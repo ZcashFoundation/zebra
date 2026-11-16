@@ -70,6 +70,7 @@ subtle = { workspace = true }
 color-eyre = { workspace = true }
 
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true }
 
 # gRPC server dependencies
@@ -122,7 +123,7 @@ which = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }
-criterion = { workspace = true, features = ["html_reports"] }
+criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
 http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
 anyhow = { workspace = true }
@@ -153,6 +154,10 @@ harness = false
 
 [[bench]]
 name = "http_compat"
+harness = false
+
+[[bench]]
+name = "mining_round_trip"
 harness = false
 
 [lints]

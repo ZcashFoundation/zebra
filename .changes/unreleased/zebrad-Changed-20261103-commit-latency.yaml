@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reuse retired or prepared non-finalized state for eligible block commits and proposal checks, avoiding full chain-index copies when reuse succeeds. Other cases retain ordinary copying and validation. This keeps one spare index copy in memory and an additional prepared copy on nodes that validate proposals.
+time: 2026-11-03T00:00:00Z

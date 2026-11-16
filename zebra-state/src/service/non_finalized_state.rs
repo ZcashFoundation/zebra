@@ -7,7 +7,8 @@ use std::{
     mem,
     ops::Bound::{Excluded, Included, Unbounded},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use indexmap::IndexMap;
@@ -136,6 +137,25 @@ pub struct NonFinalizedState {
     /// after a restart, a replay is verified once before it is recorded again.
     pub(super) rejected_blocks: watch::Sender<RejectedBlocks>,
 
+    /// The chain that the last commit or finalization replaced, kept as a spare.
+    ///
+    /// Published chains are shared with read-state snapshots, so extending or finalizing one
+    /// needs a private copy, and cloning a chain's indexes costs time proportional to the whole
+    /// chain. Once readers release the replaced chain, replaying the blocks it misses turns it
+    /// into a private copy of the current chain at a cost proportional to those blocks, so each
+    /// commit swaps the two copies instead of cloning. Snapshots never carry it.
+    spare: Option<Arc<Chain>>,
+
+    /// A private copy of the best chain with the latest validated block proposal on top, shared
+    /// by the proposal checks on snapshots and the writer.
+    ///
+    /// Proposal validation pushes each proposal onto this copy and leaves it there. A commit of
+    /// the solved proposal then rebinds that tip to the solved block instead of pushing the
+    /// block again, and retires the parent chain here for the next proposal. Any other commit or
+    /// proposal replays the copy to the chain it needs first. Only nodes that validate proposals
+    /// allocate it.
+    prepared: Arc<Mutex<Option<Arc<Chain>>>>,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -185,6 +205,9 @@ impl Clone for NonFinalizedState {
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             rejected_blocks: self.rejected_blocks.clone(),
+            // The spare is private to the writer: a clone would share it with readers.
+            spare: None,
+            prepared: self.prepared.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -205,6 +228,8 @@ impl NonFinalizedState {
             network: network.clone(),
             invalidated_blocks: Default::default(),
             rejected_blocks: watch::Sender::new(RejectedBlocks::default()),
+            spare: None,
+            prepared: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -598,6 +623,28 @@ impl NonFinalizedState {
         chain
     }
 
+    /// Returns a private copy of `chain`, retaining its common work origin.
+    ///
+    /// Replays a matching spare when possible, waiting briefly for readers to release it.
+    /// A shared parent is retired for the next extension; genuinely private forks are used
+    /// directly. Only roots already included in `finalized_work` can be physically removed.
+    fn private_copy(&mut self, chain: Arc<Chain>) -> Chain {
+        let (mut copy, retired) = match self.take_spare_waiting(&chain) {
+            Some(spare) => (spare, Some(chain)),
+            None => match Arc::try_unwrap(chain) {
+                Ok(private_chain) => (private_chain, None),
+                Err(shared) => ((*shared).clone(), Some(shared)),
+            },
+        };
+        if retired.is_some() {
+            self.spare = retired;
+        }
+        if let Some(height) = self.finalized_height {
+            copy.pop_roots_through(height);
+        }
+        copy
+    }
+
     /// Commit block to the non-finalized state, on top of:
     /// - an existing chain's tip, or
     /// - a newly forked chain.
@@ -663,11 +710,17 @@ impl NonFinalizedState {
                 let _ = notifications.validated.send(Some(contextual.block.clone()));
             }
         }
-        let mut chain = Arc::unwrap_or_clone(parent_chain);
-        if let Some(height) = self.finalized_height {
-            chain.pop_roots_through(height);
+        // A solved proposal rebinds the chain its validation prepared, and retires the parent
+        // chain for the next proposal. Any other block is pushed onto a private copy.
+        if let Some(chain) = self.take_prepared_for(&contextual, &parent_chain) {
+            self.insert_with(Arc::new(chain), |chains| {
+                chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+            });
+            self.replace_prepared(Some(parent_chain));
+            self.update_metrics_for_committed_block(height, hash);
+            return Ok(());
         }
-        let chain = chain.push(contextual)?;
+        let chain = self.private_copy(parent_chain).push(contextual)?;
         if parent_hash == finalized_state.finalized_tip_hash() {
             self.prune_finalized(finalized_state);
         }
@@ -676,6 +729,232 @@ impl NonFinalizedState {
         });
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Like [`Self::take_spare()`], but waits up to [`COMMIT_SPARE_WAIT`] for a reader to
+    /// release a spare that matches `target`, because that is far cheaper than cloning it.
+    fn take_spare_waiting(&mut self, target: &Chain) -> Option<Chain> {
+        if self.spare_matches(target) {
+            let deadline = Instant::now() + COMMIT_SPARE_WAIT;
+            while self.spare_is_shared() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        self.take_spare(target)
+    }
+
+    /// Locks the shared prepared chain.
+    fn prepared(&self) -> std::sync::MutexGuard<'_, Option<Arc<Chain>>> {
+        self.prepared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Returns the prepared chain with its proposal tip rebound to `block`, if the prepared chain
+    /// matches `parent_chain` through its tip, with a proposal for `block` on top, and no reader
+    /// shares it. Root overlap may differ, but only already-accounted roots may be absent.
+    ///
+    /// Otherwise the prepared chain is left for the next proposal to replay.
+    fn take_prepared_for(
+        &mut self,
+        block: &ContextuallyVerifiedBlock,
+        parent_chain: &Chain,
+    ) -> Option<Chain> {
+        if parent_chain.is_empty() {
+            return None;
+        }
+        // Match at the first unfinalized height, even if the proposal still keeps older roots.
+        let root_height = self
+            .finalized_height
+            .and_then(|height| height.next().ok())
+            .map_or(parent_chain.non_finalized_root_height(), |height| {
+                height.max(parent_chain.non_finalized_root_height())
+            });
+        let mut prepared = self.prepared();
+        let candidate = prepared.as_ref()?;
+        let proposal = candidate.tip_block()?;
+        if Arc::strong_count(candidate) != 1
+            || candidate.hash_by_height(root_height)
+                != Some(parent_chain.hash_by_height(root_height)?)
+            || candidate.non_finalized_tip_height()
+                != parent_chain.non_finalized_tip_height().next().ok()?
+            || !candidate.can_rebind_tip()
+            || !same_block_except_proof_of_work(proposal, block)
+        {
+            return None;
+        }
+        let candidate = prepared.take()?;
+        drop(prepared);
+        let mut chain = Arc::unwrap_or_clone(candidate);
+        match chain.rebind_tip(block.clone()) {
+            Ok(()) => {
+                if let Some(height) = self.finalized_height {
+                    chain.pop_roots_through(height);
+                }
+                // The current parent supplies the common origin, even after an empty-state gap.
+                chain.partial_cumulative_work = parent_chain.partial_cumulative_work + block.work();
+                Some(chain)
+            }
+            // The chain is unchanged, so the next proposal can still replay it.
+            Err(_) => {
+                self.replace_prepared(Some(Arc::new(chain)));
+                None
+            }
+        }
+    }
+
+    /// Takes the prepared chain as the spare for a proposal check on this snapshot, waiting up
+    /// to `deadline` for a reader or the writer to release it.
+    pub(crate) fn take_prepared_as_spare(&mut self, deadline: Instant) {
+        loop {
+            let taken = {
+                let mut prepared = self.prepared();
+                match prepared.as_ref() {
+                    None => return,
+                    Some(chain) if Arc::strong_count(chain) == 1 => prepared.take(),
+                    Some(_) => None,
+                }
+            };
+            if taken.is_some() {
+                self.spare = taken;
+                return;
+            }
+            if Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Stores `chain` as the prepared chain, replacing any previous one.
+    pub(crate) fn store_prepared(&self, chain: Chain) {
+        self.replace_prepared(Some(Arc::new(chain)));
+    }
+
+    /// Replaces the prepared chain, dropping the previous one after releasing the lock, because
+    /// freeing a chain's indexes takes time proportional to the chain and commits take this lock.
+    fn replace_prepared(&self, chain: Option<Arc<Chain>>) {
+        let previous = std::mem::replace(&mut *self.prepared(), chain);
+        drop(previous);
+    }
+
+    /// Replays the spare into a private copy of the best chain ahead of the next commit or
+    /// finalization, so they don't pay for the replay. Returns whether a copy is ready.
+    ///
+    /// Readers release the retired chain shortly after the snapshot that replaced it is
+    /// published, so this waits for them until `deadline`, unless `interrupted` reports that a
+    /// block is waiting to be committed.
+    pub fn prepare_spare(&mut self, deadline: Instant, interrupted: impl Fn() -> bool) -> bool {
+        let Some(best_chain) = self.best_chain().cloned() else {
+            return false;
+        };
+        if !self.spare_matches(&best_chain) {
+            return false;
+        }
+        while self.spare_is_shared() {
+            if Instant::now() >= deadline || interrupted() {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        match self.take_spare(&best_chain) {
+            Some(spare) => {
+                self.spare = Some(Arc::new(spare));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Returns `true` if the spare is a version of `target`, so replaying it can make a private
+    /// copy of `target` once readers release it.
+    fn spare_matches(&self, target: &Chain) -> bool {
+        self.spare
+            .as_ref()
+            .is_some_and(|spare| chain_is_version_of(spare, target, self.finalized_height))
+    }
+
+    /// Returns `true` if a reader still shares the spare.
+    fn spare_is_shared(&self) -> bool {
+        self.spare
+            .as_ref()
+            .is_some_and(|spare| Arc::strong_count(spare) > 1)
+    }
+
+    /// Removes and returns the spare chain, if there is one.
+    pub(crate) fn remove_spare(&mut self) -> Option<Arc<Chain>> {
+        self.spare.take()
+    }
+
+    /// Removes and returns the chain whose tip is `tip`, if there is one.
+    pub(crate) fn remove_chain_with_tip(&mut self, tip: block::Hash) -> Option<Arc<Chain>> {
+        let chain = self.find_chain(|chain| chain.non_finalized_tip_hash() == tip)?;
+        self.chain_set.remove(&chain);
+        Some(chain)
+    }
+
+    /// Returns a private copy of `target` replayed from the spare chain, or `None` when the spare
+    /// is missing, still shared with a reader, or not a version of `target`.
+    ///
+    /// Replaying pops the tip blocks `target` lacks, such as an unsolved proposal, pops the roots
+    /// `target` has finalized, and pushes the blocks it has added, so it costs time proportional
+    /// to those blocks rather than to the whole chain. A spare that can't be used is kept for a
+    /// later commit, unless replaying it failed.
+    fn take_spare(&mut self, target: &Chain) -> Option<Chain> {
+        let spare = self.spare.as_ref()?;
+        if spare.is_empty() {
+            self.spare = None;
+            return None;
+        }
+        if !chain_is_version_of(spare, target, self.finalized_height) {
+            return None;
+        }
+        let root_height = self
+            .finalized_height
+            .and_then(|height| height.next().ok())
+            .map_or(target.non_finalized_root_height(), |height| {
+                height.max(target.non_finalized_root_height())
+            });
+        let mut spare = match Arc::try_unwrap(self.spare.take()?) {
+            Ok(spare) => spare,
+            Err(shared) => {
+                self.spare = Some(shared);
+                return None;
+            }
+        };
+        while !target
+            .height_by_hash
+            .contains_key(&spare.non_finalized_tip_hash())
+        {
+            if spare.blocks.len() == 1 {
+                return None;
+            }
+            spare.pop_tip();
+        }
+        while spare.non_finalized_root_height() < root_height {
+            if spare.blocks.len() == 1 {
+                return None;
+            }
+            spare.pop_root();
+        }
+        if Some(spare.non_finalized_root_hash()) != target.hash_by_height(root_height) {
+            return None;
+        }
+        let spare_tip_height = spare.non_finalized_tip_height();
+        for block in target
+            .blocks
+            .range((Excluded(spare_tip_height), Unbounded))
+            .map(|(_, block)| block)
+        {
+            // These blocks were accepted onto this chain, so replaying them can only fail if
+            // the spare is not an earlier version of `target` after all.
+            spare = spare.push(block.as_ref().clone()).ok()?;
+        }
+        // Fork diagnostics are not part of the replayed blocks.
+        spare.last_fork_height = target.last_fork_height;
+        // The replayed window matches `target`; inherit its authoritative common work origin.
+        spare.partial_cumulative_work = target.partial_cumulative_work;
+        Some(spare)
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
@@ -891,7 +1170,7 @@ impl NonFinalizedState {
         fields(height = ?prepared.height, hash = %prepared.hash)
     )]
     fn validate_and_commit(
-        &self,
+        &mut self,
         new_chain: Arc<Chain>,
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
@@ -970,25 +1249,20 @@ impl NonFinalizedState {
             )?;
         }
 
-        Self::validate_and_update_parallel(
-            new_chain,
-            contextual,
-            sprout_final_treestates,
-            self.finalized_height,
-        )
+        self.validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
     #[tracing::instrument(
-        skip(new_chain, contextual, sprout_final_treestates),
+        skip(self, new_chain, contextual, sprout_final_treestates),
         fields(height = ?contextual.height, hash = %contextual.hash)
     )]
     fn validate_and_update_parallel(
+        &mut self,
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
-        finalized_height: Option<Height>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
         let mut sprout_anchor_result = None;
@@ -1029,11 +1303,7 @@ impl NonFinalizedState {
             // Pushing a block onto a Chain can launch additional parallel batches.
             // TODO: should we pass _scope into Chain::push()?
             scope.spawn_fifo(|_scope| {
-                let mut new_chain = Arc::unwrap_or_clone(new_chain);
-                if let Some(height) = finalized_height {
-                    // Keep unreconciled roots until their work has entered the common offset.
-                    new_chain.pop_roots_through(height);
-                }
+                let new_chain = self.private_copy(new_chain);
                 chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
             });
         });
@@ -1458,4 +1728,44 @@ impl Drop for NonFinalizedState {
     fn drop(&mut self) {
         self.disable_metrics();
     }
+}
+
+/// How long a commit waits for a reader to release a matching spare before cloning the chain.
+///
+/// Readers hold a snapshot for one request, so a spare that is still shared when a block arrives
+/// is normally released within a few milliseconds.
+const COMMIT_SPARE_WAIT: Duration = Duration::from_millis(5);
+
+/// Returns `true` if `chain` contains `target`'s first unfinalized block, so replay can make
+/// a private copy without requiring physical roots already included in the common work offset.
+fn chain_is_version_of(chain: &Chain, target: &Chain, finalized_height: Option<Height>) -> bool {
+    if chain.is_empty() || target.is_empty() {
+        return false;
+    }
+    let root_height = finalized_height
+        .and_then(|height| height.next().ok())
+        .map_or(target.non_finalized_root_height(), |height| {
+            height.max(target.non_finalized_root_height())
+        });
+    target
+        .hash_by_height(root_height)
+        .is_some_and(|hash| chain.hash_by_height(root_height) == Some(hash))
+}
+
+/// Returns `true` if `proposal` and `block` have the same transactions, height and header apart
+/// from the nonce and Equihash solution. The header's commitment covers the transaction
+/// authorizing data, so this means the same block contents.
+fn same_block_except_proof_of_work(
+    proposal: &ContextuallyVerifiedBlock,
+    block: &ContextuallyVerifiedBlock,
+) -> bool {
+    let (proposal_header, header) = (&proposal.block.header, &block.block.header);
+    proposal.height == block.height
+        && proposal.transaction_hashes == block.transaction_hashes
+        && proposal_header.version == header.version
+        && proposal_header.previous_block_hash == header.previous_block_hash
+        && proposal_header.merkle_root == header.merkle_root
+        && proposal_header.commitment_bytes == header.commitment_bytes
+        && proposal_header.time == header.time
+        && proposal_header.difficulty_threshold == header.difficulty_threshold
 }

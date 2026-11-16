@@ -1163,6 +1163,35 @@ where
         .map_misc_error()?
     }
 
+    /// Checks uncached templates built with overridden miner parameters in the background.
+    ///
+    /// Cached fallbacks instead retain their generation, so failures withdraw the served work.
+    fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
+        let network = self.network.clone();
+        let template = template.clone();
+        let verifier = self.gbt.block_verifier_router();
+        tokio::spawn(async move {
+            let proposal = tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            })
+            .await;
+            let result = match proposal {
+                Ok(Ok(proposal)) => tokio::time::timeout(
+                    types::get_block_template::PROPOSAL_CHECK_TIMEOUT,
+                    verifier.oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal))),
+                )
+                .await
+                .map_err(|elapsed| elapsed.to_string())
+                .and_then(|result| result.map(|_| ()).map_err(|error| error.to_string())),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = result {
+                tracing::debug!(%error, "fallback block template failed validation");
+            }
+        });
+    }
+
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
     /// `getblocktemplate` calls only validate the tip against the state instead of reading the
     /// mempool, selecting transactions, and building a coinbase transaction.
@@ -1279,13 +1308,18 @@ where
                 return Ok(None);
             };
 
-            let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
+            let Some(work_id) = cache.work_id(template.long_poll_id, Some(template.as_ref()))
+            else {
+                continue;
+            };
+            let is_client_template = Some(work_id) == client_long_poll_id;
             let now = self.template_clock_now();
             let max_time_reached =
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = Arc::unwrap_or_clone(template);
+                let mut template = Arc::unwrap_or_clone(template).response;
+                template.long_poll_id = work_id;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -1337,7 +1371,7 @@ where
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
-    ) -> Option<Arc<BlockTemplateResponse>> {
+    ) -> Option<Arc<precompute::CachedTemplate>> {
         // Subscribe before the first read below, so a template published while this call is
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
@@ -3017,6 +3051,7 @@ where
                 &self.network,
                 latest_chain_tip,
                 sync_status,
+                self.gbt.proposal_checks(),
             )
             .await;
         }
@@ -3134,6 +3169,14 @@ where
                 mempool_txs.iter().map(|tx| tx.transaction.id),
             )
             .generate_id();
+            let server_work_id = self
+                .gbt
+                .template_cache()
+                .map_or(server_long_poll_id, |cache| {
+                    cache
+                        .work_id(server_long_poll_id, None)
+                        .expect("uncached snapshots have no cached-generation precondition")
+                });
 
             // Recheck after the reads: a forward clock correction can expire a live range.
             // Only notify if it was still valid when this request started, otherwise miners
@@ -3146,7 +3189,7 @@ where
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
             // - the timestamp range expired during this request.
-            if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
+            if Some(&server_work_id) != client_long_poll_id.as_ref() || max_time_reached {
                 let (mut template, _build_guard) = self
                     .build_block_template(
                         miner_params,
@@ -3181,15 +3224,29 @@ where
                     template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
                     )?;
-                if let Some(cache) = self.gbt.template_cache() {
+                // Publish before starting the background check. Its verdict belongs to this
+                // exact generation, even if an updater takes ownership while the check runs.
+                let work_id = if let Some(cache) = self.gbt.template_cache() {
                     cache.preserve_work_identity(&mut template);
-                }
-                template.submit_old = client_long_poll_id.as_ref().map(|old_id| {
-                    now <= template.max_time && template.long_poll_id.submit_old(old_id)
-                });
+                    cache
+                        .work_id(template.long_poll_id, None)
+                        .expect("new fallback responses have no cached-generation precondition")
+                } else {
+                    template.long_poll_id
+                };
+                template.submit_old = client_long_poll_id
+                    .as_ref()
+                    .map(|old_id| now <= template.max_time && work_id.submit_old(old_id));
                 if let Some(cache) = self.gbt.template_cache() {
-                    cache.publish(template.clone());
+                    cache.publish_fallback(
+                        template.clone(),
+                        self.network.clone(),
+                        self.gbt.block_verifier_router(),
+                    );
+                } else if !template.transactions.is_empty() {
+                    self.validate_fallback_template(&template);
                 }
+                template.long_poll_id = work_id;
                 return Ok(template.into());
             }
             drop(build_guard);

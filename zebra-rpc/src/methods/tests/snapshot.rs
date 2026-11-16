@@ -1431,45 +1431,21 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // Networks without scheduled reissuance accept verifier-approved proposals without the
-    // reserve preflight. Networks with scheduled reissuance, like Mainnet and public Testnet,
-    // require the live parent even before NU7.
+    // Every network rejects stale-parent proposals before contacting the verifier.
     let proposal = network.blockchain_map()[&1].to_vec();
-    let mut proposal_read_state = read_state.clone();
     let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
         mode: GetBlockTemplateRequestMode::Proposal,
         data: Some(HexData(proposal)),
         ..Default::default()
     }));
     tokio::time::timeout(Duration::from_secs(10), async {
-        if network.nsm_reissuance_height().is_none() {
-            let verifier_response = async {
-                mock_block_verifier_router
-                    .expect_request_that(|request| matches!(request, Request::CheckProposal(_)))
-                    .await
-                    .respond(Hash::from([0; 32]));
-            };
-            let (response, ()) = tokio::join!(get_block_template, verifier_response);
-            assert_eq!(
-                response.unwrap(),
-                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
-            );
-            assert!(
-                proposal_read_state
-                    .try_next_request()
-                    .now_or_never()
-                    .is_none(),
-                "Mainnet proposal validation must not request state"
-            );
-        } else {
-            let (response, ()) =
-                tokio::join!(get_block_template, make_mock_read_state_request_handler());
-            assert!(matches!(
-                response.unwrap(),
-                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
-            ));
-            mock_block_verifier_router.expect_no_requests().await;
-        }
+        let (response, ()) =
+            tokio::join!(get_block_template, make_mock_read_state_request_handler());
+        assert!(matches!(
+            response.unwrap(),
+            GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+        ));
+        mock_block_verifier_router.expect_no_requests().await;
     })
     .await
     .expect("proposal validation must not stall");

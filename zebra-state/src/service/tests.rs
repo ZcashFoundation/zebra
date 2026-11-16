@@ -42,6 +42,7 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+mod mining_candidate;
 pub(super) mod mining_rejection;
 mod tree_roots_admission;
 
@@ -387,11 +388,21 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
                 panic!("the first candidate should reserve the available computation slot");
             };
 
-            // Signal the same cancellation branch as guard drop, but retain the sender so
-            // its closed notification proves the outer task exited before another admission.
-            guard.0.send_modify(|_| {});
-            guard.0.closed().await;
+            let permit = Arc::downgrade(
+                guard
+                    .0
+                    .borrow()
+                    .as_ref()
+                    .expect("the admitted candidate reserves its slot"),
+            );
+            while permit.strong_count() < 2 {
+                tokio::task::yield_now().await;
+            }
             drop(guard);
+            // The publication task has exited when only the queued computation owns the permit.
+            while permit.strong_count() != 1 {
+                tokio::task::yield_now().await;
+            }
             assert_eq!(
                 Arc::strong_count(&block),
                 2,
@@ -469,7 +480,7 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
         else {
             panic!("state must return a candidate subscription");
         };
-        let Response::MiningCandidate(Some(guard)) = state
+        let Response::MiningCandidate(Some(mut guard)) = state
             .clone()
             .oneshot(Request::MiningCandidate(block.clone()))
             .await
@@ -512,7 +523,11 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
                 .unwrap(),
             ReadResponse::MiningCandidate(None)
         ));
-        guard.0.closed().await;
+        guard
+            .0
+            .changed()
+            .await
+            .expect_err("expiry closes publication without releasing the verifier's slot");
         assert!(matches!(
             state
                 .clone()

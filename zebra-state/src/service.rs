@@ -68,7 +68,7 @@ use crate::{
 pub(crate) type MiningCandidate = (
     Arc<block::Block>,
     Arc<crate::GetBlockTemplateChainInfo>,
-    watch::Receiver<Arc<OwnedSemaphorePermit>>,
+    watch::Sender<Option<Arc<OwnedSemaphorePermit>>>,
     tokio::time::Instant,
 );
 
@@ -226,6 +226,10 @@ pub(crate) struct StateService {
     max_finalized_queue_height: f64,
 }
 
+/// How long a proposal check waits for the writer or another check to release the prepared chain,
+/// before cloning the published best chain instead.
+const PROPOSAL_PREPARED_WAIT: Duration = Duration::from_millis(20);
+
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
@@ -273,6 +277,10 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+
+    /// Serializes block proposal checks, so they take turns with the prepared chain instead of
+    /// each cloning the published best chain.
+    proposal_check: Arc<std::sync::Mutex<()>>,
 }
 
 impl Drop for StateService {
@@ -1235,6 +1243,7 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            proposal_check: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1399,14 +1408,19 @@ impl Service<Request> for StateService {
                 };
                 let state = self.read_service.clone();
                 let mut tip_change = self.latest_chain_tip.clone();
-                // Keep the slot reserved until verification ends, even after early work expires.
-                let (guard, mut cancelled) = watch::channel(Arc::new(permit));
+                // Published work reserves the slot until verification ends, even after expiry.
+                let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let candidate_block = block.clone();
                     let parent = block.header.previous_block_hash;
-                    let compute_permit = cancelled.borrow().clone();
+                    // Queued or running blocking work keeps its permit after cancellation or timeout.
+                    let compute_permit = cancelled
+                        .borrow()
+                        .as_ref()
+                        .expect("the newly admitted candidate owns its slot")
+                        .clone();
                     let compute = tokio::task::spawn_blocking(move || {
                         let _permit = compute_permit;
                         if !compute_state.mining_candidate_is_allowed(hash) {
@@ -1419,20 +1433,28 @@ impl Service<Request> for StateService {
                             block,
                         )
                     });
+                    // Drop the guard's permit reference before notifying waiting receivers.
                     let info = tokio::select! {
                         biased;
-                        _ = cancelled.changed() => return,
-                        _ = tokio::time::sleep_until(deadline) => return,
+                        _ = cancelled.closed() => return,
+                        _ = tokio::time::sleep_until(deadline) => {
+                            cancelled.send_modify(|permit| *permit = None);
+                            return;
+                        },
                         result = compute => match result {
                             Ok(Some(info)) => Arc::new(info),
-                            _ => return,
+                            _ => {
+                                cancelled.send_modify(|permit| *permit = None);
+                                return;
+                            },
                         },
                     };
-                    if cancelled.has_changed().is_err()
+                    if cancelled.is_closed()
                         || tokio::time::Instant::now() >= deadline
                         || state.best_tip().map(|(_, hash)| hash) != Some(parent)
                         || !state.mining_candidate_is_allowed(hash)
                     {
+                        cancelled.send_modify(|permit| *permit = None);
                         return;
                     }
                     state.mining_candidate.send_replace(Some((
@@ -1442,7 +1464,7 @@ impl Service<Request> for StateService {
                         deadline,
                     )));
                     tokio::select! {
-                        _ = cancelled.changed() => {}
+                        _ = cancelled.closed() => {}
                         _ = tokio::time::sleep_until(deadline) => {}
                         _ = async {
                             while state.best_tip().map(|(_, hash)| hash) == Some(parent) {
@@ -1940,7 +1962,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let candidate = state.mining_candidate.borrow().clone();
                 Ok(ReadResponse::MiningCandidate(candidate.and_then(
                     |(parent, info, cancelled, deadline)| {
-                        (cancelled.has_changed().is_ok()
+                        (!cancelled.is_closed()
                             && tokio::time::Instant::now() < deadline
                             && state.mining_candidate_is_allowed(info.tip_hash)
                             && state.best_tip().map(|(_, hash)| hash)
@@ -2404,6 +2426,10 @@ impl Service<ReadRequest> for ReadStateService {
                     "attempting to validate and commit block proposal \
                          onto a cloned non-finalized state"
                 );
+                let _one_check_at_a_time = state
+                    .proposal_check
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
                 // The previous block of a valid proposal must be on the best chain tip.
@@ -2429,19 +2455,32 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                // Push onto the prepared chain, replayed to the current tip, instead of cloning
+                // the published best chain. The pushed chain is then prepared for a commit of
+                // this proposal, or for the next proposal.
+                latest_non_finalized_state
+                    .take_prepared_as_spare(Instant::now() + PROPOSAL_PREPARED_WAIT);
                 let hash = semantically_verified.hash;
-                write::validate_and_commit_non_finalized(
+                if let Err(error) = write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
-                )?;
+                ) {
+                    // A spare that the failed validation did not use stays available.
+                    if let Some(spare) = latest_non_finalized_state.remove_spare() {
+                        latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(spare));
+                    }
+                    return Err(error.into());
+                }
 
-                let contextual = latest_non_finalized_state
-                    .find_chain(|chain| chain.contains_block_hash(hash))
-                    .expect("successful proposal validation inserted its block")
+                let chain = latest_non_finalized_state
+                    .remove_chain_with_tip(hash)
+                    .expect("successful proposal validation inserted its block");
+                let contextual = chain
                     .block(hash.into())
                     .expect("the selected chain contains the proposal")
                     .clone();
+                latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(chain));
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 
