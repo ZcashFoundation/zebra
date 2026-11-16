@@ -478,3 +478,41 @@ fn drain_releases_accounting_and_allows_requeue() -> Result<()> {
     assert_eq!(CommitBlockError::OrphanQueueFull.misbehavior_score(), 0);
     Ok(())
 }
+
+/// A full queue fails abandoned leaves before live higher blocks, so a peer can't pin the queue
+/// with low blocks whose callers stopped waiting.
+#[test]
+fn full_queue_fails_abandoned_leaves_first() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+
+    // Low leaves with made-up parents, whose callers have stopped waiting.
+    for i in 0..MAX_QUEUED_BLOCKS {
+        block = block.make_fake_child();
+        let mut leaf = Block::clone(&block);
+        let mut parent = [0xA5; 32];
+        parent[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        Arc::make_mut(&mut leaf.header).previous_block_hash = block::Hash(parent);
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((Arc::new(leaf).prepare(), rsp_tx));
+        drop(rsp_rx);
+    }
+
+    // A higher block that a caller is still waiting for.
+    let (live_tx, mut live_rx) = oneshot::channel();
+    queue.queue((block.make_fake_child().prepare(), live_tx));
+
+    queue.prune_overflow();
+
+    assert_eq!(queue.blocks.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(
+        live_rx.try_recv(),
+        Err(TryRecvError::Empty),
+        "the live block must outlive abandoned leaves"
+    );
+
+    Ok(())
+}

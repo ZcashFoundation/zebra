@@ -133,8 +133,8 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
-    /// Fails the highest queued blocks with [`CommitBlockError::OrphanQueueFull`] until the queue
-    /// is within its limits.
+    /// Fails abandoned leaves, then the highest queued blocks, with
+    /// [`CommitBlockError::OrphanQueueFull`] until the queue is within its limits.
     ///
     /// Callers should send the queued blocks that are ready to commit first, so they aren't failed.
     pub fn prune_overflow(&mut self) {
@@ -143,11 +143,16 @@ impl QueuedBlocks {
         }
 
         while self.blocks.len() > MAX_QUEUED_BLOCKS || self.queued_bytes > MAX_QUEUED_BYTES {
+            // Prefer leaves whose callers stopped waiting, then the highest block.
             let hash = *self
                 .by_height
                 .values()
-                .next_back()
-                .and_then(|hashes| hashes.iter().next())
+                .rev()
+                .flatten()
+                .find(|hash| {
+                    self.blocks[*hash].0 .1.is_closed() && !self.by_parent.contains_key(*hash)
+                })
+                .or_else(|| self.by_height.values().next_back()?.iter().next())
                 .expect("a queue over its limits has blocks");
             let (_block, rsp_tx) = self.remove(&hash);
 
