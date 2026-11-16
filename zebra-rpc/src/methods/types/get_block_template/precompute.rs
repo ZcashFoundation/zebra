@@ -1343,7 +1343,8 @@ where
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.
     tokio::task::spawn_blocking(move || {
         let _build_guard = build_guard;
-        BlockTemplateResponse::from_mempool(
+        let started = std::time::Instant::now();
+        let template = BlockTemplateResponse::from_mempool(
             &network,
             &coinbase_cache,
             &miner_params,
@@ -1351,8 +1352,10 @@ where
             long_poll_id,
             mempool_txs,
             mempool_tx_deps,
-        )
-        .map(|template| Some((template, mempool_tx_ids)))
+        );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(started.elapsed().as_secs_f64());
+        template.map(|template| Some((template, mempool_tx_ids)))
     })
     .await
     .map_misc_error()

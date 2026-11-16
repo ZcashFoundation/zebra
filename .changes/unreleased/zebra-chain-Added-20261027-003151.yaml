@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Expose monotonic best-tip publication times through `ChainTip::best_tip_changed_at` for matching tip hashes.
+time: 2026-10-27T00:31:51.515623565+01:00

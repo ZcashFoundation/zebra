@@ -87,8 +87,12 @@ where
 
     let mut broadcasts = FuturesUnordered::new();
     let mut mined_in_flight = HashSet::new();
-    let mut pending_mined: VecDeque<((block::Hash, block::Height), tokio::time::Instant, bool)> =
-        VecDeque::with_capacity(committed_capacity);
+    let mut pending_mined: VecDeque<(
+        (block::Hash, block::Height),
+        tokio::time::Instant,
+        tokio::time::Instant,
+        bool,
+    )> = VecDeque::with_capacity(committed_capacity);
     let mut pending_early = None;
     let mut pending_tip = None;
     let mut tip_ready_at = tokio::time::Instant::now();
@@ -103,13 +107,13 @@ where
             .filter(|(hash, _)| !mined_in_flight.contains(hash))
             .map(|block| (block, BroadcastKind::Tip, false));
         let now = tokio::time::Instant::now();
-        let next_retry = pending_mined.iter().map(|(_, at, _)| *at).min();
-        let oldest_retry = pending_mined.iter().position(|(_, _, retried)| *retried);
+        let next_retry = pending_mined.iter().map(|(_, at, _, _)| *at).min();
+        let oldest_retry = pending_mined.iter().position(|(_, _, _, retried)| *retried);
         let next = pending_mined
             .iter()
-            .find(|(_, _, retried)| !retried)
-            .or_else(|| pending_mined.iter().find(|(_, at, _)| *at <= now))
-            .map(|(block, _, retried)| (*block, BroadcastKind::Mined, *retried))
+            .find(|(_, _, _, retried)| !retried)
+            .or_else(|| pending_mined.iter().find(|(_, at, _, _)| *at <= now))
+            .map(|(block, _, _, retried)| (*block, BroadcastKind::Mined, *retried))
             // Early submissions must not postpone a committed tip that is ready to gossip.
             .or_else(|| {
                 tip.filter(|_| {
@@ -123,11 +127,21 @@ where
             biased;
 
             // Complete mined broadcasts before considering submissions or their tip fallback.
-            Some((block, kind, retried, result)) = broadcasts.next(), if !broadcasts.is_empty() => {
+            Some((block, kind, accepted_at, retried, result)) = broadcasts.next(), if !broadcasts.is_empty() => {
                 let (hash, _) = block;
                 let result: Result<zn::Response, BoxError> = result;
                 let retried: bool = retried;
+                let accepted_at: tokio::time::Instant = accepted_at;
                 if kind == BroadcastKind::Mined {
+                    let outcome = if result.is_ok() { "completed" } else { "failed" };
+                    metrics::counter!(
+                        "sync.mined.block.announcement.outcomes.total",
+                        "outcome" => outcome,
+                    ).increment(1);
+                    if result.is_ok() {
+                        metrics::histogram!("sync.mined.block.announcement.duration_seconds")
+                            .record(accepted_at.elapsed().as_secs_f64());
+                    }
                     mined_in_flight.remove(&hash);
                     if result.is_ok() {
                         if pending_tip.is_some_and(|(tip, _)| tip == hash) {
@@ -139,7 +153,7 @@ where
                         }
                     }
                     else if !retried {
-                        pending_mined.push_back((block, tokio::time::Instant::now() + TIPS_RESPONSE_TIMEOUT, true));
+                        pending_mined.push_back((block, tokio::time::Instant::now() + TIPS_RESPONSE_TIMEOUT, accepted_at, true));
                     }
                 }
                 if let Err(error) = result {
@@ -161,10 +175,10 @@ where
                 if !pending_mined.is_empty() || mined_in_flight.len() < committed_capacity => {
                 debug!(hash = ?block.0, height = ?block.1, "received mined block for broadcast");
                 if !mined_in_flight.contains(&block.0)
-                    && !pending_mined.iter().any(|(pending, _, _)| pending.0 == block.0)
+                    && !pending_mined.iter().any(|(pending, _, _, _)| pending.0 == block.0)
                 {
                     if pending_mined.len() + mined_in_flight.len() == committed_capacity {
-                        let ((hash, _), _, retried) = pending_mined
+                        let ((hash, _), _, _, retried) = pending_mined
                             .remove(oldest_retry.unwrap_or(0))
                             .expect("a full queue only receives with a pending announcement");
                         if retried {
@@ -177,7 +191,8 @@ where
                             debug!(?hash, "replaced oldest pending committed block advertisement");
                         }
                     }
-                    pending_mined.push_back((block, tokio::time::Instant::now(), false));
+                    let accepted_at = tokio::time::Instant::now();
+                    pending_mined.push_back((block, accepted_at, accepted_at, false));
                 }
                 // Do not let a superseded early advert replace mined inventory for busy peers.
                 pending_early = None;
@@ -213,9 +228,13 @@ where
                     info!(?height, ?hash, is_block_submission, log_msg);
                 }
 
+                let accepted_at = pending_mined
+                    .iter()
+                    .find(|(block, _, _, _)| block.0 == hash)
+                    .map_or_else(tokio::time::Instant::now, |(_, _, accepted_at, _)| *accepted_at);
                 match kind {
                     BroadcastKind::Mined => {
-                        pending_mined.retain(|(block, _, _)| block.0 != hash);
+                        pending_mined.retain(|(block, _, _, _)| block.0 != hash);
                         mined_in_flight.insert(hash);
                     }
                     BroadcastKind::Early => {
@@ -235,7 +254,7 @@ where
                 };
                 let broadcast = broadcast_network.call(request);
                 // Poll broadcasts concurrently with readiness and incoming notifications.
-                broadcasts.push(async move { ((hash, height), kind, retried, broadcast.await) });
+                broadcasts.push(async move { ((hash, height), kind, accepted_at, retried, broadcast.await) });
             }
 
             early = recv_submitted_block(&mut submitted_receiver), if pending_mined.is_empty() => {

@@ -1,9 +1,6 @@
-//! A task that runs an external command whenever the best chain tip changes.
+//! Best-chain tip notifications, suppressed during initial synchronization.
 //!
-//! This is Zebra's port of zcashd's `-blocknotify`. Whenever the node's best chain tip changes,
-//! and the node is close to the network tip (Zebra's analogue of "not in initial block download"),
-//! the configured command is run via the system shell with every `%s` replaced by the new tip's
-//! block hash. The command is run detached and never blocks block validation.
+//! Supports zcashd-compatible external commands and optional ZMQ `hashblock` publishing.
 
 use std::process::Stdio;
 
@@ -19,9 +16,10 @@ use crate::components::sync::SyncStatus;
 #[cfg(test)]
 mod tests;
 
-/// Block notify configuration section.
-///
-/// Mirrors zcashd's `-blocknotify` option.
+#[cfg(feature = "zmq")]
+pub mod zmq;
+
+/// Best-chain tip notification configuration section.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -35,6 +33,17 @@ pub struct Config {
     /// Best-effort per tip change: during fast sync or reorgs, intermediate tip hashes may be
     /// coalesced and skipped — only the current best tip hash fires. Disabled when `None`.
     pub block_notify_command: Option<String>,
+
+    /// ZMQ PUB endpoint for best-block hashes, equivalent to zcashd's `-zmqpubhashblock`.
+    ///
+    /// Requires the `zmq` Cargo feature. For example, `tcp://127.0.0.1:28332`.
+    /// Disabled when `None`; no socket is opened by default. Invalid or unavailable endpoints
+    /// cause startup to fail. The socket has no authentication; expose it only to trusted clients.
+    ///
+    /// Notifications are suppressed during initial sync, like [`Self::block_notify_command`].
+    /// Delivery is best-effort: bounded queues drop on overflow and intermediate tips can be
+    /// coalesced. Subscribers must reconcile through RPC after gaps or reconnects.
+    pub zmqpubhashblock: Option<String>,
 }
 
 // we like our default configs to be explicit
@@ -44,7 +53,20 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             block_notify_command: None,
+            zmqpubhashblock: None,
         }
+    }
+}
+
+impl Config {
+    /// Reject a ZMQ endpoint when this binary was built without ZMQ support.
+    pub fn validate(&self) -> color_eyre::eyre::Result<()> {
+        if self.zmqpubhashblock.is_some() && !cfg!(feature = "zmq") {
+            return Err(color_eyre::eyre::eyre!(
+                "notify.zmqpubhashblock requires a zebrad binary built with the zmq Cargo feature"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -81,32 +103,31 @@ pub async fn run_block_notify(
     info!("initializing block notify task");
 
     loop {
-        // Block until the tip changes. This always waits for a real change, so it paces the loop.
-        // The gate below can't pace the loop: it returns immediately when synced. It doesn't skip
-        // the initial sync (the tip changes throughout it); that's the gate's job.
-        let tip_action = chain_tip_change
-            .wait_for_tip_change()
-            .await
-            .map_err(BlockNotifyError::TipChange)?;
-
-        // Gate: hold until we're close to the tip (done catching up), suppressing notifications
-        // during sync. Must sit right before the spawn so close-to-tip still holds when we fire;
-        // gating earlier could fire on an intermediate block if we fall behind again first.
-        sync_status
-            .wait_until_close_to_tip()
-            .await
-            .map_err(BlockNotifyError::SyncStatus)?;
-
-        // Grab the freshest tip: catching up can take a while, during which newer blocks may have
-        // landed and made `tip_action` stale. This peek doesn't block; fall back to `tip_action`
-        // when nothing newer is pending.
-        let (hash, height) = chain_tip_change
-            .last_tip_change()
-            .unwrap_or(tip_action)
-            .best_tip_hash_and_height();
-
+        let (hash, height) = next_synced_tip(&mut sync_status, &mut chain_tip_change).await?;
         spawn_notify_command(&command, hash, height);
     }
+}
+
+/// Wait for a tip change, suppress initial sync, and return the freshest available tip.
+async fn next_synced_tip(
+    sync_status: &mut SyncStatus,
+    chain_tip_change: &mut ChainTipChange,
+) -> Result<(block::Hash, block::Height), BlockNotifyError> {
+    let tip_action = chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .map_err(BlockNotifyError::TipChange)?;
+
+    sync_status
+        .wait_until_close_to_tip()
+        .await
+        .map_err(BlockNotifyError::SyncStatus)?;
+
+    // Catching up can take a while; discard the stale action if a newer tip is available.
+    Ok(chain_tip_change
+        .last_tip_change()
+        .unwrap_or(tip_action)
+        .best_tip_hash_and_height())
 }
 
 /// Renders `command` for `hash` and spawns it detached via the system shell.

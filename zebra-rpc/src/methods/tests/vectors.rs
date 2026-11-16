@@ -6,11 +6,14 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
 use futures::FutureExt;
+use metrics::{
+    Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+};
 use tower::buffer::Buffer;
 
 use zcash_address::{ToAddress, ZcashAddress};
@@ -2766,6 +2769,7 @@ async fn rpc_getpeerinfo() {
         false,
         "/Zebra:2.1.0/".to_string(),
         zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+        Height(2_500_000),
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -2783,6 +2787,7 @@ async fn rpc_getpeerinfo() {
         true,
         "/zcashd:5.8.0/".to_string(),
         zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+        Height(2_499_900),
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -2836,6 +2841,10 @@ async fn rpc_getpeerinfo() {
     // Response of length should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
     assert_eq!(get_peer_info.len(), 2);
 
+    let peers = serde_json::to_value(&get_peer_info).expect("peer info is serializable");
+    assert_eq!(peers[0]["startingheight"].as_i64(), Some(2_500_000));
+    assert_eq!(peers[1]["startingheight"].as_i64(), Some(2_499_900));
+
     let mut res_iter = get_peer_info.into_iter();
     // Check for the outbound peer
     assert_eq!(
@@ -2854,6 +2863,31 @@ async fn rpc_getpeerinfo() {
     );
 
     mempool.expect_no_requests().await;
+}
+
+#[test]
+fn peer_info_startingheight_preserves_signed_wire_values() {
+    let addr = "127.0.0.1:8233".parse().unwrap();
+    let instant = std::time::Instant::now();
+    let now = DateTime32::now();
+    let unknown =
+        zebra_network::types::MetaAddr::new_initial_peer(addr).into_new_meta_addr(instant, now);
+    assert_eq!(PeerInfo::from_meta_addr(unknown, 0).startingheight, -1);
+
+    for (bits, expected) in [(0, 0), (0x7fff_ffff, i32::MAX), (u32::MAX, -1)] {
+        let peer = zebra_network::types::MetaAddr::new_connected(
+            addr,
+            &PeerServices::NODE_NETWORK,
+            false,
+            String::new(),
+            zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+            Height(bits),
+        )
+        .into_new_meta_addr(instant, now);
+        let peer = serde_json::to_value(PeerInfo::from_meta_addr(peer, 0))
+            .expect("peer info is serializable");
+        assert_eq!(peer["startingheight"].as_i64(), Some(i64::from(expected)));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2922,41 +2956,102 @@ async fn rpc_getblockhash() {
     mempool.expect_no_requests().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn rpc_getmininginfo() {
     let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for network in [Mainnet, Network::new_default_testnet()] {
+            let pow_limit = network.target_difficulty_limit();
+            for target in [pow_limit, pow_limit * 2 / 3, pow_limit / 4096] {
+                let chain_info = GetBlockTemplateChainInfo {
+                    expected_difficulty: target.into(),
+                    tip_height: Height::MIN,
+                    tip_hash: network.genesis_hash(),
+                    cur_time: DateTime32::now(),
+                    min_time: DateTime32::now(),
+                    max_time: DateTime32::now(),
+                    chain_history_root: None,
+                    chain_value_pools: Default::default(),
+                };
+                let read_state = tower::service_fn(move |request| {
+                    let response = match request {
+                        ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+                        ReadRequest::SolutionRate { .. } => ReadResponse::SolutionRate(None),
+                        _ => panic!("unexpected mining info request: {request:?}"),
+                    };
+                    async { Ok::<_, BoxError>(response) }
+                });
+                let (_tx, rx) = tokio::sync::watch::channel(None);
+                let (rpc, _) = RpcImpl::new(
+                    network.clone(),
+                    Default::default(),
+                    Default::default(),
+                    "0.0.1",
+                    "RPC test",
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    read_state,
+                    MockService::build().for_unit_tests(),
+                    MockSyncStatus::default(),
+                    NoChainTip,
+                    MockAddressBookPeers::default(),
+                    rx,
+                    None,
+                );
 
-    // Create a continuous chain of mainnet blocks from genesis
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .values()
-        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
-        .collect();
+                let mining_info = rpc.get_mining_info().await.expect("mining info succeeds");
+                let difficulty = rpc.get_difficulty().await.expect("difficulty succeeds");
+                let info = rpc.get_info().await.expect("node info succeeds");
+                let mining_info =
+                    serde_json::to_value(mining_info).expect("mining info is serializable");
+                let info = serde_json::to_value(info).expect("node info is serializable");
+                assert_eq!(mining_info["difficulty"].as_f64(), Some(difficulty));
+                assert_eq!(mining_info["difficulty"], info["difficulty"]);
+            }
+        }
+    })
+    .await
+    .expect("mining info must not stall");
+}
 
-    // Create a populated state service
-    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+#[tokio::test]
+async fn rpc_difficulty_defaults_to_one_with_empty_state() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for network in [Mainnet, Network::new_default_testnet()] {
+            let (state, read_state, tip, _) = zebra_state::init_test_services(&network).await;
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                network,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                state,
+                Buffer::new(read_state, 1),
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                tip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
 
-    // Init RPC
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        MockService::build().for_unit_tests(),
-        state.clone(),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        tip.clone(),
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    rpc.get_mining_info()
-        .await
-        .expect("get_mining_info call should succeed");
+            let info = rpc
+                .get_info()
+                .await
+                .expect("node info accepts an empty state");
+            let mining_info = rpc
+                .get_mining_info()
+                .await
+                .expect("mining info accepts an empty state");
+            assert_eq!(info.difficulty, 1.0);
+            assert_eq!(mining_info.difficulty(), 1.0);
+        }
+    })
+    .await
+    .expect("empty-state difficulty queries must not stall");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4141,6 +4236,48 @@ async fn getblocktemplate_precomputed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let _init_guard = zebra_test::init();
+    use metrics::{
+        Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString,
+        Unit,
+    };
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct BuildDurations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for BuildDurations {
+        fn record(&self, value: f64) {
+            self.0.lock().unwrap().push(value);
+        }
+    }
+
+    struct BuildRecorder(Arc<BuildDurations>);
+
+    impl Recorder for BuildRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::noop()
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+            if key.name() == "rpc.getblocktemplate.build.duration_seconds" {
+                assert_eq!(key.labels().count(), 0);
+                Histogram::from_arc(self.0.clone())
+            } else {
+                Histogram::noop()
+            }
+        }
+    }
+
+    let durations = Arc::new(BuildDurations::default());
+    metrics::set_global_recorder(BuildRecorder(durations.clone())).unwrap();
 
     let net = Network::Mainnet;
 
@@ -4277,15 +4414,17 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
 
     tokio::time::timeout(Duration::from_secs(30), async {
         let mut templates = template_cache.subscribe();
+        // Wait for both initial builds, not just the first coinbase-only publication.
         while template_cache
             .template_for_tip(tip_hash, &net, DateTime32::now())
             .is_none()
+            || durations.0.lock().unwrap().len() < 2
         {
             templates.changed().await;
         }
     })
     .await
-    .expect("the updater task should precompute a template for the chain tip");
+    .expect("the updater publishes the initial coinbase-only and full templates");
 
     let template = rpc
         .get_block_template(None)
@@ -4293,6 +4432,17 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         .expect("getblocktemplate should succeed")
         .try_into_template()
         .expect("getblocktemplate without parameters should return a template");
+    let builds_before = durations.0.lock().unwrap().len();
+    assert!(
+        builds_before > 0,
+        "the updater records completed template builds"
+    );
+    assert!(durations
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|duration| *duration > 0.0));
 
     // Unchanged membership cannot release a poll for the current work.
     let long_poll = tokio::spawn({
@@ -4329,6 +4479,11 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         tip_reads.load(Ordering::SeqCst),
         tip_reads_settled,
         "long polling should park after validating the tip, not spin through its wait",
+    );
+    assert_eq!(
+        durations.0.lock().unwrap().len(),
+        builds_before,
+        "parked long polls and cached responses do not build templates",
     );
 
     long_poll.abort();
@@ -5829,6 +5984,174 @@ async fn getblocktemplate_cached_long_poll_rechecks_sync() {
     }
 }
 
+#[derive(Default)]
+struct RecordedDurations(Mutex<Vec<f64>>);
+
+impl HistogramFn for RecordedDurations {
+    fn record(&self, value: f64) {
+        self.0.lock().unwrap().push(value);
+    }
+}
+
+struct NamedHistogramRecorder {
+    name: &'static str,
+    durations: Arc<RecordedDurations>,
+}
+
+impl Recorder for NamedHistogramRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+        Counter::noop()
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+        if key.name() == self.name {
+            assert_eq!(key.labels().count(), 0);
+            Histogram::from_arc(self.durations.clone())
+        } else {
+            Histogram::noop()
+        }
+    }
+}
+
+/// The first served template measures publication latency once per tip, shared by RPC clones.
+#[test]
+fn getblocktemplate_records_first_template_latency() {
+    use zebra_state::{ChainTipBlock, ChainTipSender};
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let durations = Arc::new(RecordedDurations::default());
+    let recorder = NamedHistogramRecorder {
+        name: "rpc.getblocktemplate.first_template.duration_seconds",
+        durations: durations.clone(),
+    };
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let net = Network::Mainnet;
+                let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+                let (mut tip_sender, tip, _changes) = ChainTipSender::new(None, &net);
+                let new_tip = |n: u8| ChainTipBlock {
+                    hash: Hash([n; 32]),
+                    height: Height(tip_height.0 + u32::from(n)),
+                    time: chrono::Utc::now(),
+                    transactions: vec![],
+                    transaction_hashes: Arc::new([]),
+                    previous_block_hash: Hash([0; 32]),
+                };
+                let history_root = fake_history_tree(&net).hash();
+                let read_state = tower::service_fn({
+                    let tip = tip.clone();
+                    move |request| {
+                        let now = DateTime32::now();
+                        let (height, hash) = tip.best_tip_height_and_hash().unwrap();
+                        std::future::ready(Ok::<_, BoxError>(match request {
+                            ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                            ReadRequest::ChainInfo => {
+                                ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                                    expected_difficulty: CompactDifficulty::from(
+                                        ExpandedDifficulty::from(U256::one()),
+                                    ),
+                                    tip_height: height,
+                                    tip_hash: hash,
+                                    cur_time: now,
+                                    min_time: now,
+                                    max_time: now.saturating_add(Duration32::from_minutes(90)),
+                                    chain_history_root: history_root,
+                                    chain_value_pools: Default::default(),
+                                })
+                            }
+                            other => panic!("unexpected state request: {other:?}"),
+                        }))
+                    }
+                });
+                let mempool = tower::service_fn({
+                    let tip = tip.clone();
+                    move |request| {
+                        assert!(matches!(request, mempool::Request::FullTransactions));
+                        std::future::ready(Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                            transactions: vec![],
+                            transaction_dependencies: Default::default(),
+                            last_seen_tip_hash: tip.best_tip_hash().unwrap(),
+                        }))
+                    }
+                });
+                let mut sync = MockSyncStatus::default();
+                sync.set_is_close_to_tip(true);
+                let (_logs, logs) = watch::channel(None);
+                let (rpc, queue) = RpcImpl::new(
+                    net,
+                    mining::Config {
+                        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                            NetworkType::Main,
+                            [0x7e; 20],
+                        )),
+                        ..Default::default()
+                    },
+                    false,
+                    "0.0.1",
+                    "RPC latency test",
+                    mempool,
+                    MockService::build().for_unit_tests(),
+                    read_state,
+                    MockService::build().for_unit_tests(),
+                    sync,
+                    tip,
+                    MockAddressBookPeers::default(),
+                    logs,
+                    None,
+                );
+                queue.abort();
+                let other = rpc.clone();
+                for (index, n) in [1, 3, 1, 1].into_iter().enumerate() {
+                    if n == 3 || index == 3 {
+                        tip_sender.set_finalized_tip(new_tip(2));
+                    }
+                    tip_sender.set_finalized_tip(new_tip(n));
+                    // Real monotonic time must precede the RPC's first observation of the tip.
+                    std::thread::sleep(Duration::from_millis(20));
+                    let (first, second) =
+                        tokio::join!(rpc.get_block_template(None), other.get_block_template(None),);
+                    for response in [first, second] {
+                        assert_eq!(
+                            response
+                                .unwrap()
+                                .try_into_template()
+                                .unwrap()
+                                .previous_block_hash,
+                            Hash([n; 32]),
+                        );
+                    }
+                    {
+                        let samples = durations.0.lock().unwrap();
+                        assert_eq!(
+                            samples.len(),
+                            index + 1,
+                            "one sample per served tip transition"
+                        );
+                        assert!(
+                            samples[index] >= 0.020,
+                            "timing starts before RPC observation"
+                        );
+                    }
+                    tip_sender.set_finalized_tip(new_tip(n));
+                    rpc.get_block_template(None).await.unwrap();
+                    assert_eq!(durations.0.lock().unwrap().len(), index + 1);
+                }
+            })
+            .await
+            .expect("first-template metrics do not wait for peers or additional tip changes");
+        });
+    });
+}
+
 /// Expiry notifies a waiting miner once, but re-polling expired work waits for a real change.
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_long_poll_expires_once() {
@@ -6545,6 +6868,124 @@ fn rpc_submitblock_inline_decode_boundary() {
             .await
             .expect("decoding boundary checks must finish");
         });
+}
+
+/// Submission counters use result labels, including validation failures returned as RPC success.
+#[test]
+fn rpc_submitblock_outcome_metrics() {
+    use metrics::{
+        atomics::AtomicU64, Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder,
+        SharedString, Unit,
+    };
+    use std::{collections::HashMap, sync::Mutex};
+
+    #[derive(Default)]
+    struct SubmissionRecorder(Mutex<HashMap<Key, Arc<AtomicU64>>>);
+
+    impl Recorder for SubmissionRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::from_arc(
+                self.0
+                    .lock()
+                    .unwrap()
+                    .entry(key.clone())
+                    .or_default()
+                    .clone(),
+            )
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
+            Histogram::noop()
+        }
+    }
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = SubmissionRecorder::default();
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut verifier: MockService<_, _, _, BoxError> =
+                    MockService::build().for_unit_tests();
+                let (_logs, logs) = watch::channel(None);
+                let channel = crate::SubmitBlockChannel::new();
+                let mined_block_sender = channel.sender();
+                let _mined_blocks = channel.receiver();
+                let (rpc, queue) = RpcImpl::new(
+                    Mainnet,
+                    Default::default(),
+                    false,
+                    "0.0.1",
+                    "RPC metrics test",
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    verifier.clone(),
+                    MockSyncStatus::default(),
+                    NoChainTip,
+                    MockAddressBookPeers::default(),
+                    logs,
+                    Some(mined_block_sender),
+                );
+                let block_bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+                let block: Block = block_bytes.as_slice().zcash_deserialize_into().unwrap();
+                for (verification, expected) in [
+                    (Ok(block.hash()), SubmitBlockResponse::Accepted),
+                    (
+                        Err(BoxError::from(zebra_consensus::RouterError::Checkpoint {
+                            source: Box::new(
+                                zebra_consensus::VerifyCheckpointError::AlreadyVerified {
+                                    height: Height(1),
+                                    verified_height: Height(1),
+                                },
+                            ),
+                        })),
+                        SubmitBlockErrorResponse::Duplicate.into(),
+                    ),
+                    (
+                        Err(BoxError::from("invalid submitted block")),
+                        SubmitBlockErrorResponse::Rejected.into(),
+                    ),
+                ] {
+                    let (response, ()) = tokio::join!(
+                        rpc.submit_block(HexData(block_bytes.clone()), None),
+                        async {
+                            verifier
+                                .expect_request_that(|_| true)
+                                .await
+                                .respond(verification);
+                        },
+                    );
+                    assert_eq!(response.unwrap(), expected);
+                }
+                assert_eq!(
+                    rpc.submit_block(HexData(Vec::new()), None).await.unwrap(),
+                    SubmitBlockErrorResponse::Rejected.into(),
+                );
+                queue.abort();
+            })
+            .await
+            .expect("submission metrics do not wait for network peers");
+        });
+    });
+    let counters = recorder.0.lock().unwrap();
+    for (outcome, expected) in [("accepted", 1), ("duplicate", 1), ("rejected", 2)] {
+        let key = Key::from_parts("rpc.submitblock.outcomes.total", &[("outcome", outcome)]);
+        assert_eq!(
+            counters
+                .get(&key)
+                .map_or(0, |value| value.load(Ordering::Relaxed)),
+            expected,
+            "missing submitblock outcome: {outcome}",
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

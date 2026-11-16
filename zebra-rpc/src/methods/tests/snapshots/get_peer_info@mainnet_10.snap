@@ -8,6 +8,7 @@ expression: get_peer_info
     "services": "0000000000000001",
     "lastrecv": "[lastrecv]",
     "inbound": false,
+    "startingheight": 1687104,
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": "[version]",

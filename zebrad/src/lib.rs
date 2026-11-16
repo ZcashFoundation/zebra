@@ -94,6 +94,11 @@
 //! [skip verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
 //! [specific compiler flags]: https://zebra.zfnd.org/dev/tokio-console.html#setup
 //!
+//! ### Mining notifications
+//!
+//! * `zmq`: publish best-block hashes using zcashd's ZMQ protocol over TCP, implemented in Rust.
+//!   Enable the endpoint in [`components::notify::Config`].
+//!
 //! ### Testing
 //!
 //! * `proptest-impl`: enable randomised test data generation.

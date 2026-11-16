@@ -9,7 +9,7 @@ use std::{
 };
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use zebra_chain::{parameters::Network, serialization::DateTime32};
+use zebra_chain::{block::Height, parameters::Network, serialization::DateTime32};
 use zebra_network::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_MISBEHAVIOR_SCORE,
@@ -52,6 +52,7 @@ fn book(advertised: usize) -> AddressBook {
             false,
             String::new(),
             CURRENT_NETWORK_PROTOCOL_VERSION,
+            Height(0),
         )
     }));
     assert_eq!(book.state_peers(PeerAddrState::Responded).count(), live);
@@ -72,6 +73,7 @@ fn benchmark(c: &mut Criterion) {
                 false,
                 String::new(),
                 CURRENT_NETWORK_PROTOCOL_VERSION,
+                Height(0),
             )
         };
 

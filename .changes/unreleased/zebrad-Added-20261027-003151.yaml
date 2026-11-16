@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Export new-tip to first-template latency once per served best-tip transition.
+time: 2026-10-27T00:31:51.519751343+01:00

@@ -16,6 +16,9 @@ does not promise byte-identical responses. Where Zebra diverges from
 This page describes Zebra 7.0.0-rc.0 and Zallet 0.1.0-beta.3. Zallet releases after
 0.1.0-beta.3 read chain data only from Zebra; see
 [Running Zallet with Zebra](zallet.md) for what that requires of `zebrad`.
+For pool integrations, see the [payout RPC compatibility table and tested sidecar
+procedure](mining-pools.md#wallet-rpc-compatibility); ownership does not imply that
+an unmodified payout processor works with Zallet.
 
 ## Where the boundary falls today
 
@@ -198,7 +201,7 @@ owners' current releases and the version line at the top is updated.
 | [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)             | Zebra   | Done    |                                                                                                                                                                                                          |
 | [`getblocktemplate`](https://zcash.github.io/rpc/getblocktemplate.html)           | Zebra\* | Done    | Superset: adds `maxtime` and `submitold`. `capabilities` and `mutable` match zcashd, and long polling and proposal mode are both implemented.                                                            |
 | [`getlocalsolps`](https://zcash.github.io/rpc/getlocalsolps.html)                 | —       | Retired | Out of scope for a validator node.                                                                                                                                                                       |
-| [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)                 | Zebra   | Partial | No `difficulty`, `errors`, `errorstimestamp`, `genproclimit`, `localsolps`, `pooledtx`, or `generate`.                                                                                                   |
+| [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)                 | Zebra   | Partial | No `errors`, `errorstimestamp`, `genproclimit`, `localsolps`, `pooledtx`, or `generate`.                                                                                                                 |
 | [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)           | Zebra   | Done    | Deprecated alias for `getnetworksolps`, in both zcashd and Zebra.                                                                                                                                        |
 | [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)             | Zebra   | Done    |                                                                                                                                                                                                          |
 | [`prioritisetransaction`](https://zcash.github.io/rpc/prioritisetransaction.html) | Zebra   | Planned | [Decision][11022-decisions]                                                                                                                                                                              |
@@ -224,7 +227,7 @@ owners' current releases and the version line at the top is updated.
 | [`getdeprecationinfo`](https://zcash.github.io/rpc/getdeprecationinfo.html) | Zebra   | Partial  | Only `end_of_service`. No `version`, `subversion`, `deprecated_features`, or `disabled_features`.                                                               |
 | [`getnettotals`](https://zcash.github.io/rpc/getnettotals.html)             | Zebra   | Deferred | Deferred to the v2 P2P protocol ([#11281]).                                                                                                                     |
 | [`getnetworkinfo`](https://zcash.github.io/rpc/getnetworkinfo.html)         | Zebra   | Partial  | No `warningstimestamp`. `localaddresses` and `warnings` are empty. [#11030]                                                                                     |
-| [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)               | Zebra   | Partial  | 10 of zcashd's 24 per-peer fields; Zebra's peer set does not track the rest. Adds `connection_state`.                                                           |
+| [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)               | Zebra   | Partial  | Includes `startingheight` and adds `connection_state`. Other zcashd per-peer fields remain missing.                                                            |
 | [`listbanned`](https://zcash.github.io/rpc/listbanned.html)                 | Zebra   | Deferred | Deferred to the v2 P2P protocol ([#11281]).                                                                                                                     |
 | [`ping`](https://zcash.github.io/rpc/ping.html)                             | Zebra   | Stub     | Intentional ([#11028]): Zebra already pings every peer about once a minute, so `getpeerinfo`'s `pingtime` and `pingwait` stay current without an explicit ping. |
 | [`setban`](https://zcash.github.io/rpc/setban.html)                         | Zebra   | Deferred | Deferred to the v2 P2P protocol ([#11281]).                                                                                                                     |
@@ -346,15 +349,25 @@ or the sidecar.
 | `getbestblockheightandhash` | Zebra | Done   | Tip height and hash in one call, so a caller cannot read a torn pair across two requests.                                                                                 |
 | `getstandardfee`            | Zebra | Done   | Returns `{standard_fee, version}`: the ZIP 317 marginal fee per logical action, in zatoshis, for the next block. The value depends on the next block's height ([#11557]). |
 | `generatetoaddress`         | Zebra | Done   | Regtest only. Like `generate`, but pays the coinbase to a given address instead of the configured `mining.miner_address`, which lets one node fund several test wallets.  |
+| `preciousblock`             | Zebra | Done   | Returns null; see the tip-selection rules below.                                                                                                                          |
 | `rpc.discover`              | Zebra | Done   | OpenRPC schema for every Zebra RPC method.                                                                                                                                |
+
+`preciousblock` prefers a non-finalized chain tip only over competing tips with
+equal cumulative work; higher-work chains always take precedence. The last call
+for competing equal-work tips wins. Preferences are not persisted and are lost
+on restart. Finalized blocks and known non-tip blocks succeed without changing
+the preference; an unknown hash returns `Block not found`.
 
 ## Notification transports
 
-`zcashd` publishes chain and mempool events over ZMQ. Zebra does not implement
-ZMQ today; publishing the `zcashd` topics is proposed in [#10881], [#11034], and
-[#11036].
+Zebra supports zcashd-compatible ZMQ `hashblock` notifications with the optional `zmq` Cargo
+feature. Set `zmqpubhashblock = "tcp://127.0.0.1:28332"` in the `[notify]` section of
+`zebrad.toml`. The publisher is off by default, has no authentication, and should be exposed only
+to trusted clients. Notifications are suppressed during initial sync, like block notify. See
+[ZMQ block notifications](mining.md#zmq-block-notifications) for framing, build requirements, and
+best-effort delivery semantics. The other ZMQ topics remain proposed in [#11034] and [#11036].
 
-Zebra's equivalent is the **indexer gRPC service**
+For broader event coverage, use Zebra's **indexer gRPC service**
 (`zebra-rpc/proto/indexer.proto`). It streams best-chain tip changes
 (`ChainTipChange`), non-finalized blocks (`NonFinalizedStateChange`), and
 mempool additions, invalidations, and mined transactions (`MempoolChange`), and
@@ -365,7 +378,7 @@ loopback or private address. Zallet uses this service; see
 
 | `zcashd` topic    | Owner | Status   | Notes                                                                                                                 |
 | ----------------- | ----- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `zmqpubhashblock` | Zebra | Replaced | Indexer `ChainTipChange` stream (hash and height), or `block_notify_command`. ZMQ publishing is proposed in [#10881]. |
+| `zmqpubhashblock` | Zebra | Done | Optional `zmq` feature and `[notify].zmqpubhashblock`. [#10881] |
 | `zmqpubrawblock`  | Zebra | Replaced | Indexer `NonFinalizedStateChange` stream. [#11034]                                                                    |
 | `zmqpubhashtx`    | Zebra | Replaced | Indexer `MempoolChange` stream. [#11036]                                                                              |
 | `zmqpubrawtx`     | Zebra | Replaced | Indexer `MempoolChange` stream plus `getrawtransaction`. [#11036]                                                     |
