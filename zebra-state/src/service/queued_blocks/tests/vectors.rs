@@ -530,9 +530,12 @@ fn queued_blocks_remove_and_reinsert_releases_retained_data() -> Result<()> {
         zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
     let mut queue = QueuedBlocks::default();
     queue.queue(block.clone().into_queued());
+    let queued_bytes = queue.queued_bytes;
+    assert!(queued_bytes > 0);
 
     let removed = queue.remove_queued(&block.hash()).expect("block is queued");
     assert_eq!(removed.0.block, block);
+    assert_eq!(queue.queued_bytes, 0);
     assert!(queue.blocks.is_empty());
     assert!(queue.by_parent.is_empty());
     assert!(queue.by_height.is_empty());
@@ -540,9 +543,11 @@ fn queued_blocks_remove_and_reinsert_releases_retained_data() -> Result<()> {
     assert!(queue.remove_queued(&block.hash()).is_none());
 
     queue.queue(removed);
+    assert_eq!(queue.queued_bytes, queued_bytes);
     let children = queue.dequeue_children(block.header.previous_block_hash);
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].0.block, block);
+    assert_eq!(queue.queued_bytes, 0);
     assert!(queue.blocks.is_empty());
     assert!(queue.by_parent.is_empty());
     assert!(queue.by_height.is_empty());

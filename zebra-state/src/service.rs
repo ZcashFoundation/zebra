@@ -798,7 +798,7 @@ impl StateService {
     #[instrument(level = "debug", skip(self, semantically_verified))]
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
-        semantically_verified: SemanticallyVerifiedBlock,
+        mut semantically_verified: SemanticallyVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
@@ -845,6 +845,16 @@ impl StateService {
             .remove_queued(&semantically_verified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
+            // Another copy of the same body was received when its first copy was, so it keeps
+            // its place in `Chain::cmp`'s first-received order. A different body doesn't.
+            // Blocks with the same hash compare equal, so compare their authorizing data.
+            if old_request.0.block.auth_data_root() == semantically_verified.block.auth_data_root()
+            {
+                semantically_verified.received_time = old_request
+                    .0
+                    .received_time
+                    .min(semantically_verified.received_time);
+            }
             Self::send_semantically_verified_block_error(
                 old_request,
                 CommitBlockError::new_duplicate(

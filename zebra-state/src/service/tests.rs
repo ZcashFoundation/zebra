@@ -4,7 +4,11 @@
 
 // TODO: move these tests into tests::vectors and tests::prop modules.
 
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    env,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::runtime::Runtime;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt as _};
@@ -1027,7 +1031,12 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                     assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
 
                     // Both bodies reach the queue before their missing parent arrives.
-                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged.prepare());
+                    let forged_received = Instant::now();
+                    let mut forged = forged.prepare();
+                    forged.received_time = Some(forged_received);
+                    let mut honest = honest;
+                    honest.received_time = Some(forged_received + Duration::from_secs(1));
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged);
                     let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
                     assert!(state.non_finalized_state_queued_blocks.has(honest.hash));
 
@@ -1055,10 +1064,16 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                             .expect("honest replacement commits"),
                         honest.hash,
                     );
+                    let non_finalized_state = state.read_service.latest_non_finalized_state();
+                    let tip = non_finalized_state
+                        .best_tip_block()
+                        .expect("the replacement is committed");
+                    assert_eq!(tip.block, honest.block);
+                    // Blocks with the same hash compare equal, so also compare their authorizing data.
+                    assert_eq!(tip.block.auth_data_root(), honest.block.auth_data_root());
                     assert_eq!(
-                        state.read_service.latest_non_finalized_state()
-                            .best_tip_block().expect("the replacement is committed").block,
-                        honest.block,
+                        tip.received_time, honest.received_time,
+                        "a different body doesn't take the replaced body's receipt time",
                     );
                 })
                 .await
@@ -1219,9 +1234,64 @@ async fn write_channel_duplicate_keeps_its_own_channel() {
     );
 
     assert!(
-        queued_rx.try_recv().is_err(),
+        matches!(
+            queued_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ),
         "the queued request keeps waiting on its own channel"
     );
     assert!(state.non_finalized_state_queued_blocks.has(blocks[1].hash));
     assert!(!state.non_finalized_state_queued_blocks.has(blocks[0].hash));
+}
+
+/// Another copy of a queued body keeps the receipt time of its first copy, so an equal-work
+/// sibling received between the two copies doesn't win `Chain::cmp`'s first-received tie-break.
+#[tokio::test]
+async fn queued_identical_replacement_keeps_earliest_receipt_time() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let first_received = Instant::now();
+    let later = first_received + Duration::from_secs(1);
+
+    // Each copy is `(first copy's receipt time, second copy's, the queued block's)`.
+    // Unstamped blocks count as received before any stamped block.
+    for (first, second, expected) in [
+        (Some(first_received), Some(later), Some(first_received)),
+        (Some(later), Some(first_received), Some(first_received)),
+        (None, Some(later), None),
+    ] {
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+
+        let mut first_copy = block.clone().prepare();
+        first_copy.received_time = first;
+        let mut second_copy = block.clone().prepare();
+        second_copy.received_time = second;
+
+        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy);
+        let mut second_rx = state.queue_and_commit_to_non_finalized_state(second_copy);
+
+        assert!(first_rx
+            .await
+            .expect("state responds")
+            .expect_err("the older caller is replaced")
+            .inner()
+            .is_duplicate_request());
+        assert!(
+            matches!(
+                second_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "the newer caller keeps waiting on its own channel"
+        );
+
+        let (queued, _rsp_tx) = state
+            .non_finalized_state_queued_blocks
+            .remove_queued(&block.hash())
+            .expect("the second copy is queued");
+        assert_eq!(queued.received_time, expected);
+    }
 }
