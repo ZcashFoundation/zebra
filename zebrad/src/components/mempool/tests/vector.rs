@@ -156,6 +156,32 @@ fn lock_time_rejections_have_no_mempool_score() {
     assert_eq!(score(TransactionError::NoInputs), 100);
 }
 
+/// A V4 transaction signed for an adjacent upgrade fails its scripts, so script failures of
+/// transactions without a branch ID field have no peer score near an activation, and keep it
+/// elsewhere and for transactions that carry a branch ID.
+#[test]
+fn v4_script_failure_near_activation_has_no_mempool_score() {
+    let network = Network::Mainnet;
+    let activation_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height");
+    let score = |transaction_upgrade, height| {
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::Script(zebra_script::Error::ScriptInvalid),
+            transaction_upgrade,
+            height,
+            &network,
+        )
+    };
+
+    for (offset, expected) in [(-41, 100), (-40, 0), (-1, 0), (0, 0), (39, 0), (40, 100)] {
+        let height =
+            (activation_height + offset).expect("NU6.3 activates far from the height limits");
+        assert_eq!(score(None, height), expected, "height offset {offset}");
+        assert_eq!(score(Some(NetworkUpgrade::Nu6_3), height), 100);
+    }
+}
+
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized

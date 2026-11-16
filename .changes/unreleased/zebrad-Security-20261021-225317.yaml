@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Check mempool transactions for unknown anchors and spent nullifiers before verifying their proofs, so transactions rejected by those checks no longer queue proof verification ([GHSA-3pqg-pjc9-g2jv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3pqg-pjc9-g2jv), reported by @SphereDonout). This also stops a peer from pairing an unknown anchor or spent nullifier with an invalid proof or signature to slow proof batches shared with block verification without penalty ([GHSA-2wx4-g5cf-32pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2wx4-g5cf-32pf), reported by @Nathanbyarugaba).
+time: 2026-10-21T22:53:17.862143539+02:00

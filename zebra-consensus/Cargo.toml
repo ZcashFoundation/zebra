@@ -94,6 +94,7 @@ proptest-derive = { workspace = true }
 spandoc = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tower = { workspace = true, features = ["limit"] }
 
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
