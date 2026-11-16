@@ -1,4 +1,10 @@
 project: zebrad
 kind: Security
-body: Stopped transparent address balance requests, including `getaddressbalance` RPCs and lightwalletd `GetTaddressBalance` calls, from copying the whole non-finalized chain. A recent block with many transparent outputs made each copy large, so concurrent balance requests could run the node out of memory ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
+body: >-
+  Stopped transparent address balance requests, including `getaddressbalance` RPCs and
+  lightwalletd `GetTaddressBalance` calls, from copying the whole non-finalized chain. A recent
+  block with many transparent outputs made each copy large, so concurrent balance requests could
+  run the node out of memory
+  ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
+  Thanks to @saxenism for reporting the issue.
 time: 2026-10-22T12:00:00.000000000+00:00

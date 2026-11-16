@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: Added `MAX_NON_FINALIZED_INDEX_ENTRIES`, which limits the combined size of non-finalized chain indexes on Mainnet.
-time: 2026-11-16T18:00:00.000000000Z

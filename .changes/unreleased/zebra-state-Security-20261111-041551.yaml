@@ -1,4 +1,8 @@
 project: zebra-state
 kind: Security
-body: Limit the queue of blocks waiting for their parent blocks to 1,000 blocks and 320 MiB of estimated memory, failing childless blocks whose callers stopped waiting first, then the highest queued blocks, with `CommitBlockError::OrphanQueueFull` when it is full.
+body: >-
+  Limit the queue of blocks waiting for their parent blocks to 1,000 blocks and 320 MiB of
+  estimated memory, failing childless blocks whose callers stopped waiting first, then the highest
+  queued blocks, with `CommitBlockError::OrphanQueueFull` when it is full
+  ([GHSA-8qxv-5f2c-452c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8qxv-5f2c-452c)).
 time: 2026-11-11T04:15:51.540539596+01:00

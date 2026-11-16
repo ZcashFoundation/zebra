@@ -1,4 +1,6 @@
 project: zebra-chain
-kind: Fixed
-body: 'Made block parsing stricter.'
+kind: Security
+body: >-
+  `Block` deserialization rejects some malformed blocks earlier, before reading all of their
+  transactions.
 time: 2026-11-11T14:00:00.000000000-03:00

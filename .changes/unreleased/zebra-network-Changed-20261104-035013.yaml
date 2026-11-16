@@ -1,4 +1,9 @@
 project: zebra-network
 kind: Changed
-body: Unsolicited transactions no longer interrupt downloads, and only explicit missing-inventory replies affect peer routing. With the `proptest-impl` feature, `test_support::ReceivedClientRequest::respond` no longer records missing inventory for a `NotFoundResponse` error; use the new `test_support::PeerSetHarness::notfound` to report a peer's missing block ([#276](https://github.com/ZcashFoundation/zebra-private/pull/276)).
+body: >-
+  Unsolicited transactions no longer interrupt downloads, and only explicit missing-inventory
+  replies affect peer routing. With the `proptest-impl` feature,
+  `test_support::ReceivedClientRequest::respond` no longer records missing inventory for a
+  `NotFoundResponse` error; use the new `test_support::PeerSetHarness::notfound` to report a
+  peer's missing block.
 time: 2026-11-04T03:50:13.551760334+01:00

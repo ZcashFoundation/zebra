@@ -1,4 +1,7 @@
 project: zebrad
 kind: Security
-body: Limited `getaddressutxos` and `getaddresstxids` requests to reading the non-finalized UTXOs and transactions that fit in the response, instead of copying all the recent UTXOs and transactions of the requested addresses on every request.
+body: >-
+  Stopped `getaddressutxos` and `getaddresstxids` requests from copying every recent UTXO and
+  transaction of the requested addresses on each request
+  ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
 time: 2026-10-22T12:00:01.000000000+00:00
