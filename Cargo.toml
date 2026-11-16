@@ -402,3 +402,4 @@ result_large_err = "allow"
 
 [patch.crates-io]
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "771fbbe8d8218bf554b49d7e4ae6a3bfc1c5f442" }

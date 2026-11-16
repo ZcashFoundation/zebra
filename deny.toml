@@ -172,8 +172,8 @@ required-git-spec = "rev"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 # List of URLs for allowed Git repositories.
-# Remove this exception with the Sapling patch once supporting crates are released.
-allow-git = ["https://github.com/zcash/sapling-crypto"]
+# Remove these exceptions with the Sapling and Halo2 patches once supporting crates are released.
+allow-git = ["https://github.com/zcash/halo2", "https://github.com/zcash/sapling-crypto"]
 
 [sources.allow-org]
 github = [

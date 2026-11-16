@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Cache public-input commitment windows and compute commitments in parallel for Orchard proof batches larger than two ([#12233](https://github.com/ZcashFoundation/zebra/pull/12233)).
+time: 2026-11-05T05:55:21.754772319+01:00

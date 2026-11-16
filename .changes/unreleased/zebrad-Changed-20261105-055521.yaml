@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Cache bounded Halo2 instance windows and parallelize larger instance-commitment batches ([#12233](https://github.com/ZcashFoundation/zebra/pull/12233)).
+time: 2026-11-15T19:03:36.92235222+01:00
