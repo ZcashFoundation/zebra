@@ -32,9 +32,8 @@ pub struct Config {
 
     /// IP address and port for the indexer RPC server.
     ///
-    /// Note: The indexer RPC server is disabled by default.
-    /// To enable the indexer RPC server, compile `zebrad` with the
-    /// `indexer` feature flag and set a listen address in the config:
+    /// The indexer RPC server is disabled by default. To enable it, set a listen address;
+    /// no build feature is required:
     /// ```toml
     /// [rpc]
     /// indexer_listen_addr = '127.0.0.1:8230'

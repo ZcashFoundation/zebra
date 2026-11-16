@@ -714,7 +714,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-      "description": "RPC endpoint p99 latency (5m window)",
+      "description": "RPC p99 latency by method from Zebra's exported summaries",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -745,12 +745,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p99",
+          "expr": "rpc_request_duration_seconds{quantile=\"0.99\"}",
+          "legendFormat": "{{ method }} p99",
           "refId": "A"
         }
       ],
-      "title": "RPC p99 Latency",
+      "title": "RPC p99 Latency by Method",
       "type": "stat"
     },
     {

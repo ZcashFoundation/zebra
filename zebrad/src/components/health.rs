@@ -13,8 +13,9 @@
 //! - `GET /healthy` — returns `200 OK` if the process is up and the node has at least
 //!   `min_connected_peers` recently live peers (default: 1). Otherwise `503 Service Unavailable`.
 //! - `GET /ready` — returns `200 OK` if the node is near the chain tip, the estimated block lag is
-//!   within `ready_max_blocks_behind`, and the latest committed block is recent. On regtest/testnet,
-//!   readiness returns `200` unless `enforce_on_test_networks` is set.
+//!   within `ready_max_blocks_behind`, and the observed best-chain height has recently exceeded
+//!   its previous maximum. On regtest/testnet, readiness returns `200` unless
+//!   `enforce_on_test_networks` is set.
 //!
 //! Security
 //!

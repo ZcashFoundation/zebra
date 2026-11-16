@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Count same-effects transaction variants once per advertising IP in the inbound mempool queue without suppressing other peers' or local candidates.
+time: 2026-10-24T18:44:27.162615397+02:00

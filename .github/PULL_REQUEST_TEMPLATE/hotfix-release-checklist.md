@@ -54,11 +54,16 @@ follow semver, depending on the thing being fixed.
 
 - [ ] Wait until the Docker binaries have been built on the hotfix release branch, and the quick tests have passed:
   - [ ] [zfnd-ci-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml)
-- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release (if Zebra hotfix)
 
-- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
+- [ ] For stable versions only, [publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases)
+      by disabling 'pre-release', then clicking "Set as the latest release".
+      Keep RC versions as prereleases; see the
+      [preview release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#preview-releases).
+- [ ] For stable versions only, wait until the
+      [production deployment succeeds](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease).
+      Promotion triggers deployment; publishing a prerelease does not.
 
 ## Publish Crates
 

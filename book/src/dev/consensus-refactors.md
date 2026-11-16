@@ -1,51 +1,67 @@
-# Refactoring Consensus-Critical Code
+# Refactoring consensus-critical code
 
-When a refactor moves, replaces, or delegates code that enforces consensus rules — replacing a
-Zebra type with a `librustzcash` type, rerouting a parse path, bumping a dependency that
-enforces rules for us — a rule can stop being enforced without any test failing and without
-any deleted line showing a check being removed. The dangerous bugs are not in the new code:
-they are in what the old code used to do that nothing does anymore. Absence is invisible in a
-diff, so it has to be hunted deliberately.
+Consensus-critical code determines which blocks and transactions Zebra accepts.
+Refactoring must preserve acceptance of valid inputs and rejection of invalid
+ones through production callers, not just helpers.
 
-Two consensus rules were lost this way in the transaction newtype refactor (#10461): one check
-was orphaned (its production path rerouted around it, while its unit tests kept passing) and
-one was starved (a new fallible conversion collapsed invalid wire values into a value the
-untouched check ignored). Both were restored afterwards; this checklist exists so the next
-refactor does not repeat that.
+Use the [protocol specification] and applicable ZIPs to identify the rules.
+Use the dependency versions in `Cargo.lock`, not an upstream repository's
+current branch, to determine which checks a library performs.
 
 ## Author checklist
 
-- **Inventory what the old code rejects.** List every consensus rejection the code being
-  replaced can produce — every `Err` return in a deserializer, constructor, or conversion.
-  For each one, write down its new home: enforced by the upstream library, re-implemented by
-  Zebra, or moved to a later verification layer. "Upstream probably checks this" is not a
-  home — read the upstream source at the exact version pinned in `Cargo.lock`.
-- **A rule may move to a later layer only if the outcome is identical** — the input is still
-  rejected on every path that matters (block _and_ mempool verification) — and a test pins it
-  at the new layer. Without that test, the next dependency bump can move or drop it silently.
-- **Test through the production entry point, not the helper.** A check whose only remaining
-  callers are its own tests is dead code with green CI. Every parse-time rejection needs a
-  test through the entry point the node actually uses (`Transaction::zcash_deserialize`,
-  block deserialization, or the verifier).
-- **Audit fallible conversions that feed consensus checks.** Any `.ok()`, `unwrap_or`, or
-  defaulted `try_from` between the wire format and a value a check reads can turn an invalid
-  wire value into one the check treats as benign. A check that skips `None` is only correct
-  if `None` can never mean "an invalid value was collapsed". A shared default is the same
-  trap: `unwrap_or(default)` conflates "absent" with "failed". Audit look-alike accessors
-  individually — the second instance of this class (#11386) differed from its three correct
-  siblings by a single `and_then`.
-- **Pick test boundaries from the types, not only the spec.** Cover the maximum wire value,
-  the first value each conversion cannot represent, and the largest honest value — not just
-  the values the specification names.
+1. **Inventory rejection behavior.** List the errors produced by the
+   deserializers, constructors, conversions, and verifiers being replaced.
+   Map each consensus rejection to its new location: an upstream check, a
+   retained Zebra check, or another verification stage. Include implicit
+   checks enforced by a type's representable range.
+2. **Trace production callers.** Follow each affected path from wire bytes to
+   verification, including block and mempool paths.
+3. **Preserve checks when moving layers.** Establish that every applicable
+   production path still rejects the same invalid input. Do not move a check
+   past an allocation or expensive operation that it protects from untrusted
+   input. Test the new rejection point through the production entry point.
+4. **Audit fallible conversions.** Examine `.ok()`, `and_then`, `unwrap_or`,
+   default values, narrowing conversions, and optional accessors between the
+   wire value and its check. Distinguish an absent field from an invalid value
+   that could not be represented. Check similar accessors individually.
+5. **Test representation boundaries.** Cover the largest valid value, first
+   invalid value, first unrepresentable value, and maximum wire value. Include
+   network-upgrade boundaries, malformed inputs, and valid vectors.
+6. **Keep the change reviewable.** Separate mechanical renames from behavior
+   changes. Follow the [rename procedure](mass-renames.md) for code, tests,
+   documentation, and log assertions affected by renamed symbols.
+
+## Regression examples
+
+The [transaction parsing tests] exercise coinbase script-length boundaries
+through transaction deserialization, not just the transparent-input helper.
+
+The same test module checks that `Transaction::expiry_height()` preserves
+out-of-range wire values. A field that cannot be converted to an ordinary
+height must not become `None` and bypass the expiry check. The test covers
+`499_999_999`, `500_000_000`, `2_147_483_648`, and `u32::MAX`, as well as the
+zero value that disables expiry. The [transaction verifier tests] exercise
+rejection of out-of-range expiry heights for transaction versions 4, 5, and
+6. The protocol's [transaction consensus rules] distinguish non-coinbase
+expiry bounds from the NU5-onward coinbase requirement; preserve that
+distinction when changing the representation.
+
+A regression test must fail when its production check is removed or bypassed.
 
 ## Reviewer checklist
 
-- [ ] The PR (or a linked issue) contains the rejection inventory, with a new home named for
-      every rule.
-- [ ] Every rule that moved layers has a test at the new layer, through the production path.
-- [ ] Every re-implemented rule has a test that fails when the re-implementation is reverted.
-- [ ] Fallible conversions feeding consensus checks are listed, each argued lossless for
-      consensus-relevant values.
-- [ ] Tests cover type-boundary values as well as spec-boundary values.
-- [ ] A full sync (CI full-sync job or a canary node) passes before the refactor ships in a
-      release, proving no honest historical transaction is newly rejected.
+- [ ] The author checklist is satisfied, with a rejection inventory and source
+  references for upstream checks.
+- [ ] A full sync passes before release. Record the network, height range, and
+  checkpoint configuration.
+
+A sync tests acceptance of its chain, not rejection of malformed transactions.
+For full-verification changes, set `[consensus] checkpoint_sync = false`;
+[mandatory checkpoints](zebra-checkpoints.md#checkpoint-coverage-and-spacing)
+still apply. Retain targeted rejection tests even when the sync succeeds.
+
+[protocol specification]: https://zips.z.cash/protocol/protocol.pdf
+[transaction consensus rules]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+[transaction parsing tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/tests/vectors.rs
+[transaction verifier tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction/tests.rs

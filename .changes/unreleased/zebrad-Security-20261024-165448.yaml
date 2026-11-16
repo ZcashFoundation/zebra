@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: The example Compose files no longer publish the Zebra RPC or metrics ports to the host. The observability stack keeps RPC cookie authentication, disables the Prometheus admin and lifecycle APIs, and requires `GF_SECURITY_ADMIN_PASSWORD` to start.
+time: 2026-10-24T16:54:48.916481356+02:00

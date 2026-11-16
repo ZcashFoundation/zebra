@@ -1,6 +1,24 @@
+# Contextual difficulty validation
+
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: [difficulty calculations](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/check/difficulty.rs), [contextual checks](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/check.rs), and [upgrade parameters](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network_upgrade.rs).
+
+- The 17-block window and 75-second post-Blossom spacing apply only before NU7.
+- From NU7, [ZIP 218](https://zips.z.cash/zip-0218) sets a 102-block window and 25-second spacing.
+- The median span remains 11 blocks; difficulty context grows from 28 to 113.
+- Bounded vectors and `pow_adjustment_block_span` replace fixed-size arrays.
+- Short histories are supported; quotient/remainder sums avoid overflow.
+- Regtest uses fixed difficulty.
+- The [rollback window](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/constants.rs) is 1,000 blocks, not 100.
+- Testnet's minimum-difficulty gap changes from 6 to 18 spacings at NU7, retaining [450 seconds after Blossom](https://zips.z.cash/zip-0208).
+- The [hash conversion](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/work/difficulty.rs) uses little-endian raw bytes, per the [difficulty rule](https://zips.z.cash/protocol/protocol.pdf#difficulty).
+
+---
+
 - Feature Name: contextual_difficulty_validation
 - Start Date: 2020-11-02
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
+- Design PR: (not recorded in the original RFC)
 - Zebra Issue: [ZcashFoundation/zebra#1036](https://github.com/ZcashFoundation/zebra/issues/1036)
 
 # Summary
@@ -575,7 +593,7 @@ Note: some older versions of ZIPs 205 and 208 incorrectly said that:
 ZIP 205 and 208 were fixed on 14 November 2020, see [ZIP PR 417] and
 [ZIP commit 806076c] for details.
 
-[ZIP-208]: https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+[ZIP-208]: https://zips.z.cash/zip-0208
 [ZIP PR 417]: https://github.com/zcash/zips/pull/417
 [ZIP commit 806076c]: https://github.com/zcash/zips/commit/806076c48c9834fd9941b940a32310d737975a3a
 

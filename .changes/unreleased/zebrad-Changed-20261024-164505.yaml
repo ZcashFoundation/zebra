@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Return mempool transactions only when the requested witnessed transaction ID matches, including its authorization digest.
+time: 2026-10-24T16:45:05.171761929+02:00

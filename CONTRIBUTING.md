@@ -1,70 +1,158 @@
 # Contributing
 
-- [Contributing](#contributing)
-  - [Running and Debugging](#running-and-debugging)
-  - [Bug Reports](#bug-reports)
-  - [Pull Requests](#pull-requests)
-  - [AI-Assisted Contributions](#ai-assisted-contributions)
-  - [When We Close PRs](#when-we-close-prs)
-  - [Code Standards](#code-standards)
+## Running and debugging
 
-## Running and Debugging
+Use the [user documentation][user-docs] to build, configure, run, and instrument
+Zebra. Use the [developer documentation][dev-docs] for architecture and testing.
 
-See the [user documentation](https://zebra.zfnd.org/user.html) for details on
-how to build, run, and instrument Zebra.
+## Bug reports
 
-## Bug Reports
+Submit reproducible defects through the [bug report form][bug-report]. Include
+expected and observed behavior, reproduction commands, relevant logs, operating
+system details, and the output of `zebrad --version`.
 
-Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?template=bug_report.yml) on the Zebra issue tracker.
+Report vulnerabilities through [the security disclosure process][security], not
+public issues. Test against the latest release or current `main`, and identify
+the exact version or commit.
 
-## Pull Requests
+## Pull requests
 
-PRs are welcome, but every PR requires human review time. To make that time count:
+External contributors must discuss changes before opening a pull request (PR).
+Maintainers do not need prior issue approval for their own work.
 
-1. **Start with an issue.** Check the [issue tracker](https://github.com/ZcashFoundation/zebra/issues) for existing issues or create a new one describing what you want to change and why. **Wait for a team member to respond before writing code** — an issue with no team acknowledgment does not count as prior discussion.
-2. **Coordinate large changes.** For anything beyond a small bug fix, discuss your approach with us via [issue tracker](https://github.com/ZcashFoundation/zebra/issues) or [Discord](https://discord.gg/yVNhQwQE68) before opening a PR.
-3. **Keep PRs focused.** One logical change per PR. If you're planning multiple related PRs, discuss the overall plan with the team first.
-4. **Follow conventional commits.** PRs are merged to main with a merge commit, so the PR title becomes the merge commit message and your branch commits are preserved in history. Follow the [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) standard for both.
-5. **Declare breaking changes.** If your change breaks a published crate's public Rust API, add `!` after the type and scope in the PR title (`feat(zebra-chain)!: ...`) **and** in the branch commit that introduces the break. The PR gate reads the title: with `!`, its `api-diff` check accepts the break and the gate requires a `breaking` change fragment. Without `!`, `api-diff` fails on a public API break, lists each one, and says when a break does not need `!`. The check is advisory for now. release-plz reads the commits that land on `main`, which now include your branch commits, so the marker belongs on both for the release to bump the major version.
+1. Find an existing [issue][issues], or open one explaining the problem and
+   proposed change. Wait for a Zebra team member's acknowledgment before coding.
+2. Agree on the approach for changes beyond small bug fixes. Discuss the overall
+   plan before splitting work across related PRs.
+3. Keep each PR to one logical change. Link the agreed issue and distinguish a
+   complete fix from partial work or a dependency on another PR.
+4. Follow [Conventional Commits][conventional-commits] for the PR title and branch
+   commits. Zebra uses merge commits, so both remain in history.
+5. Add tests for changed behavior and the required [change fragments][changelogs].
+   Review every changed line and run the applicable local checks before opening
+   the PR.
 
-Zebra is a validator node — it excludes features not strictly needed for block validation and chain sync. Features like wallets, block explorers, and mining pools belong in [Zaino](https://github.com/zingolabs/zaino), [Zallet](https://github.com/zcash/wallet), or [librustzcash](https://github.com/zcash/librustzcash).
+Zebra validates and synchronizes the Zcash chain. Wallet functionality, block
+explorers, and mining-pool management belong in downstream projects, not in the
+node. The [help wanted][help-wanted] and [good first issue][good-first-issue]
+labels identify work open to contributors; they do not waive prior discussion.
 
-Check out the [help wanted][hw] or [good first issue][gfi] labels if you're looking for a place to get started.
+### PR description
 
-[hw]: https://github.com/ZcashFoundation/zebra/labels/help%20wanted
-[gfi]: https://github.com/ZcashFoundation/zebra/labels/good%20first%20issue
+Follow the [PR template][pr-template]:
 
-## AI-Assisted Contributions
+- **Summary:** what changes and why, in at most three sentences or four short
+  bullets.
+- **Reviewer Notes:** design choices, migration requirements, or specifications
+  absent from the diff. Omit when unnecessary.
+- **Evidence:** before-and-after behavior, a regression test, real output, or a
+  screenshot. Do not repeat checks CI reports. Omit for nonbehavioral changes.
+- **Merge Danger:** identify the door and blast radius. A change is one-way when
+  a revert cannot undo external effects: database upgrades, publication,
+  deployment, or deleted infrastructure. Consensus, peer protocol, public crate
+  API, configuration, RPC, and metrics changes are two-way only until release.
+- **AI Disclosure:** follow [AI-assisted contributions](#ai-assisted-contributions),
+  or state that no AI tools were used.
 
-We welcome contributions that use AI tools. What matters is the quality of the result and the contributor's understanding of it, not whether AI was involved.
+### Breaking changes
 
-**What we ask:**
+Put `!` after the conventional-commit type and optional scope in both the PR
+title and the commit that introduces a break, for example
+`feat(zebra-chain)!: change the public API`. Follow the
+[changelog requirements][changelogs] for affected operators and library consumers.
 
-- **Disclose AI usage** in your PR description: Specify the tool and what it was used for (e.g., "Used Claude for test boilerplate"). This helps reviewers calibrate their review.
-- **Understand your code:** You are the sole responsible author. If asked during review, you must be able to explain the logic and design trade-offs of every change.
-- **Don't submit without reviewing:** Run the full test suite locally and review every line before opening a PR.
+The [PR gate][pr-gate] fails `api-diff` for undeclared API breaks and requires
+successful analysis for declared breaks. Its `api-diff` and `changelog-gate`
+jobs are advisory, not merge-blocking; fragment parsing and release readiness
+are separate checks. Reviewers must check compatibility and changelog coverage.
 
-Tab-completion, spell checking, and syntax highlighting don't need disclosure.
+The release planner reads commits on `main`, including branch commits and the
+merge commit. A breaking marker only in the PR description is insufficient.
 
-## When We Close PRs
+## AI-assisted contributions
 
-Any team member may close a PR. We'll leave a comment explaining why and invite you to create an issue if you believe the change has value. Common reasons for closure:
+Disclose AI-generated or AI-revised code, tests, and prose in the PR description.
+Specify what the tool did and what you reviewed. Tab completion, spell checking,
+and syntax highlighting do not require disclosure.
 
-- No linked issue, or issue exists but no team member has responded to it
-- Feature or refactor nobody requested
-- Low-effort changes (typo fixes, minor formatting) not requested by the team
-- Missing test evidence or inability to explain the changes
-- Out of scope for Zebra (see above)
+Explain the logic and trade-offs of every change, including generated work.
+Review it and run the same checks required for human-written changes.
 
-This is not personal; it's about managing review capacity. We encourage you to reach out first so your effort counts.
+## When we close PRs
 
-## Code Standards
+Maintainers can close PRs that lack the required prior discussion, introduce
+unrequested features or refactors, make unsolicited minor formatting changes,
+lack evidence for changed behavior, or fall outside Zebra's scope. Inability to
+explain a submitted change is also grounds for closure. Discuss the need in an
+issue before resubmitting.
 
-Zebra enforces code quality through review. For the full list of architecture rules, code patterns, testing requirements, and security considerations, see [`AGENTS.md`](AGENTS.md). The key points:
+## Code standards
 
-- **Build requirements**: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo nextest run` must all pass.
-- **Architecture**: Dependencies flow downward only; `zebra-chain` is sync-only
-- **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
-- **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
-- **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Never edit `CHANGELOG.md` by hand. Add a change fragment with `changie new -j <crate> -k <kind> -b "..."` (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
+[`AGENTS.md`][agents] states the full architecture, testing, and contribution
+rules; in short:
+
+- Keep crate dependencies consistent with the existing architecture. Keep
+  `zebra-chain` synchronous.
+- Use structured errors. Explain the invariant behind each `expect()`.
+- Move CPU-heavy work out of async executor threads; bound external waits.
+- Bound allocations and work driven by untrusted input.
+- Document public APIs and changed operator behavior.
+
+Create [change fragments][changelogs] with the source change, not by editing
+generated changelogs. For operator-visible changes:
+
+```sh
+changie new -j zebrad
+```
+
+For library-consumer-visible changes, select each affected project:
+
+```sh
+changie new -j zebra-chain -j zebra-state -k breaking
+```
+
+Use separate bodies when audiences or migration requirements differ.
+
+### Local checks
+
+Install the native [build dependencies][installation], Rust toolchains,
+`cargo-nextest`, and `cargo-hack` required by the jobs you reproduce. From the
+repository root, run the main formatting, lint, and unit-test checks:
+
+```sh
+cargo +1.91.0 fmt --all -- --check
+cargo +1.97.0 clippy --workspace --all-targets \
+  --features default-release-binaries -- -D warnings
+cargo +1.97.0 clippy --workspace --all-targets \
+  --features 'default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints' \
+  -- -D warnings
+CARGO_PROFILE_RELEASE_LTO=false cargo +1.97.0 nextest run \
+  --profile ci --locked --release --features default-release-binaries \
+  --run-ignored=all
+cargo +1.91.0 hack check --workspace
+```
+
+The `ci` nextest profile excludes stateful, end-to-end, and no-Git-dependency
+release tests. For per-crate feature combinations, minimum Rust versions,
+dependencies, documentation, and integration tests, follow the applicable
+[workflows][workflows] and [CI guide][ci-guide].
+
+Resolve a `do-not-merge` hold before removing the label; see the
+[label rules][labels].
+
+[user-docs]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/user.md
+[dev-docs]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev.md
+[installation]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/install.md#building-from-source
+[bug-report]: https://github.com/ZcashFoundation/zebra/issues/new?template=bug_report.yml
+[issues]: https://github.com/ZcashFoundation/zebra/issues
+[security]: https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md
+[pr-template]: https://github.com/ZcashFoundation/zebra/blob/main/.github/pull_request_template.md
+[conventional-commits]: https://www.conventionalcommits.org/en/v1.0.0/#specification
+[changelogs]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/changelog-guidelines.md
+[help-wanted]: https://github.com/ZcashFoundation/zebra/labels/help%20wanted
+[good-first-issue]: https://github.com/ZcashFoundation/zebra/labels/good%20first%20issue
+[pr-gate]: https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/pr-gate.yml
+[workflows]: https://github.com/ZcashFoundation/zebra/tree/main/.github/workflows
+[ci-guide]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md
+[labels]: https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/labels.md
+[agents]: https://github.com/ZcashFoundation/zebra/blob/main/AGENTS.md

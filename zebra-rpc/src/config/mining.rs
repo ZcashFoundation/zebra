@@ -52,7 +52,9 @@ pub struct Config {
     /// Applies only if [`Self::miner_address`] contains a shielded component.
     pub miner_memo: Option<String>,
 
-    /// Mine blocks with Zebra's internal Equihash solver.
+    /// Mine blocks using Zebra's internal Equihash solver, without an external mining pool.
+    ///
+    /// Requires the `internal-miner` build feature. Not restricted to Regtest.
     ///
     /// Public networks require synchronization and recently live peers. After a locally accepted
     /// block, the miner waits for a different committed parent. Regtest and configured Testnet may

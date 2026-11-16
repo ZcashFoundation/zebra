@@ -10,8 +10,9 @@ services:
       - ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
       - ZEBRA_SYNC__PARALLEL_CPU_THREADS=12
       - ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?MINER_ADDRESS is required}
-      - ZEBRA_MINING__MINER_DATA=${MINER_DATA:-}
+      - ZEBRA_MINING__EXTRA_COINBASE_DATA=${EXTRA_COINBASE_DATA:-}
       - ZEBRA_MINING__MINER_MEMO=${MINER_MEMO:-}
+      - ZEBRA_HEALTH__LISTEN_ADDR=127.0.0.1:8080
     volumes:
       - zebra-data:/home/zebra/.cache/zebra
     ports:

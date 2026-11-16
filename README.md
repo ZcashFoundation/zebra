@@ -39,15 +39,16 @@ docker run -d \
 ```
 
 The `-p 8233:8233` flag exposes the P2P port so other Zcash nodes can connect to
-yours, and `-v` persists the chain state across restarts (use port `18233` for
-Testnet). For more information, read our [Docker
+yours, and `-v` persists the chain state across restarts. For Testnet, also set
+`-e ZEBRA_NETWORK__NETWORK=Testnet` and publish `-p 18233:18233` instead. For
+more information, read our [Docker
 documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Manual Install
 
-Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
-compiler. Below are quick summaries for installing these dependencies.
+Building Zebra requires [Rust](https://www.rust-lang.org/tools/install) 1.91
+or newer, [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and
+C/C++17 build tools. Below are quick summaries for installing these dependencies.
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 
@@ -61,9 +62,10 @@ compiler. Below are quick summaries for installing these dependencies.
 2. Install Zebra's build dependencies:
    - **libclang**, which is a library that comes under various names, typically
      `libclang`, `libclang-dev`, `llvm`, or `llvm-dev`;
-   - **clang** or another C++ compiler (`g++,` which is for all platforms or
-     `Xcode`, which is for macOS);
-   - **[`protoc`](https://grpc.io/docs/protoc-installation/)** (optional).
+   - **clang** or another C++17 compiler (`g++` on Linux or the
+     Xcode Command Line Tools on macOS);
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)** (only for
+     regenerating Protocol Buffers code or building lightwalletd gRPC tests).
 
 </details>
 
@@ -76,34 +78,15 @@ compiler. Below are quick summaries for installing these dependencies.
 </summary>
 
 ```sh
-sudo pacman -S rust clang protobuf
+sudo pacman -Syu --needed rust base-devel clang
 ```
 
-Note that the package `clang` includes `libclang` as well. If you hit a
-compiling failure in `rocksdb`, see the [GCC 15 workaround](#gcc-15-workaround)
-below.
+Installing `clang` also installs its `clang-libs` dependency, including libclang.
 
 </details>
 
-<details><summary>
-
-#### GCC 15 workaround
-
-</summary>
-
-GCC 15, which is the default on many recent distros like Arch Linux and Ubuntu
-25 onwards, introduces a compiling failure in the version of the `rocksdb`
-dependency used by Zebra. A workaround is running the following before
-installing Zebra:
-
-```sh
-export CXXFLAGS="$CXXFLAGS -include cstdint"
-```
-
-</details>
-
-On `x86_64` or `aarch64` Linux (glibc 2.34+), you can skip the build dependencies
-and download a signed, pre-built binary with
+On `x86_64` or `aarch64` Linux (glibc 2.34+ and `libstdc++`), you can skip the
+build dependencies and download a pre-built binary with
 [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
 
 ```sh
@@ -111,8 +94,12 @@ cargo binstall zebrad
 ```
 
 The same binaries are attached to each
-[GitHub release](https://github.com/ZcashFoundation/zebra/releases), with a
-SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature.
+[GitHub release](https://github.com/ZcashFoundation/zebra/releases), with
+SHA-256 checksums and a Cosign-signed checksum manifest. GitHub stores a
+build-provenance attestation for each archive. Zebra's cargo-binstall metadata
+does not configure signature verification; use the
+[manual verification procedure](https://zebra.zfnd.org/user/install.html#download-and-verify-an-archive)
+to authenticate these artifacts.
 
 Otherwise, once you have the dependencies in place, you can build and install
 Zebra from source with:
@@ -124,7 +111,7 @@ cargo install --locked zebrad
 Alternatively, you can install it from GitHub:
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v6.0.0 zebrad
+cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v7.0.0 zebrad
 ```
 
 You can start Zebra by running
@@ -144,7 +131,7 @@ Zebra uses a comprehensive CI/CD system built on GitHub Actions to ensure code
 quality, maintain stability, and automate routine tasks. Our CI/CD
 infrastructure:
 
-- Runs automated tests on every PR and commit.
+- Runs automated tests for relevant changes on PRs and supported branches.
 - Manages deployments to various environments.
 - Handles cross-platform compatibility checks.
 - Automates release processes.

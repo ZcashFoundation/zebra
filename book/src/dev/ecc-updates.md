@@ -1,69 +1,120 @@
-# Updating the ECC dependencies
+# Updating Zcash protocol dependencies
 
-Zebra relies on numerous dependencies maintained by ZODL (formerly the Electric Coin Company), and updating them can be a complex task. This guide will help you navigate the process.
+Zebra shares transaction, proof, key, and script libraries with other Zcash
+implementations. Review consensus validation and shared types alongside
+upstream changes and the resolved dependency graph; a successful build does not
+establish consensus compatibility.
 
-The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because `zebra-script` depends on the [zcash_script](https://github.com/ZcashFoundation/zcash_script) project, which is now split into two crates (see `zebra-script/Cargo.toml`): `libzcash_script`, which links to specific files from zcash (zcash_script.cpp and all on which it depends), and the higher-level `zcash_script` crate. Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
+## Dependency inventory
 
-## Steps for upgrading
+The root [`Cargo.toml`][workspace-manifest] holds most direct requirements;
+member manifests select features and package aliases. The table lists version
+requirements, not the resolved versions in `Cargo.lock`.
 
-Let's dive into the details of each step required to perform an upgrade:
+| Group | Direct dependencies and requirements |
+| --- | --- |
+| Transaction and protocol libraries | `zcash_primitives = "0.31.0"`, `zcash_proofs = "0.31.0"`, `zcash_protocol = "0.11.0"`, `zcash_transparent = "0.11.0"` |
+| Addresses and keys | `zcash_address = "0.14.0"`, `zcash_keys = "0.17.0"` |
+| Shielded protocols | `orchard = "0.16.0"`, `sapling-crypto = "0.9"`, `zcash_note_encryption = "0.5.1"` |
+| Encoding and trees | `zcash_encoding = "0.5"`, `zcash_history = "0.6.0"`, `incrementalmerkletree = "0.9"` |
+| Transparent scripts | `libzcash_script = "0.2"`, `zcash_script = "0.6"` |
 
-### Before starting
+The cryptographic dependency graph also includes `bellman`, `bls12_381`,
+`equihash`, `ff`, `group`, `groth16`, `jubjub`, `reddsa`, `redjubjub`, and
+`sinsemilla`. Several member manifests depend on `halo2_proofs = "0.4"` under
+the local name `halo2`. Check those declarations as well as the workspace
+requirements. The `halo2_gadgets` package is a transitive dependency.
 
-- Zebra developers often dismiss ECC dependency upgrade suggestions from dependabot. For instance, see [this closed PR](https://github.com/ZcashFoundation/zebra/pull/7745) in favor of the [5.7.0 zcashd upgrade PR](https://github.com/ZcashFoundation/zebra/pull/7784), which followed this guide.
+The [script crate] uses `libzcash_script` for the default C++ interpreter from
+`zcashd` and `zcash_script` for Rust types and interpreter support. Test changes
+with the [`comparison-interpreter` feature](../user/install.md#cargo-features).
 
-- Determine the version of `zcashd` to use. This version will determine which versions of other crates to use. Typically, this should be a [tag](https://github.com/zcash/zcash/tags), but in some cases, it might be a reference to a branch (e.g., nu5-consensus) for testing unreleased developments.
+Match versions where crates exchange types or require compatible
+implementations, not to a `zcashd` release's entire dependency list:
+`libzcash_script` depends on `zcash_script`, not the Orchard or Sapling graph.
 
-- Upgrading the `zcash_script` crate can be challenging, depending on changes in the latest `zcashd` release. Follow the instructions in the project's [README](https://github.com/ZcashFoundation/zcash_script/blob/master/README.md) for guidance.
+## Select and apply the update
 
-- Upgrade and release `zcash_script` before upgrading other ECC dependencies in Zebra.
+1. Record the target releases and read their changelogs. Identify changes to
+   serialization, consensus checks, feature defaults, proof verification, and
+   public types. Apply the [consensus refactor checklist](consensus-refactors.md)
+   when validation moves between Zebra and an upstream library.
+2. Check the dependency requirements of the selected upstream releases. If
+   script changes require a new `libzcash_script` or `zcash_script` release,
+   coordinate that release in the [script repository] before selecting it in
+   Zebra. Do not require a script release for an unrelated library update.
+3. Update the relevant `[workspace.dependencies]` entries and any member-level
+   aliases or feature selections. Do not replace inherited workspace
+   requirements with independent per-crate versions.
+4. Update `Cargo.lock` for the selected packages:
 
-### Upgrade versions
+   ```sh
+   cargo update -p orchard -p sapling-crypto \
+     -p zcash_primitives -p zcash_proofs
+   cargo tree --workspace --duplicates
+   cargo tree --workspace --invert zcash_primitives
+   ```
 
-- Use the `cargo upgrade` command to upgrade all the ECC dependency versions in Zebra. For example, in [this PR](https://github.com/ZcashFoundation/zebra/pull/7784), the following command was used:
+   Adjust the package list to the update. If more than one version of a
+   package is present, use a version-qualified package specification such as
+   `zcash_primitives@0.31.0` for an inverse tree. Review transitive changes in
+   the lockfile; a targeted update can still update required dependencies.
+
+5. Adapt callers without weakening validation, following the
+   [consensus refactor checklist](consensus-refactors.md).
+
+## Dependency policy and audits
+
+The [deny policy] rejects unapproved duplicate versions, registries, Git
+sources, and licenses. It also checks security advisories. Remove obsolete
+exceptions when the update eliminates their dependency paths. Do not add a
+broad `skip-tree` exception to hide an unexplained duplicate.
+
+Install [cargo-deny] and run the default-feature checks from the workspace
+root:
 
 ```sh
-cargo upgrade --incompatible -p bridgetree -p incrementalmerkletree -p orchard -p zcash_primitives -p zcash_proofs -p zcash_address -p zcash_encoding -p zcash_note_encryption -p zcash_script
+cargo deny --workspace check bans sources licenses advisories
 ```
 
-Notes:
+For CI-only failures, reproduce the [lint feature matrix and allowances](continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+rather than weakening the shared policy.
 
-- Insert all the crate names to be updated to the command.
+Zebra also stores [cargo-vet] review records in `supply-chain/`:
 
-- Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version.
+- `config.toml`: imported audit sources, package policy, and exemptions.
+- `audits.toml`: local full-version and version-to-version audit records.
+- `imports.lock`: the imported audit records used by the repository.
 
-- You need to have [cargo-edit](https://crates.io/crates/cargo-edit) installed for this command to work — it is the crate that provides the `cargo upgrade` subcommand.
-
-### Version consistency check
-
-- Ensure that the crate versions in the `Cargo.toml` of the zcashd release, `Cargo.toml` of `zcash_script`, and the `Cargo.toml` files of Zebra crates are all the same. Version consistency is crucial.
-
-### Build/Test zebra & fix issues
-
-- Build zebra and make sure it compiles.
+Run the audit check after updating the dependency graph:
 
 ```sh
-cargo build
+cargo vet
 ```
 
-- Test Zebra and make sure all test code compiles and all tests pass:
+For missing coverage, inspect the package with `cargo vet inspect`, or review
+the version delta with `cargo vet diff`. After completing that review, record
+the applicable criteria with `cargo vet certify`. These commands take the
+package name and the version or version pair reported by the tool; see the
+[cargo-vet command reference]. Commit the resulting supply-chain changes with
+the dependency update. An exemption records missing audit coverage, not a
+successful audit; document and review any required exemption explicitly.
 
-```sh
-cargo test
-```
+## Validation and review
 
-- When upgrading, it's common for things to break, such as deprecated or removed functionality. Address these issues by referring to the broken dependency's changelog, which often provides explanations and workarounds.
+Run affected tests and feature combinations, including `comparison-interpreter`
+for script changes, and the [CI checks](continuous-integration.md). For
+consensus-sensitive updates, follow the [refactor validation requirements](consensus-refactors.md#reviewer-checklist).
 
-- If you encounter issues that you can't resolve, consider reaching out to ECC team members who worked on the upgrade, as they may have more context.
+The pull request must identify the upstream releases, explain necessary
+version coupling and policy exceptions, and record test evidence. Keep
+unrelated dependency changes out of the update so that reviewers can trace
+behavior changes to their source.
 
-### Check `deny.toml`
-
-- Review Zebra's `deny.toml` file for potential duplicates that can be removed due to the upgrade. You may also need to add new entries to `deny.toml`.
-- You can identify issues with the dependencies using `cargo deny check bans` command, need to have [cargo deny](https://crates.io/crates/cargo-deny) installed.
-- Push your changes and let the CI identify any additional problems.
-
-### Push the Pull Request (PR)
-
-- Push the pull request with all the changes and ensure that the full CI process passes.
-- Seek approval for the PR.
-- Merge to `main` branch.
+[workspace-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/Cargo.toml
+[script crate]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/Cargo.toml
+[script repository]: https://github.com/ZcashFoundation/zcash_script
+[deny policy]: https://github.com/ZcashFoundation/zebra/blob/main/deny.toml
+[cargo-deny]: https://embarkstudios.github.io/cargo-deny/
+[cargo-vet]: https://mozilla.github.io/cargo-vet/
+[cargo-vet command reference]: https://mozilla.github.io/cargo-vet/commands.html

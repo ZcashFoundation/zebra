@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Avoid panics in `getblocksubsidy` and coinbase validation on custom Testnets whose block subsidy is not divisible by five.
+time: 2026-10-24T19:10:32.332033028+02:00
