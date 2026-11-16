@@ -365,11 +365,15 @@ async fn early_block_relay_requires_bilateral_handshake() {
                         ConnectedAddr::new_outbound_direct(address)
                     };
                     let remote_addr = ConnectedAddr::new_inbound_direct(address);
+                    let mut local_tracker =
+                        ActiveConnectionCounter::new_counter().track_connection();
+                    let mut remote_tracker =
+                        ActiveConnectionCounter::new_counter().track_connection();
                     let (local_info, remote_info) = tokio::try_join!(
                         negotiate_version(
                             &mut local,
                             &local_addr,
-                            &mut ActiveConnectionCounter::new_counter().track_connection(),
+                            &mut local_tracker,
                             config,
                             Arc::default(),
                             "/same-user-agent/".to_string(),
@@ -380,7 +384,7 @@ async fn early_block_relay_requires_bilateral_handshake() {
                         negotiate_version(
                             &mut remote,
                             &remote_addr,
-                            &mut ActiveConnectionCounter::new_counter().track_connection(),
+                            &mut remote_tracker,
                             remote_config,
                             Arc::default(),
                             "/same-user-agent/".to_string(),

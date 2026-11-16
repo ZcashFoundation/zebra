@@ -771,6 +771,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
             rejected_tree_roots,
             pending_rejected_tree_roots: None,
             max_finalized_queue_height: f64::NAN,
+            pruning_task: None,
         };
         let mut completions = Vec::new();
         for (index, block) in chain.blocks.iter().enumerate() {
