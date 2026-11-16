@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Security
+body: Keep queued block bodies and response ownership together when replacing same-hash requests.
+time: 2026-11-04T04:01:28.368933503+01:00
