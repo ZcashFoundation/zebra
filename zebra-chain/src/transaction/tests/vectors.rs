@@ -1298,6 +1298,81 @@ fn binding_signatures() {
     }
 }
 
+#[test]
+fn redpallas_batch_signatures() {
+    use crate::primitives::reddsa::{batch, orchard};
+
+    let _init_guard = zebra_test::init();
+    let mut items = Vec::new();
+    let mut checked = 0;
+
+    for net in Network::iter() {
+        for (height, bytes) in net.block_iter() {
+            let block: Block = bytes
+                .zcash_deserialize_into()
+                .expect("test blocks deserialize");
+            let nu = NetworkUpgrade::current(&net, Height(*height));
+            for tx in &block.transactions {
+                let Some(bundle) = tx.orchard_bundle() else {
+                    continue;
+                };
+                // The vectors do not include the previous outputs needed for transparent spends.
+                if tx.has_transparent_inputs() {
+                    continue;
+                }
+                let sighash = tx
+                    .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                    .expect("the block height selects the transaction's network upgrade");
+                let key = bundle.binding_validating_key();
+                let sig = bundle.authorization().binding_signature().clone();
+                let valid = key.create_batch_item(sig.clone(), &sighash);
+                let invalid = if checked == 0 {
+                    key.create_batch_item(sig, b"wrong sighash")
+                } else {
+                    key.create_batch_item(sig, &sighash)
+                };
+                items.push((valid, invalid));
+                for action in bundle.actions() {
+                    let item = action
+                        .rk()
+                        .create_batch_item(action.authorization().clone(), &sighash);
+                    items.push((item.clone(), item));
+                }
+                checked += 1;
+            }
+        }
+    }
+
+    assert!(
+        checked > 0,
+        "the vectors contain Orchard binding and spend signatures"
+    );
+    assert!(
+        items.len() > 7,
+        "the vectors cover both GLV-sized chunks and a larger fallback batch"
+    );
+    // Up to seven signatures fit the serial GLV-Strauss limit; keep the full batch too.
+    for chunk_size in (1..=7).chain(std::iter::once(items.len())) {
+        for (chunk_index, chunk) in items.chunks(chunk_size).enumerate() {
+            let mut valid = batch::Verifier::<orchard::SpendAuth, orchard::Binding>::new();
+            let mut invalid = batch::Verifier::<orchard::SpendAuth, orchard::Binding>::new();
+            for (valid_item, invalid_item) in chunk {
+                valid.queue(valid_item.clone());
+                invalid.queue(invalid_item.clone());
+            }
+            assert_eq!(valid.verify(rand::rng()), Ok(()));
+            assert_eq!(
+                invalid.verify(rand::rng()),
+                if chunk_index == 0 {
+                    Err(crate::primitives::reddsa::Error::InvalidSignature)
+                } else {
+                    Ok(())
+                }
+            );
+        }
+    }
+}
+
 /// Check that a v6 (Ironwood / NU6.3) transaction computes a txid and round-trips through
 /// serialization.
 ///

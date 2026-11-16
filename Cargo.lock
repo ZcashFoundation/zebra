@@ -3607,9 +3607,8 @@ dependencies = [
 
 [[package]]
 name = "pasta_curves"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ed53ba43531a06e1f82020907cf192fc3c25d7c0baf5c49c547b74e7103b62"
+version = "0.6.3"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=64c11d02a16e0e43456bfded3e03a90f5d16d6fa#64c11d02a16e0e43456bfded3e03a90f5d16d6fa"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -4272,8 +4271,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a70b6dbd7b3277cbd4d89ee750a30bebab3b9951ee4e166ce15c00975fe410f"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=f2a23676b3cdcba3f82e480e29f8c0612209d954#f2a23676b3cdcba3f82e480e29f8c0612209d954"
 dependencies = [
  "blake2b_simd",
  "byteorder",

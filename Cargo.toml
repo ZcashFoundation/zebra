@@ -403,3 +403,6 @@ result_large_err = "allow"
 [patch.crates-io]
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
 halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "771fbbe8d8218bf554b49d7e4ae6a3bfc1c5f442" }
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "f2a23676b3cdcba3f82e480e29f8c0612209d954" }
+# zcash/pasta_curves#182 (GLV MSMs) rebased onto 0.6.3; #12232's 7554d790 lineage was force-pushed.
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "64c11d02a16e0e43456bfded3e03a90f5d16d6fa" }
