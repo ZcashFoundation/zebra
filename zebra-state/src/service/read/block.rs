@@ -376,16 +376,18 @@ pub fn any_transaction<'a>(
 
 /// Returns the serialized [`Transaction`] with [`transaction::Hash`], if it exists in any
 /// chain in `chains` or the finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data, like [`any_transaction`].
 pub fn any_raw_transaction<'a>(
     mut chains: impl Iterator<Item = &'a Arc<Chain>>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<SerializedTransaction> {
+) -> Result<Option<SerializedTransaction>, BlockReadError> {
     // Non-finalized transactions have no stored bytes, so they are serialized from memory.
-    chains
-        .find_map(|chain| chain.transaction(hash))
-        .map(|(tx, _height, _time)| SerializedTransaction::from(tx.as_ref()))
-        .or_else(|| db.serialized_transaction(hash))
+    match chains.find_map(|chain| chain.transaction(hash)) {
+        Some((tx, _height, _time)) => Ok(Some(SerializedTransaction::from(tx.as_ref()))),
+        None => db.serialized_transaction(hash),
+    }
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,

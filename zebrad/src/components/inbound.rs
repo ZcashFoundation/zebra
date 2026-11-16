@@ -643,7 +643,15 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::RawBlock(hash.into())).await?;
+                        // Pruned bodies are missing to peers; other read failures stay errors.
+                        let response = match state.clone().ready().await?.call(zs::Request::RawBlock(hash.into())).await {
+                            Ok(response) => response,
+                            Err(error) if matches!(
+                                error.downcast_ref::<zs::BlockReadError>(),
+                                Some(zs::BlockReadError::BlockBodyUnavailable { .. })
+                            ) => zs::Response::RawBlock(None),
+                            Err(error) => return Err(error),
+                        };
 
                         match response {
                             zs::Response::RawBlock(Some(block)) => {

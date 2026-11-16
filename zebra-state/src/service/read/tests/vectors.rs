@@ -200,6 +200,7 @@ fn raw_reads_from_non_finalized_chain() -> Result<()> {
 
     for tx in &block.transactions {
         let raw = read::any_raw_transaction(iter::once(&chain), &db, tx.hash())
+            .expect("in-memory chain reads don't fail")
             .expect("transaction is in the chain");
         assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
     }
@@ -225,6 +226,7 @@ fn raw_reads_from_non_finalized_chain() -> Result<()> {
     );
     for tx in &side_block.transactions {
         let raw = read::any_raw_transaction([&chain, &side_chain].into_iter(), &db, tx.hash())
+            .expect("in-memory chain reads don't fail")
             .expect("transaction is in a side chain");
         assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
     }

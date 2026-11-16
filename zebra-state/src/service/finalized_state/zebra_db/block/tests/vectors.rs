@@ -201,6 +201,7 @@ fn test_block_db_round_trip_with(
         for tx in &original_block.transactions {
             let serialized_tx = state
                 .serialized_transaction(tx.hash())
+                .expect("stored transaction is complete")
                 .expect("transaction was stored");
             assert_eq!(
                 serialized_tx.as_ref(),

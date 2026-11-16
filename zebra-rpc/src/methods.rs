@@ -2549,8 +2549,9 @@ where
                 .clone()
                 .oneshot(zebra_state::ReadRequest::AnyChainRawTransaction(txid))
                 .await
-                .map_misc_error()?
-            {
+                .map_err(|error| {
+                    map_body_read_error(error, "Transaction not available (pruned data)")
+                })? {
                 zebra_state::ReadResponse::RawTransaction(Some(hex)) => {
                     Ok(GetRawTransactionResponse::Raw(hex))
                 }

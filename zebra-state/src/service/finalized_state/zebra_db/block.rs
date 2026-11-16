@@ -535,14 +535,25 @@ impl ZebraDb {
     /// Returns the stored bytes of the [`Transaction`] with [`transaction::Hash`],
     /// if a transaction with that hash exists in the finalized chain. The bytes are not parsed,
     /// so a change to how transactions serialize needs a database upgrade to keep them equal.
+    ///
+    /// Missing bytes return the same errors as [`Self::transaction()`].
     #[allow(clippy::unwrap_in_result)]
-    pub fn serialized_transaction(&self, hash: transaction::Hash) -> Option<SerializedTransaction> {
+    pub fn serialized_transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Result<Option<SerializedTransaction>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let raw_tx: Option<RawBytes> = self.db.zs_get(&tx_by_loc, &location);
+        let Some(raw_tx) = raw_tx else {
+            return self
+                .missing_body_error(location.height)
+                .map_or(Ok(None), Err);
+        };
 
-        let transaction_location = self.transaction_location(hash)?;
-        let raw_tx: RawBytes = self.db.zs_get(&tx_by_loc, &transaction_location)?;
-
-        Some(raw_tx.into_raw_bytes().into())
+        Ok(Some(raw_tx.into_raw_bytes().into()))
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.

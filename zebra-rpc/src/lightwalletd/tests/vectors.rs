@@ -939,9 +939,14 @@ async fn tree_state_methods_reject_fast_synced_heights_explicitly() -> Result<()
                     .await
             }
         });
-        read.expect_request(ReadRequest::Block(hash.into()))
+        read.expect_request(ReadRequest::BlockHeader(hash.into()))
             .await
-            .respond(ReadResponse::Block(Some(block.clone())));
+            .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+                header: block.header.clone(),
+                hash,
+                height: block.coinbase_height().unwrap(),
+                next_block_hash: None,
+            })));
         read.expect_request(ReadRequest::AnyChainSaplingTree(hash))
             .await
             .respond(ReadResponse::SaplingTree(None));

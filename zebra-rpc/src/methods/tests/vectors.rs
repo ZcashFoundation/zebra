@@ -651,9 +651,9 @@ async fn rpc_body_reads_preserve_operational_errors() {
                             .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
                             .await
                             .respond(mempool::Response::Transactions(vec![]));
-                        ReadRequest::AnyChainTransaction(txid)
+                        ReadRequest::AnyChainRawTransaction(txid)
                     } else {
-                        ReadRequest::Block(height.into())
+                        ReadRequest::RawBlock(height.into())
                     };
                     read_state
                         .expect_request(request)
@@ -6068,6 +6068,10 @@ fn getblocktemplate_records_first_template_latency() {
                                     chain_value_pools: Default::default(),
                                 })
                             }
+                            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                            ReadRequest::MiningCandidateChanges => {
+                                ReadResponse::MiningCandidateChanges(Default::default())
+                            }
                             other => panic!("unexpected state request: {other:?}"),
                         }))
                     }
@@ -9110,9 +9114,14 @@ async fn rpc_treestate_reports_a_fast_synced_height_as_unavailable() {
     );
     let request = tokio::spawn(async move { rpc.z_get_treestate(hash.to_string()).await });
     read_state
-        .expect_request(ReadRequest::Block(hash.into()))
+        .expect_request(ReadRequest::BlockHeader(hash.into()))
         .await
-        .respond(ReadResponse::Block(Some(block)));
+        .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+            header: block.header.clone(),
+            hash,
+            height: block.coinbase_height().unwrap(),
+            next_block_hash: None,
+        })));
     read_state
         .expect_request(ReadRequest::AnyChainSaplingTree(hash))
         .await
