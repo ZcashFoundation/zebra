@@ -940,6 +940,7 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 
     Ok(())
 }
+
 /// A same-hash replacement must commit its own body, not the first caller's authorizing data.
 #[test]
 fn queued_replacement_commits_its_own_body() -> Result<()> {
@@ -1058,6 +1059,121 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                         state.read_service.latest_non_finalized_state()
                             .best_tip_block().expect("the replacement is committed").block,
                         honest.block,
+                    );
+                })
+                .await
+                .expect("queued replacement completes before the timeout");
+            });
+        }
+    );
+
+    Ok(())
+}
+
+/// A same-hash replacement must commit its own body, not the first caller's authorizing data.
+#[test]
+fn queued_forged_replacement_fails_and_scores_only_forger() -> Result<()> {
+    use zebra_chain::{
+        block::ChainHistoryBlockTxAuthCommitmentHash,
+        primitives::zcash_history::BlockCommitmentTreeRoots, serialization::BytesInDisplayOrder,
+    };
+
+    let _init_guard = zebra_test::init();
+    let ledger_strategy = nu5_ledger_strategy();
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let parent_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+
+            Runtime::new().unwrap().block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), async {
+                    let (mut state, _, _, _) = StateService::new(
+                        Config::ephemeral(),
+                        &network,
+                        chain[parent_index - 1].height,
+                        0,
+                    ).await;
+
+                    for block in chain.iter().take(parent_index) {
+                        state
+                            .queue_and_commit_to_finalized_state(
+                                CheckpointVerifiedBlock::from(block.block.clone()),
+                            )
+                            .await
+                            .expect("write task responds")
+                            .expect("valid prefix commits");
+                    }
+
+                    // Transparent-only coinbases avoid arbitrary shielded anchors. Zero-valued
+                    // outputs leave the generated value pools and note commitment trees unchanged.
+                    let trees = state.read_service.db.note_commitment_trees_for_tip();
+                    let mut history_tree = state.read_service.db.history_tree();
+                    let mut previous_hash = state.read_service.db.finalized_tip_hash();
+                    let mut next_block = |template: &SemanticallyVerifiedBlock| {
+                        let coinbase = transaction::Transaction::test_v5(
+                            NetworkUpgrade::Nu5,
+                            template.block.transactions[0].inputs(),
+                            vec![transparent::Output {
+                                value: 0.try_into().unwrap(),
+                                lock_script: transparent::Script::new(&[]),
+                            }],
+                            transaction::LockTime::unlocked(),
+                            template.height,
+                        );
+                        let mut block = Block::clone(&template.block);
+                        block.transactions = vec![Arc::new(coinbase)];
+                        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                            &history_tree.hash().expect("the prefix includes Heartwood"),
+                            &block.auth_data_root(),
+                        );
+                        let header = Arc::make_mut(&mut block.header);
+                        header.previous_block_hash = previous_hash;
+                        header.merkle_root = block.transactions.iter().collect();
+                        header.commitment_bytes = commitment.bytes_in_serialized_order().into();
+                        let block = Arc::new(block);
+                        Arc::make_mut(&mut history_tree).push(
+                            &network,
+                            block.clone(),
+                            BlockCommitmentTreeRoots {
+                                sapling: &trees.sapling.root(),
+                                orchard: &trees.orchard.root(),
+                                ironwood: &trees.ironwood.root(),
+                            },
+                        ).expect("transparent-only blocks extend the history tree");
+                        previous_hash = block.hash();
+                        block.prepare()
+                    };
+                    let parent = next_block(&chain[parent_index]);
+                    let honest = next_block(&chain[parent_index + 1]);
+                    let forged = coinbase_authorization_twin(&honest.block);
+                    assert_eq!(forged.hash(), honest.hash);
+                    assert_eq!(forged.transactions[0].hash(), honest.block.transactions[0].hash());
+                    assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
+
+                    // The honest body is queued first, the forged one replaces it.
+                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged.prepare());
+
+                    let replaced = honest_rx.await.expect("state responds").expect_err("replaced");
+                    assert!(replaced.inner().is_duplicate_request());
+                    assert_eq!(replaced.inner().misbehavior_score(), 0);
+
+                    state
+                        .queue_and_commit_to_non_finalized_state(parent)
+                        .await
+                        .expect("write task responds")
+                        .expect("valid parent commits");
+                    let forged_err = forged_rx.await.expect("write task responds").expect_err("forged fails");
+                    assert_eq!(forged_err.inner().misbehavior_score(), 100);
+                    assert!(!state.non_finalized_state_queued_blocks.has(honest.hash));
+                    assert_ne!(
+                        state.read_service.latest_non_finalized_state().best_tip_block().map(|b| b.hash),
+                        Some(honest.hash),
                     );
                 })
                 .await
