@@ -141,7 +141,7 @@ fn prune_removes_right_children() -> Result<()> {
     Ok(())
 }
 
-/// `SentHashes::remove` must drop the hash, its outpoints from `known_utxos`,
+/// `SentHashes::remove_all` must drop a single hash, its outpoints from `known_utxos`,
 /// and the corresponding `(hash, height)` entry from `curr_buf` (or whichever
 /// batch buffer holds it). Without this, a rejected same-hash block would
 /// keep a later honest re-delivery of a block at the same hash locked out as
@@ -172,7 +172,7 @@ fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
     // Remove block1. block1's hash disappears, block2's stays, and the
     // total number of known utxos shrinks by exactly block1's contribution.
     let block1_utxos = prepared1.new_outputs.len();
-    sent.remove(&prepared1.hash);
+    sent.remove_all([prepared1.hash]);
 
     assert!(
         !sent.contains(&prepared1.hash),
@@ -195,8 +195,57 @@ fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
 
     // Removing a hash that isn't tracked is a no-op.
     let block3 = block1.make_fake_child();
-    sent.remove(&block3.hash());
+    sent.remove_all([block3.hash()]);
     assert!(sent.contains(&prepared2.hash));
+
+    Ok(())
+}
+
+/// `SentHashes::remove_all` must drop every listed hash and its outpoints from
+/// all batch buffers, ignore untracked hashes, and keep unlisted hashes.
+#[test]
+fn sent_hashes_remove_all_drops_batch_across_buffers() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let block3: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419202_BYTES.zcash_deserialize_into()?;
+
+    let prepared1 = block1.clone().prepare();
+    let prepared2 = block2.prepare();
+    let prepared3 = block3.prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.finish_batch();
+    sent.add(&prepared2);
+    sent.add(&prepared3);
+
+    let utxos_after_add = sent.known_utxos.len();
+    let untracked = block1.make_fake_child().hash();
+
+    sent.remove_all([prepared1.hash, untracked, prepared3.hash]);
+
+    assert!(!sent.contains(&prepared1.hash));
+    assert!(!sent.contains(&prepared3.hash));
+    assert!(sent.contains(&prepared2.hash));
+    assert_eq!(
+        sent.known_utxos.len(),
+        utxos_after_add - prepared1.new_outputs.len() - prepared3.new_outputs.len(),
+        "remove_all must drop only the removed blocks' outpoints"
+    );
+
+    let buffered: Vec<_> = sent
+        .bufs
+        .iter()
+        .chain(std::iter::once(&sent.curr_buf))
+        .flatten()
+        .map(|(hash, _)| *hash)
+        .collect();
+    assert_eq!(buffered, vec![prepared2.hash]);
 
     Ok(())
 }
@@ -266,10 +315,10 @@ fn sent_hashes_keep_shared_outpoints_until_last_owner_is_removed() -> Result<()>
     sent.add(&first);
     sent.add(&second);
 
-    sent.remove(&first.hash);
+    sent.remove_all([first.hash]);
     assert!(sent.utxo(&shared).is_some());
 
-    sent.remove(&second.hash);
+    sent.remove_all([second.hash]);
     assert!(sent.utxo(&shared).is_none());
 
     Ok(())
@@ -326,8 +375,47 @@ fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
     sent.add(&prepared);
     sent.add(&prepared);
 
-    sent.remove(&prepared.hash);
+    sent.remove_all([prepared.hash]);
     assert!(sent.utxo(&outpoint).is_none());
+
+    Ok(())
+}
+
+/// Once a sent block is committed, the sent hashes forget its UTXOs, which readers then find in
+/// the non-finalized state, but still treat the block as sent. Later removals and pruning don't
+/// forget the outputs again.
+#[test]
+fn sent_hashes_forget_committed_utxos_but_keep_the_hash() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let prepared1 = block1.prepare();
+    let prepared2 = block2.prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.add(&prepared2);
+    let outpoint1 = *prepared1.new_outputs.keys().next().unwrap();
+    let outpoint2 = *prepared2.new_outputs.keys().next().unwrap();
+    assert!(sent.utxo(&outpoint1).is_some());
+
+    sent.forget_utxos(&prepared1.hash);
+    assert!(sent.contains(&prepared1.hash));
+    assert!(sent.utxo(&outpoint1).is_none());
+    assert!(sent.utxo(&outpoint2).is_some());
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    // Forgetting twice, then removing, doesn't touch the other block's outputs.
+    sent.forget_utxos(&prepared1.hash);
+    sent.remove_all([prepared1.hash]);
+    assert!(!sent.contains(&prepared1.hash));
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    sent.prune_by_height(prepared2.height);
+    assert_eq!(sent.known_utxos.len(), 0);
 
     Ok(())
 }

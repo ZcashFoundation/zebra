@@ -293,14 +293,17 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
-    /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
+    /// Creates a new [`SentHashes`] with the block hashes in the provided non-finalized state.
+    ///
+    /// The blocks are already committed, so UTXO lookups find their outputs in that state, and
+    /// this doesn't copy them.
     pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
         let mut sent_hashes = Self::default();
-        for (_, block) in non_finalized_state
+        for block in non_finalized_state
             .chain_iter()
-            .flat_map(|c| c.blocks.clone())
+            .flat_map(|chain| chain.blocks.values())
         {
-            sent_hashes.add(&block.into());
+            sent_hashes.add_outputs(block.hash, block.height, std::iter::empty());
         }
 
         if !sent_hashes.sent.is_empty() {
@@ -316,10 +319,19 @@ impl SentHashes {
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
+        self.add_outputs(block.hash, block.height, block.new_outputs.iter());
+    }
+
+    /// Stores borrowed block metadata without materializing another verified block.
+    fn add_outputs<'a>(
+        &mut self,
+        hash: block::Hash,
+        height: block::Height,
+        new_outputs: impl IntoIterator<Item = (&'a transparent::OutPoint, &'a transparent::OrderedUtxo)>,
+    ) {
         // Track known UTXOs in sent blocks.
-        let outpoints = block
-            .new_outputs
-            .iter()
+        let outpoints = new_outputs
+            .into_iter()
             .map(|(outpoint, ordered_utxo)| {
                 self.known_utxos
                     .insert(*outpoint, ordered_utxo.utxo.clone());
@@ -328,10 +340,10 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((block.hash, block.height));
-        self.insert_sent(block.hash, outpoints);
+        self.curr_buf.push_back((hash, height));
+        self.insert_sent(hash, outpoints);
 
-        self.update_metrics_for_block(block.height);
+        self.update_metrics_for_block(height);
     }
 
     /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a
@@ -369,6 +381,20 @@ impl SentHashes {
             for outpoint in &old_outpoints {
                 self.known_utxos.remove(outpoint);
             }
+        }
+    }
+
+    /// Forgets the UTXOs of the sent block `hash`, but still treats the block as sent.
+    ///
+    /// Called once the block is committed to a non-finalized chain that readers can see, because
+    /// UTXO lookups then find its outputs in that chain.
+    pub fn forget_utxos(&mut self, hash: &block::Hash) {
+        let Some(outpoints) = self.sent.get_mut(hash) else {
+            return;
+        };
+
+        for outpoint in mem::take(outpoints) {
+            self.known_utxos.remove(&outpoint);
         }
     }
 
@@ -423,24 +449,37 @@ impl SentHashes {
         self.sent.contains_key(hash)
     }
 
-    /// Removes a `hash` from `SentHashes`, dropping its outpoints from `known_utxos`
-    /// and its entry from whichever batch buffer holds it.
+    /// Removes `hashes` from `SentHashes`, dropping their outpoints from `known_utxos`
+    /// and their entries from whichever batch buffers hold them.
     ///
-    /// Called when the block write task rejects a block, so that a subsequent
+    /// Called when the block write task rejects or evicts blocks, so that a subsequent
     /// re-delivery of a block with the same hash is not short-circuited as a
-    /// "duplicate" against a rejected variant that never reached any chain.
-    pub fn remove(&mut self, hash: &block::Hash) {
-        let Some(outpoints) = self.sent.remove(hash) else {
-            return;
-        };
+    /// "duplicate" against a block that is no longer in any chain.
+    ///
+    /// Each batch buffer is scanned once for the whole set, because evicting a long
+    /// fork can remove many hashes at a time.
+    pub fn remove_all(&mut self, hashes: impl IntoIterator<Item = block::Hash>) {
+        let mut removed = HashSet::new();
 
-        for outpoint in &outpoints {
-            self.known_utxos.remove(outpoint);
+        for hash in hashes {
+            let Some(outpoints) = self.sent.remove(&hash) else {
+                continue;
+            };
+
+            for outpoint in &outpoints {
+                self.known_utxos.remove(outpoint);
+            }
+
+            removed.insert(hash);
         }
 
-        self.curr_buf.retain(|(h, _)| h != hash);
+        if removed.is_empty() {
+            return;
+        }
+
+        self.curr_buf.retain(|(h, _)| !removed.contains(h));
         for buf in &mut self.bufs {
-            buf.retain(|(h, _)| h != hash);
+            buf.retain(|(h, _)| !removed.contains(h));
         }
     }
 
