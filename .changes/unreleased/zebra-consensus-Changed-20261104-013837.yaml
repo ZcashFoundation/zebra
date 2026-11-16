@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Parse Sapling spend and output proofs in parallel when the corresponding list in a bundle contains at least four proofs ([#12195](https://github.com/ZcashFoundation/zebra/pull/12195)).
+time: 2026-11-04T01:38:37.019597356+01:00
