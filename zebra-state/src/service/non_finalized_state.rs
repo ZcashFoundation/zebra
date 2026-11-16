@@ -21,8 +21,8 @@ use zebra_chain::{
 use crate::{
     constants::{
         MAX_BLOCK_REORG_HEIGHT, MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
-        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS,
-        MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
+        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES,
+        MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS, MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
     },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
@@ -138,9 +138,11 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
-            max_index_entries: network
-                .is_a_test_network()
-                .then_some(MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS),
+            max_index_entries: Some(if network.is_a_test_network() {
+                MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS
+            } else {
+                MAX_NON_FINALIZED_INDEX_ENTRIES
+            }),
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
             should_count_metrics: true,

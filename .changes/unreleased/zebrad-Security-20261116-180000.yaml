@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Mainnet now also limits the combined size of non-finalized chain indexes, so a long run of blocks filled with transparent outputs can't exhaust the node's memory. Past the limit, which ordinary blocks don't reach, Zebra drops the lowest-work forks and finalizes the oldest blocks early, keeping at least 100. While it does, it can't follow a chain reorganization deeper than the blocks it kept ([GHSA-j8gf-c4rj-6jv5](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-j8gf-c4rj-6jv5)).
+time: 2026-11-16T18:00:00.000000000Z

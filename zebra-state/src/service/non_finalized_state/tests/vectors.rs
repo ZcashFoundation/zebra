@@ -2531,19 +2531,29 @@ fn index_entry_limit_evicts_forks_with_busy_blocks() -> Result<()> {
     Ok(())
 }
 
-/// Mainnet only limits the number of forks, not their index entries.
+/// Mainnet limits index entries too, to the size of the blocks it keeps when finalizing early.
 #[test]
-fn index_entry_limit_is_only_on_test_networks() {
+fn index_entry_limit_is_higher_on_mainnet() {
     let _init_guard = zebra_test::init();
 
     assert_eq!(
-        None,
+        Some(crate::constants::MAX_NON_FINALIZED_INDEX_ENTRIES),
         NonFinalizedState::new(&Network::Mainnet).max_index_entries
     );
+    assert_eq!(
+        Some(crate::constants::MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS),
+        NonFinalizedState::new(&Network::new_default_testnet()).max_index_entries
+    );
+    const {
+        assert!(
+            crate::constants::MAX_NON_FINALIZED_INDEX_ENTRIES
+                > crate::constants::MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS
+        )
+    };
 }
 
-/// Past the index entry limit, test networks finalize blocks before the reorg limit, but keep
-/// at least `MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT` blocks. Mainnet has no index entry limit.
+/// Past the index entry limit, Zebra finalizes blocks before the reorg limit, but keeps at least
+/// `MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT` blocks.
 #[test]
 fn index_entry_limit_finalizes_early_down_to_the_minimum() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -2561,24 +2571,13 @@ fn index_entry_limit_finalizes_early_down_to_the_minimum() -> Result<()> {
         }
         assert!(!state.should_finalize_root(), "{network}: under the limit");
 
-        if state.max_index_entries.is_some() {
-            state.max_index_entries = Some(1);
-        }
-        assert_eq!(
-            network.is_a_test_network(),
-            state.should_finalize_root(),
-            "{network}: over the limit",
-        );
+        state.max_index_entries = Some(1);
+        assert!(state.should_finalize_root(), "{network}: over the limit");
 
         while state.should_finalize_root() {
             state.finalize();
         }
-        let expected_len = if network.is_a_test_network() {
-            min_blocks
-        } else {
-            min_blocks + 1
-        };
-        assert_eq!(Some(expected_len), state.best_chain_len(), "{network}");
+        assert_eq!(Some(min_blocks), state.best_chain_len(), "{network}");
     }
 
     Ok(())
