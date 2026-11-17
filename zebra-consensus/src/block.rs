@@ -349,7 +349,7 @@ where
         let received_time = std::time::Instant::now();
 
         let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
         let block = request.block();
@@ -471,18 +471,24 @@ where
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())
             {
-                let rsp = transaction_verifier
-                    .ready()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::BlockRequest {
-                        transaction_hash,
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        height,
-                        time: block.header.time,
-                    });
-                async_checks.push(rsp);
+                let mut transaction_verifier = transaction_verifier.clone();
+                let request = tx::BlockRequest {
+                    transaction_hash,
+                    transaction: transaction.clone(),
+                    known_utxos: known_utxos.clone(),
+                    height,
+                    time: block.header.time,
+                };
+                async_checks.push(async move {
+                    // Dispatch and poll each verification together without monopolizing the executor.
+                    tokio::task::consume_budget().await;
+                    transaction_verifier
+                        .ready()
+                        .await
+                        .expect("transaction verifier is always ready")
+                        .call(request)
+                        .await
+                });
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
@@ -539,8 +545,14 @@ where
             }
 
             // Finally, submit the block for contextual verification.
-            let new_outputs = Arc::into_inner(known_utxos)
-                .expect("all verification tasks using known_utxos are complete");
+            // Transaction services can retain requests after returning their responses.
+            let new_outputs = Arc::try_unwrap(known_utxos).unwrap_or_else(|shared| {
+                tracing::warn!(
+                    ?hash,
+                    "transaction verifier retained outputs after verification"
+                );
+                (*shared).clone()
+            });
 
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,

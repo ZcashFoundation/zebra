@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: The `BlockVerifier` service tolerates transaction verifiers that retain block output references after responding.
+time: 2026-11-09T04:07:55.922422162+01:00

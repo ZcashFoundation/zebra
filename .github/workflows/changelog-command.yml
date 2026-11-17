@@ -82,8 +82,9 @@ jobs:
             fragment files, never changelog markdown. Output raw markdown for a maintainer to
             commit. Do not wrap the whole answer in code fences.
 
-            Zebra keeps one operator changelog (root `CHANGELOG.md`, project key `zebrad`) and
-            one changelog per crate (`<crate>/CHANGELOG.md`, project key = the crate name).
+            Zebra keeps one operator changelog (root `CHANGELOG.md`, project key `zebrad`),
+            a technical `zebrad/CHANGELOG.md` (project key `zebrad-api`, label `zebrad Rust APIs`),
+            and one changelog per other crate (`<crate>/CHANGELOG.md`, key = crate name).
             Produce one fragment per (project, change), each led by the file path to create and
             followed by a fenced yaml block. Use this shape:
 
@@ -116,6 +117,11 @@ jobs:
               (pure library API, internal refactor, CI, tests, non-security dependency bumps).
             - Add a fragment for each crate whose public API the PR changes, describing the API
               change for Rust consumers of that crate.
+            - Route zebrad's public Rust APIs and technical behavior to `zebrad-api`,
+              including behavior not visible to operators. This is not a separate package or
+              release stream and does not add an API stability guarantee. Apply the crate
+              breaking and breaking-plus-Added rules to real zebrad library-consumer breaks.
+              Do not add a dummy operator fragment for a technical-only change.
             - Breaking for a crate (`kind: breaking`): a removal, a signature, field,
               or type change, reduced visibility, an MSRV bump, new feature-gating, or an
               addition that breaks downstream builds, meaning a new variant on an enum that is

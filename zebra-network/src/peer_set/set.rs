@@ -606,6 +606,11 @@ where
         }
     }
 
+    /// Subscribe to the live peer endpoints, including peers serving requests.
+    pub(super) fn connected_peers(&self) -> watch::Receiver<super::AdvertPeers> {
+        self.block_advert_senders.subscribe()
+    }
+
     /// Check background task handles to make sure they're still running.
     ///
     /// Never returns `Ok`.
@@ -792,15 +797,7 @@ where
 
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         warn!(?key, "service is banned, dropping service");
-                        self.block_advert_senders.send_modify(|peers| {
-                            peers.remove(&key);
-                        });
-                        std::mem::drop(svc);
-                        let cancel = self.cancel_handles.remove(&key);
-                        debug_assert!(
-                            cancel.is_some(),
-                            "missing cancel handle for banned unready peer"
-                        );
+                        self.drop_banned_peer(true, key, svc);
                         continue;
                     }
 
@@ -857,6 +854,21 @@ where
         result
     }
 
+    /// Drops a banned peer's advert sender and service, and its cancel handle if it was unready.
+    fn drop_banned_peer(&mut self, was_unready: bool, key: D::Key, svc: D::Service) {
+        self.block_advert_senders.send_modify(|peers| {
+            peers.remove(&key);
+        });
+        std::mem::drop(svc);
+        if was_unready {
+            let cancel = self.cancel_handles.remove(&key);
+            debug_assert!(
+                cancel.is_some(),
+                "missing cancel handle for banned unready peer"
+            );
+        }
+    }
+
     /// Checks previously ready peer services for errors.
     ///
     /// The only way these peer `Client`s can become unready is when we send them a request,
@@ -890,10 +902,7 @@ where
                 Ok(()) => {
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
-                        self.block_advert_senders.send_modify(|peers| {
-                            peers.remove(&key);
-                        });
-                        std::mem::drop(svc);
+                        self.drop_banned_peer(false, key, svc);
                         continue;
                     }
 

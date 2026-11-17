@@ -17,6 +17,34 @@ use crate::{
     },
 };
 
+#[test]
+fn lockbox_tex_and_malformed_recipients_are_rejected() {
+    let _init_guard = zebra_test::init();
+
+    for address in [
+        "textest1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqggnfr9",
+        "not-an-address",
+    ] {
+        let disbursements = vec![ConfiguredLockboxDisbursement {
+            address: address.to_string(),
+            amount: Amount::new(1),
+        }];
+        assert!(matches!(
+            testnet::Parameters::build()
+                .with_lockbox_disbursements(disbursements.clone())
+                .to_network(),
+            Err(ParametersBuilderError::InvalidLockboxDisbursementAddress { .. })
+        ));
+        assert!(matches!(
+            testnet::Parameters::new_regtest(RegtestParameters {
+                lockbox_disbursements: Some(disbursements),
+                ..Default::default()
+            }),
+            Err(ParametersBuilderError::InvalidLockboxDisbursementAddress { .. })
+        ));
+    }
+}
+
 /// Checks that every method in the `Parameters` impl for `zebra_chain::Network` has the same output
 /// as the Parameters impl for `zcash_protocol::consensus::NetworkType` on Mainnet and the default Testnet.
 #[test]

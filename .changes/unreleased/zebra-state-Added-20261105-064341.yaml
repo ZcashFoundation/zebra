@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `HistoryCapabilities`, body-availability requests and responses, and `ZebraDb::history_capabilities()` for querying retained block history.
+time: 2026-11-05T06:43:41.020932198+01:00

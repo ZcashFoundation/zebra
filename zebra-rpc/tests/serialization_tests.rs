@@ -1193,6 +1193,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
   "blocks": 2934350,
   "currentblocksize": 1629,
   "currentblocktx": 0,
+  "difficulty": 12345.6789,
   "networksolps": 6644588130,
   "networkhashps": 6644588130,
   "chain": "main",
@@ -1204,6 +1205,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
     let tip_height = obj.tip_height();
     let current_block_size = obj.current_block_size();
     let current_block_tx = obj.current_block_tx();
+    let difficulty = obj.difficulty();
     let networksolps = obj.networksolps();
     let networkhashps = obj.networkhashps();
     let chain = obj.chain().clone();
@@ -1213,6 +1215,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
         tip_height,
         current_block_size,
         current_block_tx,
+        difficulty,
         networksolps,
         networkhashps,
         chain,
@@ -1302,6 +1305,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2500000,
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
@@ -1312,6 +1316,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2499900,
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,
@@ -1324,6 +1329,8 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(obj.len(), 2);
     assert_eq!(obj[0].services().as_str(), "0000000000000001");
     assert_eq!(obj[0].lastrecv(), 1700000000);
+    assert_eq!(obj[0].startingheight(), 2500000);
+    assert_eq!(obj[1].startingheight(), 2499900);
     assert_eq!(obj[0].banscore(), 0);
     assert_eq!(obj[0].subver().as_str(), "/Zebra:2.1.0/");
     assert_eq!(obj[0].version(), 170140);
@@ -1341,6 +1348,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2500000,
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
@@ -1353,6 +1361,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2499900,
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,

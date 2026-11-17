@@ -12,6 +12,44 @@ use zcash_script::{opcode::Evaluable, pattern};
 
 use zebra_test::prelude::*;
 
+#[test]
+fn tex_addresses_require_bech32m() {
+    use crate::{parameters::NetworkKind, transparent::Address};
+
+    let _init_guard = zebra_test::init();
+
+    assert!("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9rtaywm"
+        .parse::<Address>()
+        .is_err());
+    assert!("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte"
+        .parse::<Address>()
+        .is_ok());
+
+    for (network_kind, hrp) in [
+        (
+            NetworkKind::Mainnet,
+            zcash_address::constants::mainnet::HRP_TEX_ADDRESS,
+        ),
+        (
+            NetworkKind::Testnet,
+            zcash_address::constants::testnet::HRP_TEX_ADDRESS,
+        ),
+        (
+            NetworkKind::Regtest,
+            zcash_address::constants::regtest::HRP_TEX_ADDRESS,
+        ),
+    ] {
+        let hrp = bech32::Hrp::parse(hrp).unwrap();
+        let bech32 = bech32::encode::<bech32::Bech32>(hrp, &[0; 20]).unwrap();
+        let bech32m = bech32::encode::<bech32::Bech32m>(hrp, &[0; 20]).unwrap();
+        assert!(bech32.parse::<Address>().is_err());
+        assert_eq!(
+            bech32m.parse::<Address>().unwrap(),
+            Address::from_tex(network_kind, [0; 20]),
+        );
+    }
+}
+
 /// Builds a serialized transparent input wire-format with a null prevout (coinbase) and the given
 /// `script_sig` bytes. Used to exercise [`Input::zcash_deserialize`] directly.
 fn build_coinbase_wire(script_sig: &[u8]) -> Vec<u8> {

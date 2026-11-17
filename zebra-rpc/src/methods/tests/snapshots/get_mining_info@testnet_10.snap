@@ -5,6 +5,7 @@ expression: get_mining_info
 {
   "blocks": 1842420,
   "currentblocksize": 1618,
+  "difficulty": 1.0,
   "networksolps": 0,
   "networkhashps": 0,
   "chain": "test",

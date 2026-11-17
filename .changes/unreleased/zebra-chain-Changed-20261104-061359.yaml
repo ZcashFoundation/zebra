@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: The `Height + HeightDiff` and `Height - HeightDiff` operators now return `None` when the i64 arithmetic overflows, instead of panicking or wrapping.
+time: 2026-11-04T06:13:59.854205758+01:00

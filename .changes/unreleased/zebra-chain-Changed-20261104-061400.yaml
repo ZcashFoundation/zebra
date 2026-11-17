@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Panic on negative quotients in `Amount<NonNegative>::div_exact` instead of returning an invalid amount.
+time: 2026-11-04T06:14:00.971377975+01:00

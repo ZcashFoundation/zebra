@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Expose network difficulty in mining-info responses and advertised starting heights in peer-info responses.
+time: 2026-11-05T06:29:26.020522927+01:00

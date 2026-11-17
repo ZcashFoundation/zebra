@@ -1,0 +1,10 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added `HistoryCapabilities` variants to `ReadRequest` and `ReadResponse`; exhaustive matches
+  must handle them. Together with `ZebraDb::history_capabilities()`, they expose body availability
+  derived from stored transaction rows without changing the database format.
+  Writable initialization returns `StateInitError::PrunedDatabase` for a missing body prefix
+  when pruning is disabled, whether the loss came from pruning or corruption. Invalid retained
+  suffixes return `StateInitError::HistoryRead`. Genesis remains retained.
+time: 2026-10-24T21:37:25.110156409+02:00
