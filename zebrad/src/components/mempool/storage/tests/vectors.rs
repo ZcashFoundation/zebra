@@ -24,6 +24,41 @@ const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
 /// Transaction count used in some tests to derive the mempool test size.
 const MEMPOOL_TX_COUNT: usize = 4;
 
+/// Repeated rejections preserve insertion order, expiry, and capacity.
+#[tokio::test(start_paused = true)]
+async fn eviction_list_repeated_insertion_preserves_order_and_expiry() {
+    let _init_guard = zebra_test::init();
+    let mut evictions = EvictionList::new(2, Duration::from_secs(10));
+    let oldest = transaction::Hash([1; 32]);
+    let newer = transaction::Hash([2; 32]);
+    let newest = transaction::Hash([3; 32]);
+
+    evictions.insert(oldest);
+    evictions.insert(oldest);
+    assert_eq!(evictions.len(), 1);
+    tokio::time::advance(Duration::from_secs(5)).await;
+    evictions.insert(newer);
+    evictions.insert(newer);
+    evictions.insert(oldest);
+    assert_eq!(evictions.len(), 2);
+    assert!(evictions.contains_key(&oldest));
+    assert!(evictions.contains_key(&newer));
+
+    evictions.insert(newest);
+    assert_eq!(evictions.len(), 2);
+    assert!(!evictions.contains_key(&oldest));
+    assert!(evictions.contains_key(&newer));
+    assert!(evictions.contains_key(&newest));
+
+    tokio::time::advance(Duration::from_secs(5)).await;
+    evictions.insert(newer);
+    tokio::time::advance(Duration::from_secs(6)).await;
+    assert_eq!(evictions.len(), 0);
+    evictions.insert(newer);
+    assert_eq!(evictions.len(), 1);
+    assert!(evictions.contains_key(&newer));
+}
+
 #[test]
 fn mempool_storage_crud_exact_mainnet() {
     let _init_guard = zebra_test::init();

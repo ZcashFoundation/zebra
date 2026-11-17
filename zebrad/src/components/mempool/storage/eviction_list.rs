@@ -44,31 +44,24 @@ impl EvictionList {
     ///
     /// All entries older than [`EvictionList::eviction_memory_time`] will be removed.
     ///
-    /// # Panics
-    ///
-    /// If the TXID is already in the list.
-    ///
+    /// Repeated entries keep their original insertion time and position.
     pub fn insert(&mut self, key: transaction::Hash) {
         // From https://zips.z.cash/zip-0401#specification:
         // > Nodes SHOULD remove transactions from RecentlyEvicted that were evicted more than
         // > mempoolevictionmemoryminutes minutes ago. This MAY be done periodically,
         // > and/or just before RecentlyEvicted is accessed when receiving a transaction.
         self.prune_old();
+        if self.unique_entries.contains_key(&key) {
+            return;
+        }
+
         // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry
         // > in RecentlyEvicted if necessary to keep it to at most eviction_memory_entries entries.
         if self.len() >= self.max_size {
             self.pop_front();
         }
         let value = Instant::now();
-        let old_value = self.unique_entries.insert(key, value);
-        // It should be impossible for an already-evicted transaction to be evicted
-        // again since transactions are not added to the mempool if they are evicted,
-        // and the mempool doesn't allow inserting two transactions with the same
-        // hash (they would conflict).
-        assert_eq!(
-            old_value, None,
-            "an already-evicted transaction should not be evicted again"
-        );
+        self.unique_entries.insert(key, value);
         self.ordered_entries.push_back(key)
     }
 
