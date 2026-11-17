@@ -48,6 +48,13 @@ const GAUGES: &[(&str, Option<Unit>)] = &[
         "state.memory.backup.restore.duration_seconds",
         Some(Unit::Second),
     ),
+    // The process gauges. `process_cpu_seconds_total` is an absolute counter, so it is not listed.
+    ("process_resident_memory_bytes", Some(Unit::Byte)),
+    ("process_virtual_memory_bytes", Some(Unit::Byte)),
+    ("process_open_fds", None),
+    ("process_max_fds", None),
+    ("process_threads", None),
+    ("process_start_time_seconds", Some(Unit::Second)),
 ];
 
 /// The listed counters and gauges recorded so far, by name and labels.

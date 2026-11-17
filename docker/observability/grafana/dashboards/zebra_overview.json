@@ -855,7 +855,7 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-              "expr": "rate(process_cpu_seconds_total{job=~\"$job\"}[1m])",
+              "expr": "rate(process_cpu_seconds_total{job=~\"$job\"}[5m])",
               "legendFormat": "CPU",
               "refId": "A"
             }

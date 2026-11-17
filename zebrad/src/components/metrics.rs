@@ -14,6 +14,10 @@ mod process_memory;
 pub(crate) use process_memory::record;
 pub use process_memory::record_process_memory;
 
+/// How often the process metrics are sampled.
+#[cfg(not(windows))]
+const PROCESS_METRICS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
 pub struct MetricsEndpoint {}
@@ -26,18 +30,27 @@ impl MetricsEndpoint {
         #[cfg(not(feature = "sentry"))]
         let sentry = None::<metrics::NoopRecorder>;
 
-        if let Some(addr) = config.endpoint_addr {
-            Self::open_endpoint(addr, sentry)?;
+        let recorder_installed = if let Some(addr) = config.endpoint_addr {
+            Self::open_endpoint(addr, sentry)?
         } else if let Some(sentry) = sentry {
             install(sentry)?;
+            true
+        } else {
+            false
+        };
+
+        if recorder_installed {
+            spawn_process_metrics();
         }
 
         Ok(Self {})
     }
 
     /// Opens the Prometheus endpoint, also recording metrics with `other` if it is provided.
+    ///
+    /// Returns whether a global recorder was installed.
     #[cfg(feature = "prometheus")]
-    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<(), FrameworkError>
+    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<bool, FrameworkError>
     where
         R: Recorder + Send + Sync + 'static,
     {
@@ -70,13 +83,15 @@ impl MetricsEndpoint {
             ),
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Warns that the endpoint can't be opened, and records metrics with `other` if it is
     /// provided.
+    ///
+    /// Returns whether a global recorder was installed.
     #[cfg(not(feature = "prometheus"))]
-    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<(), FrameworkError>
+    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<bool, FrameworkError>
     where
         R: Recorder + Send + Sync + 'static,
     {
@@ -86,7 +101,112 @@ impl MetricsEndpoint {
              enable the 'prometheus' feature when compiling zebrad",
         );
 
-        other.map_or(Ok(()), install)
+        other.map_or(Ok(false), |other| install(other).map(|()| true))
+    }
+}
+
+/// Records the process metrics through the global recorder, which must already be installed.
+///
+/// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
+/// the readings neither depend on a backend nor run on a Tokio worker.
+#[cfg(not(windows))]
+fn spawn_process_metrics() {
+    use metrics::{describe_counter, describe_gauge, Unit};
+
+    describe_counter!(
+        "process_cpu_seconds_total",
+        Unit::Seconds,
+        "Total user and system CPU time spent in seconds."
+    );
+    for (name, unit, description) in [
+        (
+            "process_open_fds",
+            Unit::Count,
+            "Number of open file descriptors.",
+        ),
+        (
+            "process_max_fds",
+            Unit::Count,
+            "Maximum number of open file descriptors.",
+        ),
+        (
+            "process_virtual_memory_bytes",
+            Unit::Bytes,
+            "Virtual memory size in bytes.",
+        ),
+        (
+            "process_virtual_memory_max_bytes",
+            Unit::Bytes,
+            "Maximum amount of virtual memory available in bytes.",
+        ),
+        (
+            "process_resident_memory_bytes",
+            Unit::Bytes,
+            "Resident memory size in bytes.",
+        ),
+        (
+            "process_start_time_seconds",
+            Unit::Seconds,
+            "Start time of the process since unix epoch in seconds.",
+        ),
+        (
+            "process_threads",
+            Unit::Count,
+            "Number of OS threads in the process.",
+        ),
+    ] {
+        describe_gauge!(name, unit, description);
+    }
+
+    record_process_metrics();
+
+    let sampler = std::thread::Builder::new()
+        .name("process-metrics".to_owned())
+        .spawn(|| loop {
+            std::thread::sleep(PROCESS_METRICS_INTERVAL);
+            record_process_metrics();
+        });
+    if let Err(error) = sampler {
+        warn!(?error, "unable to start periodic process metrics");
+    }
+}
+
+/// Process metrics aren't recorded on Windows, see the `metrics-process` dependency.
+#[cfg(windows)]
+fn spawn_process_metrics() {}
+
+/// Records one sample of the process metrics.
+#[cfg(not(windows))]
+fn record_process_metrics() {
+    let sample = metrics_process::collector::collect();
+
+    if let Some(seconds) = sample.cpu_seconds_total {
+        // `metrics` counters only hold whole numbers, so this drops the fraction of a second.
+        metrics::counter!("process_cpu_seconds_total").absolute(seconds as u64);
+    }
+
+    // `metrics-process` reports an unlimited maximum as 0, which isn't a usable maximum.
+    let limited = |max: Option<u64>| max.filter(|&max| max != 0);
+
+    for (name, value) in [
+        ("process_open_fds", sample.open_fds),
+        ("process_max_fds", limited(sample.max_fds)),
+        ("process_virtual_memory_bytes", sample.virtual_memory_bytes),
+        (
+            "process_virtual_memory_max_bytes",
+            limited(sample.virtual_memory_max_bytes),
+        ),
+        (
+            "process_resident_memory_bytes",
+            sample.resident_memory_bytes,
+        ),
+        ("process_start_time_seconds", sample.start_time_seconds),
+        ("process_threads", sample.threads),
+    ] {
+        if let Some(value) = value {
+            // Process sizes, counts, and times stay far below 2^53, so `f64` holds them exactly.
+            metrics::gauge!(name).set(value as f64);
+        }
     }
 }
 

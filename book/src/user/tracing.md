@@ -58,7 +58,10 @@ When Sentry is active, Zebra sends:
   `sync.verified.block.count`, `gossip.verified.block.count`,
   `zcash.mempool.size.transactions`, and
   `zebra.state.rocksdb.total_disk_size_bytes`;
-- the [memory](metrics.md#memory-metrics) metrics once a minute.
+- the [memory](metrics.md#memory-metrics) metrics once a minute;
+- the [process metrics](metrics.md#process-metrics) `process_resident_memory_bytes`,
+  `process_virtual_memory_bytes`, `process_open_fds`, `process_max_fds`,
+  `process_threads`, and `process_start_time_seconds`, once a minute.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the node has a
 chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`,
