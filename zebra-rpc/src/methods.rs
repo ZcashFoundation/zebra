@@ -2701,7 +2701,16 @@ where
         let time = u32::try_from(header.time.timestamp())
             .expect("timestamps of valid blocks always fit into u32");
 
-        let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
+        // A read-only state that is still catching up can show a header before its trees.
+        // Answer as if the block were missing, rather than with empty trees.
+        let missing_tree = || {
+            Err("the requested block is not in the main chain")
+                .map_error(server::error::LegacyCode::InvalidParameter)
+        };
+
+        let sapling_active =
+            network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into());
+        let sapling = if sapling_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2718,6 +2727,9 @@ where
         } else {
             None
         };
+        if sapling_active && sapling.is_none() {
+            return missing_tree();
+        }
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
         if sapling_tree.is_none()
@@ -2728,7 +2740,8 @@ where
                 .map_error(server::error::LegacyCode::Database);
         }
 
-        let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
+        let orchard_active = network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into());
+        let orchard = if orchard_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2745,10 +2758,14 @@ where
         } else {
             None
         };
+        if orchard_active && orchard.is_none() {
+            return missing_tree();
+        }
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let ironwood = if network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into()) {
+        let ironwood_active = network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into());
+        let ironwood = if ironwood_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2765,6 +2782,9 @@ where
         } else {
             None
         };
+        if ironwood_active && ironwood.is_none() {
+            return missing_tree();
+        }
         // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
         let ironwood = ironwood
             .map(|(tree, root)| Treestate::new(trees::Commitments::new(Some(root), Some(tree))));

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: '`z_gettreestate` returns "the requested block is not in the main chain" instead of empty trees when a read-only state has a block header but not yet its note commitment trees.'
+time: 2026-11-17T19:00:00.000000000Z
