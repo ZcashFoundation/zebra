@@ -5,14 +5,24 @@
 // The criterion macros generate undocumented public functions.
 #![allow(missing_docs)]
 
-use std::{hint::black_box, sync::Arc};
+use std::{
+    hint::black_box,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use metrics::{Counter, Gauge, Histogram, Recorder};
-use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::FanoutBuilder;
 use sentry::{test::TestTransport, ClientOptions, Hub};
 use tracing_subscriber::{layer::SubscriberExt, Registry};
+
+/// Histogram samples recorded between two drains of the Prometheus recorders.
+///
+/// Prometheus recorders keep histogram samples until upkeep drains them, so an undrained
+/// benchmark would hold every sample it recorded.
+const HISTOGRAM_SAMPLES_PER_DRAIN: u64 = 100_000;
 
 /// The recorders that metric operations run against.
 enum Backend {
@@ -36,22 +46,50 @@ impl Backend {
     }
 
     /// Runs `f` with this backend's recorder installed for the current thread.
-    fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+    ///
+    /// `f` receives the handles of the backend's Prometheus recorders, so it can drain them.
+    fn run<T>(&self, f: impl FnOnce(&[PrometheusHandle]) -> T) -> T {
         match self {
-            Backend::None => f(),
+            Backend::None => f(&[]),
             Backend::Prometheus => {
                 let recorder = PrometheusBuilder::new().build_recorder();
-                metrics::with_local_recorder(&recorder, f)
+                let handles = [recorder.handle()];
+                metrics::with_local_recorder(&recorder, || f(&handles))
             }
             Backend::Fanout => {
+                let (first, second) = (
+                    PrometheusBuilder::new().build_recorder(),
+                    PrometheusBuilder::new().build_recorder(),
+                );
+                let handles = [first.handle(), second.handle()];
                 let recorder = FanoutBuilder::default()
-                    .add_recorder(PrometheusBuilder::new().build_recorder())
-                    .add_recorder(PrometheusBuilder::new().build_recorder())
+                    .add_recorder(first)
+                    .add_recorder(second)
                     .build();
-                metrics::with_local_recorder(&recorder as &dyn Recorder, f)
+                metrics::with_local_recorder(&recorder as &dyn Recorder, || f(&handles))
             }
         }
     }
+}
+
+/// Measures `record` in batches, draining the Prometheus recorders between batches without
+/// counting the drain.
+fn bench_histogram(b: &mut Bencher, handles: &[PrometheusHandle], mut record: impl FnMut()) {
+    b.iter_custom(|iterations| {
+        let mut elapsed = Duration::ZERO;
+        let mut remaining = iterations;
+        while remaining > 0 {
+            let batch = remaining.min(HISTOGRAM_SAMPLES_PER_DRAIN);
+            let start = Instant::now();
+            for _ in 0..batch {
+                record();
+            }
+            elapsed += start.elapsed();
+            handles.iter().for_each(PrometheusHandle::run_upkeep);
+            remaining -= batch;
+        }
+        elapsed
+    })
 }
 
 fn metrics_benches(c: &mut Criterion) {
@@ -61,7 +99,7 @@ fn metrics_benches(c: &mut Criterion) {
     for backend in Backend::ALL {
         let mut group = c.benchmark_group(format!("metrics/{}", backend.name()));
 
-        backend.run(|| {
+        backend.run(|handles| {
             group.bench_function("counter/fixed_name", |b| {
                 b.iter(|| metrics::counter!("bench.counter").increment(black_box(1)))
             });
@@ -91,17 +129,19 @@ fn metrics_benches(c: &mut Criterion) {
             });
 
             group.bench_function("histogram/fixed_name", |b| {
-                b.iter(|| metrics::histogram!("bench.histogram").record(black_box(1.0)))
+                bench_histogram(b, handles, || {
+                    metrics::histogram!("bench.histogram").record(black_box(1.0))
+                })
             });
             group.bench_function("histogram/dynamic_label", |b| {
-                b.iter(|| {
+                bench_histogram(b, handles, || {
                     metrics::histogram!("bench.histogram.labeled", "command" => label.clone())
                         .record(black_box(1.0))
                 })
             });
             let histogram: Histogram = metrics::histogram!("bench.histogram.cached");
             group.bench_function("histogram/cached_handle", |b| {
-                b.iter(|| histogram.record(black_box(1.0)))
+                bench_histogram(b, handles, || histogram.record(black_box(1.0)))
             });
         });
 
