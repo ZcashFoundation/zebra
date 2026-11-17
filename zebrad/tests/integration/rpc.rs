@@ -82,6 +82,13 @@ async fn metrics_endpoint() -> Result<()> {
     )?;
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
 
+    output.any_output_line_contains(
+        "# HELP zebrad_build_info ",
+        &body,
+        "metrics exporter response",
+        "the build info description",
+    )?;
+
     #[cfg(not(windows))]
     {
         output.any_output_line_contains(

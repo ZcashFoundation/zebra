@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added a description and unit for every Zebra metric, which the Prometheus endpoint shows as `# HELP` lines, and the metric catalog in `docker/observability/metrics-catalog.json`, which lists each metric's kind, unit, description, labels, and Prometheus series names.
+time: 2026-11-12T19:26:47.24334841Z
