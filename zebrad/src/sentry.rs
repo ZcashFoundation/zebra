@@ -1173,6 +1173,8 @@ mod tests {
                 metrics::gauge!("state.memory.index.entries").set(2_000_000.0);
                 metrics::gauge!("state.memory.backup.restore.duration_seconds").set(25.0);
                 metrics::counter!("state.memory.fork.evicted.count").increment(2);
+                // Recorded directly, so its unit is checked on every platform.
+                metrics::gauge!("process.memory.rss_fraction").set(0.5);
                 crate::components::metrics::record();
             });
 
@@ -1201,20 +1203,18 @@ mod tests {
                 MetricType::Gauge,
                 None,
             ),
+            (
+                "process.memory.rss_fraction".to_string(),
+                MetricType::Gauge,
+                Some(Unit::Ratio),
+            ),
         ];
         if cfg!(target_os = "linux") {
-            expected.extend([
-                (
-                    "process.memory.rss_bytes".to_string(),
-                    MetricType::Gauge,
-                    Some(Unit::Byte),
-                ),
-                (
-                    "process.memory.rss_fraction".to_string(),
-                    MetricType::Gauge,
-                    None,
-                ),
-            ]);
+            expected.push((
+                "process.memory.rss_bytes".to_string(),
+                MetricType::Gauge,
+                Some(Unit::Byte),
+            ));
         }
         expected.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(metrics, expected);

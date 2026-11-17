@@ -258,7 +258,11 @@ pub(super) fn send(batch: Vec<SentryMetric>) {
             .attributes
             .into_iter()
             .map(|(key, value)| (key, log_attribute(value)));
-        let unit = metric.unit.and_then(sentry_unit);
+        let unit = UNIT_OVERRIDES
+            .iter()
+            .find(|(name, _)| *name == metric.name)
+            .map(|(_, unit)| unit.clone())
+            .or_else(|| metric.unit.and_then(sentry_unit));
 
         match metric.metric_type {
             MetricType::Counter => attributes
@@ -299,6 +303,9 @@ fn log_attribute(value: AttributeValue) -> LogAttribute {
         AttributeValue::Integer(value) => value.into(),
     }
 }
+
+/// The Sentry units of metrics whose unit [`metrics::Unit`] can't express.
+const UNIT_OVERRIDES: &[(&str, Unit)] = &[("process.memory.rss_fraction", Unit::Ratio)];
 
 /// Returns the Sentry unit for `unit`, or `None` for a count or a unit Sentry doesn't have.
 fn sentry_unit(unit: metrics::Unit) -> Option<Unit> {
