@@ -105,6 +105,7 @@ where
     /// * `max_batches` is an upper bound on the number of batches in the queue,
     ///   and the number of concurrently executing batches.
     ///   If this is `None`, we use the current number of [`rayon`] threads.
+    ///   A value of zero is treated as one.
     ///   The number of batches in the queue is also limited by [`QUEUE_BATCH_LIMIT`].
     /// * `max_latency` gives the maximum latency for a batch item to start verifying.
     /// * The `max_idle` duration bounds idle time after the most recent batch item.
@@ -183,7 +184,8 @@ where
         let max_items_weight_in_batch = max(max_items_weight_in_batch, 1);
         let max_batches = max_batches
             .into()
-            .unwrap_or_else(rayon::current_num_threads);
+            .unwrap_or_else(rayon::current_num_threads)
+            .max(1);
         let max_batches_in_queue = max_batches.clamp(1, QUEUE_BATCH_LIMIT);
 
         // The semaphore bound limits the maximum number of concurrent requests
