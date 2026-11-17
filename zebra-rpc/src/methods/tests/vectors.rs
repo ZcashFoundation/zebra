@@ -650,9 +650,9 @@ async fn rpc_body_reads_preserve_operational_errors() {
                             .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
                             .await
                             .respond(mempool::Response::Transactions(vec![]));
-                        ReadRequest::AnyChainTransaction(txid)
+                        ReadRequest::AnyChainRawTransaction(txid)
                     } else {
-                        ReadRequest::Block(height.into())
+                        ReadRequest::RawBlock(height.into())
                     };
                     read_state
                         .expect_request(request)
@@ -1393,9 +1393,9 @@ async fn rpc_getblock_missing_error() {
 
     // Make the mock service respond with no block
     let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .expect_request(zebra_state::ReadRequest::RawBlock(Height(0).into()))
         .await;
-    response_handler.respond(zebra_state::ReadResponse::Block(None));
+    response_handler.respond(zebra_state::ReadResponse::RawBlock(None));
 
     let block_response = block_future.await.expect("block future should not panic");
     let block_response =

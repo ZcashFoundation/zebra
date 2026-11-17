@@ -364,6 +364,21 @@ proptest! {
 
             check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
 
+            // And the unknown TXID with verbosity 0, which reads the stored bytes.
+            let mempool_query = mempool
+                .expect_request(mempool::Request::TransactionsByMinedId([unknown_txid].into()))
+                .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
+
+            let state_query = state
+                .expect_request(zebra_state::ReadRequest::AnyChainRawTransaction(unknown_txid))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::RawTransaction(None)));
+
+            let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(0), None);
+
+            let (rpc_rsp, _, _) = tokio::join!(rpc_query, mempool_query, state_query);
+
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
+
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
 

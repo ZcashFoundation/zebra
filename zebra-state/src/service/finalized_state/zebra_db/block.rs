@@ -20,14 +20,14 @@ use itertools::Itertools;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     primitives::byte_array::increment_big_endian,
     sapling,
     serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
@@ -175,27 +175,39 @@ impl ZebraDb {
             .map(|raw_tx| Arc::<Transaction>::from_bytes(raw_tx.raw_bytes()))
             .collect();
 
-        // Compute the size of the block from the size of header and size of
-        // transactions. This requires summing them all and also adding the
-        // size of the CompactSize-encoded transaction count.
-        // See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks
-        let tx_count = CompactSizeMessage::try_from(txs.len())
-            .expect("must work for a previously serialized block");
-        let tx_raw = tx_count
-            .zcash_serialize_to_vec()
-            .expect("must work for a previously serialized block");
-        let size = raw_header.raw_bytes().len()
-            + raw_txs
-                .iter()
-                .map(|raw_tx| raw_tx.raw_bytes().len())
-                .sum::<usize>()
-            + tx_raw.len();
+        let (_, size) = serialized_tx_count_and_block_size(&raw_header, &raw_txs);
 
         let block = Block {
             header,
             transactions: txs,
         };
         Ok(Some((Arc::new(block), size)))
+    }
+
+    /// Returns the serialized [`Block`] with [`block::Hash`] or [`Height`], if it exists in the
+    /// finalized chain, reassembled from the stored header and transaction bytes.
+    ///
+    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// The stored bytes are not parsed, so a change to how blocks serialize needs a database
+    /// upgrade to keep them equal to the serialization.
+    pub fn serialized_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<Option<SerializedBlock>, BlockReadError> {
+        let Some((raw_header, raw_txs)) = self.raw_block(hash_or_height)? else {
+            return Ok(None);
+        };
+
+        let (tx_count, size) = serialized_tx_count_and_block_size(&raw_header, &raw_txs);
+
+        let mut bytes = Vec::with_capacity(size);
+        bytes.extend_from_slice(raw_header.raw_bytes());
+        bytes.extend_from_slice(&tx_count);
+        for raw_tx in &raw_txs {
+            bytes.extend_from_slice(raw_tx.raw_bytes());
+        }
+
+        Ok(Some(bytes.into()))
     }
 
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
@@ -474,6 +486,29 @@ impl ZebraDb {
         self.db
             .zs_get::<_, _, Version>(&transactions, &location)
             .map(|version| version.0)
+    }
+
+    /// Returns the stored bytes of the [`Transaction`] with [`transaction::Hash`],
+    /// if a transaction with that hash exists in the finalized chain. The bytes are not parsed,
+    /// so a change to how transactions serialize needs a database upgrade to keep them equal.
+    ///
+    /// Pruned bodies return [`BlockReadError::BlockBodyUnavailable`], like [`Self::transaction`].
+    #[allow(clippy::unwrap_in_result)]
+    pub fn serialized_transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Result<Option<SerializedTransaction>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let Some(raw_tx) = self.db.zs_get::<_, _, RawBytes>(&tx_by_loc, &location) else {
+            return self
+                .missing_body_error(location.height)
+                .map_or(Ok(None), Err);
+        };
+
+        Ok(Some(raw_tx.into_raw_bytes().into()))
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
@@ -901,4 +936,25 @@ impl DiskWriteBatch {
             self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
     }
+}
+
+/// Returns the CompactSize-encoded transaction count and the serialized size of a block made of
+/// `raw_header` and `raw_txs`.
+///
+/// See <https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks>
+fn serialized_tx_count_and_block_size(
+    raw_header: &RawBytes,
+    raw_txs: &[RawBytes],
+) -> (Vec<u8>, usize) {
+    let tx_count = CompactSizeMessage::try_from(raw_txs.len())
+        .expect("must work for a previously serialized block")
+        .zcash_serialize_to_vec()
+        .expect("must work for a previously serialized block");
+    let size = raw_header.raw_bytes().len()
+        + tx_count.len()
+        + raw_txs
+            .iter()
+            .map(|raw_tx| raw_tx.raw_bytes().len())
+            .sum::<usize>();
+    (tx_count, size)
 }

@@ -17,10 +17,10 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     block_info::BlockInfo,
     serialization::ZcashSerialize as _,
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent::{self, Utxo},
 };
 
@@ -103,6 +103,27 @@ where
             || db.block_and_size(hash_or_height),
             |block| Ok(Some(block)),
         )
+}
+
+/// Returns the serialized [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn raw_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<Option<SerializedBlock>, BlockReadError>
+where
+    C: AsRef<Chain>,
+{
+    // Non-finalized blocks have no stored bytes, so they are serialized from memory.
+    if let Some(contextual) = chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block(hash_or_height))
+    {
+        return Ok(Some(SerializedBlock::from(contextual.block.as_ref())));
+    }
+
+    db.serialized_block(hash_or_height)
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or
@@ -352,6 +373,20 @@ pub fn any_transaction<'a>(
             return Ok(None);
         };
         Ok(Some(AnyTx::Side((tx, block.hash))))
+    }
+}
+
+/// Returns the serialized [`Transaction`] with [`transaction::Hash`], if it exists in any
+/// chain in `chains` or the finalized `db`.
+pub fn any_raw_transaction<'a>(
+    mut chains: impl Iterator<Item = &'a Arc<Chain>>,
+    db: &ZebraDb,
+    hash: transaction::Hash,
+) -> Result<Option<SerializedTransaction>, BlockReadError> {
+    // Non-finalized transactions have no stored bytes, so they are serialized from memory.
+    match chains.find_map(|chain| chain.transaction(hash)) {
+        Some((tx, _height, _time)) => Ok(Some(SerializedTransaction::from(tx.as_ref()))),
+        None => db.serialized_transaction(hash),
     }
 }
 
