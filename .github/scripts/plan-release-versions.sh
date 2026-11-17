@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Prints the version each changie project releases next, as `<project>\t<version>`
+# Prints the version each package releases next, as `<package>\t<version>`
 # lines, computed from the unreleased fragments and manifests at a base revision.
 #
 # - A project's own fragments pick the level, using each kind's `auto` level in
@@ -15,8 +15,10 @@
 #   at least a patch, so its new dependency requirement is published. When the
 #   project's library sources (outside `src/bin`) name that dependency, it
 #   inherits the break, even if its own fragments plan a smaller change: a public
-#   signature can expose the dependency's types without a `pub use`. zebrad has
-#   no library API, so it only gets the patch.
+#   signature can expose the dependency's types without a `pub use`. zebrad keeps
+#   its operator version policy, so it only gets the patch.
+# - zebrad-api records technical changes at the next actual zebrad release; it
+#   does not choose a package version or independently trigger a release.
 
 set -euo pipefail
 
@@ -31,7 +33,7 @@ read_base() {
   git show "${base_revision}:$1" 2>/dev/null
 }
 
-# Each project lives in the directory named by its changie key.
+# Package projects live in the directory named by their changie key.
 mapfile -t projects < <(read_base .changie.yaml | awk '
   /^projects:/ { in_projects = 1; next }
   /^[^[:space:]#]/ { in_projects = 0 }
@@ -62,7 +64,9 @@ rank() {
 }
 
 package_version() {
-  read_base "$1/Cargo.toml" | awk '
+  local project="$1"
+  [[ "$project" == "zebrad-api" ]] && project=zebrad
+  read_base "$project/Cargo.toml" | awk '
     /^\[package\]/ { in_package = 1; next }
     /^\[/ { in_package = 0 }
     in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
@@ -141,6 +145,7 @@ while IFS= read -r fragment; do
     fi
     zebrad_network_upgrade=true
   fi
+  [[ "$project" == "zebrad-api" ]] && continue
   if (($(rank "$fragment_level") > $(rank "${level[$project]:-}"))); then
     level["$project"]="$fragment_level"
   fi
@@ -154,6 +159,7 @@ changed=true
 while [[ "$changed" == "true" ]]; do
   changed=false
   for project in "${projects[@]}"; do
+    [[ "$project" == "zebrad-api" ]] && continue
     cascade=""
     while IFS= read -r dependency; do
       if [[ -n "${new[$dependency]:-}" ]] && ! compatible "${old[$dependency]}" "${new[$dependency]}"; then
