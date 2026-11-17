@@ -169,7 +169,7 @@ queries can group nodes by the commit they run.
 
 | Metric | Unit | Labels | Description |
 |---|---|---|---|
-| `zebra.consensus.block.phase.duration_seconds` | seconds | `phase` | Time each phase of full block verification took: `block_checks`, `transaction_verification`, or `state_commit`. Recorded for blocks from sync, gossip, and `submitblock`, but not for block proposals. `state_commit` includes any wait for the parent block. |
+| `zebra.consensus.block.phase.duration_seconds` | seconds | `phase` | Time each phase of full block verification took: `block_checks`, `transaction_verification`, or `state_commit`. Recorded for blocks from sync, gossip, and `submitblock`, but not for block proposals. `block_checks` and `transaction_verification` are recorded when they pass, even if a later phase rejects the block. `state_commit` is recorded only for committed blocks, and includes any wait for the parent block. |
 | `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a checkpoint-verified block took, from loading the history tree to the RocksDB write. The phases start with `checkpoint_`. |
 | `zebra.net.block.decode.wait_seconds` | seconds | | Time a received block message waited for a rayon thread to start decoding it. |
 | `zebra.net.block.decode.duration_seconds` | seconds | | Time taken to decode a received block message, including that wait. |

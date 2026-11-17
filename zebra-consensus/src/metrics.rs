@@ -100,9 +100,11 @@ pub fn describe() {
     describe_histogram!(
         "zebra.consensus.block.phase.duration_seconds",
         Unit::Seconds,
-        "Time each phase of block verification took, for blocks committed after full \
-         verification: the header and structure checks, transaction verification, and the state \
-         commit, which includes any wait for the parent block."
+        "Time each phase of full block verification took, for blocks that aren't block \
+         proposals: the header and structure checks, transaction verification, and the state \
+         commit. The first two phases are recorded when they pass, even if a later phase rejects \
+         the block. The state commit is recorded only for committed blocks, and includes any \
+         wait for the parent block."
     );
 
     // Batch verifiers
