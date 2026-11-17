@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce signature verification overhead for empty and single-signature batches.
+time: 2026-10-20T04:53:29.069198862+02:00
