@@ -172,10 +172,14 @@ required-git-spec = "rev"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 # List of URLs for allowed Git repositories.
-# Remove these exceptions with the git patches once supporting crates are released.
+# Remove these exceptions with the dependency patches once supporting crates are released.
 allow-git = [
     "https://github.com/ZcashFoundation/reddsa",
     "https://github.com/ZcashFoundation/zcash_script",
+    "https://github.com/upbqdn/halo2",
+    "https://github.com/upbqdn/pasta_curves",
+    "https://github.com/upbqdn/sinsemilla",
+    "https://github.com/zcash/sapling-crypto",
 ]
 
 [sources.allow-org]
