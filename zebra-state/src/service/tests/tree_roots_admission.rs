@@ -1,18 +1,23 @@
-//! Cancelled responses must not free admission for detached tree-root database work.
+//! Cancelled reads retain admission, and saturated tree-root reads return a neutral refusal.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tokio::sync::oneshot;
 use tower::{Service, ServiceExt};
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::{Block, Height},
+    parallel::tree::{TreeRoots, TreeRootsProof},
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+};
 
 use crate::{service::StateService, Config, ReadRequest, ReadResponse};
 
 fn tree_roots_request() -> ReadRequest {
     ReadRequest::TreeRoots {
         start_height: Height(0),
-        final_hash: [0; 32].into(),
+        final_hash: Network::Mainnet.genesis_hash(),
         count: 1,
     }
 }
@@ -28,8 +33,29 @@ fn cancelled_tree_root_reads_retain_blocking_admission() {
         .unwrap();
     runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(30), async {
-            let (_state, mut read, _, _) =
+            let (mut state, mut read, _, _) =
                 StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
+            let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into::<Arc<Block>>()
+                .unwrap();
+            state
+                .queue_and_commit_to_finalized_state(genesis.into(), None)
+                .await
+                .unwrap()
+                .unwrap();
+            let expected = ReadResponse::TreeRoots(Some(vec![TreeRootsProof {
+                roots: TreeRoots::empty(),
+                successor_auth_data_root: None,
+            }]));
+            assert_eq!(
+                read.ready()
+                    .await
+                    .unwrap()
+                    .call(tree_roots_request())
+                    .await
+                    .unwrap(),
+                expected
+            );
             let (release, released) = oneshot::channel::<()>();
             let (started, running) = oneshot::channel();
             let blocker = tokio::task::spawn_blocking(move || {
@@ -47,18 +73,18 @@ fn cancelled_tree_root_reads_retain_blocking_admission() {
                     .unwrap()
                     .call(tree_roots_request())
                     .now_or_never(),
-                Some(Err(_))
+                Some(Ok(ReadResponse::TreeRoots(None)))
             ));
 
             release.send(()).unwrap();
             blocker.await.unwrap();
             let response = loop {
-                match read.clone().oneshot(tree_roots_request()).await {
-                    Ok(response) => break response,
-                    Err(_) => tokio::task::yield_now().await,
+                match read.clone().oneshot(tree_roots_request()).await.unwrap() {
+                    ReadResponse::TreeRoots(None) => tokio::task::yield_now().await,
+                    response => break response,
                 }
             };
-            assert_eq!(response, ReadResponse::TreeRoots(None));
+            assert_eq!(response, expected);
         })
         .await
         .expect("tree-root admission must recover after detached reads finish");

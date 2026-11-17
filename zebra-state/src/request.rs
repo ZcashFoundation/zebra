@@ -2203,10 +2203,10 @@ pub enum ReadRequest {
     /// Looks up the note commitment tree roots after each finalized block from `start_height`
     /// to the block at height `start_height + count - 1`, if that block's hash is `final_hash`.
     ///
-    /// Returns [`ReadResponse::TreeRoots`] with `count` complete root proofs, or with `None`
-    /// if the finalized chain doesn't have `final_hash` at that height, required successor
-    /// authorizing data is unavailable, or `count` is zero or above
-    /// [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
+    /// Returns [`ReadResponse::TreeRoots`] with a bounded prefix of complete root proofs, or with
+    /// `None` if read admission is saturated, the finalized chain doesn't have `final_hash` at
+    /// that height, required successor authorizing data is unavailable, or `count` is zero or
+    /// above [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
     TreeRoots {
         /// The height of the first block.
         start_height: block::Height,

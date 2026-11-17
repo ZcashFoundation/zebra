@@ -2101,6 +2101,9 @@ impl Service<ReadRequest> for ReadStateService {
         ) {
             match EXPENSIVE_READS.try_acquire() {
                 Ok(permit) => Some(permit),
+                Err(_) if matches!(req, ReadRequest::TreeRoots { .. }) => {
+                    return async { Ok(ReadResponse::TreeRoots(None)) }.boxed();
+                }
                 Err(_) => return async { Err("expensive state reads are busy".into()) }.boxed(),
             }
         } else {
