@@ -14,7 +14,7 @@ use std::{
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use metrics::{Counter, Gauge, Histogram, Recorder};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
-use metrics_util::layers::{FanoutBuilder, Layer};
+use metrics_util::layers::FanoutBuilder;
 use sentry::{test::TestTransport, ClientOptions, Hub};
 use tracing_subscriber::{layer::SubscriberExt, Registry};
 
@@ -22,13 +22,9 @@ use tracing_subscriber::{layer::SubscriberExt, Registry};
 // Checking all targets compiles their test modules without the test harness, which leaves the
 // tests' imports unused.
 #[allow(dead_code, unused_imports)]
-#[path = "../src/components/metrics/event_labels.rs"]
-mod event_labels;
-#[allow(dead_code, unused_imports)]
 #[path = "../src/components/metrics/sentry_policy.rs"]
 mod sentry_policy;
 
-use event_labels::StripEventLabelsLayer;
 use sentry_policy::SentryPolicy;
 
 /// Histogram samples recorded between two drains of the Prometheus recorders.
@@ -43,10 +39,7 @@ enum Backend {
     None,
     /// One Prometheus recorder with no HTTP listener.
     Prometheus,
-    /// The Prometheus recorder behind the layer that drops event attributes, as `zebrad`
-    /// installs it when Sentry is off.
-    PrometheusWithoutEventLabels,
-    /// That Prometheus recorder and the Sentry policy behind a fanout, as `zebrad` installs them
+    /// A Prometheus recorder and the Sentry policy behind a fanout, as `zebrad` installs them
     /// when Sentry is on.
     PrometheusAndSentry,
     /// Two Prometheus recorders behind a fanout, standing in for two backends.
@@ -54,10 +47,9 @@ enum Backend {
 }
 
 impl Backend {
-    const ALL: [Backend; 5] = [
+    const ALL: [Backend; 4] = [
         Backend::None,
         Backend::Prometheus,
-        Backend::PrometheusWithoutEventLabels,
         Backend::PrometheusAndSentry,
         Backend::Fanout,
     ];
@@ -66,7 +58,6 @@ impl Backend {
         match self {
             Backend::None => "none",
             Backend::Prometheus => "prometheus",
-            Backend::PrometheusWithoutEventLabels => "prometheus_without_event_labels",
             Backend::PrometheusAndSentry => "prometheus_and_sentry",
             Backend::Fanout => "fanout_of_two",
         }
@@ -89,15 +80,11 @@ impl Backend {
                 let recorder = prometheus();
                 metrics::with_local_recorder(&recorder, || f(&handles))
             }
-            Backend::PrometheusWithoutEventLabels => {
-                let recorder = StripEventLabelsLayer.layer(prometheus());
-                metrics::with_local_recorder(&recorder, || f(&handles))
-            }
             Backend::PrometheusAndSentry => {
                 // The benchmark never flushes the policy, which stays bounded because it keeps a
                 // fixed-size sample of each histogram label set.
                 let recorder = FanoutBuilder::default()
-                    .add_recorder(StripEventLabelsLayer.layer(prometheus()))
+                    .add_recorder(prometheus())
                     .add_recorder(SentryPolicy::default())
                     .build();
                 metrics::with_local_recorder(&recorder, || f(&handles))
@@ -136,8 +123,6 @@ fn bench_histogram(b: &mut Bencher, handles: &[PrometheusHandle], mut record: im
 fn metrics_benches(c: &mut Criterion) {
     // An owned label value, like call sites that format a label at runtime.
     let label = String::from("In::Req::Peers");
-    // A block height, which the tip block delay records as an event attribute.
-    let height = String::from("3543405");
 
     for backend in Backend::ALL {
         let mut group = c.benchmark_group(format!("metrics/{}", backend.name()));
@@ -185,16 +170,6 @@ fn metrics_benches(c: &mut Criterion) {
             let histogram: Histogram = metrics::histogram!("bench.histogram.cached");
             group.bench_function("histogram/cached_handle", |b| {
                 bench_histogram(b, handles, || histogram.record(black_box(1.0)))
-            });
-            group.bench_function("histogram/event_label", |b| {
-                bench_histogram(b, handles, || {
-                    metrics::histogram!(
-                        "bench.histogram.event",
-                        "event.chain.height" => height.clone(),
-                        "chain.network_upgrade" => "Nu7",
-                    )
-                    .record(black_box(1.0))
-                })
             });
         });
 

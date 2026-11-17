@@ -31,9 +31,8 @@
 //! the cap. The policy records it through the `metrics` facade, so every backend receives it, and
 //! logs a warning when it starts dropping values.
 //!
-//! [Event attributes](super::event_labels) never create a label set. Histograms keep them beside
-//! each value, and send them without their `event.` prefix. Counters and gauges drop them, because
-//! the policy keeps their values for the life of the process.
+//! The histograms in [`SENT_DIRECTLY`] are skipped, because their callers send each value to Sentry
+//! themselves.
 
 use std::{
     cell::Cell,
@@ -46,11 +45,9 @@ use std::{
 
 use metrics::{
     atomics::AtomicU64, Counter, CounterFn, Gauge, GaugeFn, Histogram, HistogramFn, Key, KeyName,
-    Label, Metadata, Recorder, SharedString, Unit,
+    Metadata, Recorder, SharedString, Unit,
 };
 use metrics_util::registry::{Registry, Storage};
-
-use super::event_labels::{split_event_labels, EVENT_LABEL_PREFIX};
 
 /// How often the policy sends what was recorded to Sentry.
 ///
@@ -93,6 +90,10 @@ pub(crate) const GAUGE_REFRESH_FLUSHES: u64 = 5;
 /// The least time between two warnings that the policy dropped values.
 const DROP_WARNING_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
+/// Histograms that the policy doesn't send, because their callers send each value to Sentry with
+/// attributes that would make a new Prometheus series for every value, such as a block height.
+pub(crate) const SENT_DIRECTLY: &[&str] = &["zcash.chain.tip.block_delay_seconds"];
+
 /// A value for the adapter to send to Sentry.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SentryMetric {
@@ -103,7 +104,7 @@ pub(crate) struct SentryMetric {
     pub(crate) value: f64,
     /// The unit the metric was described with.
     pub(crate) unit: Option<Unit>,
-    /// The metric's labels, then its event attributes without their prefix.
+    /// The metric's labels.
     pub(crate) attributes: Vec<(String, AttributeValue)>,
 }
 
@@ -122,9 +123,6 @@ pub(crate) enum MetricType {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum AttributeValue {
     String(String),
-    /// An event attribute whose value is an integer, such as a block height, so that Sentry
-    /// queries can compare and aggregate it.
-    Integer(u64),
 }
 
 /// A [`Recorder`] that keeps every metric for [`SentryPolicy::flush_if`] to send to Sentry.
@@ -262,7 +260,7 @@ impl SentryPolicy {
         for (key, counter) in counters {
             // One interval's increase is far below 2^53, so it converts to f64 exactly.
             let value = counter.take_increase() as f64;
-            batch.push(metric(MetricType::Counter, &key, value, unit(&key), &[]));
+            batch.push(metric(MetricType::Counter, &key, value, unit(&key)));
         }
 
         for (gauges, next) in [
@@ -273,7 +271,7 @@ impl SentryPolicy {
             over_budget += left_out;
             for (key, gauge) in gauges {
                 if let Some(value) = gauge.take_unsent(flush) {
-                    batch.push(metric(MetricType::Gauge, &key, value, unit(&key), &[]));
+                    batch.push(metric(MetricType::Gauge, &key, value, unit(&key)));
                 }
             }
         }
@@ -286,16 +284,9 @@ impl SentryPolicy {
         let values = histograms
             .iter()
             .flat_map(|(key, values)| values.iter().map(move |value| (key, value)));
-        for (index, (key, (value, event_labels))) in values.enumerate() {
+        for (index, (key, value)) in values.enumerate() {
             if kept_indexes.next_if_eq(&index).is_some() {
-                let event_labels = event_labels.as_deref().unwrap_or_default();
-                batch.push(metric(
-                    MetricType::Distribution,
-                    key,
-                    *value,
-                    unit(key),
-                    event_labels,
-                ));
+                batch.push(metric(MetricType::Distribution, key, *value, unit(key)));
             }
         }
 
@@ -357,37 +348,24 @@ fn take_turns<T>(mut due: Vec<T>, room: &mut usize, next: &mut usize) -> (Vec<T>
     (due, len - taken)
 }
 
-/// Returns the metric to send for `value` under `key`, with `event_labels` as attributes after
-/// the key's labels.
-fn metric(
-    metric_type: MetricType,
-    key: &Key,
-    value: f64,
-    unit: Option<Unit>,
-    event_labels: &[Label],
-) -> SentryMetric {
-    let labels = key.labels().map(|label| {
-        (
-            label.key().to_owned(),
-            AttributeValue::String(label.value().to_owned()),
-        )
-    });
-    let event_attributes = event_labels.iter().map(|label| {
-        let key = label.key();
-        let key = key.strip_prefix(EVENT_LABEL_PREFIX).unwrap_or(key);
-        let value = match label.value().parse() {
-            Ok(integer) => AttributeValue::Integer(integer),
-            Err(_) => AttributeValue::String(label.value().to_owned()),
-        };
-        (key.to_owned(), value)
-    });
+/// Returns the metric to send for `value` under `key`, with the key's labels as attributes.
+fn metric(metric_type: MetricType, key: &Key, value: f64, unit: Option<Unit>) -> SentryMetric {
+    let attributes = key
+        .labels()
+        .map(|label| {
+            (
+                label.key().to_owned(),
+                AttributeValue::String(label.value().to_owned()),
+            )
+        })
+        .collect();
 
     SentryMetric {
         metric_type,
         name: key.name().to_owned(),
         value,
         unit,
-        attributes: labels.chain(event_attributes).collect(),
+        attributes,
     }
 }
 
@@ -405,64 +383,42 @@ impl Recorder for SentryPolicy {
     }
 
     fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
-        let register = |key: &Key| {
-            let counter = self.tracked(
-                key,
-                |key| self.registry.get_counter(key),
-                |key| self.registry.get_or_create_counter(key, Arc::clone),
-            );
-            match counter {
-                Some(counter) => Counter::from_arc(counter),
-                None => Counter::from_arc(self.untracked.clone()),
-            }
-        };
-
-        match split_event_labels(key) {
-            Some((key, _)) => register(&key),
-            None => register(key),
+        let counter = self.tracked(
+            key,
+            |key| self.registry.get_counter(key),
+            |key| self.registry.get_or_create_counter(key, Arc::clone),
+        );
+        match counter {
+            Some(counter) => Counter::from_arc(counter),
+            None => Counter::from_arc(self.untracked.clone()),
         }
     }
 
     fn register_gauge(&self, key: &Key, _: &Metadata<'_>) -> Gauge {
-        let register = |key: &Key| {
-            let gauge = self.tracked(
-                key,
-                |key| self.registry.get_gauge(key),
-                |key| self.registry.get_or_create_gauge(key, Arc::clone),
-            );
-            match gauge {
-                Some(gauge) => Gauge::from_arc(gauge),
-                None => Gauge::from_arc(self.untracked.clone()),
-            }
-        };
-
-        match split_event_labels(key) {
-            Some((key, _)) => register(&key),
-            None => register(key),
+        let gauge = self.tracked(
+            key,
+            |key| self.registry.get_gauge(key),
+            |key| self.registry.get_or_create_gauge(key, Arc::clone),
+        );
+        match gauge {
+            Some(gauge) => Gauge::from_arc(gauge),
+            None => Gauge::from_arc(self.untracked.clone()),
         }
     }
 
     fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
-        let distribution = |key: &Key| {
-            self.tracked(
-                key,
-                |key| self.registry.get_histogram(key),
-                |key| self.registry.get_or_create_histogram(key, Arc::clone),
-            )
-        };
+        if SENT_DIRECTLY.contains(&key.name()) {
+            return Histogram::noop();
+        }
 
-        match split_event_labels(key) {
-            Some((key, event_labels)) => match distribution(&key) {
-                Some(distribution) => Histogram::from_arc(Arc::new(WithEventLabels {
-                    distribution,
-                    event_labels: event_labels.into(),
-                })),
-                None => Histogram::from_arc(self.untracked.clone()),
-            },
-            None => match distribution(key) {
-                Some(distribution) => Histogram::from_arc(distribution),
-                None => Histogram::from_arc(self.untracked.clone()),
-            },
+        let distribution = self.tracked(
+            key,
+            |key| self.registry.get_histogram(key),
+            |key| self.registry.get_or_create_histogram(key, Arc::clone),
+        );
+        match distribution {
+            Some(distribution) => Histogram::from_arc(distribution),
+            None => Histogram::from_arc(self.untracked.clone()),
         }
     }
 }
@@ -788,9 +744,8 @@ struct Distribution {
 }
 
 impl Distribution {
-    /// Adds `value` and its event attributes to the sample, unless the value isn't finite, which
-    /// Sentry can't store.
-    fn add(&self, value: f64, event_labels: Option<&Arc<[Label]>>) {
+    /// Adds `value` to the sample, unless the value isn't finite, which Sentry can't store.
+    fn add(&self, value: f64) {
         if !value.is_finite() {
             return;
         }
@@ -798,7 +753,7 @@ impl Distribution {
         self.sample
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .record(value, event_labels);
+            .record(value);
     }
 
     /// Takes the sample of the interval, and starts a new interval.
@@ -809,11 +764,11 @@ impl Distribution {
 
 impl HistogramFn for Distribution {
     fn record(&self, value: f64) {
-        self.add(value, None);
+        self.add(value);
     }
 }
 
-/// A uniform sample of at most [`HISTOGRAM_CAP`] values, with their event attributes, kept with
+/// A uniform sample of at most [`HISTOGRAM_CAP`] values, kept with
 /// [Algorithm R].
 ///
 /// [Algorithm R]: https://en.wikipedia.org/wiki/Reservoir_sampling#Simple:_Algorithm_R
@@ -821,18 +776,16 @@ impl HistogramFn for Distribution {
 struct Sample {
     /// How many values were recorded in the interval.
     recorded: u64,
-    values: Vec<(f64, Option<Arc<[Label]>>)>,
+    values: Vec<f64>,
 }
 
 impl Sample {
-    fn record(&mut self, value: f64, event_labels: Option<&Arc<[Label]>>) {
+    fn record(&mut self, value: f64) {
         let index = self.recorded;
         self.recorded = self.recorded.saturating_add(1);
         match sample_slot(index) {
-            Some(slot) if slot < self.values.len() => {
-                self.values[slot] = (value, event_labels.cloned());
-            }
-            Some(_) => self.values.push((value, event_labels.cloned())),
+            Some(slot) if slot < self.values.len() => self.values[slot] = value,
+            Some(_) => self.values.push(value),
             None => {}
         }
     }
@@ -852,18 +805,6 @@ fn sample_slot(index: u64) -> Option<usize> {
     usize::try_from(rand::random_range(0..=index))
         .ok()
         .filter(|slot| *slot < HISTOGRAM_CAP)
-}
-
-/// A histogram handle that records its event attributes beside each value.
-struct WithEventLabels {
-    distribution: Arc<Distribution>,
-    event_labels: Arc<[Label]>,
-}
-
-impl HistogramFn for WithEventLabels {
-    fn record(&self, value: f64) {
-        self.distribution.add(value, Some(&self.event_labels));
-    }
 }
 
 #[cfg(test)]
@@ -1207,12 +1148,7 @@ mod tests {
             }
             for label_set in 0..=LABEL_SET_CAP {
                 metrics::gauge!("a.gauge", "i" => label_set.to_string()).set(1.0);
-                metrics::histogram!(
-                    "a.delay_seconds",
-                    "i" => label_set.to_string(),
-                    "event.chain.height" => label_set.to_string(),
-                )
-                .record(1.0);
+                metrics::histogram!("a.delay_seconds", "i" => label_set.to_string()).record(1.0);
             }
             // A label set the policy keeps still records after the name reaches the cap.
             metrics::counter!("a.count", "i" => "0").increment(1);
@@ -1338,13 +1274,6 @@ mod tests {
             for value in 0..recorded {
                 histogram.record(f64::from(value));
             }
-            for height in 0..recorded / 10 {
-                metrics::histogram!(
-                    "a.duration_seconds",
-                    "event.chain.height" => height.to_string(),
-                )
-                .record(f64::from(height));
-            }
         });
 
         let distribution = policy
@@ -1355,7 +1284,7 @@ mod tests {
             .sample
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        assert_eq!(sample.recorded, u64::from(recorded + recorded / 10));
+        assert_eq!(sample.recorded, u64::from(recorded));
         assert_eq!(
             sample.values.len(),
             HISTOGRAM_CAP,
@@ -1376,7 +1305,7 @@ mod tests {
             let distribution = distribution.clone();
             thread::spawn(move || {
                 for value in 0..recorded {
-                    distribution.add(f64::from(value), None);
+                    distribution.add(f64::from(value));
                 }
             })
         };
@@ -1433,115 +1362,6 @@ mod tests {
         );
         let mean = sampled.iter().sum::<f64>() / count(sampled.len());
         assert!((470.0..=530.0).contains(&mean), "mean: {mean}");
-    }
-
-    #[test]
-    fn values_with_and_without_event_attributes_share_one_sample() {
-        let policy = SentryPolicy::default();
-        let (intervals, recorded) = (50, 100_u32);
-
-        let mut with_event_labels = 0;
-        for _ in 0..intervals {
-            with_local_recorder(&policy, || {
-                let histogram = metrics::histogram!("a.delay_seconds", "kind" => "tip");
-                for value in 0..recorded {
-                    histogram.record(-f64::from(value) - 1.0);
-                    metrics::histogram!(
-                        "a.delay_seconds",
-                        "kind" => "tip",
-                        "event.chain.height" => value.to_string(),
-                    )
-                    .record(f64::from(value));
-                }
-            });
-
-            let sent = flush(&policy);
-            assert_eq!(sent.len(), HISTOGRAM_CAP, "the cap is for each label set");
-            for metric in sent {
-                let kind = ("kind".to_owned(), string("tip"));
-                if metric.value >= 0.0 {
-                    with_event_labels += 1;
-                    assert_eq!(
-                        metric.attributes,
-                        [
-                            kind,
-                            (
-                                "chain.height".to_owned(),
-                                // The values are small whole numbers.
-                                AttributeValue::Integer(metric.value as u64),
-                            ),
-                        ],
-                        "each value keeps its own event attributes",
-                    );
-                } else {
-                    assert_eq!(metric.attributes, [kind]);
-                }
-            }
-        }
-
-        // Half of 1,000 values, with a standard deviation under 16.
-        assert!(
-            (400..=600).contains(&with_event_labels),
-            "both kinds of values are sampled in proportion: {with_event_labels}",
-        );
-    }
-
-    #[test]
-    fn event_attributes_are_kept_on_histograms_without_creating_label_sets() {
-        let policy = SentryPolicy::default();
-
-        with_local_recorder(&policy, || {
-            for height in [3_543_405_u32, 3_543_406] {
-                metrics::histogram!(
-                    "a.delay_seconds",
-                    "event.chain.height" => height.to_string(),
-                    "chain.network_upgrade" => "Nu7",
-                    "event.block.hash" => "00ab",
-                )
-                .record(2.0);
-            }
-            metrics::counter!("a.count", "event.chain.height" => "1").increment(1);
-            metrics::counter!("a.count", "event.chain.height" => "2").increment(1);
-            metrics::gauge!("a.gauge", "event.chain.height" => "1").set(5.0);
-        });
-
-        let mut histogram_label_sets = 0;
-        policy
-            .registry
-            .visit_histograms(|_, _| histogram_label_sets += 1);
-        let mut counter_label_sets = 0;
-        policy
-            .registry
-            .visit_counters(|_, _| counter_label_sets += 1);
-        assert_eq!((histogram_label_sets, counter_label_sets), (1, 1));
-
-        let sent = flush(&policy);
-        let attributes = |name: &str| -> Vec<Vec<(String, AttributeValue)>> {
-            sent.iter()
-                .filter(|metric| metric.name == name)
-                .map(|metric| metric.attributes.clone())
-                .collect()
-        };
-        let delay = |height| {
-            vec![
-                ("chain.network_upgrade".to_owned(), string("Nu7")),
-                ("chain.height".to_owned(), AttributeValue::Integer(height)),
-                ("block.hash".to_owned(), string("00ab")),
-            ]
-        };
-
-        let mut delays = attributes("a.delay_seconds");
-        delays.sort_by_key(|attributes| format!("{attributes:?}"));
-        assert_eq!(delays, [delay(3_543_405), delay(3_543_406)]);
-        assert_eq!(attributes("a.count"), [vec![]]);
-        assert_eq!(
-            sent.iter()
-                .find(|metric| metric.name == "a.count")
-                .map(|metric| metric.value),
-            Some(2.0),
-            "counts with different event attributes add up",
-        );
-        assert_eq!(attributes("a.gauge"), [vec![]]);
     }
 
     #[test]

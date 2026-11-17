@@ -23,7 +23,10 @@ use sentry::{
     ClientInitGuard, ClientOptions, Hub, Scope,
 };
 use tracing::Level;
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::Height,
+    parameters::{Network, NetworkUpgrade},
+};
 
 use crate::{
     application::{build_version, ZebradApp},
@@ -37,6 +40,40 @@ use crate::{
 };
 
 mod metrics_adapter;
+
+/// Sends a tip block delay to Sentry with the block's height, so that nodes can be compared block
+/// by block.
+///
+/// The height isn't a label on the `zcash.chain.tip.block_delay_seconds` histogram, because
+/// Prometheus would keep a series per height, so the metrics policy skips that histogram.
+pub(crate) fn send_tip_block_delay(height: Height, seconds: f64) {
+    tip_block_delay(node_context::network(), height, seconds).capture();
+}
+
+/// Returns a tip block delay with the block's height and, once the network is known, its network
+/// upgrade.
+///
+/// The network upgrade comes from the block's own height, because the tip height that the node
+/// context reports lags behind a new tip, which would put an activation block in the previous
+/// upgrade.
+fn tip_block_delay(
+    network: Option<&Network>,
+    height: Height,
+    seconds: f64,
+) -> sentry::metrics::DistributionMetric {
+    let distribution =
+        sentry::metrics::distribution("zcash.chain.tip.block_delay_seconds", seconds)
+            .unit(sentry::protocol::Unit::Second)
+            .attribute("chain.height", height.0);
+
+    match network {
+        Some(network) => distribution.attribute(
+            "chain.network_upgrade",
+            NetworkUpgrade::current(network, height).to_string(),
+        ),
+        None => distribution,
+    }
+}
 
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
@@ -1050,7 +1087,36 @@ mod tests {
     }
 
     #[test]
-    fn metrics_are_sent_with_their_unit_labels_and_event_attributes() {
+    fn tip_block_delays_are_sent_with_their_block_height() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        // The Mainnet NU7 activation block, which the tip height read by other metrics often
+        // hasn't reached yet.
+        let height = Height(3_543_405);
+
+        let metrics = sent_metrics(&metadata, || {
+            super::tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected one tip block delay, got {metrics:?}");
+        };
+        assert_eq!(metric.name, "zcash.chain.tip.block_delay_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 2.0);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(
+            metric_attribute(metric, "chain.height").and_then(Value::as_u64),
+            Some(3_543_405),
+        );
+        assert_eq!(
+            metric_attribute(metric, "chain.network_upgrade").and_then(Value::as_str),
+            Some("Nu7"),
+        );
+    }
+
+    #[test]
+    fn metrics_are_sent_with_their_unit_and_labels() {
         let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
         metadata.tags.insert("chain.network", "Mainnet".to_owned());
         let policy = SentryPolicy::default();
@@ -1058,9 +1124,11 @@ mod tests {
         metrics::with_local_recorder(&policy, || {
             crate::components::metrics::describe_all();
 
+            metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+                .record(2.0);
+            // Sent directly with its block height, so the policy skips it.
             metrics::histogram!(
                 "zcash.chain.tip.block_delay_seconds",
-                "event.chain.height" => "3543405",
                 "chain.network_upgrade" => "Nu7",
             )
             .record(2.0);
@@ -1076,23 +1144,24 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} is sent: {metrics:?}"))
         };
 
-        let delay = sent("zcash.chain.tip.block_delay_seconds");
-        assert_eq!(delay.r#type, MetricType::Distribution);
-        assert_eq!(delay.value, 2.0);
-        assert_eq!(delay.unit, Some(Unit::Second));
+        let stage = sent("sync.stage.duration_seconds");
+        assert_eq!(stage.r#type, MetricType::Distribution);
+        assert_eq!(stage.value, 2.0);
+        assert_eq!(stage.unit, Some(Unit::Second));
         assert_eq!(
-            metric_attribute(delay, "chain.height").and_then(Value::as_u64),
-            Some(3_543_405),
+            metric_attribute(stage, "stage").and_then(Value::as_str),
+            Some("obtain_tips"),
         );
         assert_eq!(
-            metric_attribute(delay, "chain.network_upgrade").and_then(Value::as_str),
-            Some("Nu7"),
-        );
-        assert_eq!(
-            metric_attribute(delay, "chain.network").and_then(Value::as_str),
+            metric_attribute(stage, "chain.network").and_then(Value::as_str),
             Some("Mainnet"),
         );
-        assert_eq!(metric_attribute(delay, "event.chain.height"), None);
+        assert!(
+            metrics
+                .iter()
+                .all(|metric| metric.name != "zcash.chain.tip.block_delay_seconds"),
+            "the policy doesn't send the tip block delay a second time",
+        );
 
         let errors = sent("sync.block.error.count");
         assert_eq!(errors.r#type, MetricType::Counter);

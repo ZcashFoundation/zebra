@@ -300,7 +300,6 @@ pub(super) fn send(batch: Vec<SentryMetric>) {
 fn log_attribute(value: AttributeValue) -> LogAttribute {
     match value {
         AttributeValue::String(value) => value.into(),
-        AttributeValue::Integer(value) => value.into(),
     }
 }
 

@@ -108,12 +108,6 @@ aggregated across nodes:
 - `rpc.request.duration_seconds`
 - `zcash.net.peer.handshake.duration_seconds`
 
-Label keys that start with `event.`, such as `event.chain.height`, are event
-attributes. An event attribute can have a new value every time the metric is recorded,
-so the Prometheus endpoint doesn't export it: each value would become a new series.
-[Sentry](tracing.md#sentry-production-monitoring) receives event attributes without the
-`event.` prefix. Only histograms have event attributes.
-
 The catalog file in a release lists that release's metrics, so you can check your own
 dashboards and alerts against the version you run.
 
@@ -152,13 +146,13 @@ when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 
 | Metric | Unit | Labels | Description |
 |---|---|---|---|
-| `zcash.chain.tip.block_delay_seconds` | seconds | `chain.network_upgrade`, `event.chain.height` | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+| `zcash.chain.tip.block_delay_seconds` | seconds | `chain.network_upgrade` | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
 
 `chain.network_upgrade` is the network upgrade at the block's height, such as `Nu6`.
 The Prometheus endpoint exports it as the `chain_network_upgrade` label.
-`event.chain.height` is the block's height. It is an
-[event attribute](#metric-catalog), so only Sentry receives it, as the number
-`chain.height`.
+Sentry also receives each value with the block's height as the number
+`chain.height`. The Prometheus endpoint doesn't export the height, because each
+height would become a new series.
 
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these

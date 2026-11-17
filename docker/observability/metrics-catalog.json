@@ -1875,7 +1875,6 @@
       "unit": "seconds",
       "description": "Time from a block's header time until it became this node's best chain tip.",
       "labels": [
-        "event.chain.height",
         "chain.network_upgrade"
       ],
       "prometheus": {

@@ -118,9 +118,9 @@ no metrics to Sentry, while the Prometheus endpoint keeps working.
 
 Sentry metrics carry each metric's labels as attributes. The `seed` label of
 `zcash.net.peers.initial` names only Zebra's default DNS seeders, and has the
-value `custom` for any other configured initial peer. Histograms also carry their
-event attributes, without the `event.` prefix, such as `chain.height` on
-`zcash.chain.tip.block_delay_seconds`.
+value `custom` for any other configured initial peer.
+`zcash.chain.tip.block_delay_seconds` also carries the block's height as
+`chain.height`.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the node has a
 chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`.

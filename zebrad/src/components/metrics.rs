@@ -15,8 +15,6 @@ mod process_memory;
 pub(crate) use process_memory::record;
 pub use process_memory::record_process_memory;
 
-#[cfg(any(feature = "prometheus", feature = "sentry"))]
-pub(crate) mod event_labels;
 pub(crate) mod node_context;
 #[cfg(feature = "sentry")]
 pub(crate) mod sentry_policy;
@@ -288,8 +286,8 @@ fn prometheus_builder(
     )
 }
 
-/// Returns the recorder that receives every metric: `prometheus` without event attributes, and
-/// `other` beside it if it is provided.
+/// Returns the recorder that receives every metric: `prometheus`, and `other` beside it if it is
+/// provided.
 #[cfg(feature = "prometheus")]
 fn with_prometheus<R>(
     prometheus: metrics_exporter_prometheus::PrometheusRecorder,
@@ -298,9 +296,7 @@ fn with_prometheus<R>(
 where
     R: Recorder + Send + Sync + 'static,
 {
-    use metrics_util::layers::{FanoutBuilder, Layer};
-
-    let prometheus = event_labels::StripEventLabelsLayer.layer(prometheus);
+    use metrics_util::layers::FanoutBuilder;
 
     match other {
         Some(other) => Box::new(

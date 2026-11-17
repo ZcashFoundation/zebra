@@ -427,7 +427,8 @@ pub async fn show_block_chain_progress(
 }
 
 /// Records how long after its header time each new best chain tip block was committed, with the
-/// block's height, and its network upgrade once the network this node runs on is known.
+/// block's network upgrade once the network this node runs on is known, and sends each value to
+/// Sentry with the block's height.
 ///
 /// A block is only recorded if it was mined at most [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its
 /// parent became this node's tip, so a node catching up after a restart or a stall doesn't record
@@ -439,16 +440,21 @@ pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
 
     while let Ok(tip_action) = chain_tip_change.wait_for_tip_change().await {
         if let Some((height, delay)) = tip_block_delay.observe(&tip_action, Utc::now()) {
-            let mut labels = vec![Label::new("event.chain.height", height.0.to_string())];
             // The network upgrade comes from the block's own height, because the tip height that
             // the node context reports lags behind a new tip.
-            if let Some(network) = node_context::network() {
-                labels.push(Label::new(
-                    "chain.network_upgrade",
-                    NetworkUpgrade::current(network, height).to_string(),
-                ));
-            }
+            let labels: Vec<Label> = node_context::network()
+                .map(|network| {
+                    Label::new(
+                        "chain.network_upgrade",
+                        NetworkUpgrade::current(network, height).to_string(),
+                    )
+                })
+                .into_iter()
+                .collect();
             metrics::histogram!("zcash.chain.tip.block_delay_seconds", labels).record(delay);
+
+            #[cfg(feature = "sentry")]
+            crate::sentry::send_tip_block_delay(height, delay);
         }
     }
 }

@@ -6,12 +6,10 @@ use std::{collections::HashSet, sync::Arc};
 use metrics::{Key, Label, Level, Metadata, Recorder};
 
 use crate::components::metrics::{
-    describe_all,
-    event_labels::EVENT_LABEL_PREFIX,
-    install, prometheus_builder,
+    describe_all, install, prometheus_builder,
     sentry_policy::{
         AttributeValue, MetricType, SentryMetric, SentryPolicy, FLUSH_BUDGET, HISTOGRAM_CAP,
-        LABEL_SET_CAP,
+        LABEL_SET_CAP, SENT_DIRECTLY,
     },
     with_prometheus,
 };
@@ -141,6 +139,10 @@ fn every_catalog_metric_reaches_every_backend() {
             }
         }
 
+        // These histograms reach Sentry from their callers, not through the policy.
+        if SENT_DIRECTLY.contains(&name.as_str()) {
+            continue;
+        }
         let metric_type = sentry_type(entry.kind);
         if !sent
             .iter()
@@ -150,18 +152,6 @@ fn every_catalog_metric_reaches_every_backend() {
         }
     }
     assert!(missing.is_empty(), "{}", missing.join("\n"));
-
-    let prometheus_event_label = EVENT_LABEL_PREFIX.replace('.', "_");
-    assert!(
-        !rendered.contains(&prometheus_event_label),
-        "Prometheus drops event attributes:\n{rendered}",
-    );
-    assert!(
-        sent.iter()
-            .flat_map(|metric| &metric.attributes)
-            .all(|(key, _)| !key.starts_with(EVENT_LABEL_PREFIX)),
-        "Sentry receives event attributes without their prefix",
-    );
 }
 
 /// A node that sends metrics only to Sentry sends its build info, like a node with the
@@ -195,7 +185,7 @@ fn sentry_only_install_sends_the_build_info() {
 }
 
 /// Returns a representative set of label sets for the metric `name`, with [`LABEL_VALUES`] values
-/// for each label key, or the number [`OBSERVED_LABEL_SETS`] lists, and no event attributes.
+/// for each label key, or the number [`OBSERVED_LABEL_SETS`] lists.
 fn label_sets(name: &str, entry: &Entry) -> Vec<Vec<Label>> {
     let observed = OBSERVED_LABEL_SETS
         .iter()
@@ -205,7 +195,6 @@ fn label_sets(name: &str, entry: &Entry) -> Vec<Vec<Label>> {
     entry
         .labels
         .iter()
-        .filter(|key| !key.starts_with(EVENT_LABEL_PREFIX))
         .enumerate()
         .fold(vec![Vec::new()], |label_sets, (index, key)| {
             let values = match observed {
@@ -250,13 +239,6 @@ fn a_busy_node_flush_sends_every_counter_and_gauge_within_the_budget() {
             label_sets.len(),
         );
 
-        let event_keys: Vec<&str> = entry
-            .labels
-            .iter()
-            .copied()
-            .filter(|key| key.starts_with(EVENT_LABEL_PREFIX))
-            .collect();
-
         for labels in label_sets {
             let records = match entry.kind {
                 Kind::Histogram => records_per_histogram,
@@ -264,17 +246,10 @@ fn a_busy_node_flush_sends_every_counter_and_gauge_within_the_budget() {
             };
 
             for value in 0..records {
-                // Each record has new event attribute values, like a block height.
-                let mut labels = labels.clone();
-                labels.extend(
-                    event_keys
-                        .iter()
-                        .map(|key| Label::new(*key, value.to_string())),
-                );
                 record(
                     &sentry,
                     entry.kind,
-                    &Key::from_parts(name.clone(), labels),
+                    &Key::from_parts(name.clone(), labels.clone()),
                     value + 1,
                 );
             }
@@ -290,12 +265,10 @@ fn a_busy_node_flush_sends_every_counter_and_gauge_within_the_budget() {
         sent.len(),
     );
     for (name, entry) in &catalog.0 {
-        let label_keys: Vec<&str> = entry
-            .labels
-            .iter()
-            .copied()
-            .filter(|key| !key.starts_with(EVENT_LABEL_PREFIX))
-            .collect();
+        if SENT_DIRECTLY.contains(&name.as_str()) {
+            continue;
+        }
+        let label_keys = &entry.labels;
         let sent_for_name: Vec<&SentryMetric> =
             sent.iter().filter(|metric| metric.name == *name).collect();
         let sent_label_sets: HashSet<Vec<&(String, AttributeValue)>> = sent_for_name
@@ -350,6 +323,10 @@ fn one_sentry_flush_stays_within_the_budget_for_any_cardinality() {
 
     metrics::with_local_recorder(recorder.as_ref(), describe_all);
     for (name, entry) in &catalog.0 {
+        // The policy doesn't keep these histograms, so they are neither due nor over the cap.
+        if SENT_DIRECTLY.contains(&name.as_str()) {
+            continue;
+        }
         let records = match entry.kind {
             Kind::Histogram => records_per_histogram,
             Kind::Counter | Kind::Gauge => 1,

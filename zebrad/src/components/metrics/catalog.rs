@@ -25,9 +25,8 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 ///   `< 0.8`, or `< 1`.
 /// - `zcash.mempool.size.weighted`: `bk`, a fee weight ratio bucket: `< 1`, `1`, `> 1`, `> 2`, or
 ///   `> 3`.
-/// - `zcash.chain.tip.block_delay_seconds`:
-///   - `event.chain.height`: the block's height, an event attribute.
-///   - `chain.network_upgrade`: the network upgrade at the block's height, such as `Nu6`.
+/// - `zcash.chain.tip.block_delay_seconds`: `chain.network_upgrade`, the network upgrade at the
+///   block's height, such as `Nu6`.
 /// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget`, `transport_backlog`, or
 ///   `label_set_cap`.
 pub const LABELS: &[(&str, &[&str])] = &[
@@ -45,7 +44,7 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("zcash.mempool.size.weighted", &["bk"]),
     (
         "zcash.chain.tip.block_delay_seconds",
-        &["event.chain.height", "chain.network_upgrade"],
+        &["chain.network_upgrade"],
     ),
     ("zebrad.sentry.metrics.dropped.total", &["reason"]),
 ];
