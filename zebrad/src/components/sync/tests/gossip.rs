@@ -105,6 +105,153 @@ fn mined_block(n: u32) -> (block::Hash, Height) {
     (block::Hash(hash), Height(n))
 }
 
+/// Mined announcements record local-write completion and failures, not ordinary tip gossip.
+#[test]
+fn gossip_mined_announcement_metrics() {
+    use metrics::{
+        atomics::AtomicU64, Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata,
+        Recorder, SharedString, Unit,
+    };
+    use std::{collections::HashMap, sync::atomic::Ordering};
+
+    #[derive(Default)]
+    struct Durations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for Durations {
+        fn record(&self, value: f64) {
+            self.0.lock().unwrap().push(value);
+        }
+    }
+
+    #[derive(Default)]
+    struct AnnouncementRecorder {
+        counters: Mutex<HashMap<Key, Arc<AtomicU64>>>,
+        durations: Arc<Durations>,
+    }
+
+    impl AnnouncementRecorder {
+        fn outcome(&self, outcome: &'static str) -> u64 {
+            self.counters
+                .lock()
+                .unwrap()
+                .get(&Key::from_parts(
+                    "sync.mined.block.announcement.outcomes.total",
+                    &[("outcome", outcome)],
+                ))
+                .map_or(0, |value| value.load(Ordering::Relaxed))
+        }
+    }
+
+    impl Recorder for AnnouncementRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::from_arc(
+                self.counters
+                    .lock()
+                    .unwrap()
+                    .entry(key.clone())
+                    .or_default()
+                    .clone(),
+            )
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+            if key.name() == "sync.mined.block.announcement.duration_seconds" {
+                assert_eq!(key.labels().count(), 0);
+                Histogram::from_arc(self.durations.clone())
+            } else {
+                Histogram::noop()
+            }
+        }
+    }
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = AnnouncementRecorder::default();
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::pause();
+            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 4, async {
+                let (mut tip_sender, _latest_tip, tip_change) =
+                    ChainTipSender::new(None, &Network::Mainnet);
+                let (sync_status, mut recent_syncs) = SyncStatus::new();
+                recent_syncs.push_extend_tips_length(0);
+                let (requests, mut received) = mpsc::unbounded_channel();
+                let peer_set = tower::service_fn(move |request: zn::Request| {
+                    requests.send(request.clone()).unwrap();
+                    async move {
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        if request == zn::Request::AdvertiseBlockToAll(mined_block(3).0) {
+                            Err::<zn::Response, BoxError>("local write failed".into())
+                        } else {
+                            Ok(zn::Response::Nil)
+                        }
+                    }
+                });
+                let channel = SubmitBlockChannel::new();
+                let sender = channel.sender();
+                let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+                    sync_status,
+                    tip_change,
+                    peer_set,
+                    Some(channel.receiver()),
+                ));
+                let (hash, height) = mined_block(1);
+                tip_sender.set_finalized_tip(ChainTipBlock {
+                    hash,
+                    height,
+                    time: Utc::now(),
+                    transactions: Default::default(),
+                    transaction_hashes: Arc::new([]),
+                    previous_block_hash: block::Hash([0; 32]),
+                });
+                assert_eq!(
+                    received.recv().await,
+                    Some(zn::Request::AdvertiseBlock(hash, None))
+                );
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                assert_eq!(recorder.outcome("completed"), 0);
+                assert!(recorder.durations.0.lock().unwrap().is_empty());
+
+                sender.try_send(mined_block(2)).unwrap();
+                assert_eq!(
+                    received.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(mined_block(2).0)),
+                );
+                assert_eq!(recorder.outcome("completed"), 0);
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                assert_eq!(recorder.outcome("completed"), 1);
+                {
+                    let samples = recorder.durations.0.lock().unwrap();
+                    assert_eq!(samples.len(), 1);
+                    // Timer deadlines are rounded to the runtime's millisecond resolution.
+                    assert!((3.0..4.0).contains(&samples[0]));
+                }
+
+                sender.try_send(mined_block(3)).unwrap();
+                assert_eq!(
+                    received.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(mined_block(3).0)),
+                );
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                assert_eq!(recorder.outcome("failed"), 1);
+                assert_eq!(recorder.outcome("completed"), 1);
+                assert_eq!(recorder.durations.0.lock().unwrap().len(), 1);
+                gossip.abort();
+                assert!(gossip.await.unwrap_err().is_cancelled());
+            })
+            .await
+            .expect("announcement metrics include bounded local writes");
+        });
+    });
+}
+
 /// If there are never any ready peers, the gossip task must keep consuming mined block
 /// announcements, so `submitblock` never sees a full channel.
 #[tokio::test(start_paused = true)]

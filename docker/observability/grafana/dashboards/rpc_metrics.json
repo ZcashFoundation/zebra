@@ -798,6 +798,87 @@
         }
       ],
       "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "zebra-prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "ops", "color": {"mode": "palette-classic"}},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "id": 10,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [{
+        "expr": "sum(rate(rpc_submitblock_outcomes_total[$__rate_interval])) by (outcome)",
+        "legendFormat": "{{ outcome }}",
+        "refId": "A"
+      }],
+      "title": "Block Submission Outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "zebra-prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "s", "color": {"mode": "palette-classic"}},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "id": 11,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [{
+        "expr": "sum(rate(rpc_getblocktemplate_build_duration_seconds_sum[$__rate_interval])) / sum(rate(rpc_getblocktemplate_build_duration_seconds_count[$__rate_interval]))",
+        "legendFormat": "Mean build time",
+        "refId": "A"
+      }],
+      "title": "Template Construction (Excludes Long Polling)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "zebra-prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "ops", "color": {"mode": "palette-classic"}},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "id": 12,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [{
+        "expr": "sum(rate(sync_mined_block_announcement_outcomes_total[$__rate_interval])) by (outcome)",
+        "legendFormat": "{{ outcome }}",
+        "refId": "A"
+      }],
+      "title": "Mined-Block Announcement Attempts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "zebra-prometheus"},
+      "description": "Time from gossip receiving an accepted mined block until every selected connection completes its local write, including retries. Not peer receipt.",
+      "fieldConfig": {
+        "defaults": {"unit": "s", "color": {"mode": "palette-classic"}},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "id": 13,
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [{
+        "expr": "sum(rate(sync_mined_block_announcement_duration_seconds_sum[$__rate_interval])) / sum(rate(sync_mined_block_announcement_duration_seconds_count[$__rate_interval]))",
+        "legendFormat": "Mean gossip receipt to completed writes",
+        "refId": "A"
+      }],
+      "title": "Mined-Block Announcement Latency",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
