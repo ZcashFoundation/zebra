@@ -222,6 +222,10 @@ pub(crate) struct StateService {
     /// Bounds early-work computations and keeps a live candidate from being replaced.
     mining_candidate_slot: Arc<Semaphore>,
 
+    /// How long a mining candidate may compute and stay published, [`MINING_CANDIDATE_LIFETIME`]
+    /// outside tests.
+    mining_candidate_lifetime: Duration,
+
     /// Bounded input to the writer-owned roots cache, and its published progress.
     tree_roots_sender: std::sync::mpsc::SyncSender<TreeRootsMessage>,
     wanted_tree_roots: watch::Receiver<WantedTreeRoots>,
@@ -243,6 +247,9 @@ pub(crate) struct StateService {
 /// How long a proposal check waits for the writer or another check to release the prepared chain,
 /// before cloning the published best chain instead.
 const PROPOSAL_PREPARED_WAIT: Duration = Duration::from_millis(20);
+
+/// How long a mining candidate may compute and stay published before the state gives up on it.
+const MINING_CANDIDATE_LIFETIME: Duration = Duration::from_secs(1);
 
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
@@ -554,6 +561,7 @@ impl StateService {
             read_service: read_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
+            mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
             tree_roots_sender,
             wanted_tree_roots,
             rejected_tree_roots,
@@ -1573,7 +1581,7 @@ impl Service<Request> for StateService {
                 let mut tip_change = self.latest_chain_tip.clone();
                 // Published work reserves the slot until verification ends, even after expiry.
                 let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+                let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let candidate_block = block.clone();

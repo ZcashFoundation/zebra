@@ -1798,13 +1798,18 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
 
     let _init_guard = zebra_test::init();
 
-    // Stay below the candidate's 30-second lifetime: expiry must not imitate failure withdrawal.
+    // Stay below the candidate's 60-second lifetime: expiry must not imitate failure withdrawal.
     tokio::time::timeout(Duration::from_secs(20), async {
         let network = Network::new_regtest(Default::default());
         let genesis = regtest_genesis_block();
         let tip_hash = genesis.hash();
         let (state, read_state, tip, _tip_changes) =
-            zebra_state::populated_state([genesis], &network).await;
+            zebra_state::populated_state_with_mining_candidate_lifetime(
+                [genesis],
+                &network,
+                Duration::from_secs(60),
+            )
+            .await;
         let miner_params = MinerParams::from(
             Address::decode(
                 &network,

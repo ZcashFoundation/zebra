@@ -101,6 +101,43 @@ async fn invalid_mining_candidate_body_releases_slot_while_guard_is_retained() {
     .expect("an invalid body must not reserve admission until its verifier finishes");
 }
 
+/// Without a commit, rejection, or tip change, a valid candidate lives until its lifetime ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn mining_candidate_expires_after_its_lifetime() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (mut state, read) = state(true).await;
+        let lifetime = Duration::from_millis(200);
+        state.mining_candidate_lifetime = lifetime;
+        let block = candidate(&read, false, 0).await;
+        let changes = subscribe(&read).await;
+        let admitted = tokio::time::Instant::now();
+        let Response::MiningCandidate(Some(mut guard)) = state
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::MiningCandidate(block))
+            .await
+            .unwrap()
+        else {
+            panic!("the first candidate reserves the computation slot");
+        };
+        // Publication ends at the deadline whether or not the computation finished first.
+        while guard.0.changed().await.is_ok() {}
+        assert!(
+            admitted.elapsed() >= lifetime,
+            "a valid candidate must stay live until its lifetime ends"
+        );
+        assert!(changes.0.borrow().is_none());
+        assert_eq!(
+            read.oneshot(ReadRequest::MiningCandidate).await.unwrap(),
+            ReadResponse::MiningCandidate(None)
+        );
+    })
+    .await
+    .expect("an expired candidate must be withdrawn without a commit or failure");
+}
+
 #[test]
 fn timed_out_mining_candidate_keeps_queued_computation_bounded() {
     let _init_guard = zebra_test::init();

@@ -6391,8 +6391,14 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
                 .zcash_deserialize_into()
                 .unwrap();
             let tip_hash = genesis.hash();
+            // Outlive the test's timeout, so only withdrawal can end the candidate.
             let (state, real_read_state, _tip, _tip_changes) =
-                zebra_state::populated_state([genesis], &net).await;
+                zebra_state::populated_state_with_mining_candidate_lifetime(
+                    [genesis],
+                    &net,
+                    Duration::from_secs(60),
+                )
+                .await;
             // Candidates must meet contextual header rules, which historical block 1 doesn't
             // with only genesis as context.
             let ReadResponse::ChainInfo(context) = real_read_state
@@ -6608,7 +6614,7 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
         }
     })
     .await
-    .expect("the regression must complete before the candidate's 30-second expiry");
+    .expect("the regression must complete before the candidate's 60-second expiry");
 }
 
 /// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
