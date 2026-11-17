@@ -212,17 +212,28 @@ fn inline_decoding_and_body_checks_do_not_wait_for_rayon() {
             });
             tokio::task::yield_now().await;
             let mut many = (*block::genesis::regtest_genesis_block()).clone();
-            let repeated_transaction = Arc::new(Transaction::test_v4(
-                Vec::new(),
-                Vec::new(),
+            // Each transaction has the minimum transparent transaction size, so enough of them to
+            // reach the parallel decoding threshold still fit in a small block.
+            let repeated_transaction = Arc::new(Transaction::test_v1(
+                vec![transparent::Input::PrevOut {
+                    outpoint: transparent::OutPoint {
+                        hash: [8; 32].into(),
+                        index: 0,
+                    },
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: 0,
+                }],
+                vec![transparent::Output::new(
+                    1.try_into().unwrap(),
+                    transparent::Script::new(&[]),
+                )],
                 LockTime::unlocked(),
-                Height(0),
             ));
-            many.transactions = vec![repeated_transaction; 66];
+            many.transactions = vec![repeated_transaction; 65];
             let bytes = many.zcash_serialize_to_vec().unwrap();
             assert!(bytes.len() <= 4096);
             let decoded = super::super::DecodedBlock::deserialize(&bytes).unwrap();
-            assert_eq!(decoded.block().transactions.len(), 66);
+            assert_eq!(decoded.block().transactions.len(), 65);
             let network = network();
             let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
             let decoded =

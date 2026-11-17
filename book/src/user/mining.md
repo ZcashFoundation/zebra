@@ -231,9 +231,7 @@ proposal in the background. When the chain tip changes, it serves coinbase-only 
 than waiting for mempool selection. A failed check restores the last valid template for that parent.
 A solved block that changes only the nonce and Equihash solution reuses the cached verdict in
 `submitblock`, as long as the check finished before the solve. It then checks proof of work and
-commits without repeating transaction and contextual validation. The state applies such a block by
-rebinding the chain it prepared while validating the template, so the commit does not depend on
-the number of transactions in the block.
+commits without repeating transaction and contextual validation.
 If you change the coinbase, transactions, timestamp or another header
 field, submit the modified block with `getblocktemplate` parameters
 `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it. A successful proposal lets a

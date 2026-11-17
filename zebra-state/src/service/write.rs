@@ -3,7 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use indexmap::IndexMap;
@@ -26,7 +26,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
+        ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
     },
     CheckpointVerifiedBlock, SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -184,6 +184,16 @@ fn update_latest_chain_channels(
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
 ) -> Option<block::Height> {
+    let non_finalized_tip = non_finalized_state
+        .best_tip_block()
+        .cloned()
+        .map(ChainTipBlock::from);
+    let tip_block_height = if let Some(tip) = &non_finalized_tip {
+        Some(tip.height)
+    } else {
+        finalized_state.finalized_tip_height()
+    };
+
     if let Some(backup_dir_path) = backup_dir_path {
         non_finalized_state.write_to_backup(backup_dir_path);
     }
@@ -191,15 +201,19 @@ fn update_latest_chain_channels(
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
-    chain_tip_sender.update_best_tip(non_finalized_state, finalized_state)
-}
+    if let Some(tip) = non_finalized_tip {
+        chain_tip_sender.set_best_non_finalized_tip(tip);
+    } else {
+        let finalized_tip = finalized_state
+            .tip_block()
+            .expect("the finalized tip must have a complete stored body")
+            .map(crate::CheckpointVerifiedBlock::from)
+            .map(ChainTipBlock::from);
+        chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
+    }
 
-/// How long the writer waits for readers to release a retired chain before giving up on
-/// replaying it ahead of the next commit or finalization.
-///
-/// Readers hold a snapshot for the duration of one request, and candidate and proposal checks
-/// hold one for a few milliseconds, so most retired chains are released well within this bound.
-const SPARE_WAIT: Duration = Duration::from_millis(50);
+    tip_block_height
+}
 
 /// A worker task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state`.
@@ -922,32 +936,11 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
-            let tip_block_height = non_finalized_state
-                .best_tip()
-                .expect("just successfully inserted a non-finalized block above")
-                .0;
-            let finalized_tip_height = finalized_state
-                .db
-                .finalized_tip_height()
-                .expect("non-finalized blocks have a finalized parent");
-            let finalizing_height =
-                Height(tip_block_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT));
-            let finalization_start = finalized_tip_height
-                .next()
-                .expect("the successfully committed non-finalized tip is above the finalized tip");
-            let finalization_range = finalization_start.0..=finalizing_height.0;
-            // Use the same range before publication and after acknowledgement.
-            let pruned_chains =
-                if !finalization_range.is_empty() && non_finalized_state.chain_count() > 1 {
-                    non_finalized_state.prune_for_finalization(finalizing_height)
-                } else {
-                    Vec::new()
-                };
 
             forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
 
             let phase_start = Instant::now();
-            update_latest_chain_channels(
+            let tip_block_height = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
                 chain_tip_sender,
@@ -974,31 +967,8 @@ impl WriteBlockWorkerTask {
 
             // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
-            drop(pruned_chains);
 
-            // Finish retention before receiving another block; finalization errors remain fatal.
-            // The best chain keeps written blocks, so its published snapshot isn't copied, and the
-            // blocks stay readable there until the next write pops them.
             let phase_start = Instant::now();
-            for height in finalization_range {
-                tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees =
-                    non_finalized_state.finalize_keeping_best_chain(Height(height));
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
-                if let Some(wake) = pruning_wake {
-                    let _ = wake.try_send(());
-                }
-            }
-
-            // # Security
-            //
-            // The chains can still pass the index entry limit. Finalize further roots like the
-            // other write paths, removing them from the best chain so they stop using memory, and
-            // publish that state so the previous snapshot doesn't keep them either.
             let root_height = non_finalized_state.root_height();
             finalize_root_blocks_and_forget_evicted(
                 finalized_state,
@@ -1010,27 +980,15 @@ impl WriteBlockWorkerTask {
                 backup_dir_path.as_deref(),
             );
             if non_finalized_state.root_height() != root_height {
-                let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+                if let Some(wake) = pruning_wake {
+                    let _ = wake.try_send(());
+                }
             }
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",
                 "phase" => "finalization"
             )
             .record(phase_start.elapsed().as_secs_f64());
-
-            // Replay the retired chain into a spare for the next commit while no block is
-            // waiting, so that commit only pushes its own block.
-            if non_finalized_block_write_receiver.is_empty() {
-                let phase_start = Instant::now();
-                non_finalized_state.prepare_spare(Instant::now() + SPARE_WAIT, || {
-                    !non_finalized_block_write_receiver.is_empty()
-                });
-                metrics::histogram!(
-                    "state.block_writer.phase.duration_seconds",
-                    "phase" => "prepare_spare"
-                )
-                .record(phase_start.elapsed().as_secs_f64());
-            }
 
             // Update the metrics if semantic and contextual validation passes
             //

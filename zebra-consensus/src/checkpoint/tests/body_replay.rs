@@ -178,9 +178,13 @@ async fn targeted_body_replay_rejects_changed_coinbase_height() -> Result<(), Re
     let error = timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), rejected)
         .await?
         .unwrap_err();
+    // The V5 coinbase expiry height still commits to the certified height, so the changed input
+    // height fails the coinbase height commitment before the replay is matched.
     assert!(matches!(
         error,
-        VerifyCheckpointError::CoinbaseHeight { .. }
+        VerifyCheckpointError::VerifyBlock(VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight { .. }),
+        })
     ));
     assert_eq!(error.misbehavior_score(), 100);
 

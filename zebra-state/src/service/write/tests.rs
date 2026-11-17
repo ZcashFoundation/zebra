@@ -622,7 +622,6 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         tip: LatestChainTip,
         root: Arc<Block>,
         committed: Arc<Block>,
-        conflicting_root: block::Hash,
         deferred_chain: Option<std::sync::Weak<Chain>>,
         /// An address that receives `reward` zatoshis in every block after genesis.
         address: transparent::Address,
@@ -638,7 +637,6 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
             let chain = snapshot.best_chain();
             let tip_height = self.committed.coinbase_height().unwrap();
             self.tip.best_tip_hash() == Some(self.committed.hash())
-                && !snapshot.any_chain_contains(&self.conflicting_root)
                 && [&self.root, &self.committed].into_iter().all(|block| {
                     [block.hash().into(), block.coinbase_height().unwrap().into()]
                         .into_iter()
@@ -781,7 +779,6 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
             snapshot: snapshot.clone(),
             tip: tip.clone(),
             root,
-            conflicting_root: conflicting_root.hash(),
             deferred_chain: observations.is_empty().then(|| deferred_chain.clone()),
             committed: child.clone(),
             address,

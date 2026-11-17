@@ -28,6 +28,11 @@ fn decoded_size_matches_canonical_blocks_and_bundles() {
         let branch = upgrade.branch_id().unwrap().try_into().unwrap();
         for orchard in [false, true] {
             for ironwood in [false, true] {
+                // A transaction without inputs, outputs or bundles is smaller than any valid
+                // transaction, so block parsing rejects it.
+                if !orchard && !ironwood {
+                    continue;
+                }
                 block.transactions = vec![Arc::new(fake_v6_transaction(
                     upgrade,
                     orchard.then(|| {

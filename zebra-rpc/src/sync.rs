@@ -437,16 +437,6 @@ impl TrustedChainSync {
     ) -> Result<(), ValidateContextError> {
         self.try_catch_up_with_primary().await;
 
-        // The primary's published non-finalized state keeps its newest finalized block until its
-        // next write, so the catch-up can finalize the streamed block on the secondary.
-        if self
-            .db
-            .finalized_tip_height()
-            .is_some_and(|tip| block.height <= tip)
-        {
-            return Ok(());
-        }
-
         // When the non-finalized state is empty and the incoming block doesn't build directly on
         // the secondary's finalized tip, the secondary's finalized state is lagging the primary's.
         // The streamed non-finalized blocks start at the primary's finalized tip, which can be
@@ -463,16 +453,18 @@ impl TrustedChainSync {
     }
 
     /// Commits `block` to the non-finalized state, starting a new chain if it builds on the
-    /// finalized tip or extending an existing chain otherwise, and publishes the updated chain tip
-    /// and non-finalized state.
+    /// finalized tip or extending an existing chain otherwise, prunes newly-finalized blocks, and
+    /// publishes the updated chain tip and non-finalized state.
     ///
     /// Updating the channels here (rather than only after `try_commit` returns) means the bridge
     /// blocks committed by [`Self::fill_finalized_gap`] also advance the published chain tip.
     fn commit(&mut self, block: SemanticallyVerifiedBlock) -> Result<(), ValidateContextError> {
         if self.db.finalized_tip_hash() == block.block.header.previous_block_hash {
+            self.prune_finalized();
             self.non_finalized_state.commit_new_chain(block, &self.db)?;
         } else {
             self.non_finalized_state.commit_block(block, &self.db)?;
+            self.prune_finalized();
         }
 
         self.update_channels();
@@ -485,7 +477,7 @@ impl TrustedChainSync {
     ///
     /// These blocks are finalized on the primary but not yet on the lagging secondary. Committing
     /// them as non-finalized bridge blocks gives the block at `target_height` a contiguous chain to
-    /// attach to; they are dropped again as the secondary catches up.
+    /// attach to; they are dropped again by [`Self::prune_finalized`] as the secondary catches up.
     ///
     /// This is best-effort: if a block can't be fetched or committed, it returns early and lets the
     /// caller's commit fail so the block is retried on the next subscription.
@@ -495,6 +487,7 @@ impl TrustedChainSync {
             // its own, we can stop fetching blocks. This also drops any bridge blocks the secondary
             // has since finalized, so the next height is recomputed from where we actually are.
             self.try_catch_up_with_primary().await;
+            self.prune_finalized();
 
             // The next height to bridge is just above the highest block we already have: the
             // non-finalized tip if we've committed bridge blocks, otherwise the finalized tip.
@@ -601,26 +594,48 @@ impl TrustedChainSync {
         .map(|a| a.into_inner())
     }
 
-    /// Catches up the secondary, reconciles retained chains, and publishes any retention change.
-    async fn try_catch_up_with_primary(&mut self) {
+    /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
+    async fn try_catch_up_with_primary(&self) {
         let _ = self.db.spawn_try_catch_up_with_primary().await;
-        if self.non_finalized_state.prune_finalized(&self.db) {
-            self.update_channels();
-        } else if self.non_finalized_state.best_chain().is_none() {
-            self.chain_tip_sender
-                .update_best_tip(&self.non_finalized_state, &self.db);
+    }
+
+    /// Finalizes any non-finalized blocks that are at or below the finalized tip height.
+    ///
+    /// The secondary's finalized state follows the primary, so after catching up it may have
+    /// advanced past the root of the non-finalized state. This drops those now-finalized blocks so
+    /// the non-finalized state only tracks blocks above the finalized tip. Does nothing when the
+    /// non-finalized state is empty.
+    fn prune_finalized(&mut self) {
+        let finalized_tip_height = self.db.finalized_tip_height().unwrap_or(Height::MIN);
+        while self
+            .non_finalized_state
+            .root_height()
+            .is_some_and(|root_height| root_height <= finalized_tip_height)
+        {
+            tracing::trace!("finalizing block past the reorg limit");
+            self.non_finalized_state.finalize();
         }
     }
 
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
+    // TODO: Replace this with the `update_latest_chain_channels()` fn in `write.rs`.
     fn update_channels(&mut self) {
         // If the final receiver was just dropped, ignore the error.
         let _ = self
             .non_finalized_state_sender
             .send(self.non_finalized_state.clone());
 
+        let best_chain = self.non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
+
+        let tip_block = best_chain
+            .tip_block()
+            .expect(
+                "unexpected empty chain: must commit at least one block before updating channels",
+            )
+            .clone();
+
         self.chain_tip_sender
-            .update_best_tip(&self.non_finalized_state, &self.db);
+            .set_best_non_finalized_tip(Some(tip_block.into()));
     }
 }
 

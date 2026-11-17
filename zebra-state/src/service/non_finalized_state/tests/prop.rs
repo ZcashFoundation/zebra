@@ -367,7 +367,6 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
-        partial_chain.partial_cumulative_work = full_chain.partial_cumulative_work;
         for block in chain
             .clone()
             .skip(finalized_count) {
@@ -451,7 +450,6 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
-        partial_chain.partial_cumulative_work = full_chain.partial_cumulative_work;
 
         for block in chain
             .iter()

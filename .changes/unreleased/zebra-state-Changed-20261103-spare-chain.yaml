@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Reuse retired or prepared non-finalized chain indexes for eligible commits and proposal checks, retaining ordinary copying and validation as a fallback. Matching solved proposals reuse prepared state even after root finalization, without mutating published snapshots. Keep one spare index copy and an additional prepared copy on nodes that validate proposals.
-time: 2026-11-03T00:00:00Z

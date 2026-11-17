@@ -244,12 +244,12 @@ pub(crate) struct StateService {
     max_finalized_queue_height: f64,
 }
 
-/// How long a proposal check waits for the writer or another check to release the prepared chain,
-/// before cloning the published best chain instead.
-const PROPOSAL_PREPARED_WAIT: Duration = Duration::from_millis(20);
-
 /// How long a mining candidate may compute and stay published before the state gives up on it.
 const MINING_CANDIDATE_LIFETIME: Duration = Duration::from_secs(1);
+
+/// The mining candidate lifetime of test states, so only withdrawal or an explicit short lifetime
+/// ends their candidates.
+const TEST_MINING_CANDIDATE_LIFETIME: Duration = Duration::from_secs(60);
 
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
@@ -298,10 +298,6 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
-
-    /// Serializes block proposal checks, so they take turns with the prepared chain instead of
-    /// each cloning the published best chain.
-    proposal_check: Arc<std::sync::Mutex<()>>,
 }
 
 impl Drop for StateService {
@@ -561,7 +557,11 @@ impl StateService {
             read_service: read_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
-            mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
+            mining_candidate_lifetime: if cfg!(test) {
+                TEST_MINING_CANDIDATE_LIFETIME
+            } else {
+                MINING_CANDIDATE_LIFETIME
+            },
             tree_roots_sender,
             wanted_tree_roots,
             rejected_tree_roots,
@@ -957,7 +957,7 @@ impl StateService {
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
         mut semantically_verified: SemanticallyVerifiedBlock,
-        contextual: Option<Box<crate::ContextuallyVerifiedBlock>>,
+        mut contextual: Option<Box<crate::ContextuallyVerifiedBlock>>,
         mut notifications: Option<MinedBlockNotifications>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
@@ -1028,6 +1028,12 @@ impl StateService {
                     .0
                     .received_time
                     .min(semantically_verified.received_time);
+            }
+            // A mined request's cached verdict validated its own body, so a replacement keeps
+            // both, as [`Request::CommitMinedBlock`] documents.
+            if let Some(verdict) = old_request.2.take() {
+                std::mem::swap(&mut semantically_verified, &mut old_request.0);
+                contextual = Some(verdict);
             }
             // Ordinary supersession keeps a mined observer without requiring its capacity.
             if notifications.is_none() {
@@ -1411,7 +1417,6 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
-            proposal_check: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
@@ -2636,10 +2641,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "attempting to validate and commit block proposal \
                          onto a cloned non-finalized state"
                 );
-                let _one_check_at_a_time = state
-                    .proposal_check
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
                 // The previous block of a valid proposal must be on the best chain tip.
@@ -2665,32 +2666,17 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
-                // Push onto the prepared chain, replayed to the current tip, instead of cloning
-                // the published best chain. The pushed chain is then prepared for a commit of
-                // this proposal, or for the next proposal.
-                latest_non_finalized_state
-                    .take_prepared_as_spare(Instant::now() + PROPOSAL_PREPARED_WAIT);
                 let hash = semantically_verified.hash;
-                if let Err(error) = write::validate_and_commit_non_finalized(
+                write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
-                ) {
-                    // A spare that the failed validation did not use stays available.
-                    if let Some(spare) = latest_non_finalized_state.remove_spare() {
-                        latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(spare));
-                    }
-                    return Err(error.into());
-                }
+                )?;
 
-                let chain = latest_non_finalized_state
-                    .remove_chain_with_tip(hash)
-                    .expect("successful proposal validation inserted its block");
-                let contextual = chain
-                    .block(hash.into())
-                    .expect("the selected chain contains the proposal")
-                    .clone();
-                latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(chain));
+                let contextual = latest_non_finalized_state
+                    .find_chain(|chain| chain.non_finalized_tip_hash() == hash)
+                    .and_then(|chain| chain.block(hash.into()).cloned())
+                    .expect("successful proposal validation inserted its block as a chain tip");
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 
@@ -2838,8 +2824,9 @@ pub async fn init_test(
 ) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
-    let (state_service, _, _, _) =
+    let (mut state_service, _, _, _) =
         StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
+    state_service.mining_candidate_lifetime = TEST_MINING_CANDIDATE_LIFETIME;
 
     Buffer::new(BoxService::new(state_service), 1)
 }
@@ -2859,8 +2846,9 @@ pub async fn init_test_services(
 ) {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
-    let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
+    let (mut state_service, read_state_service, latest_chain_tip, chain_tip_change) =
         StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
+    state_service.mining_candidate_lifetime = TEST_MINING_CANDIDATE_LIFETIME;
 
     let state_service = Buffer::new(BoxService::new(state_service), 1);
 

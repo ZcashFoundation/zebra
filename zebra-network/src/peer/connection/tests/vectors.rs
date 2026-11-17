@@ -299,7 +299,7 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
                 async {
                     let request = inbound_service.expect_request_that(|_| true).await;
                     match request.request() {
-                        Request::BlocksByHash(hashes) => {
+                        Request::RawBlocksByHash(hashes) => {
                             assert!(
                                 !expected_blocks.is_empty(),
                                 "transactions stay transactions"

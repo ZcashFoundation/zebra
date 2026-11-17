@@ -34,7 +34,10 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
+        arbitrary::{
+            populated_state, populated_state_with_debug,
+            populated_state_with_mining_candidate_lifetime, PreparedChain,
+        },
         chain_tip::TipAction,
         StateService,
     },
@@ -647,13 +650,16 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
 #[tokio::test]
 async fn mining_candidate_slot_is_held_until_verification_finishes() {
     let _init_guard = zebra_test::init();
+    // Expiry stays inside the test's timeout, which paused time also advances.
+    const LIFETIME: Duration = Duration::from_secs(30);
 
     tokio::time::timeout(Duration::from_secs(60), async {
         let network = Network::Mainnet;
         let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
             .unwrap();
-        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let (state, read_state, _, _) =
+            populated_state_with_mining_candidate_lifetime([genesis], &network, LIFETIME).await;
         let ReadResponse::ChainInfo(context) = read_state
             .clone()
             .oneshot(ReadRequest::ChainInfo)
@@ -709,7 +715,7 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
         ));
 
         tokio::time::pause();
-        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::advance(LIFETIME + Duration::from_secs(1)).await;
         tokio::time::resume();
         changes.changed().await;
         assert!(changes.block(block.hash()).is_none());

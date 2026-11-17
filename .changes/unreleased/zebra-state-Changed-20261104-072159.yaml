@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Finalize blocks past the reorg limit without copying the published best chain. Retained finalized roots are excluded from fork-choice work and removed when that chain next extends or is explicitly finalized. Invalidating a shared root removes every affected fork, and reconsideration restores their retained blocks.
-time: 2026-11-04T07:21:59.510670033+01:00

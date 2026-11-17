@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Fixed
-body: The trusted chain syncer reconciles retained forks against the finalized database after catching up, instead of retaining disconnected forks.
-time: 2026-11-04T08:12:20.637350713+01:00

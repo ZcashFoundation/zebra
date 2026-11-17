@@ -150,6 +150,7 @@ fn timed_out_mining_candidate_keeps_queued_computation_bounded() {
         tokio::time::timeout(Duration::from_secs(60), async {
             // A checkpointed parent avoids `block_in_place` commits, so this test can pause time.
             let (mut state, read) = state(true).await;
+            state.mining_candidate_lifetime = Duration::from_secs(30);
             let block = candidate(&read, false, 0).await;
             let mut changes = subscribe(&read).await;
             let (release, released) = oneshot::channel::<()>();

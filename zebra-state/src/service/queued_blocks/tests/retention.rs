@@ -120,7 +120,7 @@ fn assert_no_orphan_indexing(queue: &QueuedBlocks) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ready_commit_skips_orphan_indexes_and_keeps_sent_outputs() {
+async fn ready_commit_skips_orphan_indexes_and_forgets_committed_outputs() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(10), async {
         let (mut state, parent) = orphan_state().await;
@@ -163,20 +163,17 @@ async fn ready_commit_skips_orphan_indexes_and_keeps_sent_outputs() {
             .unwrap()
             .unwrap_err();
         assert!(duplicate.inner().is_duplicate_request());
-        state
-            .non_finalized_block_write_sent_hashes
-            .remove_all([first.hash()]);
-        assert!(state
-            .non_finalized_block_write_sent_hashes
-            .utxo(&shared)
-            .is_some());
-        state
-            .non_finalized_block_write_sent_hashes
-            .remove_all([second.hash()]);
+        // The duplicate drained both commit outcomes, so readers find the siblings' shared output
+        // in the published chains, and the sent hashes no longer keep their own copy.
         assert!(state
             .non_finalized_block_write_sent_hashes
             .utxo(&shared)
             .is_none());
+        assert!(state
+            .read_service
+            .latest_non_finalized_state()
+            .any_utxo(&shared)
+            .is_some());
     })
     .await
     .expect("ready siblings must commit despite dropped response receivers");

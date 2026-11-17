@@ -1237,7 +1237,7 @@ pub enum Request {
     ///
     /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
     /// without full transaction and contextual validation, and withdrawn on guard drop or after
-    /// 30 seconds.
+    /// 1 second.
     MiningCandidate(Arc<Block>),
 
     /// Performs contextual validation of the given semantically verified block,

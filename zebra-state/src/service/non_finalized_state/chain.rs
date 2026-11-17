@@ -28,7 +28,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
-    work::{difficulty::PartialCumulativeWork, equihash::Solution},
+    work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{
@@ -254,10 +254,11 @@ pub struct ChainInner {
 
     // Chain Work
     //
-    /// Work from the state's common origin through this chain's tip.
+    /// The cumulative work represented by `blocks`.
     ///
-    /// Finalizing or removing a root preserves its work. New chains inherit the finalized
-    /// offset from `NonFinalizedState`, so physical overlap never affects fork choice.
+    /// Since the best chain is determined by the largest cumulative work,
+    /// the work represented by finalized blocks can be ignored,
+    /// because they are common to all non-finalized chains.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
     // Chain Pools
@@ -446,22 +447,6 @@ impl Chain {
         (block, treestate)
     }
 
-    /// Removes finalized overlap without changing this chain's work or tip.
-    pub(super) fn pop_roots_through(&mut self, height: Height) {
-        while !self.is_empty() && self.non_finalized_root_height() <= height {
-            self.pop_root();
-        }
-    }
-
-    /// Like [`Self::pop_roots_through`], for a side chain that pops roots the best chain keeps,
-    /// so it stops sharing their index map paths.
-    pub(super) fn pop_detached_roots_through(&mut self, height: Height) {
-        while !self.is_empty() && self.non_finalized_root_height() <= height {
-            self.detach_index_entries_at(self.non_finalized_root_height());
-            self.pop_root();
-        }
-    }
-
     /// Returns the block at the provided height and all of its descendant blocks.
     pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
         self.blocks
@@ -478,9 +463,7 @@ impl Chain {
         let block_height = self.height_by_hash(block_hash)?;
         let mut new_chain = self.fork(block_hash)?;
         new_chain.pop_tip();
-        new_chain.last_fork_height = self
-            .last_fork_height
-            .min(Some(new_chain.non_finalized_tip_height()));
+        new_chain.last_fork_height = self.last_fork_height.min(Some(block_height));
         Some((new_chain, self.child_blocks(&block_height)))
     }
 
@@ -1446,7 +1429,7 @@ impl Chain {
         }
     }
 
-    pub(super) fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+    fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
@@ -1505,79 +1488,8 @@ impl Chain {
         self.blocks.values().nth(n).map(|block| block.hash)
     }
 
-    /// Replaces the tip block with `block`, a block with the same transactions and the same
-    /// header apart from the nonce and Equihash solution, such as a solved block template.
-    ///
-    /// Only the block hash index, the tip's history tree, the stored block and its recorded size
-    /// depend on those header fields, so this costs a history tree append rather than a block
-    /// push. An error leaves the chain unchanged.
-    ///
-    /// # Panics
-    ///
-    /// If [`Self::can_rebind_tip()`] is false, or `block` is not at the tip height with the
-    /// tip's transactions.
-    pub(crate) fn rebind_tip(
-        &mut self,
-        block: ContextuallyVerifiedBlock,
-    ) -> Result<(), ValidateContextError> {
-        let height = self.non_finalized_tip_height();
-        let previous = self
-            .tip_block()
-            .expect("only called while blocks is populated");
-        assert_eq!(block.height, height, "rebinding replaces the tip block");
-        assert_eq!(
-            block.transaction_hashes, previous.transaction_hashes,
-            "rebinding keeps the tip's transactions"
-        );
-        let previous_hash = previous.hash;
-        // Proposals skip proof of work, so the solution can change length when it is solved.
-        let size_change = (solution_size(&previous.block), solution_size(&block.block));
-
-        let mut history_tree = self
-            .parent_history_tree()
-            .expect("checked by can_rebind_tip");
-        let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
-        let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
-        let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
-        Arc::make_mut(&mut history_tree)
-            .push(
-                &self.network,
-                block.block.clone(),
-                BlockCommitmentTreeRoots {
-                    sapling: &sapling_root,
-                    orchard: &orchard_root,
-                    ironwood: &ironwood_root,
-                },
-            )
-            .map_err(Arc::new)?;
-
-        self.history_trees_by_height.insert(height, history_tree);
-        let info = self
-            .block_info_by_height
-            .get_mut(&height)
-            .expect("every block in the chain has block info");
-        let (previous_size, size) = size_change;
-        *info = BlockInfo::new(*info.value_pools(), info.size() + size - previous_size);
-        self.height_by_hash.remove(&previous_hash);
-        self.height_by_hash.insert(block.hash, height);
-        self.blocks.insert(height, Arc::new(block));
-        Ok(())
-    }
-
-    /// Returns `true` if the tip block can be rebound: the chain holds the history tree of the
-    /// tip's parent, which finalizing the parent removes.
-    pub(crate) fn can_rebind_tip(&self) -> bool {
-        !self.is_empty() && self.parent_history_tree().is_some()
-    }
-
-    /// Returns the history tree of the tip block's parent, if the chain still holds it.
-    fn parent_history_tree(&self) -> Option<Arc<HistoryTree>> {
-        let parent_height = self.non_finalized_tip_height().previous().ok()?;
-        self.history_trees_by_height.get(&parent_height).cloned()
-    }
-
     /// Remove the highest height block of the non-finalized portion of a chain.
-    pub(crate) fn pop_tip(&mut self) {
+    fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();
 
         let block = self
@@ -2408,10 +2320,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             "address changes must be present if block was added to chain"
         );
 
-        // Finalized roots remain part of the common work prefix, even after physical removal.
-        if position == RevertPosition::Tip {
-            self.partial_cumulative_work -= contextually_valid.work();
-        }
+        // remove work from partial_cumulative_work
+        self.partial_cumulative_work -= contextually_valid.work();
 
         // for each transaction in block
         for (transaction, transaction_hash) in
@@ -2569,15 +2479,6 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
         }
         self.block_info_by_height.remove(height);
     }
-}
-
-/// Returns the serialized length of `block`'s Equihash solution, including its length prefix.
-fn solution_size(block: &block::Block) -> u32 {
-    let size = match block.header.solution {
-        Solution::Common(_) => Solution::SERIALIZED_SIZE,
-        Solution::Regtest(_) => Solution::REGTEST_SERIALIZED_SIZE,
-    };
-    u32::try_from(size).expect("solutions are shorter than a block, which fits in a u32")
 }
 
 impl Ord for Chain {

@@ -24,7 +24,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::{check, ReadStateService, StateService, MINING_CANDIDATE_LIFETIME},
+    service::{check, ReadStateService, StateService, TEST_MINING_CANDIDATE_LIFETIME},
     BoxError, ChainTipChange, CheckpointVerifiedBlock, Config, LatestChainTip, Request, Response,
     SemanticallyVerifiedBlock,
 };
@@ -235,7 +235,7 @@ pub async fn populated_state_with_debug(
         blocks,
         network,
         debug_skip_format_upgrades,
-        MINING_CANDIDATE_LIFETIME,
+        TEST_MINING_CANDIDATE_LIFETIME,
     )
     .await
 }
