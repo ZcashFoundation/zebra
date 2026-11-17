@@ -40,8 +40,6 @@ If this returns `true`, the user is a maintainer and the contribution gate can b
 
 **Every PR to Zebra needs an approving review.** A PR from a Zebra maintainer (a member or owner of the ZcashFoundation organization) can be approved by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
 
-PRs targeting `main` that change Copilot review instructions or review skills require a Zebra Team approval.
-
 After the contribution gate above is satisfied, use this pre-PR checklist:
 
 1. Confirm scope: Zebra is a validator node. Avoid out-of-scope features like wallets, block explorers, or mining pools.
