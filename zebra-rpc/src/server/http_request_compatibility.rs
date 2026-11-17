@@ -241,16 +241,16 @@ pub(super) fn splice_response(body: &[u8], version: JsonRpcVersion) -> Option<By
     let rest = rest.strip_suffix(b"}")?;
 
     // The id and error are small next to the result, so re-encode them as the parsing path does.
-    let reencode = |value: &[u8]| {
+    let re_encode = |value: &[u8]| {
         serde_json::from_slice::<serde_json::Value>(value)
             .ok()
             .and_then(|value| serde_json::to_vec(&value).ok())
     };
-    let id = reencode(id)?;
+    let id = re_encode(id)?;
     if let Some(result) = rest.strip_prefix(br#","result":"#) {
         return is_one_value(result).then(|| splice(head, &id, result, b"null"));
     }
-    let error = reencode(rest.strip_prefix(br#","error":"#)?)?;
+    let error = re_encode(rest.strip_prefix(br#","error":"#)?)?;
     Some(splice(head, &id, b"null", &error))
 }
 
