@@ -214,6 +214,7 @@ async fn mined_transaction_needs_no_body() {
             assert_eq!(request, zs::Request::KnownTransaction(hash));
             Ok::<_, BoxError>(zs::Response::KnownTransaction(true))
         }),
+        Network::Mainnet.fee_reduction_height(),
     );
     downloads
         .download_if_needed_and_verify(Gossip::Id(transaction.id), None, None)
