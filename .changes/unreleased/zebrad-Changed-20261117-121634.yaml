@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblock` and `getrawtransaction` with verbosity 0 return the stored bytes of finalized blocks and transactions instead of deserializing and re-serializing them; responses are unchanged. In the state request metrics these requests are now labelled `raw_block` and `any_chain_raw_transaction` instead of `block` and `any_chain_transaction`.'
+time: 2026-11-17T12:16:34.000000000Z

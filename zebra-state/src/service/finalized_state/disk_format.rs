@@ -135,6 +135,11 @@ impl RawBytes {
     pub fn raw_bytes(&self) -> &Vec<u8> {
         &self.0
     }
+
+    /// Consumes the raw bytes, returning the inner data without copying it.
+    pub fn into_raw_bytes(self) -> Vec<u8> {
+        self.0
+    }
 }
 
 impl IntoDisk for RawBytes {

@@ -76,9 +76,14 @@ fn known_transaction_bodies_are_pruned_only_below_the_actual_floor() {
             BlockReadError::CorruptBlock { height }
         };
         assert_eq!(state.db.transaction(tx.hash()).unwrap_err(), expected);
+        assert_eq!(
+            state.db.serialized_transaction(tx.hash()).unwrap_err(),
+            expected
+        );
         for query in [height.into(), block.hash().into()] {
             assert_eq!(state.db.block(query).unwrap_err(), expected);
             assert_eq!(state.db.block_and_size(query).unwrap_err(), expected);
+            assert_eq!(state.db.serialized_block(query).unwrap_err(), expected);
             assert!(state.db.block_header(query).is_some());
             assert_eq!(
                 state.db.transaction_hashes_for_block(query).unwrap()[0],

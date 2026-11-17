@@ -9,12 +9,12 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, Block, ChainHistoryMmrRootHash, SerializedBlock},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
@@ -476,6 +476,9 @@ pub enum ReadResponse {
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`ReadRequest::RawBlock`] with the specified serialized block.
+    RawBlock(Option<SerializedBlock>),
+
     /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
     /// non-coinbase inputs of the specified block, keyed by the spending
     /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found or a secondary
@@ -502,6 +505,9 @@ pub enum ReadResponse {
     /// Unknown hashes and torn secondary views return `None`; known pruned or corrupt bodies
     /// produce a service error instead.
     AnyChainTransaction(Option<AnyTx>),
+
+    /// Response to [`ReadRequest::AnyChainRawTransaction`] with the specified serialized transaction.
+    RawTransaction(Option<SerializedTransaction>),
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
     /// with an list of transaction hashes in block order,
@@ -702,6 +708,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::RawBlock(_)
+            | ReadResponse::RawTransaction(_)
             | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
