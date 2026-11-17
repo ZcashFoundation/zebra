@@ -3,7 +3,7 @@
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     mem,
     path::{Path, PathBuf},
     sync::{
@@ -1277,16 +1277,41 @@ impl NonFinalizedState {
 
     /// Returns the index entries in all chains, counting the entries of blocks that chains share
     /// once, and the entries that chains have stopped sharing.
+    ///
+    /// Chains get their blocks by forking or extending other chains, and lose them only at their
+    /// root or tip, so the blocks a chain shares with any other chain are the ones from its root
+    /// up to some height. This only visits the blocks above that height.
     pub(crate) fn index_entry_count(&self) -> usize {
-        let mut seen_blocks = HashSet::new();
+        let mut counted: Vec<&Chain> = Vec::with_capacity(self.chain_set.len());
         let mut entries = 0;
-        for chain in &self.chain_set {
+        for chain in self.chain_iter() {
             entries += chain.detached_index_entry_count();
-            for block in chain.blocks.values() {
-                if seen_blocks.insert(Arc::as_ptr(block)) {
-                    entries += chain.block_index_entry_count(block);
-                }
-            }
+
+            let is_counted = |height: &block::Height, block: &Arc<ContextuallyVerifiedBlock>| {
+                counted.iter().any(|other| {
+                    other
+                        .blocks
+                        .get(height)
+                        .is_some_and(|other_block| Arc::ptr_eq(other_block, block))
+                })
+            };
+            let root_is_counted = chain
+                .blocks
+                .get_min()
+                .is_some_and(|(height, block)| is_counted(height, block));
+
+            entries += if root_is_counted {
+                chain
+                    .blocks
+                    .iter()
+                    .rev()
+                    .take_while(|(height, block)| !is_counted(height, block))
+                    .map(|(_, block)| chain.block_index_entry_count(block))
+                    .sum()
+            } else {
+                chain.index_entry_count()
+            };
+            counted.push(chain);
         }
         entries
     }

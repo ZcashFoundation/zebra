@@ -260,6 +260,10 @@ pub struct ChainInner {
     /// The transaction, spend, and nullifier index entries that each block in `blocks` adds.
     pub(crate) index_entries_by_height: imbl::OrdMap<Height, usize>,
 
+    /// [`Chain::block_index_entry_count`] summed over `blocks`, updated as blocks are added and
+    /// removed, so counting a chain's entries doesn't visit its blocks.
+    pub(crate) index_entry_total: usize,
+
     // Chain Work
     //
     /// The cumulative work represented by `blocks`.
@@ -331,6 +335,7 @@ impl Chain {
             ironwood_nullifiers: Default::default(),
             transparent_transfers_by_height: Default::default(),
             index_entries_by_height: Default::default(),
+            index_entry_total: 0,
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
@@ -406,7 +411,7 @@ impl Chain {
             .insert(block.height, block_entries);
 
         tracing::debug!(block = %block.block, "adding block to chain");
-        self.blocks.insert(block.height, Arc::new(block));
+        self.insert_block(block);
         self.precious_rank = None;
 
         Ok(self)
@@ -438,10 +443,32 @@ impl Chain {
         self.add_history_tree(block.height, history_tree);
 
         tracing::debug!(block = %block.block, "adding block to chain");
-        self.blocks.insert(block.height, Arc::new(block));
+        self.insert_block(block);
         self.precious_rank = None;
 
         self
+    }
+
+    /// Adds `block` to `blocks`, and its index entries to the chain's total.
+    ///
+    /// The block's entries must already be in `index_entries_by_height`.
+    fn insert_block(&mut self, block: ContextuallyVerifiedBlock) {
+        self.index_entry_total += self.block_index_entry_count(&block);
+        self.blocks.insert(block.height, Arc::new(block));
+    }
+
+    /// Removes the block at `height` from `blocks`, and its index entries from the chain's total.
+    fn remove_block(&mut self, height: Height) -> Arc<ContextuallyVerifiedBlock> {
+        let block = self
+            .blocks
+            .remove(&height)
+            .expect("only called while blocks is populated");
+        self.index_entry_total = self
+            .index_entry_total
+            .checked_sub(self.block_index_entry_count(&block))
+            .expect("the total includes the entries of every block in the chain");
+        self.index_entries_by_height.remove(&height);
+        block
     }
 
     /// Pops the lowest height block of the non-finalized portion of a chain,
@@ -469,11 +496,7 @@ impl Chain {
         }
 
         // Remove the lowest height block from `self.blocks`.
-        let block = self
-            .blocks
-            .remove(&block_height)
-            .expect("only called while blocks is populated");
-        self.index_entries_by_height.remove(&block_height);
+        let block = self.remove_block(block_height);
 
         // Update cumulative data members.
         self.revert_chain_with(block.as_ref(), RevertPosition::Root);
@@ -1590,11 +1613,7 @@ impl Chain {
     fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();
 
-        let block = self
-            .blocks
-            .remove(&block_height)
-            .expect("only called while blocks is populated");
-        self.index_entries_by_height.remove(&block_height);
+        let block = self.remove_block(block_height);
 
         // If the popped block completed a Sapling or Orchard subtree, remove the corresponding
         // subtree from this chain too. Subtrees are inserted by `push` keyed by the highest subtree
@@ -1667,10 +1686,7 @@ impl Chain {
     /// Returns the number of blocks, transactions, transparent outputs and spends, and
     /// nullifiers in this chain.
     pub(crate) fn index_entry_count(&self) -> usize {
-        self.blocks
-            .values()
-            .map(|block| self.block_index_entry_count(block))
-            .sum()
+        self.index_entry_total
     }
 
     /// Returns the index entries that `block` adds to this chain, counting the block itself.

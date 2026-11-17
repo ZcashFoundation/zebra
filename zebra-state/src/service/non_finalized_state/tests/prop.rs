@@ -699,6 +699,7 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // index sizes
                 chain1.index_entries_by_height = chain2.index_entries_by_height.clone();
+                chain1.index_entry_total = chain2.index_entry_total;
 
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.

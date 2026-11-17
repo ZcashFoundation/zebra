@@ -2917,6 +2917,91 @@ fn index_entries_count_shared_blocks_once() -> Result<()> {
     Ok(())
 }
 
+/// Asserts that the index entry counts the state and each of its chains keep up to date equal a
+/// full recount, which counts each distinct block in the state once.
+fn assert_index_entries_match_recount(state: &NonFinalizedState) {
+    let mut counted_blocks = std::collections::HashSet::new();
+    let mut state_entries = 0;
+    for chain in state.chain_iter() {
+        let chain_entries: usize = chain
+            .blocks
+            .values()
+            .map(|block| chain.block_index_entry_count(block))
+            .sum();
+        assert_eq!(chain.index_entry_count(), chain_entries);
+
+        state_entries += chain.detached_index_entry_count()
+            + chain
+                .blocks
+                .values()
+                .filter(|block| counted_blocks.insert(Arc::as_ptr(block)))
+                .map(|block| chain.block_index_entry_count(block))
+                .sum::<usize>();
+    }
+    assert_eq!(state.index_entry_count(), state_entries);
+}
+
+/// The index entry counts stay equal to a full recount through commits, forks, finalization,
+/// invalidation and reconsideration.
+#[test]
+fn index_entry_counts_match_a_full_recount() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    // Each block gets a different seed, so siblings have different header hashes, and blocks in
+    // the same chain have different transaction hashes.
+    let child = |parent: &Arc<Block>, outputs: u32, seed: u8| {
+        with_transactions(
+            &busy_child(parent, &block1, &network, outputs, 10),
+            &network,
+            5,
+            seed,
+        )
+        .set_block_commitment([seed; 32])
+    };
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    assert_index_entries_match_recount(&state);
+
+    let mut best = vec![block1.clone()];
+    for seed in 0..4 {
+        let block = child(best.last().unwrap(), 100, seed);
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+        assert_index_entries_match_recount(&state);
+        best.push(block);
+    }
+
+    // A two-block fork low in the best chain, and a sibling of the best tip.
+    let fork = child(&best[1], 30, 10);
+    let fork_child = child(&fork, 30, 11);
+    let sibling = child(&best[3], 30, 12);
+    for block in [&fork, &fork_child, &sibling] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+        assert_index_entries_match_recount(&state);
+    }
+    assert_eq!(state.chain_count(), 3);
+
+    state.finalize();
+    assert_index_entries_match_recount(&state);
+
+    state
+        .invalidate_block(fork.hash())
+        .expect("the fork is in the state");
+    assert_index_entries_match_recount(&state);
+    state
+        .reconsider_block(fork.hash(), &finalized_state)
+        .expect("the fork was invalidated");
+    assert_index_entries_match_recount(&state);
+
+    state
+        .invalidate_block(best[4].hash())
+        .expect("the best tip is in the state");
+    assert_index_entries_match_recount(&state);
+
+    Ok(())
+}
+
 /// Returns the resident set size of this process in bytes, or zero if it is not available.
 fn resident_set_size() -> u64 {
     std::fs::read_to_string("/proc/self/status")
