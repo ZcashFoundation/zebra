@@ -454,7 +454,7 @@ fn setup(
         chain_tip_change,
         misbehavior_tx,
     );
-    mempool.skip_network_tip_distance_check();
+    mempool.skip_tip_age_check();
 
     let mut transaction_receiver = mempool_transaction_subscriber.subscribe();
     tokio::spawn(async move { while transaction_receiver.recv().await.is_ok() {} });

@@ -1239,7 +1239,7 @@ async fn setup(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
-    mempool_service.skip_network_tip_distance_check();
+    mempool_service.skip_tip_age_check();
 
     // Pretend we're close to tip
     SyncStatus::sync_close_to_tip(&mut recent_syncs);

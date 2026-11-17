@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: Fixed the mempool starting while the node is still far behind the network chain tip. Short sync batches from a node with few useful peers no longer turn it on, because the estimated distance to the network tip must also be small. Networks without proof of work, such as Regtest, are unchanged.
+body: Fixed the mempool starting on Mainnet while the node is still far behind the network chain tip. Short sync batches from a node with few useful peers no longer turn it on, because the best tip must also be at most 125 minutes old, the same limit `getblocktemplate` applies. Test networks are unchanged.
 time: 2026-11-17T15:51:27.509329223Z

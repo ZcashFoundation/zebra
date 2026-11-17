@@ -21,10 +21,10 @@ mod prop;
 mod vector;
 
 impl Mempool {
-    /// Lets the mempool start on sync status alone, for tests whose best tip is a historical
-    /// block that is far behind the network chain tip.
-    pub fn skip_network_tip_distance_check(&mut self) {
-        self.checks_network_tip_distance = false;
+    /// Lets the mempool start on sync status alone, for tests whose best tip is an old
+    /// Mainnet block.
+    pub fn skip_tip_age_check(&mut self) {
+        self.checks_tip_age = false;
     }
 
     /// Get the storage field of the mempool for testing purposes.

@@ -27,13 +27,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::{self, Height, HeightDiff},
+    block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
@@ -92,20 +92,26 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, St
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
 
-/// The largest estimated distance to the network chain tip, in blocks, at which the mempool can
-/// start.
+/// The oldest best tip at which the mempool can start on Mainnet.
 ///
 /// Short sync batches don't show that Zebra is near the network tip, because a node with few
-/// useful peers also gets short batches. This estimate comes from the best tip's block time, so
-/// a long gap between blocks can delay activation until the next block arrives.
-const MAX_START_DISTANCE_TO_NETWORK_TIP: HeightDiff = 20;
+/// useful peers also gets short batches. This matches the tip age limit `getblocktemplate`
+/// applies on Mainnet, so the mempool is active whenever the RPC builds templates.
+const MAX_START_TIP_AGE: Duration = Duration::seconds(7_500);
 
-/// Returns `true` if the estimated distance from `latest_chain_tip` to the network chain tip is
-/// small enough to start the mempool.
-fn is_near_network_tip(network: &Network, latest_chain_tip: &impl ChainTip) -> bool {
-    latest_chain_tip
-        .estimate_distance_to_network_chain_tip(network)
-        .is_some_and(|(distance, _)| distance <= MAX_START_DISTANCE_TO_NETWORK_TIP)
+/// Returns `true` if the best tip is recent enough to start the mempool on `network` at `now`.
+///
+/// Test networks accept any tip age, as `getblocktemplate` does, so miners can restart a
+/// network that has stalled for longer than [`MAX_START_TIP_AGE`].
+fn is_near_network_tip(
+    network: &Network,
+    latest_chain_tip: &impl ChainTip,
+    now: DateTime<Utc>,
+) -> bool {
+    !matches!(network, Network::Mainnet)
+        || latest_chain_tip
+            .best_tip_block_time()
+            .is_some_and(|block_time| now - block_time <= MAX_START_TIP_AGE)
 }
 
 /// Returns the mempool peer score after applying branch ID activation policy.
@@ -302,10 +308,8 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
-    /// Whether initial activation also requires a small estimated distance to the network chain
-    /// tip. It is `false` on networks without proof of work, where block times don't follow the
-    /// wall clock.
-    checks_network_tip_distance: bool,
+    /// Whether initial activation also requires a recent best tip.
+    checks_tip_age: bool,
 
     /// If the state's best chain tip has reached this height, always enable the mempool.
     debug_enable_at_height: Option<Height>,
@@ -385,7 +389,7 @@ impl Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
             sync_status,
-            checks_network_tip_distance: !network.disable_pow(),
+            checks_tip_age: true,
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
@@ -443,8 +447,8 @@ impl Mempool {
     /// Returns `true` if Zebra is caught up enough to start the mempool.
     fn is_caught_up_to_start(&self) -> bool {
         let is_near_tip = self.sync_status.is_close_to_tip()
-            && (!self.checks_network_tip_distance
-                || is_near_network_tip(&self.network, &self.latest_chain_tip));
+            && (!self.checks_tip_age
+                || is_near_network_tip(&self.network, &self.latest_chain_tip, Utc::now()));
 
         is_near_tip || self.is_enabled_by_debug()
     }

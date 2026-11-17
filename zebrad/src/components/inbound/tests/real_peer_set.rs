@@ -823,7 +823,7 @@ async fn setup(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
-    mempool_service.skip_network_tip_distance_check();
+    mempool_service.skip_tip_age_check();
 
     // Enable the mempool
     mempool_service.enable(&mut recent_syncs).await;
