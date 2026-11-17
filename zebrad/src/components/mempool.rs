@@ -814,6 +814,7 @@ impl Service<Request> for Mempool {
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
                 *last_seen_tip_hash = block.hash;
+                let cleanup_start = std::time::Instant::now();
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -827,6 +828,8 @@ impl Service<Request> for Mempool {
                 // Clear any transaction rejections if they might have become valid after
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
+                metrics::histogram!("mempool.tip_cleanup.duration_seconds")
+                    .record(cleanup_start.elapsed().as_secs_f64());
 
                 mined_mempool_ids.extend(mined);
                 invalidated_ids.extend(invalidated);
@@ -837,7 +840,10 @@ impl Service<Request> for Mempool {
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
             if let Some(tip_height) = best_tip_height {
+                let expiry_start = std::time::Instant::now();
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
+                metrics::histogram!("mempool.expiry.duration_seconds")
+                    .record(expiry_start.elapsed().as_secs_f64());
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);

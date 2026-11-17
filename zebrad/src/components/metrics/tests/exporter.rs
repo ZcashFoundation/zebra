@@ -52,12 +52,9 @@ fn exporter_renders_bucketed_histograms_and_summaries() {
 
     let (recorder, handle) = recorder();
     metrics::with_local_recorder(&recorder, || {
-        metrics::histogram!("rpc.request.duration_seconds", "method" => "getinfo").record(0.003);
-        metrics::histogram!(
-            "zcash.net.peer.handshake.duration_seconds",
-            "result" => "success"
-        )
-        .record(0.2);
+        for (name, _) in HISTOGRAM_BUCKETS {
+            metrics::histogram!(*name).record(0.003);
+        }
         metrics::histogram!(SUMMARY_HISTOGRAM, "stage" => "obtain_tips").record(1.5);
     });
     let rendered = handle.render();

@@ -7,7 +7,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 
 /// The label keys of each labelled metric `zebrad` records.
 ///
-/// - `zebrad.build.info`: `version`, the `zebrad` version.
+/// - `zebrad.build.info`:
+///   - `version`: the `zebrad` version.
+///   - `commit`: the git commit `zebrad` was built from, or `unknown`.
 /// - `sync.restart.count`:
 ///   - `reason`: `exhausted_tips`, `obtain_tips_timeout`, `obtain_tips_error`,
 ///     `extend_tips_error`, `sync_step_timeout`, or `block_error`.
@@ -29,8 +31,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 ///   block's height, such as `Nu6`.
 /// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget`, `transport_backlog`, or
 ///   `label_set_cap`.
+/// - `sync.mined.block.announcement.outcomes.total`: `outcome`, `completed` or `failed`.
 pub const LABELS: &[(&str, &[&str])] = &[
-    ("zebrad.build.info", &["version"]),
+    ("zebrad.build.info", &["version", "commit"]),
     ("sync.restart.count", &["reason", "made_progress"]),
     ("sync.block.error.count", &["kind"]),
     ("sync.block.download.duration_seconds", &["result"]),
@@ -47,6 +50,7 @@ pub const LABELS: &[(&str, &[&str])] = &[
         &["chain.network_upgrade"],
     ),
     ("zebrad.sentry.metrics.dropped.total", &["reason"]),
+    ("sync.mined.block.announcement.outcomes.total", &["outcome"]),
 ];
 
 /// Describes every metric `zebrad` itself records to the installed [`metrics`] recorder.
@@ -54,7 +58,7 @@ pub fn describe() {
     describe_counter!(
         concat!(env!("CARGO_PKG_NAME"), ".build.info"),
         Unit::Count,
-        "Always 1, with the running zebrad version as a label."
+        "Always 1, with the running zebrad version and git commit as labels."
     );
     describe_counter!(
         "zebrad.sentry.metrics.dropped.total",
@@ -99,6 +103,16 @@ pub fn describe() {
 
 /// Describes the syncer's metrics.
 fn describe_sync() {
+    describe_histogram!(
+        "sync.mined.block.announcement.duration_seconds",
+        Unit::Seconds,
+        "Time from a mined block's acceptance until its announcement to peers finished."
+    );
+    describe_counter!(
+        "sync.mined.block.announcement.outcomes.total",
+        Unit::Count,
+        "Announcements of mined blocks to peers, by whether they finished or failed."
+    );
     describe_counter!(
         "sync.restart.count",
         Unit::Count,
@@ -230,6 +244,17 @@ fn describe_sync() {
 
 /// Describes the metrics of blocks gossiped by peers.
 fn describe_gossip() {
+    describe_histogram!(
+        "gossip.block.download.duration_seconds",
+        Unit::Seconds,
+        "Time taken to download a gossiped block, from the request to a successful response."
+    );
+    describe_histogram!(
+        "gossip.block.verify_commit.duration_seconds",
+        Unit::Seconds,
+        "Time from sending a downloaded gossiped block to the block verifier until it was \
+         committed."
+    );
     describe_gauge!(
         "gossip.queued.block.count",
         Unit::Count,
@@ -284,6 +309,16 @@ fn describe_gossip() {
 
 /// Describes the mempool's metrics.
 fn describe_mempool() {
+    describe_histogram!(
+        "mempool.tip_cleanup.duration_seconds",
+        Unit::Seconds,
+        "Time taken to remove a new tip block's transactions and their conflicts from the mempool."
+    );
+    describe_histogram!(
+        "mempool.expiry.duration_seconds",
+        Unit::Seconds,
+        "Time taken by each check of the mempool for expired transactions."
+    );
     describe_gauge!(
         "mempool.currently.queued.transactions",
         Unit::Count,

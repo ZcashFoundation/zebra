@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added the `commit` label to `zebrad_build_info`, and metrics that time each phase of block verification, checkpoint commits, block decoding, gossiped block downloads, block template building, the first template after a new tip, mined block announcements, and mempool cleanup, with `submitblock` outcome counts. They are exported as Prometheus histograms, so they can be aggregated across nodes.
+time: 2026-11-17T11:18:21.337931Z
