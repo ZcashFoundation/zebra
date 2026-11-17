@@ -7456,6 +7456,7 @@ dependencies = [
  "bytes",
  "chrono",
  "color-eyre",
+ "criterion",
  "derive-getters",
  "derive-new",
  "futures",
