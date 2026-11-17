@@ -116,6 +116,31 @@ pub enum StateInitError {
          delete it; set `ephemeral = false`, or do not request a read-only state"
     )]
     ReadOnlyEphemeralConflict,
+
+    /// A body prefix is unavailable, but this writable entry point requires archive state.
+    #[error(
+        "cannot open pruned state at {path:?} for archive writes: bodies below \
+         {lowest_retained_height:?} are unavailable except genesis. \
+         Restore an archive snapshot or fully resync in a separate cache directory"
+    )]
+    PrunedDatabase {
+        /// The database with unavailable historical bodies.
+        path: PathBuf,
+        /// The lowest height of the complete retained suffix.
+        lowest_retained_height: block::Height,
+    },
+
+    /// Historical body availability could not be read or its retained suffix was invalid.
+    #[error(
+        "cannot read historical storage capabilities at {path:?}: {source}. \
+         Restore a valid snapshot or fully resync in a separate cache directory"
+    )]
+    HistoryRead {
+        /// The database whose historical body availability could not be determined.
+        path: PathBuf,
+        /// The storage error or invalid body-index invariant.
+        source: BoxError,
+    },
 }
 
 /// An error describing why a block could not be queued to be committed to the state.
