@@ -4118,45 +4118,50 @@ async fn getblocktemplate_precomputed() {
         None,
     );
 
-    // Answers the updater task's state and mempool requests for a chain tip, until the returned
-    // tasks are aborted. `ReadRequest::Tip` and `ReadRequest::ChainInfo` always report the same
-    // tip, like the state does: both read the same non-finalized state channel.
-    let spawn_responders = |tip_height: Height, tip_hash: Hash| {
+    // Answers the updater task's state requests for the tip in `state_tip`. `ReadRequest::Tip` and
+    // `ReadRequest::ChainInfo` always report the same tip, like the state does: both read the same
+    // non-finalized state channel. A mock clone only receives requests sent after it was cloned, so
+    // this responder lives for the whole test: replacing it would strand any request sent between
+    // the two responders, and a stranded read wedges the updater, which the RPC waits for.
+    let (state_tip, state_tip_receiver) = tokio::sync::watch::channel((tip_height, tip_hash));
+    let read_state_responder = {
         let mut read_state = read_state.clone();
-        let mut mempool = mempool.clone();
         let chain_history_root = fake_history_tree(&net).hash();
 
-        let read_state_responder = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
-                read_state
-                    .expect_request_that(|_| true)
-                    .await
-                    .respond_with(move |req| match req {
-                        ReadRequest::ChainInfo => {
-                            ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                                expected_difficulty: CompactDifficulty::from(
-                                    ExpandedDifficulty::from(U256::one()),
-                                ),
-                                tip_height,
-                                tip_hash,
-                                cur_time: DateTime32::from(1654008617),
-                                min_time: DateTime32::from(1654008606),
-                                max_time: DateTime32::from(1654008728),
-                                chain_history_root,
-                                chain_value_pools: Default::default(),
-                            })
-                        }
-                        ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
-                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
-                        ReadRequest::MiningCandidateChanges => {
-                            ReadResponse::MiningCandidateChanges(Default::default())
-                        }
-                        other => panic!("unexpected read state request: {other:?}"),
-                    });
+                let request = read_state.expect_request_that(|_| true).await;
+                let (tip_height, tip_hash) = *state_tip_receiver.borrow();
+                request.respond_with(move |req| match req {
+                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(
+                            U256::one(),
+                        )),
+                        tip_height,
+                        tip_hash,
+                        cur_time: DateTime32::from(1654008617),
+                        min_time: DateTime32::from(1654008606),
+                        max_time: DateTime32::from(1654008728),
+                        chain_history_root,
+                        chain_value_pools: Default::default(),
+                    }),
+                    ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                    ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                    ReadRequest::MiningCandidateChanges => {
+                        ReadResponse::MiningCandidateChanges(Default::default())
+                    }
+                    other => panic!("unexpected read state request: {other:?}"),
+                });
             }
-        });
+        })
+    };
 
-        let mempool_responder = tokio::spawn(async move {
+    // Answers the updater task's mempool requests for a chain tip, until the returned task is
+    // aborted. A full template build abandons a stranded mempool read when the chain tip changes.
+    let spawn_mempool_responder = |tip_hash: Hash| {
+        let mut mempool = mempool.clone();
+
+        tokio::spawn(async move {
             loop {
                 mempool
                     .expect_request(mempool::Request::FullTransactions)
@@ -4167,12 +4172,10 @@ async fn getblocktemplate_precomputed() {
                         last_seen_tip_hash: tip_hash,
                     });
             }
-        });
-
-        (read_state_responder, mempool_responder)
+        })
     };
 
-    let (read_state_responder, mempool_responder) = spawn_responders(tip_height, tip_hash);
+    let mempool_responder = spawn_mempool_responder(tip_hash);
 
     let updater = rpc
         .spawn_block_template_updater(&MempoolTxSubscriber::new(
@@ -4223,11 +4226,9 @@ async fn getblocktemplate_precomputed() {
     let next_tip_hash =
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
-    read_state_responder.abort();
-    let _ = read_state_responder.await;
-
-    let (read_state_responder, mempool_responder) =
-        spawn_responders(next_tip_height, next_tip_hash);
+    // The state commits the block before the chain tip channel reports it.
+    state_tip.send_replace((next_tip_height, next_tip_hash));
+    let mempool_responder = spawn_mempool_responder(next_tip_hash);
 
     mock_tip_sender.send_best_tip_height(next_tip_height);
     mock_tip_sender.send_best_tip_hash(next_tip_hash);
