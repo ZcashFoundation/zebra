@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Reject configured Testnet and Regtest lockbox recipients without P2SH or P2PKH payment scripts; replace TEX recipients with supported transparent addresses.
+time: 2026-11-04T06:10:53.557843654+01:00

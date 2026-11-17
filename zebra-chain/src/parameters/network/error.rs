@@ -107,6 +107,14 @@ pub enum ParametersBuilderError {
         address: crate::transparent::Address,
     },
 
+    /// A lockbox disbursement recipient does not have a supported payment script.
+    #[error("lockbox disbursement address {address} must be a P2SH or P2PKH address")]
+    #[non_exhaustive]
+    InvalidLockboxDisbursementAddress {
+        /// The malformed or unsupported configured address.
+        address: String,
+    },
+
     #[error("checkpoints file format must be valid")]
     #[non_exhaustive]
     InvalidCheckpointsFormat,

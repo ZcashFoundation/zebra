@@ -178,6 +178,7 @@ There are also a few other restrictions on these parameters:
 - The network upgrade activation heights must be in order, such that the activation height for every network upgrade is at or above the activation height of every preceding network upgrade.
 - The configured subsidy schedule must stay within the 21-million-ZEC cap through the maximum supported height. Early spacing upgrades during slow start can violate this bound; accelerated test networks can set `slow_start_interval = 0`.
 - Configured NSM reissuance requires a post-NU7 halving interval with a positive integer reissuance coefficient. Configured funding streams also require a nonzero address-change interval.
+- Lockbox disbursement recipients must be P2SH or P2PKH transparent addresses. TEX addresses are not supported because they do not define lockbox payment scripts.
 
 ## Comparison To Mainnet and Default Public Testnet Consensus Rules
 
