@@ -128,6 +128,33 @@ pub fn describe() {
         "Blocks in the best chain of the non-finalized state."
     );
     describe_gauge!(
+        "state.memory.index.entries",
+        Unit::Count,
+        "Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all \
+         non-finalized chains, counting the blocks that chains share once."
+    );
+    describe_gauge!(
+        "state.memory.best.chain.index.entries",
+        Unit::Count,
+        "Blocks, transactions, transparent outputs and spends, and nullifiers indexed in the best \
+         non-finalized chain."
+    );
+    describe_counter!(
+        "state.memory.fork.evicted.count",
+        Unit::Count,
+        "Non-finalized forks dropped because the node tracked too many."
+    );
+    describe_gauge!(
+        "state.memory.backup.restored.block.count",
+        Unit::Count,
+        "Blocks restored from the non-finalized backup at startup."
+    );
+    describe_gauge!(
+        "state.memory.backup.restore.duration_seconds",
+        Unit::Seconds,
+        "Time taken to restore the non-finalized backup at startup."
+    );
+    describe_gauge!(
         "zcash.pool.value.zatoshis",
         Unit::Count,
         "Value in each pool at the best chain tip, in zatoshis."

@@ -612,6 +612,32 @@
       }
     },
     {
+      "name": "process.memory.rss_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Memory zebrad is using, its resident set size. Only recorded on Linux.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_memory_rss_bytes"
+        ]
+      }
+    },
+    {
+      "name": "process.memory.rss_fraction",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "process.memory.rss_bytes as a fraction of the memory zebrad can use: the tightest cgroup memory limit, or the machine's memory if that is smaller.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_memory_rss_fraction"
+        ]
+      }
+    },
+    {
       "name": "process_cpu_seconds_total",
       "kind": "counter",
       "unit": "seconds",
@@ -1235,6 +1261,45 @@
       }
     },
     {
+      "name": "state.memory.backup.restore.duration_seconds",
+      "kind": "gauge",
+      "unit": "seconds",
+      "description": "Time taken to restore the non-finalized backup at startup.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_backup_restore_duration_seconds"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.backup.restored.block.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks restored from the non-finalized backup at startup.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_backup_restored_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.best.chain.index.entries",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks, transactions, transparent outputs and spends, and nullifiers indexed in the best non-finalized chain.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_best_chain_index_entries"
+        ]
+      }
+    },
+    {
       "name": "state.memory.best.chain.length",
       "kind": "gauge",
       "unit": "count",
@@ -1309,6 +1374,32 @@
         "type": "gauge",
         "series": [
           "state_memory_committed_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.fork.evicted.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Non-finalized forks dropped because the node tracked too many.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_memory_fork_evicted_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.index.entries",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all non-finalized chains, counting the blocks that chains share once.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_index_entries"
         ]
       }
     },

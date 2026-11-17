@@ -48,6 +48,18 @@ pub fn describe() {
         "Always 1, with the running zebrad version as a label."
     );
 
+    describe_gauge!(
+        "process.memory.rss_bytes",
+        Unit::Bytes,
+        "Memory zebrad is using, its resident set size. Only recorded on Linux."
+    );
+    describe_gauge!(
+        "process.memory.rss_fraction",
+        Unit::Count,
+        "process.memory.rss_bytes as a fraction of the memory zebrad can use: the tightest \
+         cgroup memory limit, or the machine's memory if that is smaller."
+    );
+
     describe_sync();
     describe_gossip();
     describe_mempool();
