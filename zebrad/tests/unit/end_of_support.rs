@@ -45,19 +45,46 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     Ok(())
 }
 
-/// Check that Zebra does not depend on any crates from git sources.
+/// Check that Zebra only depends on git sources that `deny.toml` allows and that are pinned to an
+/// exact commit, so a release builds the audited code even before those crates are published.
 #[test]
 #[ignore]
 fn check_no_git_dependencies() {
-    let workspace_cargo_lock_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("zebrad manifest directory should have a workspace root parent")
-        .join("Cargo.lock");
-    let cargo_lock_contents = fs::read_to_string(workspace_cargo_lock_path)
+        .expect("zebrad manifest directory should have a workspace root parent");
+    let cargo_lock_contents = fs::read_to_string(workspace_root.join("Cargo.lock"))
         .expect("workspace root should have Cargo.lock file");
+    let deny: toml::Table = fs::read_to_string(workspace_root.join("deny.toml"))
+        .expect("workspace root should have deny.toml")
+        .parse()
+        .expect("deny.toml should be valid TOML");
+    let allow_git: Vec<&str> = deny
+        .get("sources")
+        .and_then(|sources| sources.get("allow-git"))
+        .and_then(toml::Value::as_array)
+        .map(|urls| urls.iter().filter_map(toml::Value::as_str).collect())
+        .unwrap_or_default();
 
-    if cargo_lock_contents.contains(r#"source = "git+"#) {
-        panic!("Cargo.lock includes git sources")
+    for source in cargo_lock_contents
+        .lines()
+        .filter_map(|line| line.strip_prefix(r#"source = "git+"#))
+    {
+        let (url, pin) = source
+            .split_once("?rev=")
+            .unwrap_or_else(|| panic!("git source must be pinned with rev: {source}"));
+        let (rev, resolved) = pin
+            .trim_end_matches('"')
+            .split_once('#')
+            .unwrap_or_else(|| panic!("git source must record its resolved commit: {source}"));
+        assert!(
+            rev.len() == 40 && rev == resolved,
+            "git source must be pinned to a full commit hash: {source}"
+        );
+        assert!(
+            allow_git.contains(&url),
+            "git source must be listed in deny.toml [sources] allow-git: {url}"
+        );
     }
 }
 
