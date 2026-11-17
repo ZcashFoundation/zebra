@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed the metrics sent to Sentry when `SENTRY_DSN` is set: Zebra now sends every metric that the Prometheus endpoint exports, instead of a fixed list, once a minute. Counters send their increase, gauges their latest value when it changes and at least every 5 minutes, and histograms up to 20 values per set of labels as distributions. Each minute sends at most 1,500 metrics and at most 256 sets of labels per metric, and sends none while the Sentry SDK is still sending earlier data, so metrics never fill the queue they share with events, logs, and sessions. The new `zebrad.sentry.metrics.dropped.total` counter counts the values left out. Metrics also carry `chain.near_tip`, which is `true` when the node is near the chain tip.'
+time: 2026-11-17T12:01:33.260148Z

@@ -7,6 +7,7 @@ use std::{
 };
 
 use chrono::{DateTime, TimeDelta, Utc};
+use metrics::Label;
 
 use tokio::sync::watch;
 use zebra_chain::{
@@ -20,6 +21,7 @@ use zebra_state::{ChainTipChange, TipAction, MAX_BLOCK_REORG_HEIGHT};
 
 use crate::components::{
     health::ChainTipMetrics,
+    metrics::node_context,
     sync::{RestartReason, SyncStatus},
 };
 
@@ -158,11 +160,7 @@ pub async fn show_block_chain_progress(
                 .expect("unexpected empty state: estimate requires a block height");
             let network_upgrade = NetworkUpgrade::current(&network, current_height);
 
-            #[cfg(feature = "sentry")]
-            {
-                crate::sentry::record_tip_height(current_height);
-                crate::sentry::record_close_to_tip(is_syncer_stopped);
-            }
+            node_context::record(&network, current_height, is_syncer_stopped);
 
             if let Some(previous_network_upgrade) = last_network_upgrade
                 .replace(network_upgrade)
@@ -428,20 +426,32 @@ pub async fn show_block_chain_progress(
     }
 }
 
-/// Records how long after its header time each new best chain tip block was committed.
+/// Records how long after its header time each new best chain tip block was committed, with the
+/// block's network upgrade once the network this node runs on is known, and sends each value to
+/// Sentry with the block's height.
 ///
 /// A block is only recorded if it was mined at most [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its
 /// parent became this node's tip, so a node catching up after a restart or a stall doesn't record
 /// most of its backlog. The block before a network upgrade activation isn't recorded either,
 /// because [`ChainTipChange`] reports it as a reset so that the mempool is cleared, and a reset
 /// doesn't include the block's time.
-#[cfg_attr(not(feature = "sentry"), allow(unused_variables))]
 pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
     let mut tip_block_delay = TipBlockDelay::new(Utc::now());
 
     while let Ok(tip_action) = chain_tip_change.wait_for_tip_change().await {
         if let Some((height, delay)) = tip_block_delay.observe(&tip_action, Utc::now()) {
-            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(delay);
+            // The network upgrade comes from the block's own height, because the tip height that
+            // the node context reports lags behind a new tip.
+            let labels: Vec<Label> = node_context::network()
+                .map(|network| {
+                    Label::new(
+                        "chain.network_upgrade",
+                        NetworkUpgrade::current(network, height).to_string(),
+                    )
+                })
+                .into_iter()
+                .collect();
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds", labels).record(delay);
 
             #[cfg(feature = "sentry")]
             crate::sentry::send_tip_block_delay(height, delay);

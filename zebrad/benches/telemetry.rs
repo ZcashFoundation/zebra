@@ -13,10 +13,19 @@ use std::{
 
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use metrics::{Counter, Gauge, Histogram, Recorder};
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle, PrometheusRecorder};
 use metrics_util::layers::FanoutBuilder;
 use sentry::{test::TestTransport, ClientOptions, Hub};
 use tracing_subscriber::{layer::SubscriberExt, Registry};
+
+// The backend policies are private to zebrad, so the benchmarks compile their sources directly.
+// Checking all targets compiles their test modules without the test harness, which leaves the
+// tests' imports unused.
+#[allow(dead_code, unused_imports)]
+#[path = "../src/components/metrics/sentry_policy.rs"]
+mod sentry_policy;
+
+use sentry_policy::SentryPolicy;
 
 /// Histogram samples recorded between two drains of the Prometheus recorders.
 ///
@@ -30,17 +39,26 @@ enum Backend {
     None,
     /// One Prometheus recorder with no HTTP listener.
     Prometheus,
+    /// A Prometheus recorder and the Sentry policy behind a fanout, as `zebrad` installs them
+    /// when Sentry is on.
+    PrometheusAndSentry,
     /// Two Prometheus recorders behind a fanout, standing in for two backends.
     Fanout,
 }
 
 impl Backend {
-    const ALL: [Backend; 3] = [Backend::None, Backend::Prometheus, Backend::Fanout];
+    const ALL: [Backend; 4] = [
+        Backend::None,
+        Backend::Prometheus,
+        Backend::PrometheusAndSentry,
+        Backend::Fanout,
+    ];
 
     fn name(&self) -> &'static str {
         match self {
             Backend::None => "none",
             Backend::Prometheus => "prometheus",
+            Backend::PrometheusAndSentry => "prometheus_and_sentry",
             Backend::Fanout => "fanout_of_two",
         }
     }
@@ -49,22 +67,32 @@ impl Backend {
     ///
     /// `f` receives the handles of the backend's Prometheus recorders, so it can drain them.
     fn run<T>(&self, f: impl FnOnce(&[PrometheusHandle]) -> T) -> T {
+        let mut handles = Vec::new();
+        let mut prometheus = || -> PrometheusRecorder {
+            let recorder = PrometheusBuilder::new().build_recorder();
+            handles.push(recorder.handle());
+            recorder
+        };
+
         match self {
             Backend::None => f(&[]),
             Backend::Prometheus => {
-                let recorder = PrometheusBuilder::new().build_recorder();
-                let handles = [recorder.handle()];
+                let recorder = prometheus();
+                metrics::with_local_recorder(&recorder, || f(&handles))
+            }
+            Backend::PrometheusAndSentry => {
+                // The benchmark never flushes the policy, which stays bounded because it keeps a
+                // fixed-size sample of each histogram label set.
+                let recorder = FanoutBuilder::default()
+                    .add_recorder(prometheus())
+                    .add_recorder(SentryPolicy::default())
+                    .build();
                 metrics::with_local_recorder(&recorder, || f(&handles))
             }
             Backend::Fanout => {
-                let (first, second) = (
-                    PrometheusBuilder::new().build_recorder(),
-                    PrometheusBuilder::new().build_recorder(),
-                );
-                let handles = [first.handle(), second.handle()];
                 let recorder = FanoutBuilder::default()
-                    .add_recorder(first)
-                    .add_recorder(second)
+                    .add_recorder(prometheus())
+                    .add_recorder(prometheus())
                     .build();
                 metrics::with_local_recorder(&recorder as &dyn Recorder, || f(&handles))
             }

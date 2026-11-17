@@ -130,8 +130,8 @@ Windows.
 | `process_cpu_seconds_total` | seconds | Total user and system CPU time. |
 | `process_start_time_seconds` | seconds | Start time of the process since the Unix epoch. |
 
-Sentry receives every one of these except `process_cpu_seconds_total` and
-`process_virtual_memory_max_bytes`.
+Sentry receives all of them. It receives `process_cpu_seconds_total` as the CPU time
+used in each minute.
 
 `process_cpu_seconds_total` counts whole seconds, so use a window of a few
 minutes, such as `rate(process_cpu_seconds_total[5m])`, to see steady CPU usage
@@ -144,15 +144,20 @@ These histograms show how quickly a node accepts new blocks. Official release bu
 also send them to [Sentry](tracing.md#sentry-production-monitoring) as distributions
 when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 
-| Metric | Unit | Description |
-|---|---|---|
-| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+| Metric | Unit | Labels | Description |
+|---|---|---|---|
+| `zcash.chain.tip.block_delay_seconds` | seconds | `chain.network_upgrade` | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+
+`chain.network_upgrade` is the network upgrade at the block's height, such as `Nu6`.
+The Prometheus endpoint exports it as the `chain_network_upgrade` label.
+Sentry also receives each value with the block's height as the number
+`chain.height`. The Prometheus endpoint doesn't export the height, because each
+height would become a new series.
 
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
-In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
-`chain.height`, so nodes can be compared block by block.
+In Sentry, `chain.height` lets you compare nodes block by block.
 
 ## Sync stall metrics
 
@@ -160,9 +165,9 @@ These metrics show why the syncer stopped advancing the chain tip. Their labels 
 set of values. Block heights and hashes are in the matching log fields instead.
 
 Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
-when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter as
-one total per minute for each set of labels, and each gauge's latest value once a minute, along
-with `sync.downloads.in_flight`.
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter's
+increase once a minute for each set of labels, and each gauge's latest value in the minute it
+changes, and at least every 5 minutes.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
@@ -235,3 +240,17 @@ Metric labels use bounded values:
   `bad_transaction_balance`, `script`, `opcode`, or `num`.
 - Handshake `remote_version` and `negotiated_version`: known protocol versions or
   `other`.
+- `zcash.net.peers.missing_services` `missing_service`: the required service the
+  rejected peer doesn't advertise, `NODE_NETWORK`. It replaces the
+  `remote_services` label, whose value was the service bits the peer sent.
+
+`zcash.net.peers.initial` and `zcash.net.peers.cache` no longer have a `cache`
+label with the peer cache file path. The `zcash.net.peers.initial` series without
+a `seed` label counts the addresses from the peer cache.
+
+The `seed` label of `zcash.net.peers.initial` names an entry from
+`network.initial_mainnet_peers` or `network.initial_testnet_peers` only when it
+is one of the default DNS seeders that Zebra ships, such as
+`dnsseed.z.cash:8233`. Every other entry, including a custom host name or an IP
+address and port, has the value `custom`, so private peer addresses don't reach
+metrics in Prometheus or [Sentry](tracing.md#sentry-production-monitoring).

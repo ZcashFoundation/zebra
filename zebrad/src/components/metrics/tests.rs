@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 
 use super::{catalog, describe_all, HISTOGRAM_BUCKETS};
 
+#[cfg(all(feature = "prometheus", feature = "sentry"))]
+mod backends;
 mod call_sites;
 #[cfg(feature = "prometheus")]
 mod exporter;
