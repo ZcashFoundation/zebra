@@ -126,7 +126,8 @@ struct CancelDownloadAndVerify;
 
 /// Errors that can occur while downloading and verifying a transaction.
 #[derive(Error, Debug, Clone)]
-#[allow(dead_code)]
+// Every download error is boxed; boxing this variant again would add an allocation.
+#[allow(dead_code, clippy::large_enum_variant)]
 pub enum TransactionDownloadVerifyError {
     #[error("transaction is already in state")]
     InState,
@@ -148,6 +149,10 @@ pub enum TransactionDownloadVerifyError {
         transaction_upgrade: Option<NetworkUpgrade>,
         /// The candidate block height used for mempool consensus verification.
         verification_height: Height,
+        /// The rejected transaction, retained until the mempool classifies the failure.
+        transaction: transaction::UnminedTx,
+        /// The original queue source, for preserving per-peer limits when re-verifying.
+        queue_source: Option<SocketAddr>,
     },
 
     #[error("transaction is non-standard: {0}")]
@@ -197,6 +202,9 @@ where
     /// The maximum OP_RETURN script size for the standard output checks.
     max_datacarrier_bytes: u32,
 
+    /// Activation height below which unpaid-action failures may need fresh-policy classification.
+    fee_reduction_height: Height,
+
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
     #[pin]
@@ -210,7 +218,11 @@ where
                         Option<Height>,
                         Option<oneshot::Sender<Result<(), BoxError>>>,
                     ),
-                    Box<(TransactionDownloadVerifyError, UnminedTxId)>,
+                    Box<(
+                        TransactionDownloadVerifyError,
+                        UnminedTxId,
+                        Option<oneshot::Sender<Result<(), BoxError>>>,
+                    )>,
                 >,
                 (UnminedTxId, tokio::time::error::Elapsed),
             >,
@@ -265,7 +277,11 @@ where
                 Option<Height>,
                 Option<oneshot::Sender<Result<(), BoxError>>>,
             ),
-            Box<(UnminedTxId, TransactionDownloadVerifyError)>,
+            Box<(
+                UnminedTxId,
+                TransactionDownloadVerifyError,
+                Option<oneshot::Sender<Result<(), BoxError>>>,
+            )>,
         >,
         (UnminedTxId, tokio::time::error::Elapsed),
     >;
@@ -292,8 +308,8 @@ where
                     )
                 }
                 Ok(Err(boxed_err)) => {
-                    let (e, hash) = *boxed_err;
-                    (Ok(Err(Box::new((hash, e)))), Some(hash))
+                    let (e, hash, rsp_tx) = *boxed_err;
+                    (Ok(Err(Box::new((hash, e, rsp_tx)))), Some(hash))
                 }
                 Err((txid, elapsed)) => {
                     // Treat a verification timeout as a terminal completion so the
@@ -344,16 +360,16 @@ where
     /// `network` is used to download transactions.
     /// `verifier` is used to verify transactions.
     /// `state` is used to check if transactions are already in the state.
+    /// `fee_reduction_height` identifies fee failures that can become obsolete before completion.
     ///
-    /// The [`Downloads`] stream is agnostic to the network policy, so retry and
-    /// timeout limits should be applied to the `network` service passed into
-    /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    /// Download retry and timeout limits should be applied to the `network` service.
+    pub fn new(network: ZN, verifier: ZV, state: ZS, fee_reduction_height: Height) -> Self {
         Self {
             network,
             verifier,
             state,
             max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
+            fee_reduction_height,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
@@ -382,6 +398,13 @@ where
         mut rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
+        // Internal retries must complete their original responder even if admission fails.
+        let mut reject = |error: MempoolError| {
+            if let Some(rsp_tx) = rsp_tx.take() {
+                let _ = rsp_tx.send(Err(error.clone().into()));
+            }
+            Err(error)
+        };
 
         if self.cancel_handles.contains_key(&txid) {
             debug!(
@@ -393,7 +416,7 @@ where
             metrics::gauge!("mempool.currently.queued.transactions",)
                 .set(self.pending.len() as f64);
 
-            return Err(MempoolError::AlreadyQueued);
+            return reject(MempoolError::AlreadyQueued);
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
@@ -406,7 +429,7 @@ where
             metrics::gauge!("mempool.currently.queued.transactions",)
                 .set(self.pending.len() as f64);
 
-            return Err(MempoolError::FullQueue);
+            return reject(MempoolError::FullQueue);
         }
 
         // Per-peer cap: a single advertising host (keyed by IP) cannot saturate
@@ -425,7 +448,7 @@ where
                     "too many transactions queued for this peer: ignored transaction"
                 );
                 metrics::counter!("mempool.full_queue.per_peer.total").increment(1);
-                return Err(MempoolError::FullQueue);
+                return reject(MempoolError::FullQueue);
             }
         }
 
@@ -439,6 +462,7 @@ where
         let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
+        let fee_reduction_height = self.fee_reduction_height;
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
@@ -523,6 +547,8 @@ where
                 advertiser_addr,
                 transaction_upgrade,
                 verification_height: next_height,
+                transaction: tx,
+                queue_source: source,
             })
         }
         .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
@@ -555,7 +581,7 @@ where
                         let _ = rsp_tx.send(Err("verification cancelled".into()));
                     }
 
-                    Ok(Err(Box::new((TransactionDownloadVerifyError::Cancelled, txid))))
+                    Ok(Err(Box::new((TransactionDownloadVerifyError::Cancelled, txid, None))))
                 }
                 verification = fut => {
                     verification
@@ -570,14 +596,25 @@ where
                                 Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
                                 Err(boxed_err) => {
                                     let (tx_verifier_error, tx_id) = *boxed_err;
-                                    if let Some(rsp_tx) = rsp_tx.take() {
-                                        let error_msg = format!(
-                                            "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
-                                        );
-                                        let _ = rsp_tx.send(Err(error_msg.into()));
-                                    };
-
-                                    Err(Box::new((tx_verifier_error, tx_id)))
+                                    let needs_policy_classification = matches!(
+                                        &tx_verifier_error,
+                                        TransactionDownloadVerifyError::Invalid {
+                                            error: zebra_consensus::error::TransactionError::Zip317(
+                                                transaction::zip317::Error::UnpaidActions,
+                                            ),
+                                            verification_height,
+                                            ..
+                                        } if *verification_height < fee_reduction_height
+                                    );
+                                    if !needs_policy_classification {
+                                        if let Some(rsp_tx) = rsp_tx.take() {
+                                            let error_msg = format!(
+                                                "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
+                                            );
+                                            let _ = rsp_tx.send(Err(error_msg.into()));
+                                        }
+                                    }
+                                    Err(Box::new((tx_verifier_error, tx_id, rsp_tx)))
                                 }
                             }
                         })

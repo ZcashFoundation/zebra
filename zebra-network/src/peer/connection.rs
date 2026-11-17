@@ -1414,7 +1414,10 @@ where
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(
                     *hash,
-                    self.connection_info.connected_addr.get_transient_addr(),
+                    self.connection_info
+                        .connected_addr
+                        .get_transient_addr()
+                        .map(|_| self.connection_info.clone()),
                 )
                 .into(),
 

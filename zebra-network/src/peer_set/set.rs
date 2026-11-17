@@ -177,7 +177,7 @@ struct QueuedInvRequest {
     /// The requested inventory.
     hash: InventoryHash,
 
-    /// The enqueue-time refusal deadline; downloaders enforce their own operation deadline.
+    /// The local refusal deadline, or the end of a carried advertiser's exclusive preference.
     deadline: Option<tokio::time::Instant>,
 
     /// The original request's tracing context.
@@ -191,6 +191,9 @@ struct QueuedInvRequest {
 
 /// Bounds queued discovery requests; overflow falls back to any ready peer.
 const MAX_QUEUED_FIND_REQUESTS: usize = 16;
+
+/// How long a busy block advertiser is preferred before ordinary speculative routing.
+const BLOCK_ADVERTISER_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A find request waiting for a serving peer, with a bounded serving-only preference.
 struct QueuedFindRequest {
@@ -395,6 +398,9 @@ where
     /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
     queued_inv_requests: VecDeque<QueuedInvRequest>,
 
+    /// Wakes queued inventory routing when the next advertiser preference expires.
+    queued_inv_request_timer: Option<Pin<Box<tokio::time::Sleep>>>,
+
     /// Whether queued block requests took the last ready peer from the request the [`Buffer`] is
     /// holding, so that request gets the next ready peer before the rest of the queue.
     ///
@@ -552,6 +558,7 @@ where
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
+            queued_inv_request_timer: None,
             queued_inv_requests_took_last_peer: false,
             queued_sidecar_broadcast: None,
 
@@ -692,6 +699,7 @@ where
 
         // Refuse queued requests, because there are no peers left to route them to.
         self.queued_inv_requests.clear();
+        self.queued_inv_request_timer = None;
         self.queued_find_requests.clear();
         self.queued_find_request_timer = None;
 
@@ -1471,7 +1479,7 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        match self.select_inv_route(&req, hash) {
+        match self.select_inv_route(&req, hash, true) {
             InvRoute::Peer { peer, advertised } => self.call_inv_peer(peer, req, hash, advertised),
             InvRoute::Wait => self.queue_inv_request(req, hash),
             InvRoute::Refuse => {
@@ -1499,8 +1507,8 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready peer that advertised the inventory, then a ready peer that isn't missing it.
-    /// For blocks, that fallback prefers peers that advertised [`PeerServices::NODE_NETWORK`].
+    /// Prefers a ready inventory advertiser or supplied source, waiting for a busy supplied block
+    /// source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
@@ -1517,7 +1525,12 @@ where
     /// the next turn goes back to the group that missed out.
     ///
     /// Uses P2C to choose the least loaded peer in each list.
-    fn select_inv_route(&self, request: &Request, hash: InventoryHash) -> InvRoute<D::Key> {
+    fn select_inv_route(
+        &self,
+        request: &Request,
+        hash: InventoryHash,
+        wait_for_advertiser: bool,
+    ) -> InvRoute<D::Key> {
         // # Security
         //
         // Peers that recently failed to return this block lose any preference for it, and are only
@@ -1565,13 +1578,16 @@ where
             failed_peer_list.contains(addr) || served_peer_list.contains(addr)
         };
         let advertiser = match request {
-            Request::BlockDownload { advertiser, .. } => advertiser.filter(|addr| {
-                // Registry advertisements already exclude missing peers. Apply the same rule
-                // to carried provenance without allocating a fallback set on the fast path.
-                !self
-                    .inventory_registry
-                    .missing_peers(hash)
-                    .any(|missing| missing == addr)
+            Request::BlockDownload { advertiser, .. } => advertiser.as_ref().and_then(|info| {
+                let addr = info.connected_addr.get_transient_addr()?;
+                // A same-address replacement cannot inherit the announcing connection's preference.
+                // Registry advertisements already exclude missing peers; carried provenance must too.
+                (self.is_current_connection(addr, info)
+                    && !self
+                        .inventory_registry
+                        .missing_peers(hash)
+                        .any(|missing| *missing == addr))
+                .then_some(addr)
             }),
             _ => None,
         };
@@ -1643,6 +1659,16 @@ where
                 peer,
                 advertised: true,
             };
+        }
+
+        // An advert can arrive before its connection releases discovery capacity. Asking another
+        // peer in that window can return notfound before it has even learned the new block.
+        // Only the current announcing connection gets this short exclusive preference.
+        if wait_for_advertiser
+            && advertiser
+                .is_some_and(|addr| self.cancel_handles.contains_key(&addr) && !has_failed(&addr))
+        {
+            return InvRoute::Wait;
         }
 
         let preferred_peer_list = ready_peers_with_services(true);
@@ -1929,12 +1955,20 @@ where
 
         let deadline = (!matches!(request, Request::BlockDownload { .. }))
             .then(|| tokio::time::Instant::now() + INVENTORY_BUSY_PEER_WAIT_TIMEOUT);
+        let preference_deadline = matches!(
+            request,
+            Request::BlockDownload {
+                advertiser: Some(_),
+                ..
+            }
+        )
+        .then(|| tokio::time::Instant::now() + BLOCK_ADVERTISER_WAIT_TIMEOUT);
 
         let (response_sender, response_receiver) = oneshot::channel();
         self.queued_inv_requests.push_back(QueuedInvRequest {
             request,
             hash,
-            deadline,
+            deadline: deadline.or(preference_deadline),
             span: tracing::Span::current(),
             response_sender,
         });
@@ -1990,10 +2024,10 @@ where
     fn route_queued_inv_requests(&mut self, cx: &mut Context<'_>) {
         // Register caller cancellation too, so an expired operation releases its queue entry
         // even when no connection or inventory event follows it.
+        let now = tokio::time::Instant::now();
         self.queued_inv_requests.retain_mut(|queued| {
-            queued
-                .deadline
-                .is_none_or(|deadline| deadline > tokio::time::Instant::now())
+            (matches!(queued.request, Request::BlockDownload { .. })
+                || queued.deadline.is_none_or(|deadline| deadline > now))
                 && queued.response_sender.poll_canceled(cx).is_pending()
         });
 
@@ -2005,7 +2039,8 @@ where
                 .pop_front()
                 .expect("each original queue entry is visited once");
 
-            match self.select_inv_route(&queued.request, queued.hash) {
+            let wait_for_advertiser = queued.deadline.is_none_or(|deadline| deadline > now);
+            match self.select_inv_route(&queued.request, queued.hash, wait_for_advertiser) {
                 InvRoute::Peer { .. } if keep_last_peer && self.ready_services.len() == 1 => {
                     self.queued_inv_requests.push_back(queued);
                 }
@@ -2031,6 +2066,26 @@ where
         // Poll the newly busy peer's readiness future even if another peer stays ready.
         if routed_any && !self.queued_inv_requests.is_empty() {
             self.maintenance_waker.notify.notify_one();
+        }
+
+        let next_deadline = self
+            .queued_inv_requests
+            .iter()
+            .filter_map(|queued| queued.deadline)
+            .filter(|deadline| *deadline > now)
+            .min();
+        if let Some(deadline) = next_deadline {
+            let timer = self
+                .queued_inv_request_timer
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(deadline)));
+            if timer.deadline() != deadline {
+                timer.as_mut().reset(deadline);
+            }
+            if timer.as_mut().poll(cx).is_ready() {
+                cx.waker().wake_by_ref();
+            }
+        } else {
+            self.queued_inv_request_timer = None;
         }
     }
 

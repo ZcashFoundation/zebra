@@ -2684,6 +2684,7 @@ fn mock_peers_with_services(
         let (client, handle) = ClientTestHarness::build()
             .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
             .with_services(*services)
+            .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
             .finish();
 
         changes.push(Ok(Change::Insert(addr, client.into())));

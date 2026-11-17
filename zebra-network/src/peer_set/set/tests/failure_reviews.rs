@@ -53,6 +53,178 @@ async fn finish_download(
     );
 }
 
+/// Prefer a briefly busy advertiser, but fall back while a stalled connection is still alive.
+#[tokio::test(start_paused = true)]
+async fn busy_block_advertiser_preference_is_bounded() {
+    let _init_guard = zebra_test::init();
+    for registered in [false, true] {
+        for fallback_services in [PeerServices::empty(), PeerServices::NODE_NETWORK] {
+            for release_capacity in [false, true] {
+                let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+                    peer_set_with_services(&[PeerServices::NODE_NETWORK, fallback_services]);
+                let (_, inventory, response) = block_download();
+                let InventoryHash::Block(hash) = inventory else {
+                    unreachable!("the fixture contains block inventory");
+                };
+                peer_set.ready().await.unwrap();
+                let mut source = peer_set.take_ready_service(&addrs[0]).unwrap();
+                let advertiser = source.connection_info().clone();
+                let mut busy = Vec::new();
+                for _ in 0..2 {
+                    busy.push(source.ready().await.unwrap().call(Request::Peers));
+                }
+                peer_set.push_unready(addrs[0], source);
+                if registered {
+                    send_inventory(
+                        &mut guard,
+                        InventoryStatus::new_available(inventory, addrs[0]),
+                    );
+                }
+                let request = Request::BlockDownload {
+                    hash,
+                    advertiser: Some(advertiser),
+                };
+                let mut download = Box::pin(peer_set.ready().await.unwrap().call(request.clone()));
+                assert!(peer_set.cancel_handles.contains_key(&addrs[0]));
+                tokio::time::advance(Duration::from_millis(500)).await;
+                peer_set.ready().now_or_never().unwrap().unwrap();
+                assert_eq!(
+                    received_request(&mut handles[1]),
+                    None,
+                    "the advertiser keeps its preference within the one-second window",
+                );
+
+                if release_capacity {
+                    let first = handles[0]
+                        .try_to_receive_outbound_client_request()
+                        .request()
+                        .unwrap();
+                    first.tx.send(Ok(Response::Nil)).unwrap();
+                    drop(
+                        handles[0]
+                            .try_to_receive_outbound_client_request()
+                            .request()
+                            .unwrap(),
+                    );
+                }
+                let (peer_set, _poll_task) = peer_set.into_buffer(10);
+                if !release_capacity {
+                    peer_set
+                        .clone()
+                        .oneshot(Request::PollPeerSet)
+                        .await
+                        .unwrap();
+                    assert!(
+                        download.as_mut().now_or_never().is_none(),
+                        "buffered maintenance must leave the busy-advertiser download queued",
+                    );
+                    assert_eq!(received_request(&mut handles[1]), None);
+                    tokio::time::advance(Duration::from_millis(500)).await;
+                }
+
+                // No ordinary network request drives the preference timer or capacity wakeup.
+                let selected = usize::from(!release_capacity);
+                let client_request = timeout(Duration::from_millis(100), async {
+                    loop {
+                        if let Some(request) = handles[selected]
+                            .try_to_receive_outbound_client_request()
+                            .request()
+                        {
+                            break request;
+                        }
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                })
+                .await
+                .expect("capacity release or the one-second cap must route the download");
+                assert_eq!(client_request.request, request);
+                client_request.tx.send(Ok(response.clone())).unwrap();
+                assert_eq!(download.await.unwrap(), response);
+                if release_capacity {
+                    assert_eq!(received_request(&mut handles[1]), None);
+                }
+                assert!(
+                    handles[0].wants_connection_heartbeats(),
+                    "the preference cap must not time out full connection readiness",
+                );
+                drop(peer_set);
+                drop(busy);
+            }
+        }
+    }
+}
+
+/// Neither copied metadata nor a canceled predecessor gives a busy connection source preference.
+#[tokio::test(start_paused = true)]
+async fn stale_busy_block_advertiser_allows_serving_fallback() {
+    let _init_guard = zebra_test::init();
+    for replace in [false, true] {
+        let services = [PeerServices::NODE_NETWORK; 2];
+        let (initial_peers, addrs, mut handles) = mock_peers_with_services(&services);
+        let (mut discovery_tx, discovery_rx) = mpsc::channel(2);
+        let (minimum_peer_version, _best_tip) =
+            MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, mut guard) = PeerSetBuilder::new()
+            .with_discover(stream::select(initial_peers, discovery_rx))
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(services.len(), DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+        let (_, inventory, response) = block_download();
+        let InventoryHash::Block(hash) = inventory else {
+            unreachable!("the fixture contains block inventory");
+        };
+        send_inventory(
+            &mut guard,
+            InventoryStatus::new_available(inventory, addrs[0]),
+        );
+        peer_set.ready().await.unwrap();
+        let mut source = peer_set.take_ready_service(&addrs[0]).unwrap();
+        let original = source.connection_info().clone();
+        let mut busy = Vec::new();
+        for _ in 0..2 {
+            busy.push(source.ready().await.unwrap().call(Request::Peers));
+        }
+        peer_set.push_unready(addrs[0], source);
+
+        // Keep the replacement's harness alive until routing completes.
+        let mut replacement_handle = None;
+        let advertiser = if replace {
+            let (replacement, handle) = ClientTestHarness::build()
+                .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+                .with_services(PeerServices::NODE_NETWORK)
+                .with_connected_addr(ConnectedAddr::new_inbound_direct(addrs[0]))
+                .finish();
+            let mut replacement: LoadTrackedClient = replacement.into();
+            for _ in 0..2 {
+                busy.push(replacement.ready().await.unwrap().call(Request::Peers));
+            }
+            replacement_handle = Some(handle);
+            discovery_tx.try_send(Ok(Change::Remove(addrs[0]))).unwrap();
+            discovery_tx
+                .try_send(Ok(Change::Insert(addrs[0], replacement)))
+                .unwrap();
+            // Discovery can leave canceled old work beside a busy same-address replacement.
+            let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
+            assert!(peer_set.poll_discover(&mut cx).unwrap());
+            assert_eq!(peer_set.unready_services.len(), 2);
+            original
+        } else {
+            // Equal metadata is not proof that this is the connection that announced the block.
+            Arc::new((*original).clone())
+        };
+        assert!(peer_set.cancel_handles.contains_key(&addrs[0]));
+        let request = Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        };
+        let download = peer_set.call(request.clone());
+        finish_download(&mut handles[1], request, response, download).await;
+        assert!(peer_set.queued_inv_requests.is_empty());
+        drop(replacement_handle);
+        drop(busy);
+    }
+}
+
 /// Carried provenance cannot override explicit missing inventory or a completed peer failure.
 #[tokio::test(start_paused = true)]
 async fn carried_advertiser_respects_missing_and_failed_candidates() {
@@ -64,9 +236,11 @@ async fn carried_advertiser_respects_missing_and_failed_candidates() {
         let InventoryHash::Block(hash) = inventory else {
             unreachable!("the helper constructs block inventory");
         };
+        peer_set.ready().await.unwrap();
+        let advertiser = peer_set.ready_services[&addrs[1]].connection_info().clone();
         let request = Request::BlockDownload {
             hash,
-            advertiser: Some(addrs[1]),
+            advertiser: Some(advertiser),
         };
 
         if failed {

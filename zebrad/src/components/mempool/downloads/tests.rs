@@ -16,6 +16,12 @@ fn download_verify_error_metric_labels_ignore_details() {
 
     use TransactionDownloadVerifyError::*;
 
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("a transaction fixture exists")
+        .transaction;
+
     for detail in ["first error detail", "second error detail"] {
         assert_eq!(
             StateError(BoxError::from(detail).into()).metric_label(),
@@ -36,6 +42,8 @@ fn download_verify_error_metric_labels_ignore_details() {
             advertiser_addr: None,
             transaction_upgrade: None,
             verification_height: Height(0),
+            transaction: transaction.clone(),
+            queue_source: None,
         };
         assert_eq!(error.metric_label(), "invalid");
     }
@@ -80,7 +88,7 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
     let state: MockService<zs::Request, zs::Response, PanicAssertion> =
         MockService::build().for_unit_tests();
 
-    let mut downloads = Downloads::new(peer_set, verifier, state);
+    let mut downloads = Downloads::new(peer_set, verifier, state, network.fee_reduction_height());
 
     // The first `MAX_INBOUND_CONCURRENCY_PER_PEER` pushes from this peer are admitted.
     for gossip in pushed.iter().take(MAX_INBOUND_CONCURRENCY_PER_PEER) {
@@ -89,16 +97,35 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
             .expect("pushes below the per-peer cap are admitted");
     }
 
+    let (duplicate_tx, duplicate_rx) = oneshot::channel();
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(
+            pushed[0].clone(),
+            Some(source),
+            Some(duplicate_tx),
+        ),
+        Err(MempoolError::AlreadyQueued)
+    ));
+    assert_eq!(
+        duplicate_rx.await.unwrap().unwrap_err().to_string(),
+        MempoolError::AlreadyQueued.to_string(),
+    );
+
     // The next push from the same peer exceeds the per-peer cap and is
     // rejected, even though the global queue still has spare capacity.
+    let (rsp_tx, rsp_rx) = oneshot::channel();
     let result = downloads.download_if_needed_and_verify(
         pushed[MAX_INBOUND_CONCURRENCY_PER_PEER].clone(),
         Some(source),
-        None,
+        Some(rsp_tx),
     );
     assert!(
         matches!(result, Err(MempoolError::FullQueue)),
         "a push exceeding the per-peer cap must be rejected with `FullQueue`, got {result:?}",
+    );
+    assert_eq!(
+        rsp_rx.await.unwrap().unwrap_err().to_string(),
+        MempoolError::FullQueue.to_string(),
     );
 
     // Don't leave spawned download tasks behind when the runtime shuts down.
@@ -139,6 +166,7 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
         })),
+        network.fee_reduction_height(),
     );
 
     downloads
@@ -197,4 +225,116 @@ async fn mined_transaction_needs_no_body() {
         .expect("the task did not time out");
     let error = result.expect_err("a mined transaction is reported as already in the state");
     assert!(matches!(error.1, TransactionDownloadVerifyError::InState));
+}
+
+/// Definite failures must reach RPC callers without a mempool poll, and survive a pool reset.
+#[tokio::test(start_paused = true)]
+async fn verification_errors_reach_rpc_before_mempool_poll() {
+    use std::sync::Arc;
+    use tower::{buffer::Buffer, ServiceExt as _};
+    use zebra_chain::transaction::{LockTime, Transaction, UnminedTx};
+    use zebra_consensus::error::TransactionError;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let activation = network.fee_reduction_height();
+
+    for fee_failure in [false, true] {
+        let transaction = UnminedTx::from(Arc::new(Transaction::test_v5(
+            NetworkUpgrade::current(&network, activation),
+            vec![],
+            vec![],
+            LockTime::unlocked(),
+            Height::MIN,
+        )));
+        let state = BoxCloneService::new(service_fn(move |request| async move {
+            match request {
+                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
+                zs::Request::Tip => Ok(zs::Response::Tip(Some((
+                    activation.previous().unwrap(),
+                    zebra_chain::block::Hash([1; 32]),
+                )))),
+                request => {
+                    panic!("invalid transactions need no further state queries: {request:?}")
+                }
+            }
+        }));
+        let verifier = if fee_failure {
+            let network = network.clone();
+            BoxCloneService::new(service_fn(move |request: tx::MempoolRequest| {
+                let network = network.clone();
+                async move {
+                    VerifiedUnminedTx::new(
+                        request.transaction,
+                        0i64.try_into().unwrap(),
+                        0,
+                        0,
+                        Arc::new(vec![]),
+                        &network,
+                        request.height,
+                    )
+                    .map(|transaction| tx::MempoolResponse {
+                        transaction,
+                        spent_mempool_outpoints: vec![],
+                    })
+                    .map_err(|error| BoxError::from(TransactionError::Zip317(error)))
+                }
+            }))
+        } else {
+            let mempool_setup_rx = oneshot::channel::<
+                BoxCloneService<
+                    zebra_node_services::mempool::Request,
+                    zebra_node_services::mempool::Response,
+                    BoxError,
+                >,
+            >()
+            .1;
+            BoxCloneService::new(Buffer::new(
+                tx::MempoolTxVerifier::new(&network, state.clone(), mempool_setup_rx)
+                    .map_err(BoxError::from),
+                1,
+            ))
+        };
+        let mut downloads = Downloads::new(
+            BoxCloneService::new(service_fn(|_| async {
+                panic!("pushed transactions are not downloaded");
+            })),
+            verifier,
+            state,
+            activation,
+        );
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        downloads
+            .download_if_needed_and_verify(transaction.into(), None, Some(rsp_tx))
+            .expect("the invalid transaction is admitted for verification");
+
+        // Wait for the independent task, not Downloads::poll_next or Mempool::poll_ready.
+        let completed = tokio::time::timeout(Duration::from_secs(1), downloads.pending.next())
+            .await
+            .expect("definite verification failures do not wait for a queue-checker tick")
+            .expect("the download task exists")
+            .expect("the download task does not panic")
+            .expect("the download task does not time out");
+        assert!(
+            completed.is_err(),
+            "the real validation rule rejects the fixture"
+        );
+
+        // A mempool reset drops completed results before polling them.
+        drop(completed);
+        downloads.cancel_all();
+        let error = rsp_rx
+            .await
+            .expect("reset must not replace the original rejection with a closed channel")
+            .expect_err("the submission must fail");
+        let expected = if fee_failure {
+            TransactionError::Zip317(transaction::zip317::Error::UnpaidActions)
+        } else {
+            TransactionError::NoInputs
+        };
+        assert!(
+            error.to_string().contains(&expected.to_string()),
+            "the caller must receive the original validation failure: {error}"
+        );
+    }
 }

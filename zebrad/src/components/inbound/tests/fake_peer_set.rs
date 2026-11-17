@@ -336,6 +336,8 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &zebra_chain::parameters::Network::Mainnet,
+                zebra_chain::block::Height::MAX,
             )
             .expect("verification should pass"),
         ));
@@ -548,6 +550,8 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &zebra_chain::parameters::Network::Mainnet,
+                zebra_chain::block::Height::MAX,
             )
             .expect("verification should pass"),
         ));
@@ -643,6 +647,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &zebra_chain::parameters::Network::Mainnet,
+                zebra_chain::block::Height::MAX,
             )
             .expect("verification should pass"),
         ));
@@ -764,6 +770,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &zebra_chain::parameters::Network::Mainnet,
+                zebra_chain::block::Height::MAX,
             )
             .expect("verification should pass"),
         ));
@@ -1492,11 +1500,12 @@ async fn advertise_and_serve_block(
     serving_peer: PeerSocketAddr,
 ) -> Result<(), BoxError> {
     let hash = block.hash();
+    let advertiser = zebra_network::test_support::connection_info(advertiser);
 
     let response = inbound
         .ready()
         .await?
-        .call(Request::AdvertiseBlock(hash, Some(advertiser)))
+        .call(Request::AdvertiseBlock(hash, Some(advertiser.clone())))
         .await?;
     assert_eq!(
         response,
