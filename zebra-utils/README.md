@@ -162,12 +162,11 @@ results specified in the ZIP as JSON:
 
 ```sh
 miner-poll tally --election nu8 --options 4,4,4,3,4 \
-  --network mainnet --start 3600000 --end 3669120 --threshold 25
+  --network mainnet --start 3600000 --end 3669120
 ```
 
 - Percentages are relative to all blocks in the Voting Period; blocks without a ballot count as
-  not answering.
-- Each question is `representative` if the blocks answering it reach the Participation Threshold.
+  not answering. Each question reports how many blocks don't answer it.
 - Until the block at the Voting End Height has 100 confirmations, the results count only the
   blocks mined so far, and `final` is `false`. Miners can use this to confirm that their blocks
   count, for example by tallying a range that contains only their block.
