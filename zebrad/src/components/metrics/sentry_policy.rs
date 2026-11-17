@@ -707,8 +707,6 @@ impl GaugeValue {
     }
 
     fn update(&self, change: impl Fn(f64) -> f64) {
-        // A compare-exchange loop, because `fetch_update` is deprecated on newer compilers and
-        // its replacement isn't available on Zebra's minimum supported Rust version.
         let mut bits = self.value.load(Ordering::Relaxed);
         loop {
             // A gauge that was never set starts at zero, as it does in Prometheus.
