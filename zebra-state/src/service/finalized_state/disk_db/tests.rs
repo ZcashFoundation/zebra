@@ -304,7 +304,6 @@ fn cached_size_reuses_fresh_measurement() {
 
     use zebra_chain::parameters::Network;
 
-    use crate::service::finalized_state::disk_db::SizeCache;
     use crate::{service::finalized_state::FinalizedState, Config};
 
     let _init_guard = zebra_test::init();
@@ -324,7 +323,8 @@ fn cached_size_reuses_fresh_measurement() {
         "clones share the cache"
     );
 
-    let stale = db.size_cache.now_ms() - SizeCache::TTL_MS - 1;
+    // `measured_at_ms` starts one TTL in, so 0 is always stale; subtracting from `now_ms()` can wrap in release builds.
+    let stale = 0;
     db.size_cache.measured_at_ms.store(stale, Relaxed);
     assert_eq!(
         db.cached_size(),
