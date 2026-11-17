@@ -152,10 +152,11 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     );
 
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -170,7 +171,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -229,10 +230,11 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
     let block = block_1();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -246,7 +248,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -306,10 +308,11 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let block = block_1();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -323,7 +326,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -374,10 +377,11 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
     let block = block_1();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -391,7 +395,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -437,10 +441,11 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let block = block_1();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -454,7 +459,7 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -518,10 +523,11 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
     );
 
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -535,7 +541,7 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -593,10 +599,11 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
     let block = block_10();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -610,7 +617,7 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -662,10 +669,11 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let block = block_2();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(
         matches!(
-            downloads.download_and_verify(hash, Some(advertiser)),
+            downloads.download_and_verify(hash, Some(advertiser_info.clone())),
             DownloadAction::AddedToQueue
         ),
         "download is queued"
@@ -679,7 +687,7 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((

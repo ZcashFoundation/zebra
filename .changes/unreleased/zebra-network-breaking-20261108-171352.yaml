@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`Request::BlockDownload::advertiser` and the second `Request::AdvertiseBlock` field now take `Option<Arc<ConnectionInfo>>` instead of `Option<PeerSocketAddr>`. Retain the announcing connection''s shared metadata so only that current connection delays speculative block fallback, with a one-second busy-source preference before ordinary fallback ([#12375](https://github.com/ZcashFoundation/zebra/pull/12375)).'
+time: 2026-11-08T17:13:52.841153436+01:00

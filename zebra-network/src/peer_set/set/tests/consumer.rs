@@ -1,6 +1,6 @@
 //! Real buffered peer-set and client-channel fixtures for downstream consumer tests.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, stream, StreamExt};
 use tower::{discover::Change, ServiceExt};
@@ -11,12 +11,22 @@ use crate::{
     peer::{ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion},
     peer_set::InventoryChange,
     types::{InventoryHash, PeerServices},
-    BlockAdvertiser, BoxError, NetworkService, PeerSocketAddr, Request, Response,
+    BlockAdvertiser, BoxError, ConnectionInfo, NetworkService, PeerSocketAddr, Request, Response,
 };
 
 pub use crate::peer::ReceivedClientRequest;
 
 use super::{PeerSetBuilder, PeerSetGuard};
+
+/// Builds connection metadata for consumers backed by a mock network service.
+pub fn connection_info(addr: PeerSocketAddr) -> Arc<ConnectionInfo> {
+    ClientTestHarness::build()
+        .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
+        .finish()
+        .0
+        .connection_info
+        .clone()
+}
 
 /// Owns a buffered peer set and the remote endpoints of its real client channels.
 pub struct PeerSetHarness {
@@ -26,6 +36,8 @@ pub struct PeerSetHarness {
     pub block_advertiser: BlockAdvertiser<MockChainTip>,
     /// The connected addresses, in the same order as the supplied service flags.
     pub addrs: Vec<PeerSocketAddr>,
+    /// Shared identities of the connections, in the same order as their addresses.
+    pub connections: Vec<Arc<ConnectionInfo>>,
     peers: Vec<ClientTestHarness>,
     guard: PeerSetGuard,
     busy_requests: Vec<super::super::ResponseFuture>,
@@ -41,6 +53,7 @@ impl PeerSetHarness {
         let mut guard = PeerSetGuard::new();
         let inventory_receiver = guard.create_inventory_receiver();
         let mut addrs = Vec::new();
+        let mut connections = Vec::new();
         let mut peers = Vec::new();
         let mut changes: Vec<Result<_, BoxError>> = Vec::new();
         for (index, services) in services.iter().enumerate() {
@@ -51,6 +64,7 @@ impl PeerSetHarness {
                 .with_services(*services)
                 .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
                 .finish();
+            connections.push(client.connection_info.clone());
             changes.push(Ok(Change::Insert(addr, client.into())));
             addrs.push(addr);
             peers.push(handle);
@@ -91,6 +105,7 @@ impl PeerSetHarness {
             network,
             block_advertiser,
             addrs,
+            connections,
             peers,
             guard: peer_guard,
             busy_requests,
@@ -108,6 +123,7 @@ impl PeerSetHarness {
             .with_services(services)
             .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
             .finish();
+        self.connections.push(client.connection_info.clone());
         self.discovery
             .try_send(Ok(Change::Insert(addr, client.into())))
             .expect("the discovery channel has room for a test peer");
