@@ -625,12 +625,12 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
             header: block_1.header.clone(),
             hash: block_1.hash(),
             height: Height(1),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let error = downloads
         .next()
@@ -700,12 +700,12 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
             header: genesis.header.clone(),
             hash: genesis.hash(),
             height: Height(0),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let error = downloads
         .next()
@@ -761,7 +761,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(Err(zn::BoxError::from("block not found in any chain")));
+        .respond(zs::ReadResponse::BlockHeader(None));
 
     let error = downloads
         .next()
@@ -881,8 +881,8 @@ fn with_transactions_of(block: &Block, other: &Block) -> Arc<Block> {
 /// Serves `block` from `ADVERTISER` for a downloader with its state tip at `tip_height`, and
 /// returns the download error.
 ///
-/// Answers a parent lookup with "not found", so a parent never proves a rewrite, and checks that
-/// the block never reaches the verifier.
+/// Answers a parent lookup with an unknown parent, so a parent never proves a rewrite, and checks
+/// that the block never reaches the verifier.
 async fn drop_error_for(tip_height: Height, block: Arc<Block>) -> BlockDownloadVerifyError {
     let (error, _downloads_paused) = drop_error_and_pause_for(tip_height, block, false).await;
 
@@ -928,7 +928,7 @@ async fn drop_error_and_pause_for(
         request = state.expect_request(zs::ReadRequest::BlockHeader(
             block.header.previous_block_hash.into(),
         )) => {
-            request.respond(Err(zn::BoxError::from("block not found in any chain")));
+            request.respond(zs::ReadResponse::BlockHeader(None));
             next.await
         }
     }

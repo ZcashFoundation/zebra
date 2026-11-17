@@ -43,21 +43,21 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// A known finalized block cannot be read as a complete block.
+/// A known finalized block or transaction cannot be read completely.
 ///
-/// Unknown blocks and incomplete secondary views return `Ok(None)` instead. Missing primary bodies
-/// indicate corruption until historical body pruning is supported.
+/// Unknown objects and torn secondary views return `Ok(None)` instead. Missing non-genesis bodies
+/// below the actual retained-body floor are unavailable; missing retained data is corruption.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BlockReadError {
-    /// Some or all transaction rows are missing from a known block.
-    #[error("block body unavailable at height {height:?}: stored transactions are incomplete")]
+    /// Transaction bytes are missing from a known block below the retained-body floor.
+    #[error("block body unavailable at height {height:?}: pruned data")]
     BlockBodyUnavailable {
         /// The height of the known block.
         height: block::Height,
     },
 
-    /// The retained header or transaction-location index is inconsistent.
-    #[error("corrupt block metadata at height {height:?}")]
+    /// A retained body, header, or transaction-location index is inconsistent.
+    #[error("corrupt block data at height {height:?}")]
     CorruptBlock {
         /// The height of the known block.
         height: block::Height,
