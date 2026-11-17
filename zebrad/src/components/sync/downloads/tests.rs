@@ -580,15 +580,8 @@ async fn gossip_and_sync_share_download_ownership() {
         ownership.contains(&hash),
         "sync cancellation must not cancel gossip"
     );
-    // An absent state entry and a closed tip notifier must fall back to an independent download.
-    let (queued, ()) = tokio::join!(sync.download_and_verify(hash), async {
-        read_state
-            .try_next_request()
-            .await
-            .expect("sync queries committed presence")
-            .respond(zs::ReadResponse::BlockInfo(None));
-    });
-    queued.unwrap();
+    // Gossip hasn't downloaded a body yet, so sync downloads independently without waiting.
+    sync.download_and_verify(hash).await.unwrap();
     let sync_response = network
         .expect_request(zn::Request::BlockDownload {
             hash,
@@ -614,6 +607,7 @@ async fn gossip_and_sync_share_download_ownership() {
     .expect("the last holder releases the hash");
     drop(sync_response);
     network.expect_no_requests().await;
+    read_state.expect_no_requests().await;
 }
 
 /// A failed or stalled state read never extends the normal independent download deadline.
@@ -644,9 +638,11 @@ async fn inbound_commit_wait_errors_keep_download_deadline() {
         } else {
             Some(tip_sender)
         };
-        let hash = block_1().hash();
+        let body = block_1();
+        let hash = body.hash();
         let ownership = downloads.in_flight_hashes();
-        let inbound = ownership.claim(hash).unwrap();
+        let mut inbound = ownership.claim(hash).unwrap();
+        inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
         let started = Instant::now();
         let pending_read = {
             let enqueue = downloads.download_and_verify(hash);
@@ -708,9 +704,11 @@ async fn cancelled_inbound_commit_wait_releases_ownership() {
     let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
     let (tip, _tip_sender) = MockChainTip::new();
     downloads.latest_chain_tip = tip;
-    let hash = block_1().hash();
+    let body = block_1();
+    let hash = body.hash();
     let ownership = downloads.in_flight_hashes();
-    let inbound = ownership.claim(hash).unwrap();
+    let mut inbound = ownership.claim(hash).unwrap();
+    inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
     {
         let enqueue = downloads.download_and_verify(hash);
         tokio::pin!(enqueue);
@@ -732,6 +730,59 @@ async fn cancelled_inbound_commit_wait_releases_ownership() {
     network.expect_no_requests().await;
     verifier.expect_no_requests().await;
     state.expect_no_requests().await;
+}
+
+/// An advertisement alone claims a hash, so sync must not wait for an owner without a body, and
+/// stops waiting when the owner drops its body.
+#[tokio::test(start_paused = true)]
+async fn inbound_commit_wait_needs_a_downloaded_body() {
+    use tokio::time::Instant;
+
+    let _init_guard = zebra_test::init();
+    for served in [false, true] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let (tip, _tip_sender) = MockChainTip::new();
+        downloads.latest_chain_tip = tip;
+        let body = block_1();
+        let hash = body.hash();
+        let ownership = downloads.in_flight_hashes();
+        let mut inbound = ownership.claim(hash).unwrap();
+        let started = Instant::now();
+        let pending_read = if served {
+            inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            // The lookup stays outstanding, so only the dropped body can end the wait.
+            let read = state
+                .try_next_request()
+                .await
+                .expect("sync queries committed presence");
+            drop(inbound);
+            enqueue.await.unwrap();
+            assert!(Instant::now() - started < super::INBOUND_COMMIT_TIMEOUT);
+            Some(read)
+        } else {
+            // The advertiser never serves the block.
+            downloads.download_and_verify(hash).await.unwrap();
+            assert_eq!(Instant::now() - started, Duration::ZERO);
+            drop(inbound);
+            None
+        };
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await
+            .respond_error("independent download failed".into());
+        downloads.next().await.unwrap().unwrap_err();
+        verifier.expect_no_requests().await;
+        if let Some(read) = pending_read {
+            read.respond(zs::ReadResponse::BlockInfo(None));
+        }
+        state.expect_no_requests().await;
+    }
 }
 
 /// A rejected body releases its hash before a slow parent lookup can outlive cancellation.

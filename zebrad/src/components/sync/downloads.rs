@@ -20,7 +20,7 @@ use thiserror::Error;
 use tokio::{
     sync::{oneshot, watch},
     task::JoinHandle,
-    time::{timeout, timeout_at, Instant},
+    time::{sleep, timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
@@ -44,6 +44,9 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Bound waiting for inbound commitment without depending on the gossip task's lifetime.
 pub(crate) const INBOUND_COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How often sync checks whether the inbound owner it waits for still holds its downloaded body.
+const INBOUND_BODY_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Wait for committed presence using owned handles and an explicit `Send` future.
 // Expose the `Send` guarantee in the signature, not through auto-trait leakage.
@@ -113,11 +116,29 @@ impl DownloadOwners {
 
 impl InFlightDownloads {
     /// Return whether a live download task currently holds this hash.
+    #[cfg(test)]
     pub(crate) fn contains(&self, hash: &block::Hash) -> bool {
         self.0
             .lock()
             .expect("download ownership lock is not poisoned")
             .contains_key(hash)
+    }
+
+    /// Return whether a live download task holds a downloaded body for this hash.
+    ///
+    /// An advertisement alone can claim a hash, so a claim doesn't mean a body is coming.
+    pub(crate) fn has_body(&self, hash: &block::Hash) -> bool {
+        self.0
+            .lock()
+            .expect("download ownership lock is not poisoned")
+            .get(hash)
+            .is_some_and(|owners| {
+                owners
+                    .source
+                    .iter()
+                    .chain(&owners.other_sources)
+                    .any(|(body, _)| body.strong_count() > 0)
+            })
     }
 
     /// Return the supplier of this exact body, not another concurrent download of the same hash.
@@ -620,8 +641,9 @@ where
 
     /// Queue a block for download and verification.
     ///
-    /// This method briefly waits for an existing inbound owner to commit, otherwise waits for
-    /// network readiness within the download deadline. It returns after queuing the result or request.
+    /// This method briefly waits for an inbound owner holding a downloaded body to commit,
+    /// otherwise waits for network readiness within the download deadline. It returns after
+    /// queuing the result or request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
@@ -633,22 +655,34 @@ where
         }
 
         let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        let inbound_owns_hash = self.in_flight_hashes.contains(&hash);
+        let inbound_has_body = self.in_flight_hashes.has_body(&hash);
         // Keep gossip from reclaiming the hash if the current owner fails or is cancelled.
         // Dropping this future releases our hold, just like a cancelled readiness wait.
         let ownership = self.in_flight_hashes.hold(hash);
-        let committed_height = if inbound_owns_hash {
+        let committed_height = if inbound_has_body {
             let committed = committed_block_height(
                 self.read_state.clone(),
                 self.latest_chain_tip.clone(),
                 hash,
             );
-            // Only committed best-chain presence is shared. Errors, shutdown, and stalled or
-            // forged gossip all fall back to an independent download within the original deadline.
-            timeout(INBOUND_COMMIT_TIMEOUT, committed)
-                .await
-                .ok()
-                .and_then(Result::ok)
+            let in_flight = self.in_flight_hashes.clone();
+            let body_dropped = async move {
+                while in_flight.has_body(&hash) {
+                    sleep(INBOUND_BODY_POLL_INTERVAL).await;
+                }
+            };
+            // Only committed best-chain presence is shared. Errors, shutdown, stalled gossip, and
+            // dropped bodies all fall back to an independent download within the original deadline.
+            timeout(INBOUND_COMMIT_TIMEOUT, async {
+                tokio::select! {
+                    biased;
+                    committed = committed => committed.ok(),
+                    () = body_dropped => None,
+                }
+            })
+            .await
+            .ok()
+            .flatten()
         } else {
             None
         };
