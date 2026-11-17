@@ -41,7 +41,6 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
-        record_phase,
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, IntoDisk, RawBytes,
     },

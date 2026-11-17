@@ -61,7 +61,6 @@ macro_rules! record_phase {
         }
     };
 }
-pub(crate) use record_phase;
 
 pub mod column_family;
 
