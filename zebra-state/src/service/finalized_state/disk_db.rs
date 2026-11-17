@@ -43,7 +43,7 @@ use crate::{
 
 use super::zebra_db::transparent::{
     fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
-    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP, UTXO_LOC_BY_TRANSPARENT_ADDR_LOC,
 };
 // Doc-only imports
 #[allow(unused_imports)]
@@ -1028,6 +1028,15 @@ impl DiskDb {
     /// This limits restart recovery work during heavy sync without disabling WAL durability.
     const MAX_TOTAL_WAL_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+    /// Sliding window, in entries, that RocksDB checks for deletions when an SST file is written.
+    const DELETION_COMPACTION_WINDOW: usize = 10_000;
+
+    /// Deletions within one window that mark the SST file for compaction.
+    const DELETION_COMPACTION_TRIGGER: usize = 5_000;
+
+    /// Whole-file share of deletions that also marks the SST file for compaction.
+    const DELETION_COMPACTION_RATIO: f64 = 0.5;
+
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
@@ -1057,6 +1066,16 @@ impl DiskDb {
                     cf_options.set_merge_operator_associative(
                         BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
                         fetch_add_balance_and_received,
+                    );
+                }
+
+                // Spends delete from this index, and address queries range-scan it, so compact
+                // files dense with deletions instead of leaving the markers for scans to skip.
+                if cf_name == UTXO_LOC_BY_TRANSPARENT_ADDR_LOC {
+                    cf_options.add_compact_on_deletion_collector_factory(
+                        Self::DELETION_COMPACTION_WINDOW,
+                        Self::DELETION_COMPACTION_TRIGGER,
+                        Self::DELETION_COMPACTION_RATIO,
                     );
                 }
 
@@ -1343,6 +1362,25 @@ impl DiskDb {
 
     // Write methods
     // Low-level write methods are located in the WriteDisk trait
+
+    /// Compacts the keys of `cf_name` from `from` to `to`, where `None` leaves that end open,
+    /// dropping obsolete entries and deletion markers.
+    pub(crate) fn compact_cf_range(&self, cf_name: &str, from: Option<&[u8]>, to: Option<&[u8]>) {
+        let cf = self
+            .cf_handle(cf_name)
+            .expect("column family was created when the database was opened");
+        self.db.compact_range_cf(&cf, from, to);
+    }
+
+    /// Returns how many background errors RocksDB has seen, which is how a failed manual
+    /// compaction is reported: `compact_range_cf` itself returns nothing.
+    pub(crate) fn background_error_count(&self) -> u64 {
+        self.db
+            .property_int_value("rocksdb.background-errors")
+            .ok()
+            .flatten()
+            .unwrap_or(0)
+    }
 
     /// Writes `batch` to the database.
     pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {

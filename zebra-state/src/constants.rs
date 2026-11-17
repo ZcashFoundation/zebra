@@ -48,6 +48,8 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.2.0: compacts `utxo_loc_by_transparent_addr_loc` once, and enables deletion-triggered
+///   compaction on it, so address queries no longer skip the deletion markers of spent outputs.
 /// - 29.1.0: fast checkpoint sync. Adds the `fast_sync_tree_roots` column family, which stores
 ///   the note commitment tree roots and sizes of heights committed without their Sapling, Orchard,
 ///   and Ironwood trees. Those heights have no trees by height, but the subtrees they completed are
@@ -66,7 +68,7 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 2;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
