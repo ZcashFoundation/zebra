@@ -1573,7 +1573,7 @@ impl Service<Request> for StateService {
                 let mut tip_change = self.latest_chain_tip.clone();
                 // Published work reserves the slot until verification ends, even after expiry.
                 let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let candidate_block = block.clone();
