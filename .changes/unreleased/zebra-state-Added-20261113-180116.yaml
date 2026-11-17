@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: Add `NonFinalizedState::prepare_spare` to prepare reusable proposal state with a deadline and interruption predicate.
-time: 2026-11-13T18:01:16.370266252+01:00
