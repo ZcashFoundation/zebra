@@ -173,6 +173,10 @@ pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
 #[cfg(test)]
 mod tests;
 
+/// The `z_gettreestate` error for a block that isn't in the main chain, or that left it while the
+/// request was answered.
+const BLOCK_NOT_IN_MAIN_CHAIN: &str = "the requested block is not in the main chain";
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
@@ -2678,7 +2682,9 @@ where
         //
         // For consistency, this lookup must be performed first, then all the other lookups must
         // be based on the hash. The tree lookups check every chain, so a reorg that moves the
-        // block onto a side chain after this lookup can't make its treestate disappear.
+        // block onto a side chain after this lookup can't make its treestate disappear. If the
+        // block is invalidated, or reorged away and pruned, before the tree lookups, they find
+        // nothing, and the request fails as if the block were missing.
         //
         let zebra_state::ReadResponse::BlockHeader(header) = read_state
             .ready()
@@ -2695,18 +2701,17 @@ where
             ..
         } = header.ok_or_error(
             server::error::LegacyCode::InvalidParameter,
-            "the requested block is not in the main chain",
+            BLOCK_NOT_IN_MAIN_CHAIN,
         )?;
 
         let time = u32::try_from(header.time.timestamp())
             .expect("timestamps of valid blocks always fit into u32");
 
-        // A read-only state that is still catching up can show a header before its trees.
-        // Answer as if the block were missing, rather than with empty trees.
-        let missing_tree = || {
-            Err("the requested block is not in the main chain")
-                .map_error(server::error::LegacyCode::InvalidParameter)
-        };
+        // The header and tree lookups are separate requests, so the block can be invalidated, or
+        // reorged away and pruned, between them. Answer as if the block were missing, rather than
+        // with empty trees.
+        let missing_tree =
+            || Err(BLOCK_NOT_IN_MAIN_CHAIN).map_error(server::error::LegacyCode::InvalidParameter);
 
         let sapling_active =
             network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into());
