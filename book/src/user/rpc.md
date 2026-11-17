@@ -9,7 +9,7 @@ from `zcashd`, including missing fields and unsupported methods.
 ## Enabling the server
 
 JSON-RPC is disabled until [`[rpc] listen_addr`](config.md#rpc) is set to an
-explicit IP address and port. See [Ports](run.md) for network conventions.
+explicit IP address and port. See [Ports](run.md#ports) for network conventions.
 
 Generate a configuration file:
 

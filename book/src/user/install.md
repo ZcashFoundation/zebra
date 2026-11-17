@@ -266,7 +266,7 @@ Cargo feature resolution. See [Arti support](https://github.com/ZcashFoundation/
 
 Cargo features select code at build time; configuration selects runtime
 behavior. The table covers every explicit feature in
-[`zebrad/Cargo.toml`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/Cargo.toml#L63-L152).
+[`zebrad/Cargo.toml`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/Cargo.toml#L64-L156).
 “Default” includes features enabled transitively by `default`.
 Mining RPCs require no optional Cargo feature; `internal-miner` adds the
 built-in solver, not the mining API.
@@ -276,6 +276,7 @@ built-in solver, not the mining API.
 | `default` | Yes | Production feature selector; enables `default-release-binaries`. | Each included component retains its own runtime activation requirements. |
 | `default-release-binaries` | Yes | Production bundle: `release_max_level_info`, `progress-bar`, `prometheus`, `sentry`, and `opentelemetry`. | The archive workflow explicitly selects this bundle. |
 | `indexer` | No | Production integration: adds state indexes mapping spent outputs and revealed nullifiers to spending transactions. | No runtime switch; opening a populated state adds the indexes. A build without the feature removes them. The indexer gRPC listener is separate and uses `[rpc] indexer_listen_addr` without requiring this feature. |
+| `zmq` | No | Mining integration: publishes zcashd-compatible ZMQ `hashblock` notifications with a pure-Rust publisher; no system ZMQ library is needed. | Set `[notify] zmqpubhashblock`; see [ZMQ block notifications](mining.md#zmq-block-notifications). Configuring the endpoint without this feature is a startup error. |
 | `internal-miner` | No | Experimental CPU Equihash miner; runs one solver and checks the target difficulty. | Set `[mining] miner_address` and `internal_miner = true`; see [internal miner setup](regtest.md#using-zebras-internal-miner). Use generation RPCs, not this solver, for deterministic Regtest block production. |
 | `sentry` | Yes | Production monitoring: sends diagnostic events to Sentry. | Set `SENTRY_DSN` to activate; see [Sentry monitoring](tracing.md#sentry-production-monitoring). |
 | `journald` | No | Production logging: writes tracing events to systemd-journald. | Requires Linux with a reachable journal and `[tracing] use_journald = true`. |
@@ -294,7 +295,7 @@ built-in solver, not the mining API.
 | `proptest-impl` | No | Tests: enables property-test data generators in Zebra crates. | Used by test code; no node configuration switch. |
 | `zebra-checkpoints` | No | Tests: enables checkpoint-generation test support and the `zebra-utils/zebra-checkpoints` feature. | Checkpoint tests need a synced cached state and the `zebra-checkpoints` executable; see [checkpoint generation](../dev/zebra-checkpoints.md). |
 | `lightwalletd-grpc-tests` | No | Tests: generates the lightwalletd gRPC test client. | Requires `protoc` while building and an installed `lightwalletd` binary for the tests. It is not required to serve normal wallet traffic. |
-| `tokio-console` | No | Debugging: enables Tokio task instrumentation through `console-subscriber`. | Build with `RUSTFLAGS="--cfg tokio_unstable"`, disable default log ceilings, and use the `tokio-console` client. |
+| `tokio-console` | No | Debugging: enables Tokio task instrumentation through `console-subscriber`. | Build with `RUSTFLAGS="--cfg tokio_unstable"`, disable default log ceilings, and use the `tokio-console` client; see [setup](../dev/tokio-console.md#setup). |
 | `comparison-interpreter` | No | Tests: runs the Rust and C++ script interpreters and reports disagreements. | No runtime activation flag; do not use for production. |
 
 Cargo also exposes implicit features for optional dependencies. The default
