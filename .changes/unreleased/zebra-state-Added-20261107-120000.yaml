@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`ZebraDb::cached_size`, `DiskDb::cached_size` and `DiskDb::SIZE_CACHE_TTL`. `ReadRequest::UsageInfo` now returns a disk size estimate measured at most 30 seconds ago.'
+time: 2026-11-07T12:00:00.000000000Z

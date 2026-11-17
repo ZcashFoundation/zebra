@@ -296,3 +296,43 @@ fn read_only_secondary_removes_its_directory_on_drop() {
         "dropping a secondary must keep the primary database"
     );
 }
+
+/// Check that `cached_size` reuses a fresh measurement and re-measures a stale one.
+#[test]
+fn cached_size_reuses_fresh_measurement() {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    use zebra_chain::parameters::Network;
+
+    use crate::service::finalized_state::disk_db::SizeCache;
+    use crate::{service::finalized_state::FinalizedState, Config};
+
+    let _init_guard = zebra_test::init();
+
+    let state = FinalizedState::new(&Config::ephemeral(), &Network::Mainnet)
+        .expect("opening an ephemeral database should succeed");
+    let db: &DiskDb = state.db.db();
+
+    assert_eq!(db.cached_size(), db.size());
+
+    let sentinel = db.size() + 12_345;
+    db.size_cache.size.store(sentinel, Relaxed);
+    assert_eq!(db.cached_size(), sentinel, "a fresh measurement is reused");
+    assert_eq!(
+        state.db.clone().cached_size(),
+        sentinel,
+        "clones share the cache"
+    );
+
+    let stale = db.size_cache.now_ms() - SizeCache::TTL_MS - 1;
+    db.size_cache.measured_at_ms.store(stale, Relaxed);
+    assert_eq!(
+        db.cached_size(),
+        db.size(),
+        "a stale measurement is replaced"
+    );
+    assert!(
+        db.size_cache.measured_at_ms.load(Relaxed) > stale,
+        "the refresh records its time"
+    );
+}

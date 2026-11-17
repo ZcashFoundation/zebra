@@ -1615,7 +1615,7 @@ impl Service<ReadRequest> for ReadStateService {
 
         let request_handler = move || match req {
             // Used by the `getblockchaininfo` RPC.
-            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
+            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.cached_size())),
 
             ReadRequest::HistoryCapabilities => Ok(ReadResponse::HistoryCapabilities(
                 state.db.history_capabilities()?,

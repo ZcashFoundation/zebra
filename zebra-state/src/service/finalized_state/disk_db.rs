@@ -17,9 +17,10 @@ use std::{
     ops::RangeBounds,
     path::Path,
     sync::{
-        atomic::{self, AtomicBool},
+        atomic::{self, AtomicBool, AtomicU64},
         Arc,
     },
+    time::{Duration, Instant},
 };
 
 use itertools::Itertools;
@@ -101,6 +102,9 @@ pub struct DiskDb {
     /// A boolean flag indicating whether the db format change task has finished
     /// applying any format changes that may have been required.
     finished_format_upgrades: Arc<AtomicBool>,
+
+    /// The last [`DiskDb::size`] result and when it was measured, shared by all clones.
+    size_cache: Arc<SizeCache>,
 
     // Owned State
     //
@@ -608,7 +612,44 @@ impl DiskWriteBatch {
     }
 }
 
+/// The [`DiskDb::size`] measurement reused by [`DiskDb::cached_size`].
+#[derive(Debug)]
+struct SizeCache {
+    /// Measurement times count from here.
+    opened: Instant,
+    /// The last measurement, or [`SizeCache::UNKNOWN`] before the first one.
+    size: AtomicU64,
+    /// When `size` was measured, in milliseconds from `opened` plus [`SizeCache::TTL_MS`].
+    measured_at_ms: AtomicU64,
+}
+
+impl SizeCache {
+    /// Marks a cache that has no measurement yet.
+    const UNKNOWN: u64 = u64::MAX;
+
+    /// [`DiskDb::SIZE_CACHE_TTL`] in milliseconds.
+    const TTL_MS: u64 = DiskDb::SIZE_CACHE_TTL.as_secs() * 1000;
+
+    fn new() -> Self {
+        Self {
+            opened: Instant::now(),
+            size: AtomicU64::new(Self::UNKNOWN),
+            measured_at_ms: AtomicU64::new(0),
+        }
+    }
+
+    /// The current time on the `measured_at_ms` scale, which starts one TTL in, so a stale time always exists.
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.opened.elapsed().as_millis())
+            .unwrap_or(u64::MAX)
+            .saturating_add(Self::TTL_MS)
+    }
+}
+
 impl DiskDb {
+    /// How long [`DiskDb::cached_size`] reuses a measurement.
+    pub const SIZE_CACHE_TTL: Duration = Duration::from_secs(30);
+
     /// Prints rocksdb metrics for each column family along with total database disk size, live data disk size and database memory size.
     pub fn print_db_metrics(&self) {
         let mut total_size_on_disk = 0;
@@ -754,6 +795,43 @@ impl DiskDb {
         }
 
         total_size_on_disk
+    }
+
+    /// Returns [`DiskDb::size`], measured at most [`DiskDb::SIZE_CACHE_TTL`] ago.
+    ///
+    /// Measuring re-reads the MANIFEST file, which takes milliseconds on a mainnet database.
+    pub fn cached_size(&self) -> u64 {
+        let cache = &self.size_cache;
+        let now = cache.now_ms();
+        let measured_at = cache.measured_at_ms.load(atomic::Ordering::Relaxed);
+        let size = cache.size.load(atomic::Ordering::Relaxed);
+
+        if size != SizeCache::UNKNOWN {
+            if now.saturating_sub(measured_at) < SizeCache::TTL_MS {
+                return size;
+            }
+
+            // One caller claims the refresh, the others reuse the previous measurement.
+            if cache
+                .measured_at_ms
+                .compare_exchange(
+                    measured_at,
+                    now,
+                    atomic::Ordering::Relaxed,
+                    atomic::Ordering::Relaxed,
+                )
+                .is_err()
+            {
+                return size;
+            }
+        }
+
+        let size = self.size();
+        cache.size.store(size, atomic::Ordering::Relaxed);
+        cache
+            .measured_at_ms
+            .fetch_max(now, atomic::Ordering::Relaxed);
+        size
     }
 
     /// Sets `finished_format_upgrades` to true to indicate that Zebra has
@@ -1108,6 +1186,7 @@ impl DiskDb {
                     db: Arc::new(db),
                     secondary_dir,
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    size_cache: Arc::new(SizeCache::new()),
                 };
 
                 // Guard the lowest writable entry point before launching migrations or checks.

@@ -1232,7 +1232,7 @@ impl Request {
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
-    /// with the current disk space usage in bytes.
+    /// with the estimated disk space usage in bytes, measured at most 30 seconds ago.
     UsageInfo,
 
     /// Returns stored body availability in [`ReadResponse::HistoryCapabilities`].

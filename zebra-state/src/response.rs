@@ -431,7 +431,7 @@ impl Eq for NonFinalizedBlocksListener {}
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
-    /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
+    /// Response to [`ReadRequest::UsageInfo`] with the estimated disk space usage in bytes.
     UsageInfo(u64),
 
     /// Stored body availability, in response to [`ReadRequest::HistoryCapabilities`].
