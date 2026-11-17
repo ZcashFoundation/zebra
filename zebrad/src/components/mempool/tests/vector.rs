@@ -80,21 +80,48 @@ fn early_branch_id_before_nu6_3_has_no_mempool_score() {
     );
 }
 
-/// An NU7 branch ID keeps its peer score on Mainnet while NU7 has no activation height.
+/// An NU7 branch ID has no peer score on a Mainnet node that is still syncing below NU7, outside
+/// the activation grace window.
 #[test]
-fn nu7_branch_id_keeps_mempool_score_without_mainnet_activation() {
+fn nu7_branch_id_has_no_mempool_score_while_syncing_below_nu7() {
     let network = Network::Mainnet;
-    let height = (NetworkUpgrade::Nu6_3
+    let activation_height = NetworkUpgrade::Nu7
         .activation_height(&network)
-        .expect("NU6.3 has a mainnet activation height")
-        + 1_000)
-        .expect("NU6.3 activates far below Height::MAX");
+        .expect("NU7 has a mainnet activation height");
+    // The first block above the 3,543,291 checkpoint, where a syncing node verified transactions.
+    let height = (activation_height - 113).expect("NU7 activates far above Height::MIN");
 
     assert_eq!(
         adjusted_mempool_misbehavior_score(
             &TransactionError::WrongConsensusBranchId,
             Some(NetworkUpgrade::Nu7),
             height,
+            &network,
+        ),
+        0,
+    );
+}
+
+/// A branch ID for an upgrade without an activation height keeps its peer score.
+#[test]
+fn unscheduled_branch_id_keeps_mempool_score() {
+    let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu6_3: Some(10),
+            nu7: None,
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured network is valid");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu7),
+            Height(1_000),
             &network,
         ),
         100,
