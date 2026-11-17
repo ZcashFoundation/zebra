@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: The address-book benchmark builds again, and the inventory registry docs no longer link a renamed function.
+time: 2026-11-17T01:14:03.93437608+01:00
