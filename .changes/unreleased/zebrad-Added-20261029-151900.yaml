@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added `preciousblock` to prefer a known non-finalized tip among equal-work chains, with the last call winning and preferences lost on restart.
+time: 2026-10-29T15:19:00.835597176-05:00
