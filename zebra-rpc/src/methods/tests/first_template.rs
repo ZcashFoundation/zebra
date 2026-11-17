@@ -7,10 +7,65 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use metrics::{
+    Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+};
 
 use zebra_chain::{block, chain_tip::ChainTip, transaction, BoxError};
 
 use crate::methods::FirstTemplateTip;
+
+/// The name of the histogram these tests check.
+const FIRST_TEMPLATE: &str = "rpc.getblocktemplate.first_template.duration_seconds";
+
+/// The samples recorded to one histogram.
+#[derive(Default)]
+struct Samples(Mutex<Vec<f64>>);
+
+impl HistogramFn for Samples {
+    fn record(&self, value: f64) {
+        self.0
+            .lock()
+            .expect("recording never panics while holding the lock")
+            .push(value);
+    }
+}
+
+/// Records the samples of the first-template histogram and ignores every other metric.
+#[derive(Default)]
+struct FirstTemplateRecorder(Arc<Samples>);
+
+impl FirstTemplateRecorder {
+    fn samples(&self) -> Vec<f64> {
+        self.0
+             .0
+            .lock()
+            .expect("recording never panics while holding the lock")
+            .clone()
+    }
+}
+
+impl Recorder for FirstTemplateRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+        Counter::noop()
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+        if key.name() == FIRST_TEMPLATE {
+            Histogram::from_arc(self.0.clone())
+        } else {
+            Histogram::noop()
+        }
+    }
+}
 
 /// A best tip published at `changed_at`, whose publication reads can be paused.
 struct PublishedTip {
@@ -69,11 +124,18 @@ impl ChainTip for PublishedTip {
     fn mark_best_tip_seen(&mut self) {}
 }
 
-/// Each publication is recorded once, and a return to an earlier tip is a new publication.
+/// Each publication is recorded once, as the time since it was published, and a return to an
+/// earlier tip is a new publication.
 #[test]
 fn records_each_publication_once() {
+    const AGE: Duration = Duration::from_millis(50);
+
+    let recorder = FirstTemplateRecorder::default();
+    let _recorder_guard = metrics::set_default_local_recorder(&recorder);
     let first_template = FirstTemplateTip::default();
-    let published = Instant::now();
+    let published = Instant::now()
+        .checked_sub(AGE)
+        .expect("the monotonic clock started more than 50 ms ago");
     let tip = |hash, changed_at| PublishedTip {
         hash,
         changed_at,
@@ -91,6 +153,15 @@ fn records_each_publication_once() {
 
     let republished = published + Duration::from_millis(1);
     assert!(first_template.record(&tip(a, republished), a));
+
+    let samples = recorder.samples();
+    assert_eq!(samples.len(), 3, "one sample per recorded publication");
+    for sample in samples {
+        assert!(
+            (AGE.as_secs_f64() - 0.001..10.0).contains(&sample),
+            "{sample} is the time since the tip was published",
+        );
+    }
 }
 
 /// An RPC that read an older publication can't replace a newer one that another RPC recorded
