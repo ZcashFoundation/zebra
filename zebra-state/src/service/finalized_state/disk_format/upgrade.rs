@@ -86,6 +86,11 @@ pub trait DiskFormatUpgrade {
         true
     }
 
+    /// Returns true if the upgrade rewrites records, so older readers can't read the database until it runs.
+    fn changes_record_format(&self) -> bool {
+        self.needs_migration()
+    }
+
     /// Returns whether running this migration requires complete historical block bodies.
     ///
     /// New migrations must opt out only if they can run entirely on retained data.
@@ -153,7 +158,7 @@ pub fn restorable_db_versions() -> Vec<u64> {
 
 /// Whether the existing records can be read without applying any intervening migrations.
 pub(crate) fn can_read_without_migration(disk_version: &Version) -> bool {
-    !format_upgrades(Some(disk_version.clone())).any(|upgrade| upgrade.needs_migration())
+    !format_upgrades(Some(disk_version.clone())).any(|upgrade| upgrade.changes_record_format())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -985,6 +990,10 @@ fn compact_address_utxo_index_runs_once_after_29_1_0() {
         !from_29[0].requires_full_history(),
         "pruned nodes can run the compaction"
     );
+    assert!(
+        !from_29[0].changes_record_format(),
+        "the compaction leaves records readable"
+    );
 
     let mut in_code = crate::constants::state_database_format_version_in_code();
     in_code.build = semver::BuildMetadata::EMPTY;
@@ -993,4 +1002,18 @@ fn compact_address_utxo_index_runs_once_after_29_1_0() {
         Some(&in_code),
         "the last upgrade is the version in code"
     );
+}
+
+#[test]
+fn compaction_does_not_block_read_only_reuse() {
+    for disk_version in [
+        Version::new(28, 1, 0),
+        Version::new(29, 0, 0),
+        Version::new(29, 1, 0),
+    ] {
+        assert!(
+            can_read_without_migration(&disk_version),
+            "{disk_version} is readable before the compaction runs"
+        );
+    }
 }
