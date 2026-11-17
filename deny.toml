@@ -15,6 +15,8 @@ ignore = [
     "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained): via librustzcash orchard -> getset
     "RUSTSEC-2025-0119", # number_prefix: transitive via indicatif
     "RUSTSEC-2025-0141", # bincode: direct dependency
+    "RUSTSEC-2026-0543", # chrono (unmaintained): direct dependency, used in zebra-chain's public API
+    "RUSTSEC-2026-0542", # humantime (unmaintained, wraps chrono): via humantime-serde and console-subscriber
 ]
 
 # This section is considered when running `cargo deny check licenses`.
