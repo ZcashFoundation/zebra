@@ -27,6 +27,7 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod dispatch;
 mod nu7;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
