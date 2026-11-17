@@ -102,6 +102,28 @@ fn nu7_branch_id_has_no_mempool_score_while_syncing_below_nu7() {
     );
 }
 
+/// An NU6.3 branch ID has no peer score on a Mainnet node well past NU7, since a peer whose tip
+/// lags behind NU7 can honestly relay it.
+#[test]
+fn nu6_3_branch_id_has_no_mempool_score_long_after_nu7() {
+    let network = Network::Mainnet;
+    let height = (NetworkUpgrade::Nu7
+        .activation_height(&network)
+        .expect("NU7 has a mainnet activation height")
+        + 10_000)
+        .expect("NU7 activates far below Height::MAX");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_3),
+            height,
+            &network,
+        ),
+        0,
+    );
+}
+
 /// A branch ID for an upgrade without an activation height keeps its peer score.
 #[test]
 fn unscheduled_branch_id_keeps_mempool_score() {

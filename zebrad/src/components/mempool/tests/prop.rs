@@ -159,9 +159,10 @@ proptest! {
         );
     }
 
-    /// Checks that NU6.2 branch IDs regain their peer score at the grace cutoff.
+    /// Checks that NU6.2 branch IDs have no peer score after the NU6.3 grace window either, since a
+    /// peer whose tip lags behind NU6.3 can honestly relay them.
     #[test]
-    fn nu6_2_branch_id_keeps_score_after_nu6_3_grace(
+    fn nu6_2_branch_id_has_no_score_after_nu6_3_grace(
         activation_height in 100u32..1_000_000,
         height_offset in 40i64..1_000,
     ) {
@@ -187,14 +188,15 @@ proptest! {
                 height,
                 &network,
             ),
-            100,
+            0,
         );
     }
 
 
-    /// Checks that other mismatched branch IDs retain their normal peer score.
+    /// Checks that other mismatched branch IDs have no peer score if their upgrade is scheduled on
+    /// the network, and keep their normal score otherwise.
     #[test]
-    fn other_branch_ids_keep_mempool_score(
+    fn other_branch_ids_are_scored_only_when_unscheduled(
         activation_height in 100u32..1_000_000,
         height_offset in -1i64..41,
         transaction_upgrade in any::<NetworkUpgrade>(),
@@ -219,6 +221,11 @@ proptest! {
             .expect("generated activation heights are far below Height::MAX");
 
         prop_assume!(transaction_upgrade != NetworkUpgrade::current(&network, height));
+        let expected_score = if transaction_upgrade.activation_height(&network).is_some() {
+            0
+        } else {
+            100
+        };
 
         prop_assert_eq!(
             adjusted_mempool_misbehavior_score(
@@ -227,7 +234,7 @@ proptest! {
                 height,
                 &network,
             ),
-            100,
+            expected_score,
         );
     }
 
@@ -541,9 +548,9 @@ proptest! {
         prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 0);
     }
 
-    /// Checks that NU6.3 branch IDs regain their peer score at the NU7 grace cutoff.
+    /// Checks that NU6.3 branch IDs have no peer score after the NU7 grace window either.
     #[test]
-    fn nu6_3_branch_id_keeps_score_after_nu7_grace(
+    fn nu6_3_branch_id_has_no_score_after_nu7_grace(
         activation_height in 100u32..1_000_000,
         height_offset in 120i64..1_000,
     ) {
@@ -554,7 +561,7 @@ proptest! {
         });
         let height = height_at_offset(activation_height, height_offset);
 
-        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 100);
+        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 0);
     }
 
     /// Checks that NU7 branch IDs have no peer score at any height below NU7 activation, inside
@@ -574,9 +581,10 @@ proptest! {
         prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu7, height, &network), 0);
     }
 
-    /// Checks that non-adjacent branch IDs retain their normal peer score around NU7 activation.
+    /// Checks that non-adjacent branch IDs around NU7 activation have no peer score if their
+    /// upgrade is scheduled on the network, and keep their normal score otherwise.
     #[test]
-    fn non_adjacent_branch_ids_keep_mempool_score_at_nu7(
+    fn non_adjacent_branch_ids_are_scored_only_when_unscheduled_at_nu7(
         activation_height in 100u32..1_000_000,
         height_offset in -1i64..121,
         transaction_upgrade in any::<NetworkUpgrade>(),
@@ -590,8 +598,14 @@ proptest! {
             ..Default::default()
         });
         let height = height_at_offset(activation_height, height_offset);
+        prop_assume!(transaction_upgrade != NetworkUpgrade::current(&network, height));
+        let expected_score = if transaction_upgrade.activation_height(&network).is_some() {
+            0
+        } else {
+            100
+        };
 
-        prop_assert_eq!(branch_id_score(transaction_upgrade, height, &network), 100);
+        prop_assert_eq!(branch_id_score(transaction_upgrade, height, &network), expected_score);
     }
 }
 

@@ -88,8 +88,8 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-/// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
-/// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
+/// The wall-clock window around a network upgrade activation where a V4 script failure receives no
+/// peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
 
 /// Returns the mempool peer score after applying branch ID activation policy.
@@ -99,22 +99,22 @@ fn adjusted_mempool_misbehavior_score(
     verification_height: Height,
     network: &Network,
 ) -> u32 {
-    let is_grace_mismatch =
-        match (error, transaction_upgrade) {
-            (TransactionError::WrongConsensusBranchId, Some(_)) => true,
-            // V4 and older transactions commit to the branch ID only in their signatures, so one
-            // signed for an adjacent upgrade fails its scripts instead. zcashd checks the previous
-            // branch ID explicitly; Zebra doesn't, so it forgives any script failure in the window.
-            (TransactionError::Script(_), None) => true,
-            _ => false,
-        } && is_in_branch_id_grace_period(transaction_upgrade, verification_height, network);
+    // A branch ID for any upgrade scheduled on this network is valid on an honest chain whose tip
+    // is on the other side of an activation from ours: ahead, while this node is still syncing,
+    // or behind, while the peer is. The branch ID check runs before scripts and proofs.
+    let is_scheduled_branch_id = matches!(error, TransactionError::WrongConsensusBranchId)
+        && transaction_upgrade.is_some_and(|transaction_upgrade| {
+            transaction_upgrade.activation_height(network).is_some()
+        });
 
-    // A branch ID for an upgrade that activates above our tip is valid on a chain that is ahead
-    // of ours, for example while this node is still syncing, so a peer can honestly relay it.
-    let is_future_branch_id = matches!(error, TransactionError::WrongConsensusBranchId)
-        && transaction_upgrade
-            .and_then(|transaction_upgrade| transaction_upgrade.activation_height(network))
-            .is_some_and(|activation_height| activation_height > verification_height);
+    // V4 and older transactions commit to the branch ID only in their signatures, so one signed
+    // for an adjacent upgrade fails its scripts instead. zcashd checks the previous branch ID
+    // explicitly; Zebra doesn't, so it forgives any script failure near an activation.
+    let is_v4_script_failure_near_activation =
+        matches!(
+            (error, transaction_upgrade),
+            (TransactionError::Script(_), None)
+        ) && is_near_activation(verification_height, network);
 
     // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
     // relay a transaction we reject.
@@ -124,39 +124,30 @@ fn adjusted_mempool_misbehavior_score(
             | TransactionError::LockedUntilAfterBlockTime(_)
     );
 
-    if is_grace_mismatch || is_future_branch_id || is_tip_relative_lock_time {
+    if is_scheduled_branch_id || is_v4_script_failure_near_activation || is_tip_relative_lock_time {
         0
     } else {
         error.mempool_misbehavior_score()
     }
 }
 
-/// Returns `true` if `transaction_upgrade` activates immediately before or after the upgrade
-/// current at `height` on `network`, and `height` is within the grace window of that boundary.
-/// `None` matches either adjacent upgrade.
-fn is_in_branch_id_grace_period(
-    transaction_upgrade: Option<NetworkUpgrade>,
-    height: Height,
-    network: &Network,
-) -> bool {
+/// Returns `true` if `height` is within the grace window after the activation of the upgrade
+/// current at `height` on `network`, or before the activation of the next upgrade.
+fn is_near_activation(height: Height, network: &Network) -> bool {
     let activations = network.activation_list();
     let Some((&current_height, &current)) = activations.range(..=height).next_back() else {
         return false;
     };
     let grace_blocks =
         BRANCH_ID_GRACE_PERIOD.num_seconds() / current.target_spacing().num_seconds();
-    let matches = |upgrade| transaction_upgrade.is_none_or(|tx_upgrade| tx_upgrade == upgrade);
 
-    let previous = activations.range(..current_height).next_back();
+    let has_previous = activations.range(..current_height).next_back().is_some();
     let next = activations
         .range((Bound::Excluded(height), Bound::Unbounded))
         .next();
 
-    previous
-        .is_some_and(|(_, &previous)| matches(previous) && height - current_height < grace_blocks)
-        || next.is_some_and(|(&next_height, &next)| {
-            matches(next) && next_height - height <= grace_blocks
-        })
+    (has_previous && height - current_height < grace_blocks)
+        || next.is_some_and(|(&next_height, _)| next_height - height <= grace_blocks)
 }
 
 /// The state of the mempool.
