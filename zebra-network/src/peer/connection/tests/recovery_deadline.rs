@@ -42,12 +42,7 @@ where
     connection.request_timer = Some(Box::pin(tokio::time::sleep(response_timeout(&handler))));
     connection.state = State::AwaitingResponse {
         handler,
-        tx: MustUseClientResponseSender::new(
-            tx,
-            &Request::BlocksByHash([block.hash()].into()),
-            None,
-            None,
-        ),
+        tx: MustUseClientResponseSender::new(tx),
         span: tracing::Span::none(),
     };
     rx

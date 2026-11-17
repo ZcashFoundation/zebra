@@ -8,6 +8,12 @@ use abscissa_core::{Component, FrameworkError, FrameworkErrorKind};
 use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
+mod process_memory;
+
+#[cfg(all(test, feature = "sentry"))]
+pub(crate) use process_memory::record;
+pub use process_memory::record_process_memory;
+
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
 pub struct MetricsEndpoint {}

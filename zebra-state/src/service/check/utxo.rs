@@ -11,7 +11,7 @@ use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
     service::{
         finalized_state::ZebraDb,
-        non_finalized_state::{CreatedUtxos, SpendingTransactionId},
+        non_finalized_state::{Chain, SpendingTransactionId},
     },
     SemanticallyVerifiedBlock,
     ValidateContextError::{
@@ -20,10 +20,6 @@ use crate::{
     },
 };
 
-// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
-// License, Version 2.0, at your option.
-// Adapted from zakura-core/zakura#1153 (https://github.com/zakura-core/zakura/pull/1153).
-// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Lookup all the [`transparent::Utxo`]s spent by a [`SemanticallyVerifiedBlock`].
 /// If any of the spends are invalid, return an error.
 /// Otherwise, return the looked up UTXOs.
@@ -44,8 +40,8 @@ use crate::{
 /// - unshielded spends of a transparent coinbase output.
 pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
-    non_finalized_chain_created_utxos: &CreatedUtxos,
-    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    non_finalized_chain: &Chain,
+    non_finalized_chain_spent_utxos: &imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
@@ -68,7 +64,7 @@ pub fn transparent_spend(
                 spend,
                 spend_tx_index_in_block,
                 &semantically_verified.new_outputs,
-                non_finalized_chain_created_utxos,
+                non_finalized_chain,
                 non_finalized_chain_spent_utxos,
                 finalized_state,
             )?;
@@ -133,8 +129,8 @@ fn transparent_spend_chain_order(
     spend: transparent::OutPoint,
     spend_tx_index_in_block: usize,
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    non_finalized_chain_created_utxos: &CreatedUtxos,
-    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    non_finalized_chain: &Chain,
+    non_finalized_chain_spent_utxos: &imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
@@ -154,6 +150,8 @@ fn transparent_spend_chain_order(
         }
     }
 
+    // This check must come before the created output lookup, because the created outputs
+    // include outputs that are already spent in the non-finalized chain.
     if non_finalized_chain_spent_utxos.contains_key(&spend) {
         // reject the spend if its UTXO is already spent in the
         // non-finalized parent chain
@@ -163,8 +161,8 @@ fn transparent_spend_chain_order(
         });
     }
 
-    non_finalized_chain_created_utxos
-        .get(&spend)
+    non_finalized_chain
+        .created_ordered_utxo(&spend)
         .map(|utxo| utxo.as_ref().clone())
         .or_else(|| finalized_state.utxo(&spend))
         // we don't keep spent UTXOs in the finalized state,
@@ -222,6 +220,8 @@ pub fn transparent_coinbase_spend(
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
 // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Reject negative remaining transaction value.
 ///

@@ -1149,7 +1149,7 @@ where
             // So we can just track peer activity based on Ping and Pong.
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
-            let inbound_inv_collector = inv_collector.clone();
+            let inbound_inv_collector = inv_collector;
             let early_block_relay = connection_info.early_block_relay;
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
@@ -1275,7 +1275,6 @@ where
                 server_tx,
                 block_advert_tx,
                 compact_receive_tx,
-                inv_collector,
                 error_slot,
                 connection_task,
                 heartbeat_task,
@@ -1395,6 +1394,7 @@ pub(crate) async fn register_inventory_status(
         }
 
         (Ok(Message::NotFound(missing)), Some(transient_addr)) => {
+            // Only wire messages establish missing inventory; local responses can synthesize IDs.
             // Ignore Errors and the unsupported FilteredBlock type
             let missing = missing.iter().filter(|missing| {
                 missing.unmined_tx_id().is_some() || missing.block_hash().is_some()
@@ -1546,9 +1546,6 @@ async fn send_one_heartbeat(
     match server_tx.try_send(ClientRequest {
         request,
         tx,
-        // we're not requesting inventory, so we don't need to update the registry
-        inv_collector: None,
-        transient_addr: None,
         span: tracing::Span::current(),
     }) {
         Ok(()) => {}

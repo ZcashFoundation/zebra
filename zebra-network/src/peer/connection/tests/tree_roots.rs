@@ -53,8 +53,6 @@ async fn outbound_tree_roots_request_maps_to_messages() {
                     excluded_peer: None,
                 },
                 tx,
-                inv_collector: None,
-                transient_addr: None,
                 span: Span::current(),
             })
             .await
@@ -158,8 +156,6 @@ async fn interrupted_tree_roots_exchange_retires_connection(cancel: bool) {
             excluded_peer: None,
         },
         tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
     let (tx, rx) = oneshot::channel();

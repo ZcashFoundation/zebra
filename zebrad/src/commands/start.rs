@@ -771,6 +771,11 @@ impl StartCmd {
         let tip_delay_task_handle =
             tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
 
+        // Like the tip block delay task, this task only reports metrics.
+        info!("spawning process memory metrics task");
+        let process_memory_task_handle =
+            tokio::spawn(crate::components::metrics::record_process_memory().in_current_span());
+
         // Start health server if configured
         info!("initializing health endpoints");
         let (health_task_handle, _) = health::init(
@@ -1059,6 +1064,7 @@ impl StartCmd {
         block_template_task_handle.abort();
         health_task_handle.abort();
         tip_delay_task_handle.abort();
+        process_memory_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();

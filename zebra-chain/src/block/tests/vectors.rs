@@ -607,7 +607,7 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
         ],
         LockTime::unlocked(),
     );
-    let utxos = HashMap::<_, transparent::Utxo>::new();
+    let utxos = HashMap::<transparent::OutPoint, transparent::Utxo>::new();
 
     assert!(
         coinbase.value_balance(&utxos).is_err(),
@@ -675,7 +675,7 @@ fn genesis_transparent_outputs_are_not_issued_supply() {
         for network in [&network, &Network::Mainnet] {
             let change = genesis
                 .chain_value_pool_change(
-                    &HashMap::<_, transparent::Utxo>::new(),
+                    &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
                     DeferredPoolBalanceChange::zero(),
                     network,
                     ValueBalance::zero(),
@@ -847,7 +847,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         )],
     );
     let pre_activation_change = before_activation.chain_value_pool_change(
-        &HashMap::<_, transparent::Utxo>::new(),
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         before_seed,
@@ -878,7 +878,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     );
     let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
     let (change, fees) = block.chain_value_pool_change_and_fees(
-        &HashMap::<_, transparent::Utxo>::new(),
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
         deferred_change,
         &network,
         parent,
@@ -890,7 +890,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     assert_eq!(after.total()?, (parent.total()? + total)?);
     let next = make_block(height.next()?, Vec::new());
     let next_change = next.chain_value_pool_change(
-        &HashMap::<_, transparent::Utxo>::new(),
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         after,
@@ -914,10 +914,10 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     );
     assert_eq!(
         underfunded.chain_value_pool_change(
-            &HashMap::<_, transparent::Utxo>::new(),
+            &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
             deferred_change,
             &network,
-            parent,
+            parent
         )?,
         change,
         "ledger accounting does not validate funding payouts",
@@ -1484,4 +1484,177 @@ fn transaction_fees_sum_the_non_coinbase_transactions() {
     assert_eq!(fees, None);
     assert_eq!(change.transparent_amount().zatoshis(), 999_999);
     assert_eq!(change.nsm_amount().zatoshis(), 0);
+}
+
+/// Returns a serialized block with a real header and `transactions` copies of `transaction`.
+fn block_with_repeated_transaction(transaction: &[u8], transactions: usize) -> Vec<u8> {
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .expect("genesis block is valid");
+    let mut bytes = genesis
+        .header
+        .zcash_serialize_to_vec()
+        .expect("header serializes");
+    crate::serialization::CompactSizeMessage::try_from(transactions)
+        .expect("count fits")
+        .zcash_serialize(&mut bytes)
+        .expect("count serializes");
+    for _ in 0..transactions {
+        bytes.extend_from_slice(transaction);
+    }
+    bytes
+}
+
+/// A block whose transactions are smaller on average than the smallest valid transaction is
+/// rejected while it's parsed, and a block full of the smallest valid transactions still parses.
+#[test]
+fn block_with_tiny_transactions_is_rejected() {
+    use crate::serialization::TrustedPreallocate;
+
+    let _init_guard = zebra_test::init();
+
+    // A V1 transaction with no inputs and no outputs parses on its own.
+    let empty_v1 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert!(Transaction::zcash_deserialize(&empty_v1[..]).is_ok());
+
+    let count = usize::try_from(Transaction::max_allocation()).expect("fits in usize");
+    let tiny = block_with_repeated_transaction(&empty_v1, count);
+    assert_too_small(&tiny);
+
+    // The block is rejected after its first transaction, before reading any more of them.
+    let first_only = &tiny[..tiny.len() - (count - 1) * empty_v1.len()];
+    assert_too_small(first_only);
+
+    // A V1 transaction with one empty-script input, one empty-script output and a lock time.
+    let mut smallest = vec![1, 0, 0, 0, 1];
+    smallest.extend_from_slice(&[0x11; 32]);
+    smallest.extend_from_slice(&[0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1]);
+    smallest.extend_from_slice(&[0; 9]);
+    smallest.extend_from_slice(&[0; 4]);
+    assert_eq!(smallest.len(), 60);
+    assert!(Transaction::zcash_deserialize(&smallest[..]).is_ok());
+
+    let header_and_count = block_with_repeated_transaction(&smallest, 0).len() + 4;
+    let count =
+        (usize::try_from(MAX_BLOCK_BYTES).expect("fits") - header_and_count) / smallest.len();
+    let full = block_with_repeated_transaction(&smallest, count);
+    assert!(full.len() as u64 <= MAX_BLOCK_BYTES);
+    let block =
+        Block::zcash_deserialize(&full[..]).expect("block of valid-sized transactions parses");
+    assert_eq!(block.transactions.len(), count);
+}
+
+/// Returns a serialized V1 transaction with no inputs and one output whose script has
+/// `script_len` bytes.
+fn v1_transaction_with_output_script(script_len: u8) -> Vec<u8> {
+    let mut transaction = vec![1, 0, 0, 0, 0, 1];
+    transaction.extend_from_slice(&[0; 8]);
+    transaction.push(script_len);
+    transaction.extend(std::iter::repeat_n(0x51, script_len.into()));
+    transaction.extend_from_slice(&[0; 4]);
+    transaction
+}
+
+/// Asserts that `block` is rejected because its transactions are too small.
+fn assert_too_small(block: &[u8]) {
+    match Block::zcash_deserialize(block) {
+        Err(SerializationError::Parse(message)) => assert_eq!(
+            message,
+            "block transactions are smaller than the smallest valid transaction"
+        ),
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+/// The size check accepts transactions that average exactly [`MIN_TRANSPARENT_TX_SIZE`] bytes,
+/// and rejects them one byte below.
+#[test]
+fn block_transaction_size_check_boundary() {
+    use crate::{serialization::TrustedPreallocate, transaction::MIN_TRANSPARENT_TX_SIZE};
+
+    let _init_guard = zebra_test::init();
+
+    let at_minimum = v1_transaction_with_output_script(35);
+    let below_minimum = v1_transaction_with_output_script(34);
+    assert_eq!(at_minimum.len() as u64, MIN_TRANSPARENT_TX_SIZE);
+    assert_eq!(below_minimum.len() as u64, MIN_TRANSPARENT_TX_SIZE - 1);
+
+    let block = block_with_repeated_transaction(&at_minimum, 1000);
+    let block = Block::zcash_deserialize(&block[..]).expect("minimum-sized transactions parse");
+    assert_eq!(block.transactions.len(), 1000);
+    assert_too_small(&block_with_repeated_transaction(&below_minimum, 1000));
+
+    // The check is on the running average: 60 then 48 bytes averages exactly the minimum.
+    let mut mixed = block_with_repeated_transaction(&at_minimum, 0);
+    mixed.pop();
+    mixed.push(2);
+    mixed.extend_from_slice(&v1_transaction_with_output_script(41));
+    mixed.extend_from_slice(&v1_transaction_with_output_script(29));
+    let block = Block::zcash_deserialize(&mixed[..]).expect("average at the minimum parses");
+    assert_eq!(block.transactions.len(), 2);
+
+    let empty = block_with_repeated_transaction(&at_minimum, 0);
+    let block = Block::zcash_deserialize(&empty[..]).expect("an empty transaction list parses");
+    assert!(block.transactions.is_empty());
+
+    let count = usize::try_from(Transaction::max_allocation()).expect("fits in usize") + 1;
+    let mut over = block_with_repeated_transaction(&at_minimum, 0);
+    over.pop();
+    crate::serialization::CompactSizeMessage::try_from(count)
+        .expect("count fits")
+        .zcash_serialize(&mut over)
+        .expect("count serializes");
+    over.extend_from_slice(&at_minimum);
+    assert!(matches!(
+        Block::zcash_deserialize(&over[..]),
+        Err(SerializationError::Parse(
+            "Vector longer than max_allocation"
+        ))
+    ));
+}
+
+/// Blocks filled with the smallest transparent transaction of each version still parse.
+#[test]
+fn blocks_of_smallest_transactions_of_each_version_parse() {
+    use crate::transaction::MIN_TRANSPARENT_TX_SIZE;
+
+    let _init_guard = zebra_test::init();
+
+    let input = || transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint::from_usize(crate::transaction::Hash([0x11; 32]), 0),
+        unlock_script: transparent::Script::new(&[]),
+        sequence: u32::MAX,
+    };
+    let output = || transparent::Output::new(Amount::zero(), transparent::Script::new(&[]));
+    let lock_time = LockTime::unlocked;
+    let expiry = Height(0);
+
+    let transactions = [
+        Transaction::test_v1(vec![input()], vec![output()], lock_time()),
+        Transaction::test_v2(vec![input()], vec![output()], lock_time()),
+        Transaction::test_v3(vec![input()], vec![output()], lock_time(), expiry),
+        Transaction::test_v4(vec![input()], vec![output()], lock_time(), expiry),
+        Transaction::test_v5(Nu5, vec![input()], vec![output()], lock_time(), expiry),
+    ];
+
+    for transaction in transactions {
+        let bytes = transaction
+            .zcash_serialize_to_vec()
+            .expect("transaction serializes");
+        assert!(bytes.len() as u64 >= MIN_TRANSPARENT_TX_SIZE);
+
+        let header_and_count = block_with_repeated_transaction(&bytes, 0).len() + 4;
+        let count =
+            (usize::try_from(MAX_BLOCK_BYTES).expect("fits") - header_and_count) / bytes.len();
+        let block = block_with_repeated_transaction(&bytes, count);
+        assert!(block.len() as u64 <= MAX_BLOCK_BYTES);
+
+        let block = Block::zcash_deserialize(&block[..]).unwrap_or_else(|error| {
+            panic!(
+                "block of {}-byte transactions parses: {error:?}",
+                bytes.len()
+            )
+        });
+        assert_eq!(block.transactions.len(), count);
+    }
 }

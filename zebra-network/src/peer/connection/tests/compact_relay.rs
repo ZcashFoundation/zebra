@@ -105,8 +105,6 @@ async fn connection_find_blocks_cached_compact_rechecks_ban() {
                         stop: None,
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: Some(source),
                     span: tracing::Span::none(),
                 }
                 .into(),
@@ -182,8 +180,6 @@ async fn connection_find_blocks_inflight_compact_rechecks_authorization() {
                         stop: None,
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: Some(source),
                     span: tracing::Span::none(),
                 }
                 .into(),
@@ -263,8 +259,6 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                         stop: None,
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: None,
                     span: tracing::Span::none(),
                 })
                 .await
@@ -306,8 +300,6 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                     .send(ClientRequest {
                         request: Request::Ping(barrier),
                         tx,
-                        inv_collector: None,
-                        transient_addr: None,
                         span: tracing::Span::none(),
                     })
                     .await
@@ -338,8 +330,6 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                             stop: None,
                         },
                         tx,
-                        inv_collector: None,
-                        transient_addr: None,
                         span: tracing::Span::none(),
                     })
                     .await
@@ -397,8 +387,6 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                             stop: None,
                         },
                         tx,
-                        inv_collector: None,
-                        transient_addr: None,
                         span: tracing::Span::none(),
                     })
                     .await
@@ -416,8 +404,6 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                             stop: None,
                         },
                         tx,
-                        inv_collector: None,
-                        transient_addr: None,
                         span: tracing::Span::none(),
                     })
                     .await
@@ -498,8 +484,6 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                         stop,
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: Some(source),
                     span: tracing::Span::none(),
                 })
                 .await
@@ -589,8 +573,6 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                                 stop,
                             },
                             tx,
-                            inv_collector: None,
-                            transient_addr: Some(source),
                             span: tracing::Span::none(),
                         })
                         .await
@@ -609,8 +591,6 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                             advertiser: Some(source),
                         },
                         tx,
-                        inv_collector: None,
-                        transient_addr: Some(source),
                         span: tracing::Span::none(),
                     })
                     .await
@@ -699,8 +679,6 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                         advertiser: Some(source),
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: Some(source),
                     span: tracing::Span::none(),
                 })
                 .await
@@ -780,8 +758,6 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                     .send(ClientRequest {
                         request: Request::BlocksByHash([block.hash()].into()),
                         tx,
-                        inv_collector: None,
-                        transient_addr: Some(source),
                         span: tracing::Span::none(),
                     })
                     .await

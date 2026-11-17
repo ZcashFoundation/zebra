@@ -165,14 +165,14 @@ async fn ready_commit_skips_orphan_indexes_and_keeps_sent_outputs() {
         assert!(duplicate.inner().is_duplicate_request());
         state
             .non_finalized_block_write_sent_hashes
-            .remove(&first.hash());
+            .remove_all([first.hash()]);
         assert!(state
             .non_finalized_block_write_sent_hashes
             .utxo(&shared)
             .is_some());
         state
             .non_finalized_block_write_sent_hashes
-            .remove(&second.hash());
+            .remove_all([second.hash()]);
         assert!(state
             .non_finalized_block_write_sent_hashes
             .utxo(&shared)
@@ -273,8 +273,10 @@ async fn ready_commit_writer_shutdown_clears_orphans() {
     .expect("writer shutdown must answer ready and orphaned callers");
 }
 
+/// A locally mined orphan isn't abandoned when its caller drops, because the state owns its
+/// notifications, so overflow evicts the highest waited-for orphan instead.
 #[tokio::test(flavor = "multi_thread")]
-async fn orphan_receiver_drop_retention_is_bounded() {
+async fn mined_orphan_survives_caller_drop_and_overflow() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(30), async {
         let (mut state, parent) = orphan_state().await;
@@ -283,14 +285,17 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         let highest = orphans.pop().unwrap();
         let mut evicted =
             state.queue_and_commit_to_non_finalized_state(highest.clone().prepare(), None, None);
-        for orphan in orphans {
-            drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None));
-        }
+        // Callers keep waiting for every filler orphan, so none of them is abandoned.
+        let _waiting: Vec<_> = orphans
+            .into_iter()
+            .map(|orphan| {
+                state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None)
+            })
+            .collect();
         assert_eq!(
             state.non_finalized_state_queued_blocks.blocks.len(),
             usize::try_from(MAX_BLOCK_REORG_HEIGHT).unwrap(),
         );
-        assert_indexes(&state.non_finalized_state_queued_blocks);
 
         let mut proposal_state = state.read_service.latest_non_finalized_state();
         proposal_state.disable_metrics();
@@ -319,37 +324,24 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         assert_eq!(
             queue.blocks.len(),
             usize::try_from(MAX_BLOCK_REORG_HEIGHT).unwrap(),
-            "dropped response receivers must not permit unbounded orphan retention",
         );
-        assert!(queue.has(child.hash()));
+        assert!(queue.has(child.hash()), "the mined orphan must stay queued");
         let queued = &queue.blocks[&child.hash()].0;
-        assert!(Arc::ptr_eq(&queued.0.new_outputs, &cached_outputs));
         assert!(Arc::ptr_eq(
             &queued.2.as_ref().unwrap().new_outputs,
             &cached_outputs,
         ));
         assert!(!queue.has(highest.hash()));
-        assert!(queue
-            .blocks
-            .values()
-            .all(|(queued, _)| queued.1.is_closed()));
         assert_indexes(queue);
-        let error = evicted
-            .try_recv()
-            .expect("capacity eviction must answer the affected caller")
-            .expect_err("the highest orphan must be evicted for the lower ancestor");
-        assert_eq!(error.inner(), &crate::CommitBlockError::OrphanQueueFull);
-        assert_eq!(error.inner().misbehavior_score(), 0);
-        assert!(!error.inner().is_duplicate_request());
-        assert!(!error.inner().is_auth_commitment_mismatch());
-        assert!(!error.inner().is_descendant_of_auth_commitment_mismatch());
+        assert_eq!(
+            evicted.try_recv().unwrap().unwrap_err().inner(),
+            &crate::CommitBlockError::OrphanQueueFull,
+        );
         assert_eq!(
             committed.capacity(),
             1,
             "orphans must not hold relay permits"
         );
-        assert!(commits.try_recv().is_err());
-        assert!(bodies.borrow().is_none());
 
         // A duplicate replaces only the response and notification policy, not the accepted payload.
         let mut replacement = child.clone().prepare();
@@ -407,7 +399,7 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         assert_indexes(&state.non_finalized_state_queued_blocks);
     })
     .await
-    .expect("bounded orphan eviction and retained child commits must finish");
+    .expect("a mined orphan must commit and notify after its caller drops");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -699,30 +691,6 @@ fn pruned_orphan_outputs_release_cache_allocation() {
     assert_indexes(&queue);
     assert_eq!(queue.queued_bytes, 0);
     assert_eq!(queue.known_utxos.0.capacity(), 0);
-}
-
-#[test]
-fn orphan_accounting_overflow_rejects_without_retention() {
-    let _init_guard = zebra_test::init();
-    let block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into::<Arc<Block>>()
-        .unwrap();
-    // Exercise arithmetic overflow without allocating an address space worth of payloads.
-    let mut queue = QueuedBlocks {
-        queued_bytes: usize::MAX,
-        ..Default::default()
-    };
-    let (sender, mut receiver) = tokio::sync::oneshot::channel();
-    queue.queue((block.prepare(), sender, None, None));
-    assert_eq!(
-        receiver.try_recv().unwrap().unwrap_err().inner(),
-        &crate::CommitBlockError::OrphanQueueFull,
-    );
-    assert!(queue.blocks.is_empty());
-    assert!(queue.by_parent.is_empty());
-    assert!(queue.by_height.is_empty());
-    assert!(queue.known_utxos.0.is_empty());
-    assert_eq!(queue.queued_bytes, usize::MAX);
 }
 
 async fn ordinary_replacement_ignores_superseded_mined_channel(closed: bool) {

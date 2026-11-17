@@ -152,16 +152,37 @@ with `sync.downloads.in_flight`.
 - `exhausted_tips`: the syncer downloaded every block its peers advertised. This is the normal end of a round.
 - `obtain_tips_timeout` or `obtain_tips_error`: asking peers for new block hashes timed out or failed. If a block they returned was still waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
 - `extend_tips_error`: asking peers to extend the known hashes failed.
-- `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang. If a block was waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
+- `sync_step_timeout`: the state tip did not advance for the block verify timeout (8 minutes) during a round. Zebra backs off, then asks for new tips without cancelling pending downloads. A block that was waiting for network capacity is counted in `sync.block.error.count` with the `network_ready_timeout` kind.
 - `block_error`: a block download or verify error restarted the sync. The error's `kind` is in the `waiting to restart sync` log.
 
 `kind` names the error, for example `not_found`, `download_timed_out`, `invalid`, `verify_timeout`,
 `utxo_lookup_timeout`, `already_verified`, or `cancelled`.
 
 When a round fails without advancing the state tip, Zebra logs a `sync failed without advancing the
-state tip` warning with the `reason`, `kind`, and `error`. The `chain updates have stalled` warning
-includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
+state tip` warning with the `reason`, `kind`, and `error`. A `sync_step_timeout` round is not a
+failure, so it logs `waiting to restart sync` at INFO instead. The `chain updates have stalled`
+warning includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
 `oldest_in_flight_secs`.
+
+## Memory metrics
+
+These metrics show how much memory `zebrad` uses, and how large the non-finalized state is.
+
+Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives the counter as
+one total per minute, and each gauge's latest value once a minute.
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `process.memory.rss_bytes` | gauge | Memory `zebrad` is using (its resident set size). Only on Linux. |
+| `process.memory.rss_fraction` | gauge | `process.memory.rss_bytes` as a fraction of the memory `zebrad` can use: the tightest memory limit on its cgroup or any parent cgroup, or the machine's memory if that is smaller. The kernel stops the process near 1. |
+| `state.memory.chain.count` | gauge | Non-finalized chains, the best chain and its forks |
+| `state.memory.best.chain.length` | gauge | Blocks in the best non-finalized chain. Above the 1,000-block reorg limit, older blocks are waiting to be written to the database. |
+| `state.memory.index.entries` | gauge | Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all non-finalized chains, counting the blocks that chains share once |
+| `state.memory.best.chain.index.entries` | gauge | The same count for the best chain only |
+| `state.memory.fork.evicted.count` | counter | Forks dropped because the node tracked too many |
+| `state.memory.backup.restored.block.count` | gauge | Blocks restored from the non-finalized backup at startup |
+| `state.memory.backup.restore.duration_seconds` | gauge | How long restoring the non-finalized backup took at startup |
 
 ## Network metric aggregation
 
@@ -190,7 +211,7 @@ Other bounded labels include:
 
 | Metric or label | Values |
 | --- | --- |
-| `mempool.failed.verify.tasks.total`, `reason` | `in_state`, `state_error`, `download_failed`, `cancelled`, `invalid`, `timeout` |
+| `mempool.failed.verify.tasks.total`, `reason` | `in_state`, `state_error`, `download_failed`, `cancelled`, `invalid`, `non_standard`, `timeout` |
 | `zebra.net.in.errors`, `error` | `io`, `parse`, `utf8_error`, `try_from_slice_error`, `try_from_int_error`, `from_hex_error`, `amount`, `bad_transaction_balance`, `script`, `opcode`, `num` |
 | Handshake `remote_version` and `negotiated_version` | Protocol versions defined by Zebra, or `other`; arbitrary received numbers do not create new labels. |
 | RPC `method` | Registered RPC method names, or `unknown` for unregistered names. |

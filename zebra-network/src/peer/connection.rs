@@ -31,8 +31,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
-        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
+        GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
+        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
+        PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -211,10 +212,7 @@ impl Handler {
                 Handler::Finished(Ok(Response::Peers(response_addrs)))
             }
 
-            // `zcashd` returns requested transactions in a single batch of messages.
-            // Other transaction or non-transaction messages can come before or after the batch.
-            // After the transaction batch, `zcashd` sends `notfound` if any transactions are missing:
-            // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
+            // Requested transactions can be interleaved with unsolicited or duplicate messages.
             (
                 Handler::TransactionsById {
                     mut pending_ids,
@@ -222,45 +220,17 @@ impl Handler {
                 },
                 Message::Tx(transaction),
             ) => {
-                // assumptions:
-                //   - the transaction messages are sent in a single continuous batch
-                //   - missing transactions are silently skipped
-                //     (there is no `notfound` message at the end of the batch)
                 if pending_ids.remove(&transaction.id) {
-                    // we are in the middle of the continuous transaction messages
                     transactions.push(transaction);
                 } else {
-                    // We got a transaction we didn't ask for. If the caller doesn't know any of the
-                    // transactions, they should have sent a `notfound` with all the hashes, rather
-                    // than an unsolicited transaction.
-                    //
-                    // So either:
-                    // 1. The peer implements the protocol badly, skipping `notfound`.
-                    //    We should cancel the request, so we don't hang waiting for transactions
-                    //    that will never arrive.
-                    // 2. The peer sent an unsolicited transaction.
-                    //    We should ignore the transaction, and wait for the actual response.
-                    //
-                    // We end the request, so we don't hang on bad peers (case 1). But we keep the
-                    // connection open, so the inbound service can process transactions from good
-                    // peers (case 2).
                     ignored_msg = Some(Message::Tx(transaction));
                 }
 
-                if ignored_msg.is_some() && transactions.is_empty() {
-                    // If we didn't get anything we wanted, retry the request.
-                    let missing_transaction_ids = pending_ids.into_iter().map(Into::into).collect();
-                    Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
-                } else if pending_ids.is_empty() || ignored_msg.is_some() {
-                    // If we got some of what we wanted, let the internal client know.
+                if pending_ids.is_empty() {
                     let available = transactions
                         .into_iter()
                         .map(|t| InventoryResponse::Available((t, transient_addr)));
-                    let missing = pending_ids.into_iter().map(InventoryResponse::Missing);
-
-                    Handler::Finished(Ok(Response::Transactions(
-                        available.chain(missing).collect(),
-                    )))
+                    Handler::Finished(Ok(Response::Transactions(available.collect())))
                 } else {
                     // Keep on waiting for more.
                     Handler::TransactionsById {
@@ -425,6 +395,8 @@ impl Handler {
                 }
             }
 
+            // Inventory has no request identifier: a block announcement is indistinguishable
+            // from a valid singleton reply. Keep accepting these replies.
             // An empty inventory can be a late mempool reply after cancellation.
             // Zebra and zcashd send no message for an empty getblocks result.
             (Handler::FindBlocks { .. }, Message::Inv(items)) if is_block_inventory(&items) => {
@@ -442,6 +414,8 @@ impl Handler {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
             }
 
+            // Transaction announcements and mempool replies use the same wire message.
+            // An empty inventory is also a valid reply from a peer with an empty mempool.
             (Handler::MempoolTransactionIds, Message::Inv(items))
                 if items.iter().all(|item| item.unmined_tx_id().is_some()) =>
             {
@@ -1743,10 +1717,17 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
+                    // Bound the set before cloning it for inbound dispatch. Duplicates do not
+                    // consume slots, matching the inbound service's distinct-hash limit.
+                    let mut hashes =
+                        HashSet::with_capacity(items.len().min(GETDATA_MAX_BLOCK_COUNT));
+                    for hash in block_hashes(items) {
+                        hashes.insert(hash);
+                        if hashes.len() == GETDATA_MAX_BLOCK_COUNT {
+                            break;
+                        }
+                    }
                     // Serve stored block bytes, rather than deserializing and reserializing them.
-                    let hashes = block_hashes(items)
-                        .take(crate::constants::GETDATA_MAX_BLOCK_COUNT)
-                        .collect();
                     if self.connection_info.early_block_relay {
                         Request::EarlyRawBlocksByHash(hashes)
                     } else {

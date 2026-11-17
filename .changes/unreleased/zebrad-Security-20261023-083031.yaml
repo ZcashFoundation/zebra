@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: Update `ctutils` to 0.4.5 to fix RUSTSEC-2026-0385, non-constant-time mask generation and `u128` comparisons. Zebra holds no keys and uses the affected hashing and signature code on public data.
-time: 2026-10-23T08:30:31.26642316Z

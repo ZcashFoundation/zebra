@@ -342,8 +342,8 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 }
 
 /// Check that a network stack:
-/// - returns a `NotFound` error when a peer responds with an unrelated transaction, and
-/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
+/// - returns a `NotFound` error after an unrelated transaction followed by explicit missing IDs, and
+/// - returns a `NotFoundRegistry` error for repeated requests for those missing IDs.
 ///
 /// The requests are coming from the full stack to the isolated peer,
 /// so this is the reverse of the previous tests.
@@ -352,7 +352,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 /// with an unrelated transaction test responder.
 #[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError> {
-    // We respond with an unrelated transaction, so the peer gives up on the request.
+    // Send an unrelated transaction before explicitly reporting the requested IDs as missing.
     let unrelated_response: Transaction =
         zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let unrelated_response = Response::Transactions(vec![Available((
@@ -454,11 +454,8 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
                 .oneshot(Request::TransactionsById(iter::once(tx).copied().collect()))
                 .await;
 
-            // The only ready peer in the PeerSet failed the same request,
-            // so we expect the peer set to return a `NotFoundRegistry` error immediately.
-            //
-            // If these asserts fail, then the PeerSet isn't returning inv routing error responses.
-            // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+            // The only ready peer explicitly reported this ID as missing, so the registry
+            // must reject the repeated request without another network round trip.
             if let Err(missing_error) = response.as_ref() {
                 let missing_error = missing_error
                     .downcast_ref::<SharedPeerError>()
@@ -496,12 +493,12 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 
 /// Check that a network stack:
 /// - returns a partial notfound response, when a peer partially responds to a multi-transaction request,
-/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
+/// - returns a `NotFoundRegistry` error for repeated requests for explicitly missing IDs.
 ///
 /// The requests are coming from the full stack to the isolated peer.
 #[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> {
-    // We repeatedly respond with the same transaction, so the peer gives up on the second response.
+    // Send a duplicate transaction before explicitly reporting the remaining IDs as missing.
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let repeated_tx: UnminedTx = std::sync::Arc::new(repeated_tx).into();
     let repeated_response = Response::Transactions(vec![
@@ -708,8 +705,9 @@ async fn dropping_network_owner_stops_real_inbound_consumers() {
 
 /// Setup a real Zebra network stack, with a connected peer using a real isolated network stack.
 ///
-/// The isolated peer responds to every request with `isolated_peer_response`.
-/// (If no response is provided, the isolated peer ignores inbound requests.)
+/// The isolated peer responds to every request with `isolated_peer_response`, adding explicit
+/// missing IDs for requested transactions absent from that response.
+/// If no response is provided, the isolated peer ignores inbound requests.
 ///
 /// Uses fake verifiers, and does not run a block syncer task.
 async fn setup(
@@ -871,8 +869,20 @@ async fn setup(
 
     // Set up the inbound service response for the isolated peer
     let isolated_peer_response = isolated_peer_response.unwrap_or(Response::Nil);
-    let response_inbound_service = tower::service_fn(move |_req| {
-        let isolated_peer_response = isolated_peer_response.clone();
+    let response_inbound_service = tower::service_fn(move |req| {
+        let mut isolated_peer_response = isolated_peer_response.clone();
+        if let (Request::TransactionsById(ids), Response::Transactions(transactions)) =
+            (req, &mut isolated_peer_response)
+        {
+            for id in ids {
+                if !transactions.iter().any(|transaction| match transaction {
+                    Available((tx, _)) => tx.id == id,
+                    Missing(missing_id) => *missing_id == id,
+                }) {
+                    transactions.push(Missing(id));
+                }
+            }
+        }
         async move { Ok::<Response, BoxError>(isolated_peer_response) }
     });
     let user_agent = "test".to_string();

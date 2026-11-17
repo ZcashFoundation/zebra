@@ -751,6 +751,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
         // Use the actual service admission/order/recovery code with this deterministic embedded tree.
         let mut state = StateService {
             network: chain.network.clone(),
+            max_checkpoint_height: Height::MAX,
             full_verifier_utxo_lookahead: Height(0),
             non_finalized_state_queued_blocks: Default::default(),
             finalized_state_queued_blocks: Default::default(),

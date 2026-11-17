@@ -2,8 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    iter,
-    mem::size_of,
+    iter, mem,
 };
 
 use tokio::sync::oneshot;
@@ -16,7 +15,7 @@ use zebra_chain::{
 use crate::{
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
-    request::{block_wire_and_retained_bytes, output_retained_bytes},
+    request::new_outputs_retained_bytes,
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
     KnownBlock, MinedBlockNotifications, NonFinalizedState, SemanticallyVerifiedBlock,
 };
@@ -39,18 +38,21 @@ pub type QueuedSemanticallyVerified = (
     Option<MinedBlockNotifications>,
 );
 
-/// One existing checkpoint download budget per supported non-finalized fork.
-///
-/// This 320 MiB resource charge covers retained content and decoded/index metadata, not allocator
-/// RSS. Shared allocations are charged per owner, including cached prior-output scripts. Unlike a
-/// single checkpoint budget, this allows ordinary concurrent full verification of large blocks.
-// Both constants fit usize on every supported platform.
+/// The maximum number of blocks in a [`QueuedBlocks`].
+// The reorg height fits in usize on every supported platform.
+const MAX_QUEUED_BLOCKS: usize = MAX_BLOCK_REORG_HEIGHT as usize;
+
+/// The maximum memory used by the blocks in a [`QueuedBlocks`], in bytes: one maximum-size
+/// checkpoint range for each supported chain fork.
+// 32 MiB fits in usize on every supported platform.
 const MAX_QUEUED_BYTES: usize = MAX_CHECKPOINT_BYTE_COUNT as usize * MAX_NON_FINALIZED_CHAIN_FORKS;
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
+///
+/// The queue holds at most [`MAX_QUEUED_BLOCKS`] blocks, which use at most [`MAX_QUEUED_BYTES`].
 #[derive(Debug, Default)]
 pub struct QueuedBlocks {
-    /// Blocks awaiting their parent blocks for contextual verification.
+    /// Blocks awaiting their parent blocks for contextual verification, with their memory use.
     blocks: HashMap<block::Hash, (QueuedSemanticallyVerified, usize)>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
@@ -58,7 +60,7 @@ pub struct QueuedBlocks {
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
     /// Known UTXOs.
     known_utxos: KnownUtxos,
-    /// Sum of the immutable charges stored alongside queued payloads.
+    /// The total memory used by `blocks`.
     queued_bytes: usize,
 }
 
@@ -101,9 +103,7 @@ impl KnownUtxos {
 impl QueuedBlocks {
     /// Queue a block for eventual verification and commit.
     ///
-    /// The caller must dispatch ready blocks, then call [`Self::prune_overflow`] before returning.
-    /// The queue can temporarily exceed its limits by this one incoming block, without awaiting.
-    /// This lets a commit-ready parent release a full queue of children before applying the limits.
+    /// The queue can go over its limits until the caller calls [`Self::prune_overflow`].
     #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
@@ -115,23 +115,20 @@ impl QueuedBlocks {
             return;
         }
 
-        let bytes = Self::retained_bytes(&new);
-        let Some(queued_bytes) = self
-            .queued_bytes
-            .checked_add(bytes)
-            .filter(|_| bytes < usize::MAX)
-        else {
-            let _ = new.1.send(Err(CommitBlockError::OrphanQueueFull.into()));
-            return;
-        };
-
         // Track known UTXOs in queued blocks.
         for (outpoint, ordered_utxo) in new.0.new_outputs.iter() {
             self.known_utxos
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        self.queued_bytes = queued_bytes;
+        // Count the block, the copy of its outputs in `known_utxos`, and any cached verdict.
+        let bytes = new.0.retained_bytes()
+            + new_outputs_retained_bytes(&new.0.new_outputs)
+            + new
+                .2
+                .as_ref()
+                .map_or(0, |contextual| contextual.contextual_data_retained_bytes());
+        self.queued_bytes += bytes;
         self.blocks.insert(new_hash, (new, bytes));
         self.by_height
             .entry(new_height)
@@ -146,67 +143,65 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
-    /// Conservative content/metadata charge, computed once without copying transactions or outputs.
-    fn retained_bytes(queued: &QueuedSemanticallyVerified) -> usize {
-        let prepared = &queued.0;
-        let mut bytes =
-            block_wire_and_retained_bytes(&prepared.block, &prepared.transaction_hashes)
-                .1
-                .saturating_add(size_of::<(QueuedSemanticallyVerified, usize, block::Hash)>())
-                .saturating_add(2 * size_of::<(block::Hash, HashSet<block::Hash>)>());
-        // Charge the semantic output map and its UTXO-cache copy independently.
-        bytes =
-            bytes.saturating_add(output_retained_bytes(&prepared.new_outputs).saturating_mul(2));
-        if let Some(contextual) = &queued.2 {
-            bytes = bytes.saturating_add(contextual.contextual_data_retained_bytes());
-        }
-        bytes
-    }
-
-    /// Drop highest-height orphans until both resource limits hold, after ready work is dispatched.
+    /// Fails abandoned leaves, then the highest queued blocks, with
+    /// [`CommitBlockError::OrphanQueueFull`] until the queue is within its limits.
     ///
-    /// Pressure is an operational error, not evidence that the evicted block is invalid.
+    /// Callers should send the queued blocks that are ready to commit first, so they aren't failed.
     pub fn prune_overflow(&mut self) {
-        // The reorganization window fits usize on every supported platform.
-        while self.blocks.len() > MAX_BLOCK_REORG_HEIGHT as usize
-            || self.queued_bytes > MAX_QUEUED_BYTES
-        {
+        if self.blocks.len() <= MAX_QUEUED_BLOCKS && self.queued_bytes <= MAX_QUEUED_BYTES {
+            return;
+        }
+
+        while self.blocks.len() > MAX_QUEUED_BLOCKS || self.queued_bytes > MAX_QUEUED_BYTES {
+            // Prefer leaves whose callers stopped waiting, then the highest block.
             let hash = *self
                 .by_height
-                .last_key_value()
-                .and_then(|(_, hashes)| hashes.iter().next())
-                .expect("an over-limit queue contains an indexed block");
-            let (_, sender, _, _) = self.remove(&hash);
-            let _ = sender.send(Err(CommitBlockError::OrphanQueueFull.into()));
+                .values()
+                .rev()
+                .flatten()
+                .find(|hash| {
+                    let (queued, _) = &self.blocks[*hash];
+                    // The state owns a mined block's notifications after its caller drops.
+                    queued.1.is_closed()
+                        && queued.3.is_none()
+                        && !self.by_parent.contains_key(*hash)
+                })
+                .or_else(|| self.by_height.values().next_back()?.iter().next())
+                .expect("a queue over its limits has blocks");
+            let (_block, rsp_tx, _, _) = self.remove(&hash);
+
+            // The caller might have stopped waiting for the block.
+            let _ = rsp_tx.send(Err(CommitBlockError::OrphanQueueFull.into()));
         }
+
+        tracing::debug!(queued = %self.blocks.len(), "failed queued blocks over the queue limits");
         self.update_metrics();
     }
 
-    /// Remove one payload, its charge, and every secondary reference.
+    /// Removes a queued block, its indexes, and its outputs.
     fn remove(&mut self, hash: &block::Hash) -> QueuedSemanticallyVerified {
-        let (queued, bytes) = self.blocks.remove(hash).expect("indexed block is queued");
-        self.queued_bytes = self
-            .queued_bytes
-            .checked_sub(bytes)
-            .expect("each queued payload is charged and removed exactly once");
-        let parent = queued.0.block.header.previous_block_hash;
-        // Dequeue and height pruning can already have removed the corresponding whole bucket.
-        if let Some(hashes) = self.by_parent.get_mut(&parent) {
-            assert!(hashes.remove(hash), "queued block is indexed by parent");
+        let (queued, bytes) = self.blocks.remove(hash).expect("indexed blocks are queued");
+        self.queued_bytes -= bytes;
+
+        let parent_hash = queued.0.block.header.previous_block_hash;
+        if let Some(hashes) = self.by_parent.get_mut(&parent_hash) {
+            hashes.remove(hash);
             if hashes.is_empty() {
-                self.by_parent.remove(&parent);
+                self.by_parent.remove(&parent_hash);
             }
         }
+
         if let Some(hashes) = self.by_height.get_mut(&queued.0.height) {
-            assert!(hashes.remove(hash), "queued block is indexed by height");
+            hashes.remove(hash);
             if hashes.is_empty() {
                 self.by_height.remove(&queued.0.height);
             }
         }
-        // The cache keeps an output until the last queued block that creates it is removed.
+
         for outpoint in queued.0.new_outputs.keys() {
             self.known_utxos.remove(outpoint);
         }
+
         queued
     }
 
@@ -214,6 +209,11 @@ impl QueuedBlocks {
     #[instrument(skip(self), fields(%parent_hash))]
     pub fn has_queued_children(&self, parent_hash: block::Hash) -> bool {
         self.by_parent.contains_key(&parent_hash)
+    }
+
+    /// Returns the parent hashes of every queued block.
+    pub fn parent_hashes(&self) -> Vec<block::Hash> {
+        self.by_parent.keys().copied().collect()
     }
 
     /// Returns `true` if there is a block with the provided hash present.
@@ -251,14 +251,15 @@ impl QueuedBlocks {
     /// `finalized_tip_height`.
     #[instrument(skip(self))]
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        while let Some((&height, _)) = self.by_height.first_key_value() {
-            if height > finalized_tip_height {
+        while let Some(lowest) = self.by_height.first_entry() {
+            if *lowest.key() > finalized_tip_height {
                 break;
             }
-            let (_, hashes) = self.by_height.pop_first().expect("first height exists");
-            for hash in hashes {
+
+            for hash in lowest.remove() {
                 let (expired_block, expired_sender, _, _) = self.remove(&hash);
-                // Receiver closure does not cancel accepted work.
+
+                // we don't care if the receiver was dropped
                 let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
                     Some(expired_block.height.into()),
                     KnownBlock::Finalized,
@@ -271,9 +272,14 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
-    /// Return the queued block if it has already been registered
-    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedSemanticallyVerified> {
-        self.blocks.get_mut(hash).map(|(queued, _)| queued)
+    /// Removes a queued block, its indexes, its outputs and its memory charge, if it is queued.
+    pub fn remove_queued(&mut self, hash: &block::Hash) -> Option<QueuedSemanticallyVerified> {
+        if !self.blocks.contains_key(hash) {
+            return None;
+        }
+        let queued = self.remove(hash);
+        self.update_metrics();
+        Some(queued)
     }
 
     /// Update metrics after the queue is modified
@@ -312,11 +318,11 @@ impl QueuedBlocks {
         self.by_parent.clear();
         self.by_parent.shrink_to_fit();
         self.by_height.clear();
-
         self.queued_bytes = 0;
+
         self.blocks
             .drain()
-            .map(|(hash, (queued, _))| (hash, queued))
+            .map(|(hash, (queued, _bytes))| (hash, queued))
     }
 }
 
@@ -342,14 +348,17 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
-    /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
+    /// Creates a new [`SentHashes`] with the block hashes in the provided non-finalized state.
+    ///
+    /// The blocks are already committed, so UTXO lookups find their outputs in that state, and
+    /// this doesn't copy them.
     pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
         let mut sent_hashes = Self::default();
         for block in non_finalized_state
             .chain_iter()
             .flat_map(|chain| chain.blocks.values())
         {
-            sent_hashes.add_outputs(block.hash, block.height, &block.new_outputs);
+            sent_hashes.add_outputs(block.hash, block.height, std::iter::empty());
         }
 
         if !sent_hashes.sent.is_empty() {
@@ -365,22 +374,22 @@ impl SentHashes {
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
-        self.add_outputs(block.hash, block.height, &block.new_outputs);
+        self.add_outputs(block.hash, block.height, block.new_outputs.iter());
     }
 
     // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
     // License, Version 2.0, at your option.
     // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     /// Stores borrowed block metadata without materializing another verified block.
-    fn add_outputs(
+    fn add_outputs<'a>(
         &mut self,
         hash: block::Hash,
         height: block::Height,
-        new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        new_outputs: impl IntoIterator<Item = (&'a transparent::OutPoint, &'a transparent::OrderedUtxo)>,
     ) {
         // Track known UTXOs in sent blocks.
         let outpoints = new_outputs
-            .iter()
+            .into_iter()
             .map(|(outpoint, ordered_utxo)| {
                 self.known_utxos
                     .insert(*outpoint, ordered_utxo.utxo.clone());
@@ -430,6 +439,20 @@ impl SentHashes {
             for outpoint in &old_outpoints {
                 self.known_utxos.remove(outpoint);
             }
+        }
+    }
+
+    /// Forgets the UTXOs of the sent block `hash`, but still treats the block as sent.
+    ///
+    /// Called once the block is committed to a non-finalized chain that readers can see, because
+    /// UTXO lookups then find its outputs in that chain.
+    pub fn forget_utxos(&mut self, hash: &block::Hash) {
+        let Some(outpoints) = self.sent.get_mut(hash) else {
+            return;
+        };
+
+        for outpoint in mem::take(outpoints) {
+            self.known_utxos.remove(&outpoint);
         }
     }
 
@@ -484,24 +507,37 @@ impl SentHashes {
         self.sent.contains_key(hash)
     }
 
-    /// Removes a `hash` from `SentHashes`, dropping its outpoints from `known_utxos`
-    /// and its entry from whichever batch buffer holds it.
+    /// Removes `hashes` from `SentHashes`, dropping their outpoints from `known_utxos`
+    /// and their entries from whichever batch buffers hold them.
     ///
-    /// Called when the block write task rejects a block, so that a subsequent
+    /// Called when the block write task rejects or evicts blocks, so that a subsequent
     /// re-delivery of a block with the same hash is not short-circuited as a
-    /// "duplicate" against a rejected variant that never reached any chain.
-    pub fn remove(&mut self, hash: &block::Hash) {
-        let Some(outpoints) = self.sent.remove(hash) else {
-            return;
-        };
+    /// "duplicate" against a block that is no longer in any chain.
+    ///
+    /// Each batch buffer is scanned once for the whole set, because evicting a long
+    /// fork can remove many hashes at a time.
+    pub fn remove_all(&mut self, hashes: impl IntoIterator<Item = block::Hash>) {
+        let mut removed = HashSet::new();
 
-        for outpoint in &outpoints {
-            self.known_utxos.remove(outpoint);
+        for hash in hashes {
+            let Some(outpoints) = self.sent.remove(&hash) else {
+                continue;
+            };
+
+            for outpoint in &outpoints {
+                self.known_utxos.remove(outpoint);
+            }
+
+            removed.insert(hash);
         }
 
-        self.curr_buf.retain(|(h, _)| h != hash);
+        if removed.is_empty() {
+            return;
+        }
+
+        self.curr_buf.retain(|(h, _)| !removed.contains(h));
         for buf in &mut self.bufs {
-            buf.retain(|(h, _)| h != hash);
+            buf.retain(|(h, _)| !removed.contains(h));
         }
     }
 

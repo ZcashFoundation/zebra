@@ -1,4 +1,0 @@
-project: zebra-test
-kind: Changed
-body: Remove an unused Windows dependency.
-time: 2026-11-07T01:26:16.553665524+01:00

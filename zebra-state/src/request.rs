@@ -30,7 +30,7 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
-    ReadResponse, Response,
+    CommitBlockError, ReadResponse, Response,
 };
 use crate::{
     error::{InvalidateError, LayeredStateError, ReconsiderError},
@@ -361,7 +361,9 @@ pub struct ContextuallyVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+    ///
+    /// The non-finalized chain indexes share these outputs, instead of copying them.
+    pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
 
     // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
@@ -591,8 +593,22 @@ impl ContextuallyVerifiedBlock {
     /// Contextual metadata and output maps, excluding the shared block and transaction hashes.
     pub(crate) fn contextual_data_retained_bytes(&self) -> usize {
         size_of::<Self>()
-            .saturating_add(output_retained_bytes(&self.new_outputs))
-            .saturating_add(output_retained_bytes(&self.spent_outputs))
+            .saturating_add(shared_outputs_retained_bytes(&self.new_outputs))
+            .saturating_add(new_outputs_retained_bytes(&self.spent_outputs))
+    }
+
+    /// Returns an owned copy of the created outputs for semantic block metadata.
+    ///
+    /// The non-finalized chain shares each output, so semantic metadata needs its own map.
+    pub(crate) fn semantic_new_outputs(
+        &self,
+    ) -> Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>> {
+        Arc::new(
+            self.new_outputs
+                .iter()
+                .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+                .collect(),
+        )
     }
 
     /// Rebind a successfully validated proposal to its solved block.
@@ -608,13 +624,13 @@ impl ContextuallyVerifiedBlock {
     /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
     ///
     /// The caller must first verify solved proof of work, current time, serialized size, and exact
-    /// proposal equality except nonce and solution. Shares the output map with the queue metadata.
+    /// proposal equality except nonce and solution. Copies the outputs into the queue metadata.
     pub fn into_mined_request(self, notifications: MinedBlockNotifications) -> Request {
         let block = SemanticallyVerifiedBlock {
             block: self.block.clone(),
             hash: self.hash,
             height: self.height,
-            new_outputs: self.new_outputs.clone(),
+            new_outputs: self.semantic_new_outputs(),
             transaction_hashes: self.transaction_hashes.clone(),
             received_time: self.received_time,
         };
@@ -639,6 +655,10 @@ impl ContextuallyVerifiedBlock {
     /// A [`ContextuallyVerifiedBlock`] is only contextually valid after all state service
     /// validation succeeds; construction or
     /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) alone is not sufficient.
+    ///
+    /// # Panics
+    ///
+    /// If `spent_outputs` is missing the UTXO of a transparent input.
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
@@ -689,7 +709,12 @@ impl ContextuallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs,
+                new_outputs: Arc::new(
+                    Arc::unwrap_or_clone(new_outputs)
+                        .into_iter()
+                        .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                        .collect(),
+                ),
                 spent_outputs: Arc::new(spent_outputs),
                 transaction_hashes,
                 chain_value_pool_change,
@@ -745,15 +770,22 @@ pub(crate) fn block_wire_and_retained_bytes(
     (wire_bytes, bytes)
 }
 
-/// Include scripts from prior transactions, not just the current block's wire bytes.
-pub(crate) fn output_retained_bytes(
-    outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+/// Like [`new_outputs_retained_bytes`], for outputs shared with the non-finalized chain.
+///
+/// Shared allocations are charged per owner, including each output's allocation.
+pub(crate) fn shared_outputs_retained_bytes(
+    outputs: &HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) -> usize {
     outputs.values().fold(
-        outputs
-            .capacity()
-            .saturating_mul(size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()),
-        |bytes, output| bytes.saturating_add(output.utxo.output.lock_script.as_raw_bytes().len()),
+        outputs.capacity().saturating_mul(size_of::<(
+            transparent::OutPoint,
+            Arc<transparent::OrderedUtxo>,
+        )>()),
+        |bytes, output| {
+            bytes
+                .saturating_add(size_of::<transparent::OrderedUtxo>())
+                .saturating_add(output.utxo.output.lock_script.as_raw_bytes().len())
+        },
     )
 }
 
@@ -810,6 +842,40 @@ impl SemanticallyVerifiedBlock {
             received_time: None,
         }
     }
+
+    /// Returns an estimate of the memory this block keeps alive, in bytes.
+    ///
+    /// Queues of blocks that can't be verified or committed yet use it to limit their memory. A
+    /// decoded block can be many times larger than its serialized size, for example when it has
+    /// many small transactions or transparent outputs, so this also counts its decoded transactions
+    /// and [`Self::new_outputs`].
+    pub fn retained_bytes(&self) -> usize {
+        let transactions = &self.block.transactions;
+        let mut bytes = self.block.zcash_serialized_size()
+            + transactions.capacity() * size_of::<Arc<transaction::Transaction>>()
+            + size_of_val(&*self.transaction_hashes)
+            + new_outputs_retained_bytes(&self.new_outputs);
+
+        for transaction in transactions {
+            bytes += size_of_val(transaction.as_ref());
+            if let Some(bundle) = transaction.transparent_bundle() {
+                bytes += size_of_val(bundle.vin.as_slice()) + size_of_val(bundle.vout.as_slice());
+            }
+        }
+
+        bytes
+    }
+}
+
+/// Returns the memory used by `new_outputs`, including their scripts, in bytes.
+pub(crate) fn new_outputs_retained_bytes(
+    new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> usize {
+    new_outputs.capacity() * size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()
+        + new_outputs
+            .values()
+            .map(|output| output.utxo.output.lock_script.as_raw_bytes().len())
+            .sum::<usize>()
 }
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
@@ -862,7 +928,12 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             block: valid.block,
             hash: valid.hash,
             height: valid.height,
-            new_outputs: valid.new_outputs,
+            new_outputs: Arc::new(
+                Arc::unwrap_or_clone(valid.new_outputs)
+                    .into_iter()
+                    .map(|(outpoint, utxo)| (outpoint, Arc::unwrap_or_clone(utxo)))
+                    .collect(),
+            ),
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
         }
@@ -1172,12 +1243,9 @@ pub enum Request {
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
-    /// This request can be made out-of-order; the state service queues it until its parent is ready.
-    /// The orphan queue retains at most [`crate::MAX_BLOCK_REORG_HEIGHT`] payloads and a 320 MiB
-    /// content/metadata resource charge, including cached spent outputs, not exact allocator RSS.
-    /// Highest-height orphans are evicted with [`crate::CommitBlockError::OrphanQueueFull`].
-    /// Commit-ready parents and descendants are dispatched before eviction, so a full queue cannot
-    /// prevent their progress. One incoming payload can temporarily exceed the limits during dispatch.
+    /// This request can be made out-of-order; the state service will queue it
+    /// until its parent is ready. The queue has a size limit: when it is full, the state fails the
+    /// highest queued blocks with [`CommitBlockError::OrphanQueueFull`].
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if

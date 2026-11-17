@@ -261,7 +261,7 @@ impl TestType {
 
             // And reset the concurrency to the default value
             config.sync.checkpoint_verify_concurrency_limit =
-                zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+                zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
         }
 
         Some(Ok(config))

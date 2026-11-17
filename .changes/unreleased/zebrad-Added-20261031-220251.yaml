@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: Added the verified block counts, the mempool size, and the database disk size to the metrics sent to Sentry once a minute when `SENTRY_DSN` is set, to help compare nodes.
-time: 2026-10-31T22:02:51.379869436Z

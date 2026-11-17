@@ -433,6 +433,25 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns `true` if the block was rejected because its transactions don't match its header,
+    /// in one of the checks that run before its height is used:
+    /// - the transaction IDs don't match the header's Merkle root,
+    /// - the transactions contain duplicates that keep the Merkle root (CVE-2012-2459), or
+    /// - a V5 or later coinbase claims a height other than its expiry height.
+    ///
+    /// The block hash only commits to the header, so a peer that serves a body for a requested
+    /// block hash can still send the wrong transactions. The block itself can still be valid.
+    pub fn is_body_header_mismatch(&self) -> bool {
+        matches!(
+            self,
+            VerifyBlockError::Block {
+                source: BlockError::BadMerkleRoot { .. }
+                    | BlockError::DuplicateTransaction
+                    | BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight { .. }),
+            }
+        )
+    }
+
     /// Returns `true` if the block was rejected only because an ancestor's authorizing
     /// data didn't match the commitment in its header.
     ///
@@ -804,6 +823,21 @@ where
                 })
                 .await?;
             }
+
+            // # Security
+            //
+            // Check that the header commits to the coinbase height before anything uses it, as the
+            // checkpoint verifier does. A peer can rewrite the height of a V5 coinbase without
+            // changing the Merkle root. `merkle_root_validity()` uses the height to pick the
+            // network upgrade for its consensus branch ID check, and the checks after it use the
+            // height before the transaction verifier checks the coinbase expiry height against it.
+            // So a rewritten height would get the block checked at that height, or rejected for an
+            // error that doesn't show the body was forged (GHSA-g9rc-89v4-hhvf).
+            //
+            // The height is only authenticated once the Merkle root check also passes, but either
+            // failure shows that the body was forged. Cached proposal reuse below also runs after
+            // this check.
+            check::coinbase_height_is_committed(&block, height)?;
 
             // Hash only when populating the cache or when an unmatched block could reuse it.
             let proposal_key = if decoded_match.is_none()

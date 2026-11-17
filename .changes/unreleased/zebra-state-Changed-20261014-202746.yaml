@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Changed
-body: Bounded orphan retention is shared by ordinary and cached block commits, releasing unused UTXO-cache allocation on removal, with commit-ready parents dispatched before eviction.
+body: Cached block commits now share the bounded orphan queue's memory limit, and the queue releases unused UTXO-cache allocation when it removes blocks.
 time: 2026-10-14T20:27:46.895491768+02:00

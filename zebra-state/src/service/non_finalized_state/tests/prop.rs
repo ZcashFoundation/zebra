@@ -47,7 +47,7 @@ fn spent_utxos(
             let utxo = block
                 .new_outputs
                 .get(&outpoint)
-                .or_else(|| chain.created_utxos.get(&outpoint).map(Arc::as_ref))
+                .or_else(|| chain.created_ordered_utxo(&outpoint).map(Arc::as_ref))
                 .expect("generated spends refer to earlier outputs");
             (outpoint, utxo.clone())
         })
@@ -250,6 +250,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
 
         prop_assert_eq!(forked.blocks.len(), full_chain.blocks.len());
         prop_assert!(forked.eq_internal_state(&full_chain));
+        crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(&forked);
     });
 
     Ok(())
@@ -394,6 +395,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
              full chain:\n{full_chain:#?}\n\n\
              partial chain:\n{partial_chain:#?}\n",
         );
+        crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(&full_chain);
     });
 
     Ok(())
@@ -660,7 +662,6 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.tx_loc_by_hash.clone_from(&chain2.tx_loc_by_hash);
 
                 // transparent UTXOs
-                chain1.created_utxos.clone_from(&chain2.created_utxos);
                 chain1.spent_utxos.clone_from(&chain2.spent_utxos);
 
                 // note commitment trees
@@ -697,6 +698,9 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // block data
                 chain1.block_info_by_height = chain2.block_info_by_height.clone();
+
+                // index sizes
+                chain1.index_entries_by_height = chain2.index_entries_by_height.clone();
 
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.

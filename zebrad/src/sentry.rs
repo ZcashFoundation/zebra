@@ -1180,6 +1180,60 @@ mod tests {
     }
 
     #[test]
+    fn memory_metrics_are_sent_with_their_units() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            metrics::gauge!("state.memory.index.entries").set(2_000_000.0);
+            metrics::gauge!("state.memory.backup.restore.duration_seconds").set(25.0);
+            metrics::counter!("state.memory.fork.evicted.count").increment(2);
+            crate::components::metrics::record();
+
+            super::periodic::flush();
+        });
+
+        let mut metrics: Vec<_> = metrics
+            .iter()
+            .map(|metric| (metric.name.to_string(), metric.r#type, metric.unit.clone()))
+            .collect();
+        metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut expected = vec![
+            (
+                "state.memory.backup.restore.duration_seconds".to_string(),
+                MetricType::Gauge,
+                Some(Unit::Second),
+            ),
+            (
+                "state.memory.fork.evicted.count".to_string(),
+                MetricType::Counter,
+                None,
+            ),
+            (
+                "state.memory.index.entries".to_string(),
+                MetricType::Gauge,
+                None,
+            ),
+        ];
+        if cfg!(target_os = "linux") {
+            expected.extend([
+                (
+                    "process.memory.rss_bytes".to_string(),
+                    MetricType::Gauge,
+                    Some(Unit::Byte),
+                ),
+                (
+                    "process.memory.rss_fraction".to_string(),
+                    MetricType::Gauge,
+                    Some(Unit::Ratio),
+                ),
+            ]);
+        }
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(metrics, expected);
+    }
+
+    #[test]
     fn counts_since_the_last_flush_are_sent_at_shutdown() {
         let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
 

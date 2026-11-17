@@ -22,12 +22,6 @@ use zebra_chain::{
     serialization::Duration32,
 };
 
-/// Maximum block hashes admitted from one `getdata` request, before allocation and buffering.
-///
-/// Matches the zcashd request limit:
-/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
-pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
-
 /// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
 /// When it starts up, Zebra opens [`crate::Config::peerset_initial_target_size`]
@@ -327,6 +321,18 @@ pub const PEER_GET_ADDR_TIMEOUT: Duration = Duration::from_secs(8);
 /// With a fanout of 3, we were dropping a lot of responses, because the overall crawl timed out.
 pub const GET_ADDR_FANOUT: usize = 1;
 
+/// The maximum number of distinct block hashes retained from a peer's `getdata` request.
+///
+/// The inbound service uses the same limit when serving blocks. Additional block hashes are
+/// ignored before allocating and cloning the internal request.
+///
+/// This is the same as `zcashd`'s request limit:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
+///
+/// (Zebra's outbound request limit is one block in transit per peer, because it fans out block
+/// requests to many peers instead of just a few peers.)
+pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
 /// `addr`:
@@ -446,7 +452,8 @@ pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 /// The interval between flushes of batched peer misbehaviour updates into the address book.
 ///
 /// Misbehaviour updates are batched so peers can't keep the address book mutex locked by
-/// repeatedly sending invalid blocks or transactions.
+/// repeatedly sending invalid blocks or transactions. An update that bans a peer is sent right
+/// away, at most once per peer address and interval.
 #[cfg(not(test))]
 pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 

@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: 'Remove the `elasticsearch` feature, the `Config::elasticsearch_url`, `elasticsearch_username` and `elasticsearch_password` fields, the `FinalizedState::elastic_db` and `elastic_blocks` fields, the `FinalizedState::elasticsearch` method, the `enable_elastic_db` argument of `FinalizedState::new`, and `RedactedString`.'
-time: 2026-11-03T18:22:08.000000000Z

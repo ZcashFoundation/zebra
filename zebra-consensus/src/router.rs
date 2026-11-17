@@ -173,6 +173,16 @@ impl RouterError {
         }
     }
 
+    /// Returns `true` if the block was rejected because its transactions don't match its header.
+    ///
+    /// See [`VerifyBlockError::is_body_header_mismatch()`].
+    pub fn is_body_header_mismatch(&self) -> bool {
+        match self {
+            RouterError::Checkpoint { source, .. } => source.is_body_header_mismatch(),
+            RouterError::Block { source, .. } => source.is_body_header_mismatch(),
+        }
+    }
+
     /// Returns `true` if the block was rejected only because an ancestor's authorizing
     /// data didn't match the commitment in its header.
     ///

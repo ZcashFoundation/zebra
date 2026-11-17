@@ -14,7 +14,7 @@ use crate::{
         CompactSize64, CompactSizeMessage, ReadZcashExt, SerializationError, TrustedPreallocate,
         ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
-    transaction::Transaction,
+    transaction::{Transaction, MIN_TRANSPARENT_TX_SIZE},
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -179,7 +179,7 @@ impl ZcashDeserialize for Block {
             // The stored `consensus_branch_id` may be wrong for pre-Canopy transactions.
             // This field is not used in production (sighash computation provides the
             // correct branch ID explicitly via the NetworkUpgrade parameter).
-            transactions: limited_reader.zcash_deserialize_into()?,
+            transactions: zcash_deserialize_block_transactions(limited_reader)?,
         })
     }
 }
@@ -229,6 +229,19 @@ pub(super) fn parallel_block(bytes: &[u8]) -> Option<(Result<Block, Serializatio
 
     let body_start = bounded.len() - remaining.len();
     let mut consumed = body_start;
+    // Matches `zcash_deserialize_block_transactions`: reject once the transactions average fewer
+    // than `MIN_TRANSPARENT_TX_SIZE` bytes, after the same transaction as the serial decoder.
+    let check_size = |parsed: usize, consumed: usize| {
+        // Lossless: `usize` is at most 64 bits on supported targets, and `parsed` is bounded by
+        // `Transaction::max_allocation()`, so the product can't overflow.
+        if ((consumed - body_start) as u64) < parsed as u64 * MIN_TRANSPARENT_TX_SIZE {
+            Err(SerializationError::Parse(
+                "block transactions are smaller than the smallest valid transaction",
+            ))
+        } else {
+            Ok(())
+        }
+    };
     let block = (|| {
         let mut transactions = Vec::new();
         let mut ranges = Vec::new();
@@ -244,6 +257,7 @@ pub(super) fn parallel_block(bytes: &[u8]) -> Option<(Result<Block, Serializatio
                 let transaction = Transaction::zcash_deserialize(&mut reader);
                 consumed = bounded.len() - reader.len();
                 transactions.push(Arc::new(transaction?));
+                check_size(transactions.len(), consumed)?;
                 continue;
             }
             let start = consumed;
@@ -273,6 +287,7 @@ pub(super) fn parallel_block(bytes: &[u8]) -> Option<(Result<Block, Serializatio
             for ((transaction, end), range) in parsed.drain(..).zip(&ranges) {
                 consumed = end;
                 transactions.push(transaction?);
+                check_size(transactions.len(), consumed)?;
                 if end != start + range.end {
                     // Do not use stale boundaries or repeat already accepted parsing.
                     serial = true;
@@ -404,6 +419,35 @@ pub(super) fn scan_transaction(bytes: &mut &[u8]) -> Option<()> {
         }
     }
     Some(())
+}
+
+/// Deserializes a block's transactions, rejecting them once they average fewer than
+/// [`MIN_TRANSPARENT_TX_SIZE`] bytes, so a small message can't parse into many transactions.
+fn zcash_deserialize_block_transactions<R: io::Read>(
+    reader: &mut io::Take<R>,
+) -> Result<Vec<Arc<Transaction>>, SerializationError> {
+    let count: CompactSizeMessage = (&mut *reader).zcash_deserialize_into()?;
+    let count = u64::try_from(usize::from(count))
+        .map_err(|_| SerializationError::Parse("transaction count doesn't fit in a u64"))?;
+    if count > Transaction::max_allocation() {
+        return Err(SerializationError::Parse(
+            "Vector longer than max_allocation",
+        ));
+    }
+
+    let start = reader.limit();
+    let mut transactions = Vec::new();
+    for parsed in 1..=count {
+        transactions.push((&mut *reader).zcash_deserialize_into()?);
+
+        if start - reader.limit() < parsed * MIN_TRANSPARENT_TX_SIZE {
+            return Err(SerializationError::Parse(
+                "block transactions are smaller than the smallest valid transaction",
+            ));
+        }
+    }
+
+    Ok(transactions)
 }
 
 /// A serialized block.

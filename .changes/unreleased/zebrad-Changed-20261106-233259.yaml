@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Reduce CPU work when updating mempool rejection metrics.
-time: 2026-11-06T23:32:59.917951995+01:00

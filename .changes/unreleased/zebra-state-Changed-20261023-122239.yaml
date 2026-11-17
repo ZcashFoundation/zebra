@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Reduce allocations and script copies when indexing transparent transactions in non-finalized blocks.
-time: 2026-10-23T12:22:39.382047598+02:00

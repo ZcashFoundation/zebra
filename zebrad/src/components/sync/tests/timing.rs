@@ -206,3 +206,270 @@ async fn request_genesis_is_rate_limited() {
         RETRIES_TO_RUN
     );
 }
+
+/// Repeated failed extensions back off without cancelling an unrelated live verification.
+#[tokio::test(start_paused = true)]
+async fn failed_tip_extensions_have_a_no_progress_deadline() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+    use futures::StreamExt;
+    use zebra_chain::{
+        block::{self, Block},
+        chain_tip::mock::MockChainTip,
+        serialization::ZcashDeserializeInto,
+    };
+    use zebra_test::mock_service::MockService;
+
+    use crate::components::sync::FANOUT;
+
+    let _init_guard = zebra_test::init();
+    // Keep the pending verification outside the short post-checkpoint timeout window.
+    let honest: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_202_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let honest_hash = honest.hash();
+    let genesis_hash = Network::Mainnet.genesis_hash();
+    let a = block::Hash::from([0xA1; 32]);
+    let b = block::Hash::from([0xB1; 32]);
+    let started = tokio::time::Instant::now();
+    let injected = Arc::new(AtomicBool::new(false));
+    let requests = Arc::new(AtomicUsize::new(0));
+    let network_requests = requests.clone();
+    let network = tower::service_fn(move |request| {
+        let block = honest.clone();
+        let injected = injected.clone();
+        let requests = network_requests.clone();
+        async move {
+            match request {
+                zebra_network::Request::FindBlocks { known_blocks, .. } => {
+                    requests.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let hashes = if known_blocks == vec![genesis_hash] {
+                        vec![a, b]
+                    } else if started.elapsed() >= BLOCK_VERIFY_TIMEOUT / 2
+                        && !injected.swap(true, Ordering::SeqCst)
+                    {
+                        // Keep the repeated tip (a, b), but also admit an honest block late
+                        // enough that its verification is still live when the round ends.
+                        vec![b, honest_hash, a, b]
+                    } else {
+                        vec![b, a, b]
+                    };
+                    Ok(zebra_network::Response::BlockHashes(hashes))
+                }
+                zebra_network::Request::BlockDownload { hash, .. } if hash == honest_hash => {
+                    Ok(zebra_network::Response::Blocks(vec![
+                        zebra_network::InventoryResponse::Available((block, None)),
+                    ]))
+                }
+                zebra_network::Request::BlockDownload { .. } => {
+                    Err(crate::BoxError::from("connection reset"))
+                }
+                _ => unreachable!("only tip and block requests are expected"),
+            }
+        }
+    });
+    let state = tower::service_fn(move |request| {
+        future::ok::<_, crate::BoxError>(match request {
+            zebra_state::Request::BlockLocator => {
+                zebra_state::Response::BlockLocator(vec![genesis_hash])
+            }
+            zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::KnownBlocks(requested) => {
+                zebra_state::Response::KnownBlocks(vec![None; requested.len()])
+            }
+            _ => unreachable!("only known blocks and the locator are queried"),
+        })
+    });
+    let mut verifier = MockService::build().for_unit_tests();
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        verifier.clone(),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    timeout(
+        BLOCK_VERIFY_TIMEOUT + Duration::from_secs(2),
+        chain_sync.try_to_sync(),
+    )
+    .await
+    .expect("repeated failing extensions must not run forever")
+    .expect("the no-progress deadline must preserve unrelated pending downloads");
+    assert!(started.elapsed() >= BLOCK_VERIFY_TIMEOUT);
+    assert!(requests.load(Ordering::SeqCst) > 5 * FANOUT);
+
+    verifier
+        .expect_request_that(|request: &zebra_consensus::Request| {
+            request.block().hash() == honest_hash
+        })
+        .await
+        .respond(honest_hash);
+    timeout(Duration::from_secs(1), async {
+        loop {
+            match chain_sync.downloads.next().await {
+                Some(Ok((_, hash))) if hash == honest_hash => break,
+                Some(result) => chain_sync.handle_block_response(result).unwrap(),
+                None => panic!("the live honest verification must not be cancelled"),
+            }
+        }
+    })
+    .await
+    .expect("the honest verification must finish after the round backs off");
+    chain_sync.downloads.cancel_all();
+}
+
+/// A tip advance renews the deadline without cancelling a pending tip extension.
+#[tokio::test(start_paused = true)]
+async fn tip_progress_renews_an_in_progress_sync_step() {
+    use zebra_chain::{block, chain_tip::mock::MockChainTip};
+    use zebra_test::mock_service::MockService;
+
+    use crate::components::sync::RestartReason;
+
+    let _init_guard = zebra_test::init();
+    let genesis_hash = Network::Mainnet.genesis_hash();
+    let a = block::Hash::from([0xA1; 32]);
+    let b = block::Hash::from([0xB1; 32]);
+    let started = tokio::time::Instant::now();
+    let network = tower::service_fn(move |request| async move {
+        match request {
+            zebra_network::Request::FindBlocks { known_blocks, .. } => {
+                let hashes = if known_blocks == vec![genesis_hash] {
+                    vec![a, b]
+                } else {
+                    tokio::time::sleep(Duration::from_secs(5) - Duration::from_millis(1)).await;
+                    if started.elapsed() > BLOCK_VERIFY_TIMEOUT {
+                        Vec::new()
+                    } else {
+                        vec![b, a, b]
+                    }
+                };
+                Ok(zebra_network::Response::BlockHashes(hashes))
+            }
+            zebra_network::Request::BlockDownload { .. } => {
+                Err(crate::BoxError::from("connection reset"))
+            }
+            _ => unreachable!("only tip and block requests are expected"),
+        }
+    });
+    let state = tower::service_fn(move |request| {
+        future::ok::<_, crate::BoxError>(match request {
+            zebra_state::Request::BlockLocator => {
+                zebra_state::Response::BlockLocator(vec![genesis_hash])
+            }
+            zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::KnownBlocks(requested) => {
+                zebra_state::Response::KnownBlocks(vec![None; requested.len()])
+            }
+            _ => unreachable!("only known blocks and the locator are queried"),
+        })
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    let advance_tip = tokio::spawn(async move {
+        tokio::time::sleep(BLOCK_VERIFY_TIMEOUT - Duration::from_millis(1)).await;
+        tip_sender.send_best_tip_height(Height(1));
+        tip_sender
+    });
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    let reason = timeout(
+        BLOCK_VERIFY_TIMEOUT + Duration::from_secs(6),
+        chain_sync.try_to_sync(),
+    )
+    .await
+    .expect("the pending extension must finish within its original response timeout")
+    .unwrap();
+    assert_eq!(
+        reason,
+        RestartReason::ExhaustedTips,
+        "recent chain progress must prevent the old deadline from cancelling the extension"
+    );
+    assert!(started.elapsed() > BLOCK_VERIFY_TIMEOUT);
+    let _tip_sender = advance_tip.await.unwrap();
+    chain_sync.downloads.cancel_all();
+}
+
+/// Verifier backpressure must expire even when no sync stage is polling the download.
+#[tokio::test(start_paused = true)]
+async fn verifier_readiness_times_out() {
+    use futures::StreamExt;
+    use tower::limit::ConcurrencyLimit;
+
+    use zebra_chain::{
+        block::Block, chain_tip::mock::MockChainTip, serialization::ZcashDeserializeInto,
+    };
+    use zebra_test::mock_service::MockService;
+
+    use crate::components::sync::downloads::BlockDownloadVerifyError;
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let network = tower::service_fn(move |request| {
+        assert_eq!(
+            request,
+            zebra_network::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            }
+        );
+        future::ok::<_, crate::BoxError>(zebra_network::Response::Blocks(vec![
+            zebra_network::InventoryResponse::Available((block.clone(), None)),
+        ]))
+    });
+    let never_ready_verifier = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        never_ready_verifier,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    let started = tokio::time::Instant::now();
+    chain_sync
+        .downloads
+        .download_and_verify(hash)
+        .await
+        .unwrap();
+    let error = timeout(
+        BLOCK_VERIFY_TIMEOUT + Duration::from_secs(1),
+        chain_sync.downloads.next(),
+    )
+    .await
+    .expect("verifier readiness must have its own deadline")
+    .expect("the download must report its readiness timeout")
+    .expect_err("a verifier with no permits never becomes ready");
+    assert!(
+        matches!(
+            error,
+            BlockDownloadVerifyError::VerifierServiceError { ref error }
+                if error.is::<tokio::time::error::Elapsed>()
+        ),
+        "a readiness timeout must be reported as a verifier service error: {error:?}"
+    );
+    assert_eq!(tokio::time::Instant::now() - started, BLOCK_VERIFY_TIMEOUT);
+    assert!(chain_sync.downloads.is_empty());
+}

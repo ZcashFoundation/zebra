@@ -244,6 +244,187 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     .unwrap();
 }
 
+/// Blocks evicted by the fork limit are reported like rejected blocks, so the state service can
+/// download and commit them again if the network extends them (#11133).
+#[test]
+fn evicted_blocks_are_reported_as_rejected() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized, root, _child) = populated_state();
+    let received = std::time::Instant::now();
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 1..=max_forks {
+        let mut prepared = root
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+            .prepare();
+        prepared.received_time = Some(received + Duration::from_secs(i.into()));
+        state.commit_block(prepared, &finalized).unwrap();
+    }
+
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+    forget_evicted_blocks(&mut state, &rejected_sender);
+
+    let NonFinalizedWriteOutcome::Rejected(evicted) = rejected_receiver
+        .try_recv()
+        .expect("one fork was evicted at the fork limit")
+    else {
+        panic!("evicted blocks are reported as rejected");
+    };
+    assert!(!state.any_chain_contains(&evicted));
+    assert!(
+        rejected_receiver.try_recv().is_err(),
+        "blocks that are still in another chain are not reported",
+    );
+
+    forget_evicted_blocks(&mut state, &rejected_sender);
+    assert!(
+        rejected_receiver.try_recv().is_err(),
+        "blocks are reported once"
+    );
+}
+
+/// Finalizing re-inserts the remaining chains under the fork limits, so it can evict forks. Those
+/// blocks are reported like rejected blocks, and the non-finalized state without them is
+/// published, before the next block is committed.
+#[test]
+fn forks_evicted_by_finalizing_are_reported_and_published() {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, genesis) = new_state_with_mainnet_genesis();
+    finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    let mut best = vec![genesis.block.make_fake_child().set_work(10)];
+    state
+        .commit_new_chain(best[0].clone().prepare(), &finalized.db)
+        .unwrap();
+    let min_blocks = usize::try_from(crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT)
+        .expect("the minimum fits in a usize");
+    while best.len() < min_blocks + 2 {
+        let tip = best.last().unwrap().make_fake_child().set_work(10);
+        state
+            .commit_block(tip.clone().prepare(), &finalized.db)
+            .unwrap();
+        best.push(tip);
+    }
+    let forks: Vec<_> = [1, 2]
+        .map(|i| best[2].make_fake_child().set_block_commitment([i; 32]))
+        .into_iter()
+        .collect();
+    for fork in &forks {
+        state
+            .commit_block(fork.clone().prepare(), &finalized.db)
+            .unwrap();
+    }
+    assert_eq!(state.chain_count(), 3);
+    assert!(state.take_evicted_block_hashes().is_empty());
+
+    state.set_max_index_entries(Some(1));
+    let (mut tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    finalize_root_blocks_and_forget_evicted(
+        &mut finalized,
+        &mut state,
+        &mut None,
+        &rejected_sender,
+        &mut tip_sender,
+        &state_sender,
+        None,
+    );
+
+    assert!(finalized.db.finalized_tip_height() > Some(Height(0)));
+    let NonFinalizedWriteOutcome::Rejected(evicted) = rejected_receiver
+        .try_recv()
+        .expect("finalizing evicted one fork")
+    else {
+        panic!("evicted blocks are reported as rejected");
+    };
+    assert!(forks.iter().any(|fork| fork.hash() == evicted));
+    assert!(!state.any_chain_contains(&evicted));
+    assert!(rejected_receiver.try_recv().is_err());
+
+    assert!(state_receiver.has_changed().unwrap());
+    assert!(!state_receiver.borrow().any_chain_contains(&evicted));
+}
+
+/// Finalizing re-inserts side chains one at a time, so a fork can be evicted before a later
+/// fork that shares its side-branch ancestor is back. That ancestor must not be reported.
+#[test]
+fn finalizing_does_not_report_ancestors_of_retained_forks() {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, genesis) = new_state_with_mainnet_genesis();
+    finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    let mut best = vec![genesis.block.make_fake_child().set_work(10)];
+    state
+        .commit_new_chain(best[0].clone().prepare(), &finalized.db)
+        .unwrap();
+    let min_blocks = usize::try_from(crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT)
+        .expect("the minimum fits in a usize");
+    while best.len() < min_blocks + 2 {
+        let tip = best.last().unwrap().make_fake_child().set_work(10);
+        state
+            .commit_block(tip.clone().prepare(), &finalized.db)
+            .unwrap();
+        best.push(tip);
+    }
+
+    // Side chains are re-inserted from the most work down: `high` first, then `middle`, which
+    // evicts `high`, then `low`, which shares `shared` with `high` and evicts `middle`.
+    let shared = best[2]
+        .make_fake_child()
+        .set_block_commitment([1; 32])
+        .set_work(1);
+    let high = shared
+        .make_fake_child()
+        .set_block_commitment([2; 32])
+        .set_work(5);
+    let low = shared
+        .make_fake_child()
+        .set_block_commitment([3; 32])
+        .set_work(1);
+    let middle = best[2]
+        .make_fake_child()
+        .set_block_commitment([4; 32])
+        .set_work(3);
+    for block in [&shared, &high, &low, &middle] {
+        state
+            .commit_block(block.clone().prepare(), &finalized.db)
+            .unwrap();
+    }
+    assert_eq!(state.chain_count(), 4);
+    assert!(state.take_evicted_block_hashes().is_empty());
+
+    state.set_max_index_entries(Some(1));
+    let (mut tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, _state_receiver) = watch::channel(state.clone());
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    finalize_root_blocks_and_forget_evicted(
+        &mut finalized,
+        &mut state,
+        &mut None,
+        &rejected_sender,
+        &mut tip_sender,
+        &state_sender,
+        None,
+    );
+
+    assert!(state.any_chain_contains(&shared.hash()));
+    assert!(state.any_chain_contains(&low.hash()));
+    let mut rejected = std::collections::HashSet::new();
+    while let Ok(outcome) = rejected_receiver.try_recv() {
+        let NonFinalizedWriteOutcome::Rejected(hash) = outcome else {
+            panic!("evicted blocks are reported as rejected");
+        };
+        assert!(rejected.insert(hash), "each evicted block is reported once");
+    }
+    assert_eq!(rejected, [high.hash(), middle.hash()].into());
+}
+
 #[test]
 fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
     use std::sync::Mutex;

@@ -113,7 +113,12 @@ impl ContextuallyVerifiedBlock {
             block,
             hash,
             height,
-            new_outputs: new_outputs.clone(),
+            new_outputs: Arc::new(
+                new_outputs
+                    .iter()
+                    .map(|(outpoint, utxo)| (*outpoint, Arc::new(utxo.clone())))
+                    .collect(),
+            ),
             // Just re-use the outputs we created in this block, even though that's incorrect.
             //
             // TODO: fix the tests, and stop adding unrelated inputs and outputs.

@@ -96,7 +96,7 @@ fn finalized_transparent_balance(
 ///
 /// If the addresses do not exist in the non-finalized `chain`, returns zero.
 fn chain_transparent_balance_change(
-    mut chain: Arc<Chain>,
+    chain: Arc<Chain>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
 ) -> (Amount<NegativeAllowed>, u64) {
@@ -108,8 +108,6 @@ fn chain_transparent_balance_change(
     let required_chain_root = finalized_tip
         .map(|tip| (tip + 1).unwrap())
         .unwrap_or(Height(0));
-
-    let chain = Arc::make_mut(&mut chain);
 
     assert!(
         chain.non_finalized_root_height() <= required_chain_root,
@@ -124,14 +122,9 @@ fn chain_transparent_balance_change(
         return (Amount::zero(), 0);
     }
 
-    // Correctness: some balances might have duplicate creates or spends,
-    // so we pop root blocks from `chain` until the chain root is a child of the finalized tip.
-    while chain.non_finalized_root_height() < required_chain_root {
-        // TODO: just revert the transparent balances, to improve performance
-        chain.pop_root();
-    }
-
-    chain.partial_transparent_balance_change(addresses)
+    // Correctness: the finalized balance already includes the blocks below the required root,
+    // so only the blocks from that root are added, and each block is counted once.
+    chain.partial_transparent_balance_change_from(addresses, required_chain_root)
 }
 
 /// Add the supplied finalized and non-finalized balances together,

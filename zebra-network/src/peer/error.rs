@@ -108,7 +108,6 @@ pub enum PeerError {
     ServiceShutdown,
 
     /// We requested data, but the peer replied with a `notfound` message.
-    /// (Or it didn't respond before the request finished.)
     ///
     /// This error happens when the peer doesn't have any of the requested data,
     /// so that the original request can be retried.

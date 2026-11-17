@@ -84,6 +84,17 @@ pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, PeerSocke
 /// An internal marker used in inventory status hash maps.
 type InventoryMarker = InventoryStatus<()>;
 
+/// The number of repeat requests for a block that were sent to each group of peers, see
+/// [`InventoryRegistry::repeat_requests()`].
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct RepeatRequests {
+    /// Requests sent to peers that advertised the block.
+    pub advertisers: usize,
+
+    /// Requests sent to peers that didn't advertise the block.
+    pub other_peers: usize,
+}
+
 /// An Inventory Registry for tracking recent inventory advertisements and missing inventory.
 ///
 /// For more details please refer to the [RFC].
@@ -125,6 +136,31 @@ pub struct InventoryRegistry {
 
     /// Map tracking peers that failed to return inventory in the previous interval period.
     failed_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+
+    /// Map tracking the peers that returned a block they were asked for because the block was
+    /// advertised, in the current interval period.
+    ///
+    /// # Security
+    ///
+    /// A caller only asks for a block again if it rejected the block it was given. So a second
+    /// request for one of these blocks shows that a peer that advertised it served something
+    /// else, and the advertisements for it can't be trusted. See
+    /// [`InventoryRegistry::served_peers()`].
+    ///
+    /// This map is limited like `failed_current`.
+    served_current: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+
+    /// Map tracking the peers that returned an advertised block in the previous interval period.
+    served_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+
+    /// Map tracking the repeat requests sent for a block in the current interval period, see
+    /// [`InventoryRegistry::repeat_requests()`].
+    ///
+    /// This map is limited like `failed_current`.
+    repeat_current: IndexMap<InventoryHash, RepeatRequests>,
+
+    /// Map tracking the repeat requests sent for a block in the previous interval period.
+    repeat_prev: IndexMap<InventoryHash, RepeatRequests>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -249,6 +285,10 @@ impl InventoryRegistry {
             compact_tip: None,
             failed_current: Default::default(),
             failed_prev: Default::default(),
+            served_current: Default::default(),
+            served_prev: Default::default(),
+            repeat_current: Default::default(),
+            repeat_prev: Default::default(),
             inv_stream: BroadcastStream::new(inv_stream).boxed(),
             interval: IntervalStream::new(interval),
             compact_sources: IndexMap::new(),
@@ -329,25 +369,113 @@ impl InventoryRegistry {
     ///
     /// Failures expire after the registry rotates twice, like inventory statuses.
     pub fn register_failed(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
-        if let Some(index) = self.failed_current.get_index_of(&hash) {
-            self.failed_current
-                .move_index(index, self.failed_current.len() - 1);
+        Self::register_peer(&mut self.failed_current, hash, peer);
+    }
+
+    /// Returns an iterator over addrs of peers that recently returned `hash` when they were asked
+    /// for it because it was advertised, or in a repeat request.
+    ///
+    /// Can include the same peer twice, if it returned `hash` in the current and previous interval.
+    ///
+    /// # Security
+    ///
+    /// If this isn't empty, a request for `hash` is a repeat: the caller rejected the block one
+    /// of these peers gave it. A block hash only commits to the header, so a peer can advertise a
+    /// block and then serve its header with other transactions. So the caller should only ask
+    /// these peers as a last resort.
+    ///
+    /// Several peers can advertise the same block to get each retry in turn, and the caller can't
+    /// tell them from the honest peers that advertised it. See
+    /// [`InventoryRegistry::repeat_answer_count()`].
+    pub fn served_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
+        self.served_current
+            .get(&hash)
+            .into_iter()
+            .chain(self.served_prev.get(&hash))
+            .flatten()
+    }
+
+    /// Records that `peer` returned `hash` when it was asked for it because it was advertised, or
+    /// in a repeat request.
+    ///
+    /// These records expire after the registry rotates twice, like inventory statuses.
+    pub fn register_served(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
+        Self::register_peer(&mut self.served_current, hash, peer);
+    }
+
+    /// Returns how many repeat requests for `hash` were recently sent to the peers that
+    /// advertised it, and to the peers that didn't.
+    ///
+    /// # Security
+    ///
+    /// The peers that advertised `hash` and the peers that didn't take turns to get the repeat
+    /// requests for it, and these counts decide whose turn it is. A peer that forges blocks can
+    /// advertise them from several addresses, and it can also connect from addresses that don't
+    /// advertise them and don't answer. So if either group got every repeat request, that group
+    /// could keep them all from the honest peers.
+    ///
+    /// Requests are counted when they are sent, not when they are answered. So several repeat
+    /// requests in flight at the same time take turns too, and a peer can't change the turn by
+    /// delaying its answer.
+    pub fn repeat_requests(&self, hash: InventoryHash) -> RepeatRequests {
+        let current = self.repeat_current.get(&hash).copied().unwrap_or_default();
+        let prev = self.repeat_prev.get(&hash).copied().unwrap_or_default();
+
+        RepeatRequests {
+            advertisers: current.advertisers.saturating_add(prev.advertisers),
+            other_peers: current.other_peers.saturating_add(prev.other_peers),
         }
-        let failed_peers = self.failed_current.entry(hash).or_default();
-        let (index, _) = failed_peers.insert_full(peer);
-        failed_peers.move_index(index, failed_peers.len() - 1);
+    }
+
+    /// Records that a repeat request for `hash` was sent to a peer that advertised it, if
+    /// `advertised` is true, or to a peer that didn't.
+    ///
+    /// These records expire after the registry rotates twice, like inventory statuses.
+    pub fn register_repeat_request(&mut self, hash: InventoryHash, advertised: bool) {
+        if let Some(index) = self.repeat_current.get_index_of(&hash) {
+            self.repeat_current
+                .move_index(index, self.repeat_current.len() - 1);
+        }
+        let requests = self.repeat_current.entry(hash).or_default();
+        if advertised {
+            requests.advertisers = requests.advertisers.saturating_add(1);
+        } else {
+            requests.other_peers = requests.other_peers.saturating_add(1);
+        }
+
+        // # Security
+        //
+        // Limit the number of stored hashes, removing the oldest entries, like `register_peer()`.
+        if self.repeat_current.len() > MAX_INV_PER_MAP {
+            // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+            self.repeat_current.shift_remove_index(0);
+        }
+    }
+
+    /// Adds `peer` to the peers for `hash` in `map`, as the newest entry.
+    fn register_peer(
+        map: &mut IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+        hash: InventoryHash,
+        peer: PeerSocketAddr,
+    ) {
+        if let Some(index) = map.get_index_of(&hash) {
+            map.move_index(index, map.len() - 1);
+        }
+        let peers = map.entry(hash).or_default();
+        let (index, _) = peers.insert_full(peer);
+        peers.move_index(index, peers.len() - 1);
 
         // # Security
         //
         // Limit the number of stored peers and hashes, removing the oldest entries, like
         // `register()`.
-        if failed_peers.len() > MAX_PEERS_PER_INV {
+        if peers.len() > MAX_PEERS_PER_INV {
             // Performance: `MAX_PEERS_PER_INV` is small, so O(n) performance is acceptable.
-            failed_peers.shift_remove_index(0);
+            peers.shift_remove_index(0);
         }
-        if self.failed_current.len() > MAX_INV_PER_MAP {
+        if map.len() > MAX_INV_PER_MAP {
             // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
-            self.failed_current.shift_remove_index(0);
+            map.shift_remove_index(0);
         }
     }
 
@@ -574,5 +702,7 @@ impl InventoryRegistry {
         self.prev = std::mem::take(&mut self.current);
         self.announced_prev = std::mem::take(&mut self.announced_current);
         self.failed_prev = std::mem::take(&mut self.failed_current);
+        self.served_prev = std::mem::take(&mut self.served_current);
+        self.repeat_prev = std::mem::take(&mut self.repeat_current);
     }
 }

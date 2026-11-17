@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Checkpoint submissions retain bounded work through cancellation and range recovery, and accepted commit invariant panics remain fatal after caller cancellation. Synchronization reuses downloaded bodies under one verification deadline, backing off repeated orphan-admission pressure while retrying checkpoint range pressure promptly ([#12287](https://github.com/ZcashFoundation/zebra/pull/12287)).
+body: Checkpoint commit invariant panics stop the node even when the requesting caller has cancelled.
 time: 2026-10-14T20:34:39.515118675+02:00

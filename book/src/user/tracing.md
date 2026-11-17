@@ -171,7 +171,8 @@ With Sentry enabled, Zebra sends:
   with these metrics once a minute, which help compare nodes:
   `sync.verified.block.count`, `gossip.verified.block.count`,
   `zcash.mempool.size.transactions`, and
-  `zebra.state.rocksdb.total_disk_size_bytes`.
+  `zebra.state.rocksdb.total_disk_size_bytes`;
+- the [memory](metrics.md#memory-metrics) metrics once a minute.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the progress
 task observes a chain tip, events and logs also carry `chain.height` and

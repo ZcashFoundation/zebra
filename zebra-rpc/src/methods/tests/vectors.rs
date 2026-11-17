@@ -165,7 +165,11 @@ async fn rpc_getdeprecationinfo() {
         .expect("getdeprecationinfo should succeed");
     assert_eq!(deprecation_info.end_of_service, None);
 
-    let end_of_support_height = 3_546_440;
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis. Place the end of support after it, so the
+    // test doesn't fail when the checkpoints are updated.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let end_of_support_height = checkpoint_height.0 + 20_000;
     let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
     let end_of_service = rpc
         .get_deprecation_info()
@@ -175,9 +179,6 @@ async fn rpc_getdeprecationinfo() {
         .expect("end_of_service should be present when an end of support height is set");
 
     assert_eq!(end_of_service.block_height, end_of_support_height);
-    // This node has no tip, so the estimate counts the blocks remaining after the highest
-    // compiled-in checkpoint, not after genesis.
-    let checkpoint_height = Mainnet.checkpoint_list().max_height();
     let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
     assert!(end_of_service.estimated_time > Utc::now().timestamp());

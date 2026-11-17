@@ -243,10 +243,9 @@ pub enum CommitBlockError {
     #[error("mined block notification channel is closed; block was not committed")]
     MinedBlockNotificationClosed,
 
-    /// The bounded orphan queue evicted this block before its parent became ready.
-    ///
-    /// This is local resource pressure, not a consensus failure; the request can be retried.
-    #[error("orphan block queue is full; block was not committed")]
+    /// The queue of blocks waiting for their parent blocks was full, so the state dropped this
+    /// block. It might be valid.
+    #[error("block was dropped from the full queue of blocks waiting for their parent blocks")]
     OrphanQueueFull,
 }
 
@@ -295,8 +294,7 @@ impl CommitBlockError {
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, orphan/notification admission failures, and rejected
-    /// descendants score 0.
+    /// Duplicate requests, shutdowns, full queues, and rejected-ancestor descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
@@ -525,6 +523,13 @@ pub enum ValidateContextError {
     #[error("block height {candidate_height:?} is not one greater than its parent block's height {parent_height:?}")]
     #[non_exhaustive]
     NonSequentialBlock {
+        candidate_height: block::Height,
+        parent_height: block::Height,
+    },
+
+    #[error("block height {candidate_height:?} is not one greater than its finalized parent block's height {parent_height:?}")]
+    #[non_exhaustive]
+    NonSequentialFinalizedChild {
         candidate_height: block::Height,
         parent_height: block::Height,
     },
@@ -827,6 +832,8 @@ impl ValidateContextError {
             // A wrong block subsidy, funding stream, or miner fee payment is invalid given only
             // the block and its parent, so the peer that sent it is misbehaving.
             ValidateContextError::InvalidSubsidy { .. } => 100,
+            // The parent's height is known, so the block is invalid on its own.
+            ValidateContextError::NonSequentialFinalizedChild { .. } => 100,
             _other => 0,
         }
     }

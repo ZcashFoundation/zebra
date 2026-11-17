@@ -4,7 +4,11 @@
 
 // TODO: move these tests into tests::vectors and tests::prop modules.
 
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    env,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::runtime::Runtime;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt as _};
@@ -1483,6 +1487,602 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
     );
 
     Ok(())
+}
+
+/// A semantically verified block that names a checkpoint verified block below the final
+/// checkpoint as its parent can't end checkpoint sync, whether it's queued after its parent is
+/// committed or before. The switch happens once the final checkpoint is committed.
+#[test]
+fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=9)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+    let max_checkpoint_height = Height(8);
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        max_checkpoint_height,
+        0,
+    ));
+
+    let commit_checkpoint = |state: &mut StateService, height: usize| {
+        state
+            .queue_and_commit_to_finalized_state(
+                CheckpointVerifiedBlock::from(blocks[height].clone()),
+                None,
+            )
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    };
+    // The real block above the final checkpoint, re-parented onto a lower checkpoint block.
+    let forged_child = |parent: usize| {
+        let mut block = Arc::unwrap_or_clone(blocks[9].clone());
+        Arc::make_mut(&mut block.header).previous_block_hash = blocks[parent].hash();
+        Arc::new(block).prepare()
+    };
+    let assert_forged_child_rejected = |error: crate::CommitSemanticallyVerifiedError| {
+        assert!(
+            matches!(
+                error.inner(),
+                CommitBlockError::ValidateContextError(error)
+                    if matches!(**error, ValidateContextError::NonSequentialFinalizedChild { .. })
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(error.inner().misbehavior_score(), 100);
+    };
+
+    for height in 0..=5 {
+        commit_checkpoint(&mut state, height);
+    }
+    assert!(!state.checkpoint_handoff_is_ready());
+
+    // A child of the committed tip is rejected before it's queued.
+    let rejected = state
+        .queue_and_commit_to_non_finalized_state(forged_child(5), None, None)
+        .try_recv()
+        .expect("forged child is answered before it's queued")
+        .expect_err("forged child is rejected");
+    assert_forged_child_rejected(rejected);
+    assert!(state.block_write_sender.finalized.is_some());
+
+    // A child of a checkpoint block that hasn't arrived yet is rejected when its parent is sent.
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7), None, None);
+    assert!(state.block_write_sender.finalized.is_some());
+    commit_checkpoint(&mut state, 6);
+    commit_checkpoint(&mut state, 7);
+    let rejected = queued_rx
+        .try_recv()
+        .expect("forged child is answered when its parent is sent")
+        .expect_err("forged child is rejected");
+    assert_forged_child_rejected(rejected);
+    assert!(state.block_write_sender.finalized.is_some());
+
+    // The honest switch still happens at the final checkpoint.
+    commit_checkpoint(&mut state, 8);
+    assert!(state.checkpoint_handoff_is_ready());
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
+    assert!(state.block_write_sender.finalized.is_none());
+
+    Ok(())
+}
+
+/// A forged child queued while its checkpoint parent is in the write channel is rejected at the
+/// switch to full validation.
+#[test]
+fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=9)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        Height(8),
+        0,
+    ));
+
+    let commit_checkpoint = |state: &mut StateService, height: usize| {
+        state
+            .queue_and_commit_to_finalized_state(
+                CheckpointVerifiedBlock::from(blocks[height].clone()),
+                None,
+            )
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    };
+
+    for height in 0..=5 {
+        commit_checkpoint(&mut state, height);
+    }
+
+    // Hold block 6 in a substitute write channel, so it's sent but not written.
+    let (held_tx, mut held_rx) = tokio::sync::mpsc::unbounded_channel();
+    let write_sender = state
+        .block_write_sender
+        .finalized
+        .replace(held_tx)
+        .expect("checkpoint sync is running");
+    let parent_rx = state.queue_and_commit_to_finalized_state(
+        CheckpointVerifiedBlock::from(blocks[6].clone()),
+        None,
+    );
+    let held_parent = held_rx.try_recv().expect("block 6 is sent");
+    assert_eq!(state.read_service.db.height(blocks[6].hash()), None);
+
+    let mut forged = Arc::unwrap_or_clone(blocks[9].clone());
+    Arc::make_mut(&mut forged.header).previous_block_hash = blocks[6].hash();
+    let mut forged_rx =
+        state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare(), None, None);
+    assert!(matches!(
+        forged_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    // Write block 6, finish checkpoint sync, and switch with the honest block 9.
+    assert!(
+        write_sender.send(held_parent).is_ok(),
+        "write task is running"
+    );
+    state.block_write_sender.finalized = Some(write_sender);
+    parent_rx
+        .blocking_recv()
+        .expect("write task responds")
+        .expect("block 6 commits");
+    commit_checkpoint(&mut state, 7);
+    commit_checkpoint(&mut state, 8);
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
+    assert!(state.block_write_sender.finalized.is_none());
+
+    let rejected = forged_rx
+        .try_recv()
+        .expect("forged child is answered at the switch")
+        .expect_err("forged child is rejected");
+    assert_eq!(rejected.inner().misbehavior_score(), 100);
+    assert!(!state
+        .non_finalized_state_queued_blocks
+        .has_queued_children(blocks[6].hash()));
+
+    Ok(())
+}
+
+/// An honest block queued before the final checkpoint commits isn't rejected, and commits after
+/// the switch to full validation.
+#[test]
+fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=10)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        Height(8),
+        0,
+    ));
+
+    for block in &blocks[..=7] {
+        state
+            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.clone()), None)
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    }
+
+    // The first block above the final checkpoint arrives before the final checkpoint.
+    let mut child_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
+    assert!(matches!(
+        child_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    state
+        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[8].clone()), None)
+        .blocking_recv()
+        .expect("write task responds")
+        .expect("final checkpoint commits");
+    assert!(matches!(
+        child_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    // The next block triggers the switch, and both commit.
+    let grandchild_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare(), None, None);
+    assert!(state.block_write_sender.finalized.is_none());
+    assert_eq!(
+        child_rx.blocking_recv().expect("child is answered")?,
+        blocks[9].hash()
+    );
+    assert_eq!(
+        grandchild_rx
+            .blocking_recv()
+            .expect("grandchild is answered")?,
+        blocks[10].hash()
+    );
+
+    Ok(())
+}
+
+/// A same-hash replacement must commit its own body, not the first caller's authorizing data.
+#[test]
+fn queued_replacement_commits_its_own_body() -> Result<()> {
+    use zebra_chain::{
+        block::ChainHistoryBlockTxAuthCommitmentHash,
+        primitives::zcash_history::BlockCommitmentTreeRoots, serialization::BytesInDisplayOrder,
+    };
+
+    let _init_guard = zebra_test::init();
+    let ledger_strategy = nu5_ledger_strategy();
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let parent_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+
+            Runtime::new().unwrap().block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), async {
+                    let (mut state, _, _, _) = StateService::new(
+                        Config::ephemeral(),
+                        &network,
+                        chain[parent_index - 1].height,
+                        0,
+                    ).await;
+
+                    for block in chain.iter().take(parent_index) {
+                        state
+                            .queue_and_commit_to_finalized_state(
+                                CheckpointVerifiedBlock::from(block.block.clone()),
+                                None,
+                            )
+                            .await
+                            .expect("write task responds")
+                            .expect("valid prefix commits");
+                    }
+
+                    // Transparent-only coinbases avoid arbitrary shielded anchors. Zero-valued
+                    // outputs leave the generated value pools and note commitment trees unchanged.
+                    let trees = state.read_service.db.note_commitment_trees_for_tip();
+                    let mut history_tree = state.read_service.db.history_tree();
+                    let mut previous_hash = state.read_service.db.finalized_tip_hash();
+                    let mut next_block = |template: &SemanticallyVerifiedBlock| {
+                        let coinbase = transaction::Transaction::test_v5(
+                            NetworkUpgrade::Nu5,
+                            template.block.transactions[0].inputs(),
+                            vec![transparent::Output {
+                                value: 0.try_into().unwrap(),
+                                lock_script: transparent::Script::new(&[]),
+                            }],
+                            transaction::LockTime::unlocked(),
+                            template.height,
+                        );
+                        let mut block = Block::clone(&template.block);
+                        block.transactions = vec![Arc::new(coinbase)];
+                        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                            &history_tree.hash().expect("the prefix includes Heartwood"),
+                            &block.auth_data_root(),
+                        );
+                        let header = Arc::make_mut(&mut block.header);
+                        header.previous_block_hash = previous_hash;
+                        header.merkle_root = block.transactions.iter().collect();
+                        header.commitment_bytes = commitment.bytes_in_serialized_order().into();
+                        let block = Arc::new(block);
+                        Arc::make_mut(&mut history_tree).push(
+                            &network,
+                            block.clone(),
+                            BlockCommitmentTreeRoots {
+                                sapling: &trees.sapling.root(),
+                                orchard: &trees.orchard.root(),
+                                ironwood: &trees.ironwood.root(),
+                            },
+                        ).expect("transparent-only blocks extend the history tree");
+                        previous_hash = block.hash();
+                        block.prepare()
+                    };
+                    let parent = next_block(&chain[parent_index]);
+                    let honest = next_block(&chain[parent_index + 1]);
+                    let forged = coinbase_authorization_twin(&honest.block);
+                    assert_eq!(forged.hash(), honest.hash);
+                    assert_eq!(forged.transactions[0].hash(), honest.block.transactions[0].hash());
+                    assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
+
+                    // Both bodies reach the queue before their missing parent arrives.
+                    let forged_received = Instant::now();
+                    let mut forged = forged.prepare();
+                    forged.received_time = Some(forged_received);
+                    let mut honest = honest;
+                    honest.received_time = Some(forged_received + Duration::from_secs(1));
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged, None, None);
+                    let honest_rx =
+                        state.queue_and_commit_to_non_finalized_state(honest.clone(), None, None);
+                    assert!(state.non_finalized_state_queued_blocks.has(honest.hash));
+
+                    let replaced = forged_rx
+                        .await
+                        .expect("state responds")
+                        .expect_err("the older caller is replaced");
+                    assert_eq!(
+                        replaced.inner(),
+                        &CommitBlockError::new_duplicate(
+                            Some(honest.hash.into()),
+                            crate::KnownBlock::Queue,
+                        ),
+                    );
+
+                    state
+                        .queue_and_commit_to_non_finalized_state(parent, None, None)
+                        .await
+                        .expect("write task responds")
+                        .expect("valid parent commits");
+                    assert_eq!(
+                        honest_rx
+                            .await
+                            .expect("write task responds")
+                            .expect("honest replacement commits"),
+                        honest.hash,
+                    );
+                    let non_finalized_state = state.read_service.latest_non_finalized_state();
+                    let tip = non_finalized_state
+                        .best_tip_block()
+                        .expect("the replacement is committed");
+                    assert_eq!(tip.block, honest.block);
+                    // Blocks with the same hash compare equal, so also compare their authorizing data.
+                    assert_eq!(tip.block.auth_data_root(), honest.block.auth_data_root());
+                    assert_eq!(
+                        tip.received_time, honest.received_time,
+                        "a different body doesn't take the replaced body's receipt time",
+                    );
+                })
+                .await
+                .expect("queued replacement completes before the timeout");
+            });
+        }
+    );
+
+    Ok(())
+}
+
+/// A same-hash replacement must commit its own body, not the first caller's authorizing data.
+#[test]
+fn queued_forged_replacement_fails_and_scores_only_forger() -> Result<()> {
+    use zebra_chain::{
+        block::ChainHistoryBlockTxAuthCommitmentHash,
+        primitives::zcash_history::BlockCommitmentTreeRoots, serialization::BytesInDisplayOrder,
+    };
+
+    let _init_guard = zebra_test::init();
+    let ledger_strategy = nu5_ledger_strategy();
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let parent_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+
+            Runtime::new().unwrap().block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), async {
+                    let (mut state, _, _, _) = StateService::new(
+                        Config::ephemeral(),
+                        &network,
+                        chain[parent_index - 1].height,
+                        0,
+                    ).await;
+
+                    for block in chain.iter().take(parent_index) {
+                        state
+                            .queue_and_commit_to_finalized_state(
+                                CheckpointVerifiedBlock::from(block.block.clone()),
+                                None,
+                            )
+                            .await
+                            .expect("write task responds")
+                            .expect("valid prefix commits");
+                    }
+
+                    // Transparent-only coinbases avoid arbitrary shielded anchors. Zero-valued
+                    // outputs leave the generated value pools and note commitment trees unchanged.
+                    let trees = state.read_service.db.note_commitment_trees_for_tip();
+                    let mut history_tree = state.read_service.db.history_tree();
+                    let mut previous_hash = state.read_service.db.finalized_tip_hash();
+                    let mut next_block = |template: &SemanticallyVerifiedBlock| {
+                        let coinbase = transaction::Transaction::test_v5(
+                            NetworkUpgrade::Nu5,
+                            template.block.transactions[0].inputs(),
+                            vec![transparent::Output {
+                                value: 0.try_into().unwrap(),
+                                lock_script: transparent::Script::new(&[]),
+                            }],
+                            transaction::LockTime::unlocked(),
+                            template.height,
+                        );
+                        let mut block = Block::clone(&template.block);
+                        block.transactions = vec![Arc::new(coinbase)];
+                        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                            &history_tree.hash().expect("the prefix includes Heartwood"),
+                            &block.auth_data_root(),
+                        );
+                        let header = Arc::make_mut(&mut block.header);
+                        header.previous_block_hash = previous_hash;
+                        header.merkle_root = block.transactions.iter().collect();
+                        header.commitment_bytes = commitment.bytes_in_serialized_order().into();
+                        let block = Arc::new(block);
+                        Arc::make_mut(&mut history_tree).push(
+                            &network,
+                            block.clone(),
+                            BlockCommitmentTreeRoots {
+                                sapling: &trees.sapling.root(),
+                                orchard: &trees.orchard.root(),
+                                ironwood: &trees.ironwood.root(),
+                            },
+                        ).expect("transparent-only blocks extend the history tree");
+                        previous_hash = block.hash();
+                        block.prepare()
+                    };
+                    let parent = next_block(&chain[parent_index]);
+                    let honest = next_block(&chain[parent_index + 1]);
+                    let forged = coinbase_authorization_twin(&honest.block);
+                    assert_eq!(forged.hash(), honest.hash);
+                    assert_eq!(forged.transactions[0].hash(), honest.block.transactions[0].hash());
+                    assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
+
+                    // The honest body is queued first, the forged one replaces it.
+                    let honest_rx =
+                        state.queue_and_commit_to_non_finalized_state(honest.clone(), None, None);
+                    let forged_rx =
+                        state.queue_and_commit_to_non_finalized_state(forged.prepare(), None, None);
+
+                    let replaced = honest_rx.await.expect("state responds").expect_err("replaced");
+                    assert!(replaced.inner().is_duplicate_request());
+                    assert_eq!(replaced.inner().misbehavior_score(), 0);
+
+                    state
+                        .queue_and_commit_to_non_finalized_state(parent, None, None)
+                        .await
+                        .expect("write task responds")
+                        .expect("valid parent commits");
+                    let forged_err = forged_rx.await.expect("write task responds").expect_err("forged fails");
+                    assert_eq!(forged_err.inner().misbehavior_score(), 100);
+                    assert!(!state.non_finalized_state_queued_blocks.has(honest.hash));
+                    assert_ne!(
+                        state.read_service.latest_non_finalized_state().best_tip_block().map(|b| b.hash),
+                        Some(honest.hash),
+                    );
+                })
+                .await
+                .expect("queued replacement completes before the timeout");
+            });
+        }
+    );
+
+    Ok(())
+}
+
+/// A request for a hash already sent to the write task gets its own duplicate error and does not
+/// take over another request's response channel.
+#[tokio::test]
+async fn write_channel_duplicate_keeps_its_own_channel() {
+    let _init_guard = zebra_test::init();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+
+    let blocks: Vec<SemanticallyVerifiedBlock> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(2..=3)
+        .map(|(_, bytes)| {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            block.prepare()
+        })
+        .collect();
+
+    // Block 3 is queued behind block 2, which has been sent to the write task.
+    let mut queued_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[1].clone(), None, None);
+    state.non_finalized_block_write_sent_hashes.add(&blocks[0]);
+
+    let duplicate = state
+        .queue_and_commit_to_non_finalized_state(blocks[0].clone(), None, None)
+        .await
+        .expect("state responds")
+        .expect_err("the hash was already sent to the write task");
+    assert_eq!(
+        duplicate.inner(),
+        &CommitBlockError::new_duplicate(
+            Some(blocks[0].hash.into()),
+            crate::KnownBlock::WriteChannel,
+        ),
+    );
+
+    assert!(
+        matches!(
+            queued_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ),
+        "the queued request keeps waiting on its own channel"
+    );
+    assert!(state.non_finalized_state_queued_blocks.has(blocks[1].hash));
+    assert!(!state.non_finalized_state_queued_blocks.has(blocks[0].hash));
+}
+
+/// Another copy of a queued body keeps the receipt time of its first copy, so an equal-work
+/// sibling received between the two copies doesn't win `Chain::cmp`'s first-received tie-break.
+#[tokio::test]
+async fn queued_identical_replacement_keeps_earliest_receipt_time() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let first_received = Instant::now();
+    let later = first_received + Duration::from_secs(1);
+
+    // Each copy is `(first copy's receipt time, second copy's, the queued block's)`.
+    // Unstamped blocks count as received before any stamped block.
+    for (first, second, expected) in [
+        (Some(first_received), Some(later), Some(first_received)),
+        (Some(later), Some(first_received), Some(first_received)),
+        (None, Some(later), None),
+    ] {
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+
+        let mut first_copy = block.clone().prepare();
+        first_copy.received_time = first;
+        let mut second_copy = block.clone().prepare();
+        second_copy.received_time = second;
+
+        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy, None, None);
+        let mut second_rx = state.queue_and_commit_to_non_finalized_state(second_copy, None, None);
+
+        assert!(first_rx
+            .await
+            .expect("state responds")
+            .expect_err("the older caller is replaced")
+            .inner()
+            .is_duplicate_request());
+        assert!(
+            matches!(
+                second_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "the newer caller keeps waiting on its own channel"
+        );
+
+        let (queued, _rsp_tx, _, _) = state
+            .non_finalized_state_queued_blocks
+            .remove_queued(&block.hash())
+            .expect("the second copy is queued");
+        assert_eq!(queued.received_time, expected);
+    }
 }
 
 #[tokio::test]

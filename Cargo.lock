@@ -206,6 +206,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "archery"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ca55ee147b1926dbea904f50fe4902494e97bc742205abbbf10c709e43815f"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2425,6 +2431,27 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
 ]
+
+[[package]]
+name = "imbl"
+version = "7.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46bad832b9b463ed9398b8506488cc2e3b897a9d44f13af115f382aac71f4fec"
+dependencies = [
+ "archery",
+ "equivalent",
+ "imbl-sized-chunks",
+ "rand_core 0.9.5",
+ "rand_xoshiro",
+ "version_check",
+ "wide",
+]
+
+[[package]]
+name = "imbl-sized-chunks"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a0813be332553f857953298749fa19549e8b61b80589757c29b4e2a804fa9c6"
 
 [[package]]
 name = "impl-codec"
@@ -4696,6 +4723,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd85992a680de788217d9c70b74aa7685b108cf1aba02f728fb27f1b27199ad1"
 
 [[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5841,7 +5877,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -5863,7 +5899,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.43"
+version = "0.2.44"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -6576,6 +6612,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7202,7 +7248,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "15.0.0"
+version = "16.0.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -7271,7 +7317,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "18.0.0"
+version = "19.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7356,7 +7402,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "15.0.0"
+version = "16.0.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -7397,7 +7443,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "jsonrpsee-types",
  "reqwest 0.12.28",
@@ -7411,7 +7457,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "19.0.0"
+version = "20.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7478,7 +7524,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "14.0.0"
+version = "15.0.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7497,7 +7543,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -7513,6 +7559,7 @@ dependencies = [
  "howudoin",
  "human_bytes",
  "humantime-serde",
+ "imbl",
  "indexmap 2.14.0",
  "insta",
  "itertools 0.14.0",
@@ -7545,7 +7592,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "color-eyre",
  "futures",
@@ -7573,7 +7620,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "10.0.4"
+version = "11.0.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -7597,7 +7644,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "7.0.0"
+version = "7.1.0"
 dependencies = [
  "abscissa_core",
  "bytes",

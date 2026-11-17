@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: 'Remove the experimental `elasticsearch` feature, which exported finalized blocks to Elasticsearch and slowed down syncing. A config that still has `elasticsearch_url`, `elasticsearch_username` or `elasticsearch_password` in the `[state]` section now fails to load: delete those fields.'
-time: 2026-11-03T18:22:08.000000000Z

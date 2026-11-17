@@ -104,6 +104,7 @@ humantime = "2.2"
 humantime-serde = "1.1"
 hyper = "1.6"
 hyper-util = "0.1.11"
+imbl = "7.0.2"
 indexmap = "2.8"
 indicatif = "0.17"
 inferno = { version = "0.12", default-features = false }
