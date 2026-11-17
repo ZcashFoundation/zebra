@@ -401,3 +401,5 @@ result_large_err = "allow"
 
 [patch.crates-io]
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "7e610c3f8a63294975932bca901da95893aa895a" }
+# Await the asm hex rendering in https://github.com/ZcashFoundation/zcash_script/pull/311.
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", rev = "08556638dfd1a517d887b27acbff46bb24273f1e" }
