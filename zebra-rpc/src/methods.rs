@@ -937,11 +937,42 @@ where
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
 
     /// The last best tip publication a template was served for, shared by all RPC clones.
-    first_template_tip: Arc<Mutex<Option<(block::Hash, Instant)>>>,
+    first_template_tip: FirstTemplateTip,
 
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
+}
+
+/// The last best tip publication that a block template was served for, shared by all RPC clones.
+#[derive(Clone, Debug, Default)]
+struct FirstTemplateTip(Arc<Mutex<Option<(block::Hash, Instant)>>>);
+
+impl FirstTemplateTip {
+    /// Records the time from the publication of the best tip `hash` to now, if `hash` is still
+    /// the best tip and no template was recorded for this publication yet, including a return
+    /// to an earlier tip.
+    ///
+    /// Returns whether it recorded a sample.
+    fn record(&self, chain_tip: &impl ChainTip, hash: block::Hash) -> bool {
+        // Reading the publication while holding the lock stops a clone that read an older
+        // publication from replacing a newer one that another clone recorded.
+        let mut recorded = self
+            .0
+            .lock()
+            .expect("the lock is only held to compare and replace a value, which can't panic");
+        let Some(changed_at) = chain_tip.best_tip_changed_at(hash) else {
+            return false;
+        };
+        if *recorded == Some((hash, changed_at)) {
+            return false;
+        }
+
+        metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
+            .record(changed_at.elapsed().as_secs_f64());
+        *recorded = Some((hash, changed_at));
+        true
+    }
 }
 
 /// A type alias for the last event logged by the server.
@@ -1054,21 +1085,11 @@ where
         (rpc_impl, rpc_tx_queue_task_handle)
     }
 
-    /// Records the time from a best tip's publication to the first template served on it, once
-    /// per publication, including a return to an earlier tip.
+    /// Records the first template served on the current best tip publication, then converts
+    /// `template` into the RPC response.
     fn served_block_template(&self, template: BlockTemplateResponse) -> GetBlockTemplateResponse {
-        let hash = template.previous_block_hash;
-        if let Some(changed_at) = self.latest_chain_tip.best_tip_changed_at(hash) {
-            let mut recorded = self
-                .first_template_tip
-                .lock()
-                .expect("the lock is only held to compare and replace a value, which can't panic");
-            if *recorded != Some((hash, changed_at)) {
-                metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
-                    .record(changed_at.elapsed().as_secs_f64());
-                *recorded = Some((hash, changed_at));
-            }
-        }
+        self.first_template_tip
+            .record(&self.latest_chain_tip, template.previous_block_hash);
         template.into()
     }
 
