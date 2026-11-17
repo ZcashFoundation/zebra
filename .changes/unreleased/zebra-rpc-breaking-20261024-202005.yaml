@@ -1,0 +1,7 @@
+project: zebra-rpc
+kind: breaking
+body: >-
+  Added difficulty and starting-height getters to the mining and peer RPC responses.
+  Pass `difficulty: f64` to `GetMiningInfoResponse::new()` and `startingheight: i32` to
+  `PeerInfo::new()`; the mining response no longer implements `Eq`.
+time: 2026-10-24T20:20:05.506938555+02:00

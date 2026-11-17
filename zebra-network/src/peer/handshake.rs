@@ -1065,6 +1065,7 @@ where
                         connected_addr.is_inbound(),
                         connection_info.remote.user_agent.clone(),
                         connection_info.negotiated_version,
+                        connection_info.remote.start_height,
                     ))
                     .await;
             }
