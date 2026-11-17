@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use tower::{service_fn, BoxError};
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::{Block, Height, SerializedBlock},
     chain_tip::NoChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
@@ -521,8 +521,11 @@ impl GenesisPeer {
             ));
         }
 
+        let raw_genesis = Arc::new(SerializedBlock::from(genesis_bytes.to_vec()));
+
         let inbound_service = service_fn(move |request: Request| {
             let genesis = genesis.clone();
+            let raw_genesis = raw_genesis.clone();
 
             async move {
                 let response = match request {
@@ -532,6 +535,19 @@ impl GenesisPeer {
                             .map(|hash| {
                                 if hash == genesis_hash {
                                     InventoryResponse::Available((genesis.clone(), None))
+                                } else {
+                                    InventoryResponse::Missing(hash)
+                                }
+                            })
+                            .collect(),
+                    ),
+                    // Block `getdata` from peers arrives as raw-bytes requests.
+                    Request::RawBlocksByHash(hashes) => Response::RawBlocks(
+                        hashes
+                            .into_iter()
+                            .map(|hash| {
+                                if hash == genesis_hash {
+                                    InventoryResponse::Available(raw_genesis.clone())
                                 } else {
                                     InventoryResponse::Missing(hash)
                                 }
