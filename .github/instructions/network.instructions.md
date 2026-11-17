@@ -1,5 +1,5 @@
 ---
-applyTo: "zebra-network/**,zebra-node-services/**,zebrad/src/components/sync/**,zebrad/src/components/mempool/**,zebrad/src/components/inbound/**"
+applyTo: "zebra-network/**,zebra-node-services/**,zebrad/src/components/sync/**,zebrad/src/components/mempool/**,zebrad/src/components/inbound/**,zebrad/src/components/sync.rs,zebrad/src/components/mempool.rs,zebrad/src/components/inbound.rs"
 ---
 
 # Safety review rules: network, P2P, mempool, and sync
@@ -20,6 +20,6 @@ Look for: misbehavior scores lost when errors are wrapped or converted; invalid 
 
 ## Match wire formats to the spec and zcashd
 
-Implement wire formats, encodings, network magic, enum values, limits, and replies exactly as the protocol spec, ZIPs, and zcashd define them, and reject reserved flag bits. Stay compatible with older peers, and advertise a protocol version only after its NetworkUpgrade activation height is scheduled.
+Implement wire formats, encodings, network magic, enum values, limits, and replies exactly as the protocol spec, ZIPs, and zcashd define them. Reject reserved values where the spec requires it, and keep ignoring unknown service bits as the version decoder does. Stay compatible with older peers, and advertise a protocol version only after its NetworkUpgrade activation height is scheduled.
 
-Look for: a new protocol version constant advertised before activation is set; flag-byte parsing that ignores reserved bits; message fields that differ from zcashd behavior; changes that stop handling messages older peers still send
+Look for: a new protocol version constant advertised before activation is set; parsing that accepts values the spec says to reject; message fields that differ from zcashd behavior; changes that stop handling messages older peers still send

@@ -1,5 +1,5 @@
 ---
-applyTo: "zebra-consensus/**,zebra-script/**,zebra-chain/src/parameters/**,zebra-chain/src/orchard/**,zebra-chain/src/sapling/**,zebra-chain/src/sprout/**,zebra-chain/src/primitives/**,zebra-chain/src/work/**"
+applyTo: "zebra-consensus/**,zebra-script/**,zebra-chain/src/parameters/**,zebra-chain/src/orchard/**,zebra-chain/src/sapling/**,zebra-chain/src/sprout/**,zebra-chain/src/primitives/**,zebra-chain/src/work/**,zebra-chain/src/ironwood/**,zebra-chain/src/ironwood.rs,zebra-chain/src/orchard.rs,zebra-chain/src/sapling.rs,zebra-chain/src/sprout.rs,zebra-chain/src/primitives.rs,zebra-chain/src/work.rs,zebra-chain/src/parameters.rs"
 ---
 
 # Safety review rules: consensus, script, and cryptography
@@ -28,7 +28,7 @@ Look for: new activation heights for unscheduled upgrades; branch IDs not yet se
 
 Gate each consensus rule and each piece of upgrade-specific data on the activation height of the NetworkUpgrade that introduces it. Keep existing activation timing unchanged.
 
-Look for: checks gated on whichever upgrade comes next rather than the one that introduced the rule; upgrade-specific fields populated before activation; `NetworkUpgrade` comparisons that rely on enum declaration order; callers each checking activation instead of the consensus check doing it
+Look for: checks gated on whichever upgrade comes next rather than the one that introduced the rule; upgrade-specific fields populated before activation; a new `NetworkUpgrade` variant placed out of activation-height order, which breaks its derived `Ord` comparisons; callers each checking activation instead of the consensus check doing it
 
 ## Validate fully before committing or mutating state
 

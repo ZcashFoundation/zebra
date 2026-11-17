@@ -14,7 +14,7 @@ Look for: the same value written to two column families or tables; a cached or c
 
 ## Bump the DB format version on disk changes
 
-For any change to on-disk layout, encoding, column families, or upgrade code, bump the state database version at the correct major, minor, or patch level, using a version never merged or cached before and set to the first release that ships the change. Document new column families with tree, key, and value tables in the database design docs.
+For any change to on-disk layout, encoding, column families, or upgrade code, bump the state database version at the correct major, minor, or patch level, using a version never merged or cached before. Document new column families with tree, key, and value tables in the database design docs.
 
 Look for: new or changed column families, key encodings, or value encodings with no version constant change; a version constant that matches one already on `main` or in CI caches; a major bump where appending fields to a forward-compatible record would do; new column families missing from the database design docs
 
