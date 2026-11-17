@@ -71,8 +71,13 @@ impl Wake for PeerSetWaker {
 ///
 /// Accepts only `AdvertiseBlock` (sampled peers plus sidecars) and `AdvertiseBlockToAll`.
 /// Readiness reconciles pending discovery and waits for an eligible connected peer, even if busy.
-/// Success requires every selected connection to complete its local write. Full queues, revoked
-/// connections, write failures, and losing all eligible peers after readiness are errors.
+/// Success acknowledges the first completed local write, not remote receipt or delivery to every
+/// selected peer. Other queued adverts continue independently. Per-peer failures are logged.
+/// If no write succeeds, full or closed queues, revoked connections, and write failures return an
+/// error. Losing all eligible peers after readiness is also an error.
+/// An acknowledgement timeout takes precedence over other errors and means delivery is unknown:
+/// a queued write may still complete. Caller timeouts likewise do not establish zero delivery.
+/// Dropping a call's future does not cancel queued adverts.
 /// Keep an owning [`NetworkService`] alive; advertiser handles do not own background tasks.
 #[derive(Clone, Debug)]
 pub struct BlockAdvertiser<C> {
@@ -166,13 +171,14 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
             .filter(|(addr, (version, _, sender))| {
                 *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
             })
-            .map(|(_, entry)| entry)
+            .map(|(addr, entry)| (*addr, entry))
             .collect();
         selected.shuffle(&mut rand::rng());
         let sample = broadcast_peer_count(&self.network, selected.len());
         let mut writes = FuturesUnordered::new();
+        let mut failure = None;
         let mut sampled = 0;
-        for (_, sidecar, sender) in selected {
+        for (addr, (_, sidecar, sender)) in selected {
             if !all && !*sidecar {
                 if sampled >= sample {
                     continue;
@@ -180,28 +186,35 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
                 sampled += 1;
             }
             let (result, receiver) = oneshot::channel();
-            let admission = sender
-                .try_send(BlockAdvert { hash, result })
-                .map_err(|error| -> BoxError { error.to_string().into() });
+            if let Err(error) = sender.try_send(BlockAdvert { hash, result }) {
+                tracing::debug!(?addr, %error, "block advert queue admission failed");
+                failure.get_or_insert_with(|| -> BoxError { error.to_string().into() });
+                continue;
+            }
             writes.push(async move {
-                admission?;
-                tokio::time::timeout(REQUEST_TIMEOUT, receiver).await??
+                let result = tokio::time::timeout(REQUEST_TIMEOUT, async { receiver.await? }).await;
+                (addr, result)
             });
         }
         async move {
-            if writes.is_empty() {
-                return Err("no eligible peers for block advertisement".into());
-            }
-            let mut failure = None;
-            while let Some(result) = writes.next().await {
-                if let Err(error) = result {
-                    failure.get_or_insert(error);
+            let mut timed_out = None;
+            while let Some((addr, result)) = writes.next().await {
+                match result {
+                    Ok(Ok(())) => return Ok(Response::Nil),
+                    Ok(Err(error)) => {
+                        tracing::debug!(?addr, %error, "block advert write failed");
+                        failure.get_or_insert(error);
+                    }
+                    Err(error) => {
+                        tracing::debug!(?addr, %error, "block advert acknowledgement timed out");
+                        timed_out.get_or_insert(error);
+                    }
                 }
             }
-            match failure {
-                Some(error) => Err(error),
-                None => Ok(Response::Nil),
-            }
+            Err(timed_out
+                .map(BoxError::from)
+                .or(failure)
+                .unwrap_or_else(|| "no eligible peers for block advertisement".into()))
         }
         .boxed()
     }

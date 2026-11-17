@@ -1,0 +1,7 @@
+project: zebra-network
+kind: Changed
+body: 'Connections write a dequeued block advert even if the `BlockAdvertiser` caller stopped
+  waiting for its result, without extending an outstanding peer request deadline
+  or closing the connection when an ordinary request times out
+  ([#11876](https://github.com/ZcashFoundation/zebra/pull/11876)).'
+time: 2026-10-23T00:08:25+02:00

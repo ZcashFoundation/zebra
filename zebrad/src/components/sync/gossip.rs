@@ -187,7 +187,6 @@ where
             let broadcast_fut = broadcast_network.call(request);
 
             // Await bounded local writes in a spawned task so they don't delay later broadcasts.
-            // Errors can represent partial delivery; don't retry and duplicate successful writes.
             tokio::spawn(broadcast_fut);
 
             // TODO: Move this logic for marking the last change hash as seen to its own method.
