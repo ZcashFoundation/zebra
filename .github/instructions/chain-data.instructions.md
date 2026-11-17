@@ -1,13 +1,9 @@
 ---
 applyTo: "zebra-chain/**"
+excludeAgent: "cloud-agent"
 ---
 
-# Safety review rules: chain data and serialization
+# Chain data and serialization review
 
-Breaking these rules can split consensus, let peers or RPC callers exhaust the node, crash it, or corrupt its state. Flag a rule only where the diff introduces or extends the problem, give the file and line, and say what to change.
-
-## Serialize consensus data in spec-defined layout
-
-Serialize consensus structures exactly as the Zcash protocol spec and the governing ZIP define them, including field order, separately encoded arrays, and per-version field presence, rather than following the in-memory struct shape, a derived encoding, or what the test vectors happen to exercise.
-
-Look for: `zcash_serialize` writing fields in struct declaration order rather than spec order; `#[derive(Serialize)]` or serde used for consensus bytes; arrays interleaved per element where the spec encodes them as separate arrays; transaction digest or sighash code with field order that differs from the ZIP
+- Compare changed consensus encodings with the governing protocol specification or ZIP. Check field order, separately encoded arrays, and fields present only in particular versions.
+- Check the bytes passed to transaction digests and sighashes. A derived encoding or a round-trip test can agree with itself while encoding the wrong bytes.

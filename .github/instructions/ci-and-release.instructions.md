@@ -1,13 +1,8 @@
 ---
-applyTo: ".github/**,docker/**"
+applyTo: ".github/actions/**,.github/scripts/**,.github/workflows/**,deploy/**,docker/**,make/**,scripts/**,**/Dockerfile,Makefile"
+excludeAgent: "cloud-agent"
 ---
 
-# Safety review rules: CI and deployment
+# CI and release review
 
-Breaking these rules can split consensus, let peers or RPC callers exhaust the node, crash it, or corrupt its state. Flag a rule only where the diff introduces or extends the problem, give the file and line, and say what to change.
-
-## Validate CI inputs before any side effects
-
-Validate env vars, workflow inputs, values parsed from PR bodies, and derived identifiers at the boundary, and reject invalid or unsupported combinations before any side-effecting job runs.
-
-Look for: `workflow_dispatch` inputs used without checks; branch names or short SHAs where an immutable full commit SHA is required; scripts reading required env vars without checking they are set; invalid inputs that only fail in a later job
+- Flag workflow inputs, required environment variables, PR-derived values, or resource identifiers that can reach a publishing, deployment, or deletion step before validation. Check that required commit identifiers are full SHAs when the operation needs an immutable revision.
