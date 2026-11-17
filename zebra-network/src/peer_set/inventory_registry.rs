@@ -319,7 +319,7 @@ impl InventoryRegistry {
     ///
     /// Several peers can advertise the same block to get each retry in turn, and the caller can't
     /// tell them from the honest peers that advertised it. See
-    /// [`InventoryRegistry::repeat_answer_count()`].
+    /// [`InventoryRegistry::repeat_requests()`].
     pub fn served_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.served_current
             .get(&hash)
