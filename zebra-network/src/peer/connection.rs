@@ -923,7 +923,10 @@ where
                         None => self.fail_with(PeerError::ConnectionClosed).await,
                         Some(Err(e)) => self.fail_with(e).await,
                         Some(Ok(peer_msg)) => {
-                            self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
+                            self.update_state_metrics(Some(format_args!(
+                                "Out::Rsp::{}",
+                                peer_msg.command()
+                            )));
 
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
@@ -1065,7 +1068,10 @@ where
                 "command" => request.command(),
             )
             .increment(1);
-            self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
+            self.update_state_metrics(Some(format_args!(
+                "Out::Req::Canceled::{}",
+                request.command()
+            )));
 
             return;
         }
@@ -1078,7 +1084,7 @@ where
             "command" => request.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("Out::Req::{}", request.command()));
+        self.update_state_metrics(Some(format_args!("Out::Req::{}", request.command())));
 
         // # Security
         //
@@ -1286,7 +1292,7 @@ where
         trace!(?msg);
         debug!(state = %self.state, %msg, "received inbound peer message");
 
-        self.update_state_metrics(format!("In::Msg::{}", msg.command()));
+        self.update_state_metrics(Some(format_args!("In::Msg::{}", msg.command())));
 
         use InboundMessage::*;
 
@@ -1505,7 +1511,7 @@ where
             "command" => req.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("In::Req::{}", req.command()));
+        self.update_state_metrics(Some(format_args!("In::Req::{}", req.command())));
 
         // Give the inbound service time to clear its queue,
         // before sending the next inbound request.
@@ -1561,7 +1567,10 @@ where
                         client_receiver = ?self.client_rx,
                         "error processing peer request",
                     );
-                    self.update_state_metrics(format!("In::Req::{}/Rsp::Error", req.command()));
+                    self.update_state_metrics(Some(format_args!(
+                        "In::Req::{}/Rsp::Error",
+                        req.command()
+                    )));
                 }
 
                 return;
@@ -1575,7 +1584,7 @@ where
             "command" => rsp.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
+        self.update_state_metrics(Some(format_args!("In::Rsp::{}", rsp.command())));
 
         // TODO: split response handler into its own method
         match rsp.clone() {
@@ -1734,10 +1743,16 @@ where
                 "inbound service {error} error, closing connection",
             );
 
-            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Error", req.command()));
+            self.update_state_metrics(Some(format_args!(
+                "In::Req::{}/Rsp::{error}::Error",
+                req.command()
+            )));
             self.fail_with(error).await;
         } else {
-            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Ignored", req.command()));
+            self.update_state_metrics(Some(format_args!(
+                "In::Req::{}/Rsp::{error}::Ignored",
+                req.command()
+            )));
 
             if matches!(error, PeerError::Overloaded) {
                 metrics::counter!("pool.ignored.loadshed").increment(1);
@@ -1793,8 +1808,8 @@ where
     /// using `extra_state_info` as additional state information.
     ///
     /// Counts live connections by command, without retaining per-peer address series.
-    fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
-        let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
+    fn update_state_metrics(&mut self, extra_state_info: Option<fmt::Arguments<'_>>) {
+        let current_metrics_state = if let Some(extra_state_info) = extra_state_info {
             format!("{}::{extra_state_info}", self.state.command()).into()
         } else {
             self.state.command()
