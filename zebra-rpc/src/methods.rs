@@ -36,8 +36,8 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     ops::RangeInclusive,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -936,6 +936,9 @@ where
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
 
+    /// The last best tip publication a template was served for, shared by all RPC clones.
+    first_template_tip: Arc<Mutex<Option<(block::Hash, Instant)>>>,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
@@ -1036,6 +1039,7 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            first_template_tip: Default::default(),
             #[cfg(test)]
             template_clock: None,
         };
@@ -1048,6 +1052,24 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Records the time from a best tip's publication to the first template served on it, once
+    /// per publication, including a return to an earlier tip.
+    fn served_block_template(&self, template: BlockTemplateResponse) -> GetBlockTemplateResponse {
+        let hash = template.previous_block_hash;
+        if let Some(changed_at) = self.latest_chain_tip.best_tip_changed_at(hash) {
+            let mut recorded = self
+                .first_template_tip
+                .lock()
+                .expect("the lock is only held to compare and replace a value, which can't panic");
+            if *recorded != Some((hash, changed_at)) {
+                metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
+                    .record(changed_at.elapsed().as_secs_f64());
+                *recorded = Some((hash, changed_at));
+            }
+        }
+        template.into()
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -2769,7 +2791,7 @@ where
             .precomputed_block_template(client_long_poll_id, long_poll_started)
             .await
         {
-            return Ok(template.into());
+            return Ok(self.served_block_template(template));
         }
 
         // - Checks and fetches that can change during long polling
@@ -2914,7 +2936,7 @@ where
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
                         .await
                     {
-                        return Ok(template.into());
+                        return Ok(self.served_block_template(template));
                     }
                 }
 
@@ -2950,6 +2972,7 @@ where
         );
 
         let height = chain_info.tip_height.next().map_misc_error()?;
+        let build_started = std::time::Instant::now();
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
@@ -2984,6 +3007,8 @@ where
             mempool_txs,
             submit_old,
         );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(build_started.elapsed().as_secs_f64());
 
         // Coinbase construction can take seconds. Recheck the whole advertised range after it,
         // just as the cache does, rather than returning timestamps invalidated by clock rollback.
@@ -2991,7 +3016,7 @@ where
             <= self
                 .template_clock_now()
                 .saturating_add(Duration32::from_hours(2)))
-        .then(|| template.into())
+        .then(|| self.served_block_template(template))
         .ok_or_misc_error("local clock moved backwards while building the block template")
     }
 
@@ -3010,7 +3035,9 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
+                return Ok(
+                    SubmitBlockResponse::from(SubmitBlockErrorResponse::Rejected).with_metrics(),
+                );
             }
         };
 
@@ -3040,7 +3067,7 @@ where
                     .advertise_mined_block(hash, height)
                     .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
 
-                return Ok(SubmitBlockResponse::Accepted);
+                return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -3086,7 +3113,7 @@ where
             Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
-        Ok(response.into())
+        Ok(SubmitBlockResponse::from(response).with_metrics())
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {

@@ -12,6 +12,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 
 use chrono::Utc;
@@ -158,6 +159,15 @@ impl VerifyBlockError {
             _other => 0,
         }
     }
+}
+
+/// Records the time since `phase_start` as the block verifier phase `phase`, then restarts the
+/// timer for the next phase.
+fn record_phase(phase: &'static str, phase_start: &mut Instant) {
+    let now = Instant::now();
+    metrics::histogram!("zebra.consensus.block.phase.duration_seconds", "phase" => phase)
+        .record(now.duration_since(*phase_start).as_secs_f64());
+    *phase_start = now;
 }
 
 /// Converts an error from a `CommitSemanticallyVerifiedBlock` state request
@@ -346,7 +356,7 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
-        let received_time = std::time::Instant::now();
+        let received_time = Instant::now();
 
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
@@ -377,6 +387,10 @@ where
             }
 
             tracing::trace!("performing block checks");
+            // The template precompute verifies every template as a proposal, so timing proposals
+            // would mix template checks into the timings of blocks that are committed.
+            let record_phases = !request.is_proposal();
+            let mut phase_start = Instant::now();
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
@@ -460,6 +474,10 @@ where
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
 
+            if record_phases {
+                record_phase("block_checks", &mut phase_start);
+            }
+
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
 
@@ -538,6 +556,10 @@ where
                 )?;
             }
 
+            if record_phases {
+                record_phase("transaction_verification", &mut phase_start);
+            }
+
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
@@ -575,6 +597,7 @@ where
             {
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
+                    record_phase("state_commit", &mut phase_start);
                     Ok(hash)
                 }
 

@@ -41,6 +41,7 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
+        record_phase,
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, IntoDisk, RawBytes,
     },
@@ -544,6 +545,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
+        phase_timer: &mut Option<std::time::Instant>,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -613,6 +615,7 @@ impl ZebraDb {
             .into_iter()
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
             .collect();
+        record_phase!(phase_timer, "checkpoint_spent_outputs");
 
         // Get the transparent addresses with changed balances/UTXOs
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
@@ -658,6 +661,7 @@ impl ZebraDb {
                 Some(self.address_balance_location(addr)?.into_new_change())
             }))
         };
+        record_phase!(phase_timer, "checkpoint_address_balances");
 
         let mut batch = DiskWriteBatch::new();
 
@@ -675,6 +679,7 @@ impl ZebraDb {
             self.finalized_value_pool(),
             prev_note_commitment_trees,
         )?;
+        record_phase!(phase_timer, "checkpoint_batch_build");
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
@@ -683,6 +688,7 @@ impl ZebraDb {
         }
         metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
             .record(batch_start.elapsed().as_secs_f64());
+        record_phase!(phase_timer, "checkpoint_db_write");
 
         tracing::trace!(?source, "committed block from");
 

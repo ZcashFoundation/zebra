@@ -107,6 +107,7 @@ aggregated across nodes:
 
 - `rpc.request.duration_seconds`
 - `zcash.net.peer.handshake.duration_seconds`
+- every histogram in [Performance timing](#performance-timing)
 
 The catalog file in a release lists that release's metrics, so you can check your own
 dashboards and alerts against the version you run.
@@ -158,6 +159,41 @@ The header time is set by the block's miner, so a single value is only approxima
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
 In Sentry, `chain.height` lets you compare nodes block by block.
+
+## Performance timing
+
+These histograms and counters show where a node spends its time on each block, block
+template, and mempool update. Compare them between builds that run on the same
+network, hardware, and height range. `zebrad_build_info` has a `commit` label, so
+queries can group nodes by the commit they run.
+
+| Metric | Unit | Labels | Description |
+|---|---|---|---|
+| `zebra.consensus.block.phase.duration_seconds` | seconds | `phase` | Time each phase of full block verification took: `block_checks`, `transaction_verification`, or `state_commit`. Recorded for blocks from sync, gossip, and `submitblock`, but not for block proposals. `state_commit` includes any wait for the parent block. |
+| `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a checkpoint-verified block took, from loading the history tree to the RocksDB write. The phases start with `checkpoint_`. |
+| `zebra.net.block.decode.wait_seconds` | seconds | | Time a received block message waited for a rayon thread to start decoding it. |
+| `zebra.net.block.decode.duration_seconds` | seconds | | Time taken to decode a received block message, including that wait. |
+| `gossip.block.download.duration_seconds` | seconds | | Time taken to download a gossiped block from a peer. |
+| `gossip.block.verify_commit.duration_seconds` | seconds | | Time from sending a downloaded gossiped block to the verifier until it was committed. |
+| `rpc.getblocktemplate.build.duration_seconds` | seconds | | Time taken to select transactions and build a block template. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | seconds | | Time from a new best chain tip until the first block template on it was served. Miners keep working on the old tip for this long. |
+| `rpc.submitblock.outcomes.total` | count | `outcome` | Blocks submitted with `submitblock`, by result: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
+| `sync.mined.block.announcement.duration_seconds` | seconds | | Time from a mined block's acceptance until its announcement to peers finished. |
+| `sync.mined.block.announcement.outcomes.total` | count | `outcome` | Announcements of mined blocks, `completed` or `failed`. |
+| `mempool.tip_cleanup.duration_seconds` | seconds | | Time taken to remove a new tip block's transactions and their conflicts from the mempool. |
+| `mempool.expiry.duration_seconds` | seconds | | Time taken by each check of the mempool for expired transactions. |
+
+For example, this query shows the 95th percentile of each block verification phase
+for each commit:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, phase, commit) (
+    rate(zebra_consensus_block_phase_duration_seconds_bucket[1h])
+    * on (instance) group_left (commit) zebrad_build_info
+  )
+)
+```
 
 ## Sync stall metrics
 

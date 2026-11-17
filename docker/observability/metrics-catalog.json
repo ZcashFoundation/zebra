@@ -223,6 +223,66 @@
       }
     },
     {
+      "name": "gossip.block.download.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to download a gossiped block, from the request to a successful response.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.0,
+          5.0,
+          10.0,
+          20.0,
+          30.0
+        ],
+        "series": [
+          "gossip_block_download_duration_seconds_bucket",
+          "gossip_block_download_duration_seconds_sum",
+          "gossip_block_download_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.block.verify_commit.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time from sending a downloaded gossiped block to the block verifier until it was committed.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "gossip_block_verify_commit_duration_seconds_bucket",
+          "gossip_block_verify_commit_duration_seconds_sum",
+          "gossip_block_verify_commit_duration_seconds_count"
+        ]
+      }
+    },
+    {
       "name": "gossip.cancelled.count",
       "kind": "counter",
       "unit": "count",
@@ -381,6 +441,38 @@
       }
     },
     {
+      "name": "mempool.expiry.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken by each check of the mempool for expired transactions.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.00001,
+          0.00005,
+          0.0001,
+          0.00025,
+          0.0005,
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "series": [
+          "mempool_expiry_duration_seconds_bucket",
+          "mempool_expiry_duration_seconds_sum",
+          "mempool_expiry_duration_seconds_count"
+        ]
+      }
+    },
+    {
       "name": "mempool.failed.verify.tasks.total",
       "kind": "counter",
       "unit": "count",
@@ -472,6 +564,38 @@
         "type": "gauge",
         "series": [
           "mempool_rejected_transaction_ids_bytes"
+        ]
+      }
+    },
+    {
+      "name": "mempool.tip_cleanup.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to remove a new tip block's transactions and their conflicts from the mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.00001,
+          0.00005,
+          0.0001,
+          0.00025,
+          0.0005,
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "series": [
+          "mempool_tip_cleanup_duration_seconds_bucket",
+          "mempool_tip_cleanup_duration_seconds_sum",
+          "mempool_tip_cleanup_duration_seconds_count"
         ]
       }
     },
@@ -823,6 +947,68 @@
       }
     },
     {
+      "name": "rpc.getblocktemplate.build.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to select transactions and build a block template, including the coinbase.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "rpc_getblocktemplate_build_duration_seconds_bucket",
+          "rpc_getblocktemplate_build_duration_seconds_sum",
+          "rpc_getblocktemplate_build_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "rpc.getblocktemplate.first_template.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time from a new best chain tip until the first block template on it was served.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "rpc_getblocktemplate_first_template_duration_seconds_bucket",
+          "rpc_getblocktemplate_first_template_duration_seconds_sum",
+          "rpc_getblocktemplate_first_template_duration_seconds_count"
+        ]
+      }
+    },
+    {
       "name": "rpc.request.duration_seconds",
       "kind": "histogram",
       "unit": "seconds",
@@ -867,6 +1053,21 @@
         "type": "counter",
         "series": [
           "rpc_requests_total"
+        ]
+      }
+    },
+    {
+      "name": "rpc.submitblock.outcomes.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks submitted with submitblock, by their zcashd-compatible result.",
+      "labels": [
+        "outcome"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "rpc_submitblock_outcomes_total"
         ]
       }
     },
@@ -945,6 +1146,40 @@
         "type": "counter",
         "series": [
           "signatures_redpallas_validated"
+        ]
+      }
+    },
+    {
+      "name": "state.block_writer.phase.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time each phase of committing a checkpoint-verified block to the finalized state took.",
+      "labels": [
+        "phase"
+      ],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.00001,
+          0.00005,
+          0.0001,
+          0.00025,
+          0.0005,
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "series": [
+          "state_block_writer_phase_duration_seconds_bucket",
+          "state_block_writer_phase_duration_seconds_sum",
+          "state_block_writer_phase_duration_seconds_count"
         ]
       }
     },
@@ -1770,6 +2005,52 @@
       }
     },
     {
+      "name": "sync.mined.block.announcement.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time from a mined block's acceptance until its announcement to peers finished.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "sync_mined_block_announcement_duration_seconds_bucket",
+          "sync_mined_block_announcement_duration_seconds_sum",
+          "sync_mined_block_announcement_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.mined.block.announcement.outcomes.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Announcements of mined blocks to peers, by whether they finished or failed.",
+      "labels": [
+        "outcome"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_mined_block_announcement_outcomes_total"
+        ]
+      }
+    },
+    {
       "name": "sync.no.height.dropped.block.count",
       "kind": "counter",
       "unit": "count",
@@ -2436,6 +2717,39 @@
       }
     },
     {
+      "name": "zebra.consensus.block.phase.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time each phase of block verification took, for blocks committed after full verification: the header and structure checks, transaction verification, and the state commit, which includes any wait for the parent block.",
+      "labels": [
+        "phase"
+      ],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "zebra_consensus_block_phase_duration_seconds_bucket",
+          "zebra_consensus_block_phase_duration_seconds_sum",
+          "zebra_consensus_block_phase_duration_seconds_count"
+        ]
+      }
+    },
+    {
       "name": "zebra.consensus.cache.evict",
       "kind": "counter",
       "unit": "count",
@@ -2507,6 +2821,70 @@
         "type": "gauge",
         "series": [
           "zebra_consensus_cache_size"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.block.decode.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to decode a received block message, including the wait for a rayon thread.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.00001,
+          0.00005,
+          0.0001,
+          0.00025,
+          0.0005,
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "series": [
+          "zebra_net_block_decode_duration_seconds_bucket",
+          "zebra_net_block_decode_duration_seconds_sum",
+          "zebra_net_block_decode_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.block.decode.wait_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time a received block message waited for a rayon thread to start decoding it.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.00001,
+          0.00005,
+          0.0001,
+          0.00025,
+          0.0005,
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0
+        ],
+        "series": [
+          "zebra_net_block_decode_wait_seconds_bucket",
+          "zebra_net_block_decode_wait_seconds_sum",
+          "zebra_net_block_decode_wait_seconds_count"
         ]
       }
     },
@@ -2757,9 +3135,10 @@
       "name": "zebrad.build.info",
       "kind": "counter",
       "unit": "count",
-      "description": "Always 1, with the running zebrad version as a label.",
+      "description": "Always 1, with the running zebrad version and git commit as labels.",
       "labels": [
-        "version"
+        "version",
+        "commit"
       ],
       "prometheus": {
         "type": "counter",

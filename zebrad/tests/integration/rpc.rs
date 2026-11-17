@@ -89,6 +89,13 @@ async fn metrics_endpoint() -> Result<()> {
         "the build info description",
     )?;
 
+    output.any_output_line_contains(
+        "commit=\"",
+        &body,
+        "metrics exporter response",
+        "the build info commit label",
+    )?;
+
     #[cfg(not(windows))]
     {
         output.any_output_line_contains(

@@ -215,6 +215,17 @@ pub fn describe() {
         "Requests to peers canceled before they were sent."
     );
 
+    describe_histogram!(
+        "zebra.net.block.decode.wait_seconds",
+        Unit::Seconds,
+        "Time a received block message waited for a rayon thread to start decoding it."
+    );
+    describe_histogram!(
+        "zebra.net.block.decode.duration_seconds",
+        Unit::Seconds,
+        "Time taken to decode a received block message, including the wait for a rayon thread."
+    );
+
     // Inbound overload
     describe_counter!(
         "pool.closed.loadshed",

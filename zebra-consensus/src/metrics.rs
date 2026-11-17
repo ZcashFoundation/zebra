@@ -14,6 +14,8 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 ///   - `result`: `success` or `failure`.
 /// - `zebra.consensus.cache.*`:
 ///   - `verifier`: `halo2_pre_nu6_2`, `halo2_nu6_2`, `halo2_nu6_3_onward`, or `groth16_sapling`.
+/// - `zebra.consensus.block.phase.duration_seconds`: `phase`, `block_checks`,
+///   `transaction_verification`, or `state_commit`.
 pub const LABELS: &[(&str, &[&str])] = &[
     (
         "zebra.consensus.batch.duration_seconds",
@@ -24,6 +26,7 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("zebra.consensus.cache.insert", &["verifier"]),
     ("zebra.consensus.cache.evict", &["verifier"]),
     ("zebra.consensus.cache.size", &["verifier"]),
+    ("zebra.consensus.block.phase.duration_seconds", &["phase"]),
 ];
 
 /// The counters of signatures and shielded bundles in batches that failed verification.
@@ -91,6 +94,15 @@ pub fn describe() {
         "checkpoint.waiting.count",
         Unit::Count,
         "Times the checkpoint verifier waited for more blocks before it could verify a range."
+    );
+
+    // Block verifier
+    describe_histogram!(
+        "zebra.consensus.block.phase.duration_seconds",
+        Unit::Seconds,
+        "Time each phase of block verification took, for blocks committed after full \
+         verification: the header and structure checks, transaction verification, and the state \
+         commit, which includes any wait for the parent block."
     );
 
     // Batch verifiers

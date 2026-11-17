@@ -5,6 +5,7 @@ use std::{
     fmt,
     io::{Cursor, Read, Write},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -659,8 +660,13 @@ impl Codec {
     }
 
     fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_block_spawning(reader);
-        Ok(Message::Block(result?.into()))
+        let decode_start = Instant::now();
+        let (result, wait) = Self::deserialize_block_spawning(reader);
+        metrics::histogram!("zebra.net.block.decode.wait_seconds").record(wait.as_secs_f64());
+        let message = Message::Block(result?.into());
+        metrics::histogram!("zebra.net.block.decode.duration_seconds")
+            .record(decode_start.elapsed().as_secs_f64());
+        Ok(message)
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -802,9 +808,14 @@ impl Codec {
     }
 
     /// Given the reader, deserialize the block in the rayon thread pool.
+    ///
+    /// Also returns how long the parse waited for a rayon thread to start it.
     #[allow(clippy::unwrap_in_result)]
-    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
+    fn deserialize_block_spawning<R: Read + std::marker::Send>(
+        reader: R,
+    ) -> (Result<Block, Error>, Duration) {
         let mut result = None;
+        let mut wait = Duration::ZERO;
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
@@ -814,12 +825,16 @@ impl Codec {
         // We can't use `spawn_blocking()` because:
         // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
         // - There is no way to check the blocking task's future for panics
+        let wait_start = Instant::now();
         tokio::task::block_in_place(|| {
             rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
+                s.spawn_fifo(|_s| {
+                    wait = wait_start.elapsed();
+                    result = Some(Block::zcash_deserialize(reader))
+                })
             })
         });
 
-        result.expect("scope has already finished")
+        (result.expect("scope has already finished"), wait)
     }
 }

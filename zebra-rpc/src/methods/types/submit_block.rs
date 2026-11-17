@@ -57,6 +57,26 @@ pub enum SubmitBlockResponse {
     Accepted,
 }
 
+impl SubmitBlockResponse {
+    /// Counts this response in `rpc.submitblock.outcomes.total`, by its zcashd-compatible result.
+    ///
+    /// Operational RPC errors return before a response exists, so they aren't counted as
+    /// rejections.
+    pub(in crate::methods) fn with_metrics(self) -> Self {
+        let outcome = match &self {
+            Self::Accepted => "accepted",
+            Self::ErrorResponse(SubmitBlockErrorResponse::Duplicate) => "duplicate",
+            Self::ErrorResponse(SubmitBlockErrorResponse::DuplicateInconclusive) => {
+                "duplicate-inconclusive"
+            }
+            Self::ErrorResponse(SubmitBlockErrorResponse::Inconclusive) => "inconclusive",
+            Self::ErrorResponse(SubmitBlockErrorResponse::Rejected) => "rejected",
+        };
+        metrics::counter!("rpc.submitblock.outcomes.total", "outcome" => outcome).increment(1);
+        self
+    }
+}
+
 impl Default for SubmitBlockResponse {
     fn default() -> Self {
         Self::ErrorResponse(SubmitBlockErrorResponse::Rejected)

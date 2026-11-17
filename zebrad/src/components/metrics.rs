@@ -27,11 +27,65 @@ mod tests;
 #[cfg(not(windows))]
 const PROCESS_METRICS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// Bucket upper bounds for work that usually takes well under a millisecond.
+const SUB_MILLISECOND_BUCKETS: &[f64] = &[
+    0.00001, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25,
+    0.5, 1.0,
+];
+
+/// Bucket upper bounds for block verification, block template, and announcement latency.
+const BLOCK_LATENCY_BUCKETS: &[f64] = &[
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+];
+
+/// Bucket upper bounds for downloads from peers.
+const DOWNLOAD_BUCKETS: &[f64] = &[
+    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0,
+];
+
 /// The histograms that Prometheus exports as histograms with these bucket upper bounds, in
 /// seconds. Every other histogram is exported as a summary with quantiles.
 ///
 /// Adding a histogram here removes its `quantile` series, which breaks queries that use them.
 pub const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
+    (
+        "zebra.consensus.block.phase.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
+    ),
+    (
+        "state.block_writer.phase.duration_seconds",
+        SUB_MILLISECOND_BUCKETS,
+    ),
+    (
+        "zebra.net.block.decode.wait_seconds",
+        SUB_MILLISECOND_BUCKETS,
+    ),
+    (
+        "zebra.net.block.decode.duration_seconds",
+        SUB_MILLISECOND_BUCKETS,
+    ),
+    ("gossip.block.download.duration_seconds", DOWNLOAD_BUCKETS),
+    (
+        "gossip.block.verify_commit.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
+    ),
+    (
+        "rpc.getblocktemplate.build.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
+    ),
+    (
+        "rpc.getblocktemplate.first_template.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
+    ),
+    (
+        "sync.mined.block.announcement.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
+    ),
+    (
+        "mempool.tip_cleanup.duration_seconds",
+        SUB_MILLISECOND_BUCKETS,
+    ),
+    ("mempool.expiry.duration_seconds", SUB_MILLISECOND_BUCKETS),
     (
         "rpc.request.duration_seconds",
         &[
@@ -195,6 +249,7 @@ fn describe_and_record_build_info() {
     metrics::counter!(
         concat!(env!("CARGO_PKG_NAME"), ".build.info"),
         "version" => env!("CARGO_PKG_VERSION"),
+        "commit" => crate::application::ZebradApp::git_commit().unwrap_or("unknown"),
     )
     .increment(1);
 }
