@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Added the `chain_network_upgrade` label to `zcash.chain.tip.block_delay_seconds`, the network upgrade at the block's height. Sentry still receives each value's block height as the `chain.height` attribute.
+time: 2026-11-17T12:01:34.278679Z

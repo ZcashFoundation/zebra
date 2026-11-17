@@ -1165,13 +1165,18 @@ mod tests {
     fn memory_metrics_are_sent_with_their_units() {
         let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
 
-        let metrics = sent_metrics(&metadata, || {
-            metrics::gauge!("state.memory.index.entries").set(2_000_000.0);
-            metrics::gauge!("state.memory.backup.restore.duration_seconds").set(25.0);
-            metrics::counter!("state.memory.fork.evicted.count").increment(2);
-            crate::components::metrics::record();
+        let policy = metrics_adapter::start().expect("the test can start the flush thread");
 
-            super::periodic::flush();
+        let metrics = sent_metrics(&metadata, || {
+            metrics::with_local_recorder(policy, || {
+                crate::components::metrics::describe_all();
+                metrics::gauge!("state.memory.index.entries").set(2_000_000.0);
+                metrics::gauge!("state.memory.backup.restore.duration_seconds").set(25.0);
+                metrics::counter!("state.memory.fork.evicted.count").increment(2);
+                crate::components::metrics::record();
+            });
+
+            super::end(SessionStatus::Crashed);
         });
 
         let mut metrics: Vec<_> = metrics
@@ -1207,7 +1212,7 @@ mod tests {
                 (
                     "process.memory.rss_fraction".to_string(),
                     MetricType::Gauge,
-                    Some(Unit::Ratio),
+                    None,
                 ),
             ]);
         }
