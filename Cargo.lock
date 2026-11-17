@@ -3687,7 +3687,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.3"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=95df6839da3dd8e5588bb547f63ac26575f1037e#95df6839da3dd8e5588bb547f63ac26575f1037e"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=67d1040a18798101541c66f8a012b57e770e3d44#67d1040a18798101541c66f8a012b57e770e3d44"
 dependencies = [
  "blake2b_simd",
  "cpufeatures 0.3.1",

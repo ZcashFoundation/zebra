@@ -407,7 +407,7 @@ result_large_err = "allow"
 halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "49059f3e540f212d287e6e17f1ad04119cfbd7d5" }
 halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "49059f3e540f212d287e6e17f1ad04119cfbd7d5" }
 halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "49059f3e540f212d287e6e17f1ad04119cfbd7d5" }
-pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "95df6839da3dd8e5588bb547f63ac26575f1037e" }
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "67d1040a18798101541c66f8a012b57e770e3d44" }
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "8be350c737225b2f3c6e0f34e2a118cecec1768b" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
 sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "3e175751a626e99a449b7ffe44631a44e6875dd4" }
