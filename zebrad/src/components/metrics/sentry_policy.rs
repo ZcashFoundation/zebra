@@ -707,15 +707,24 @@ impl GaugeValue {
     }
 
     fn update(&self, change: impl Fn(f64) -> f64) {
-        let _ = self
-            .value
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
-                // A gauge that was never set starts at zero, as it does in Prometheus.
-                let current = Some(f64::from_bits(bits))
-                    .filter(|value| !value.is_nan())
-                    .unwrap_or_default();
-                Some(change(current).to_bits())
-            });
+        // A compare-exchange loop, because `fetch_update` is deprecated on newer compilers and
+        // its replacement isn't available on Zebra's minimum supported Rust version.
+        let mut bits = self.value.load(Ordering::Relaxed);
+        loop {
+            // A gauge that was never set starts at zero, as it does in Prometheus.
+            let current = Some(f64::from_bits(bits))
+                .filter(|value| !value.is_nan())
+                .unwrap_or_default();
+            match self.value.compare_exchange_weak(
+                bits,
+                change(current).to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(actual) => bits = actual,
+            }
+        }
     }
 }
 
