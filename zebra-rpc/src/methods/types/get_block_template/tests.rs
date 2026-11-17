@@ -123,6 +123,8 @@ fn template_reports_selected_transaction_dependencies() {
             0,
             0,
             Default::default(),
+            &net,
+            Height(1),
         )
         .unwrap()
     };

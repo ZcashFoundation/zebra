@@ -27,7 +27,13 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
             .expect("a V4 or V5 transaction has an expiry height");
         let fee = crate::transaction::miner_fee(&tx, &HashMap::new())
             .expect("a Sapling-only fixture has a fee without transparent UTXOs");
-        assert!(fee >= zip317::conventional_fee(&tx));
+        assert!(
+            fee >= zip317::conventional_fee(
+                zip317::conventional_actions(&tx),
+                &Network::Mainnet,
+                height,
+            )
+        );
         let item = sapling_item(&tx, network_upgrade);
         timeout(
             test_timeout(),
@@ -38,7 +44,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
         .expect("the mainnet fixture has valid Sapling proofs and signatures");
         let transaction: zebra_chain::transaction::UnminedTx = Arc::new(tx).into();
         zip317::mempool_checks(
-            zip317::unpaid_actions(&transaction, fee),
+            zip317::unpaid_actions(&transaction, fee, &Network::Mainnet, height),
             fee,
             transaction.size,
         )

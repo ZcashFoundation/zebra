@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Add `Network::fee_reduction_height()`, `zip317::marginal_fee()`, the cached `UnminedTx::conventional_actions` field and `VerifiedUnminedTx::update_fee_parameters()` for height-aware ZIP 2009 fee parameters.
+time: 2026-11-04T06:08:32.459181435+01:00

@@ -37,7 +37,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction::UnminedTxId,
+    transaction::{zip317, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
@@ -178,10 +178,10 @@ enum ActiveState {
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
 
-        /// Last seen chain tip hash that mempool transactions have been verified against.
+        /// Last seen chain tip that mempool transactions have been verified against.
         ///
-        /// In some tests, this is initialized to the latest chain tip, then updated in `poll_ready()` before each request.
-        last_seen_tip_hash: block::Hash,
+        /// Updated in `poll_ready()` before each request.
+        last_seen_tip: (block::Hash, Height),
     },
 }
 
@@ -424,15 +424,16 @@ impl Mempool {
     }
 
     /// Replaces the active state with a freshly-initialised [`ActiveState::Enabled`],
-    /// using `tip_action`'s best tip hash as the `last_seen_tip_hash`.
+    /// using `tip_action`'s best tip as the `last_seen_tip`.
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
-        let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
+        let last_seen_tip = tip_action.best_tip_hash_and_height();
 
         let tx_downloads = Box::pin(
             TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
                 self.state.clone(),
+                self.network.fee_reduction_height(),
             )
             .with_max_datacarrier_bytes(
                 self.config
@@ -443,7 +444,7 @@ impl Mempool {
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
-            last_seen_tip_hash,
+            last_seen_tip,
         };
     }
 
@@ -452,7 +453,7 @@ impl Mempool {
     /// Sync status only gates initial activation. Once the mempool is active,
     /// this method does not disable it.
     ///
-    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash`
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip`
     /// field when enabling the mempool state. It will not enable the mempool if
     /// this is [`None`]. `is_caught_up_to_start` is supplied by the caller, which
     /// already computes it, to avoid evaluating the sync-status predicate twice.
@@ -711,9 +712,25 @@ impl Service<Request> for Mempool {
         if let ActiveState::Enabled {
             storage,
             tx_downloads,
-            last_seen_tip_hash,
+            last_seen_tip,
         } = &mut self.active_state
         {
+            // Refresh retained entries before completed downloads can insert and update metrics.
+            if let Some(tip_action) = tip_action.as_ref() {
+                let (_, height) = tip_action.best_tip_hash_and_height();
+                let activation = self.network.fee_reduction_height();
+                let old_next_height = last_seen_tip
+                    .1
+                    .next()
+                    .expect("chain tip height is far below Height::MAX");
+                let next_height = height
+                    .next()
+                    .expect("chain tip height is far below Height::MAX");
+                if (old_next_height >= activation) != (next_height >= activation) {
+                    storage.update_fee_parameters(&self.network, next_height);
+                }
+            }
+
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
             let mut invalidated_ids = HashSet::<_>::new();
@@ -765,12 +782,37 @@ impl Service<Request> for Mempool {
                         }
                     }
                     Ok(Err(boxed_err)) => {
-                        let (tx_id, error) = *boxed_err;
+                        let (tx_id, error, rsp_tx) = *boxed_err;
+                        let activation = self.network.fee_reduction_height();
+                        let error = match error {
+                            TransactionDownloadVerifyError::Invalid {
+                                error: TransactionError::Zip317(zip317::Error::UnpaidActions),
+                                verification_height,
+                                transaction,
+                                queue_source,
+                                ..
+                            } if verification_height < activation
+                                && best_tip_height.is_some_and(|tip| {
+                                    tip.next().is_ok_and(|height| height >= activation)
+                                }) =>
+                            {
+                                // State publishes the new tip before LatestChainTip, so the retry
+                                // uses the activated policy. A current-policy failure is terminal.
+                                let _result = tx_downloads.download_if_needed_and_verify(
+                                    transaction.into(),
+                                    queue_source,
+                                    rsp_tx,
+                                );
+                                continue;
+                            }
+                            error => error,
+                        };
                         if let TransactionDownloadVerifyError::Invalid {
                             error,
                             advertiser_addr: Some(advertiser_addr),
                             transaction_upgrade,
                             verification_height,
+                            ..
                         } = &error
                         {
                             let score = adjusted_mempool_misbehavior_score(
@@ -794,6 +836,11 @@ impl Service<Request> for Mempool {
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.metric_label()).increment(1);
 
+                        if let Some(rsp_tx) = rsp_tx {
+                            let error_msg =
+                                format!("failed to validate tx: {tx_id}, error: {error}");
+                            let _ = rsp_tx.send(Err(error_msg.into()));
+                        }
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
                     }
@@ -813,7 +860,7 @@ impl Service<Request> for Mempool {
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
-                *last_seen_tip_hash = block.hash;
+                *last_seen_tip = (block.hash, block.height);
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -915,7 +962,7 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
-                last_seen_tip_hash,
+                last_seen_tip,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -993,7 +1040,7 @@ impl Service<Request> for Mempool {
                     let response = Response::FullTransactions {
                         transactions,
                         transaction_dependencies,
-                        last_seen_tip_hash: *last_seen_tip_hash,
+                        last_seen_tip_hash: last_seen_tip.0,
                     };
 
                     async move { Ok(response) }.boxed()
@@ -1122,7 +1169,7 @@ impl Service<Request> for Mempool {
                     {
                         trace!(?req, "answered mempool request");
 
-                        let last_seen_hash = *last_seen_tip_hash;
+                        let last_seen_hash = last_seen_tip.0;
                         return async move {
                             Ok(Response::TransparentOutput(Some(CreatedOrSpent::Created {
                                 output,

@@ -11,8 +11,10 @@ use tokio::time;
 use zebra_chain::{
     amount::Amount,
     at_least_one,
+    block::Height,
     fmt::{DisplayToDebug, SummaryDebug},
     orchard,
+    parameters::Network,
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::{AtLeastOne, ZcashDeserialize},
@@ -540,6 +542,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -549,6 +553,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
         )
@@ -577,6 +583,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -586,6 +594,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
         )
