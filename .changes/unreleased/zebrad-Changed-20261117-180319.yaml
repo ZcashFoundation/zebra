@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Verbose `getblock` and `getrawtransaction` responses render script `asm` faster, with unchanged output.'
+time: 2026-11-17T18:03:19.000000000Z
