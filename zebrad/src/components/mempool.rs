@@ -33,7 +33,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
@@ -91,6 +91,22 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, St
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
+
+/// The largest estimated distance to the network chain tip, in blocks, at which the mempool can
+/// start.
+///
+/// Short sync batches don't show that Zebra is near the network tip, because a node with few
+/// useful peers also gets short batches. This estimate comes from the best tip's block time, so
+/// a long gap between blocks can delay activation until the next block arrives.
+const MAX_START_DISTANCE_TO_NETWORK_TIP: HeightDiff = 20;
+
+/// Returns `true` if the estimated distance from `latest_chain_tip` to the network chain tip is
+/// small enough to start the mempool.
+fn is_near_network_tip(network: &Network, latest_chain_tip: &impl ChainTip) -> bool {
+    latest_chain_tip
+        .estimate_distance_to_network_chain_tip(network)
+        .is_some_and(|(distance, _)| distance <= MAX_START_DISTANCE_TO_NETWORK_TIP)
+}
 
 /// Returns the mempool peer score after applying branch ID activation policy.
 fn adjusted_mempool_misbehavior_score(
@@ -286,6 +302,11 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
+    /// Whether initial activation also requires a small estimated distance to the network chain
+    /// tip. It is `false` on networks without proof of work, where block times don't follow the
+    /// wall clock.
+    checks_network_tip_distance: bool,
+
     /// If the state's best chain tip has reached this height, always enable the mempool.
     debug_enable_at_height: Option<Height>,
 
@@ -364,6 +385,7 @@ impl Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
             sync_status,
+            checks_network_tip_distance: !network.disable_pow(),
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
@@ -420,7 +442,11 @@ impl Mempool {
 
     /// Returns `true` if Zebra is caught up enough to start the mempool.
     fn is_caught_up_to_start(&self) -> bool {
-        self.sync_status.is_close_to_tip() || self.is_enabled_by_debug()
+        let is_near_tip = self.sync_status.is_close_to_tip()
+            && (!self.checks_network_tip_distance
+                || is_near_network_tip(&self.network, &self.latest_chain_tip));
+
+        is_near_tip || self.is_enabled_by_debug()
     }
 
     /// Replaces the active state with a freshly-initialised [`ActiveState::Enabled`],

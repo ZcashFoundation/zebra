@@ -641,6 +641,103 @@ async fn disabled_mempool_keeps_tip_action_until_sync_status_catches_up() -> Res
     Ok(())
 }
 
+/// Check that short sync batches don't start the mempool while the best tip is far behind the
+/// network chain tip.
+///
+/// A node with few useful peers also gets short sync batches, so sync status alone can report
+/// that Zebra is close to the tip while it is still syncing.
+#[tokio::test]
+async fn mempool_stays_disabled_with_short_sync_batches_far_from_network_tip() -> Result<(), Report>
+{
+    let network = Network::Mainnet;
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+
+    // The best tip is the 2016 genesis block, so it is far behind the network chain tip.
+    service.checks_network_tip_distance = true;
+
+    service.enable(&mut recent_syncs).await;
+    assert!(
+        service.sync_status.is_close_to_tip(),
+        "short sync batches report that Zebra is close to the tip"
+    );
+    assert!(!service.is_enabled());
+
+    // Without the distance check, the same sync status starts the mempool from the same tip
+    // action, so the check above is what kept it disabled.
+    service.skip_network_tip_distance_check();
+    service.dummy_call().await;
+    assert!(service.is_enabled());
+
+    Ok(())
+}
+
+/// Check the estimated distance limit for starting the mempool.
+#[test]
+fn near_network_tip_requires_small_estimated_distance() {
+    let network = Network::Mainnet;
+    let (chain_tip, chain_tip_sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+
+    assert!(
+        !mempool::is_near_network_tip(&network, &chain_tip),
+        "an empty state is not near the network tip"
+    );
+
+    chain_tip_sender.send_best_tip_height(Height(1));
+
+    for (distance, is_near) in [
+        (-5, true),
+        (0, true),
+        (MAX_START_DISTANCE_TO_NETWORK_TIP, true),
+        (MAX_START_DISTANCE_TO_NETWORK_TIP + 1, false),
+        (180_000, false),
+    ] {
+        chain_tip_sender.send_estimated_distance_to_network_chain_tip(distance);
+        assert_eq!(
+            mempool::is_near_network_tip(&network, &chain_tip),
+            is_near,
+            "estimated distance: {distance}"
+        );
+    }
+}
+
+/// Check that networks without proof of work start the mempool on sync status alone, because
+/// their block times don't follow the wall clock.
+#[tokio::test]
+async fn mempool_skips_network_tip_distance_without_proof_of_work() {
+    let regtest = Network::new_regtest(Default::default());
+    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), &regtest, Height::MAX, 0).await;
+    let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+    let (sync_status, _recent_syncs) = SyncStatus::new_for_network(&regtest);
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+
+    let (mempool, _mempool_transaction_subscriber) = Mempool::new(
+        &regtest,
+        &mempool::Config::default(),
+        Buffer::new(BoxService::new(peer_set), 1),
+        state_service,
+        Buffer::new(BoxService::new(tx_verifier), 1),
+        sync_status,
+        latest_chain_tip,
+        chain_tip_change,
+        misbehavior_tx,
+    );
+
+    assert!(!mempool.checks_network_tip_distance);
+    assert!(mempool.sync_status.is_close_to_tip());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_mined() -> Result<(), Report> {
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -2311,7 +2408,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mut mempool, mempool_transaction_subscriber) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2322,6 +2419,7 @@ async fn setup_with_mempool_config(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
+    mempool.skip_network_tip_distance_check();
 
     // Keep the change feed drained in the background so tests that ignore it
     // don't leave the broadcast channel without receivers (which would make
@@ -2619,6 +2717,7 @@ async fn enabled_mempool_with_mock_verifier(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
+    mempool.skip_network_tip_distance_check();
     let mut changes = mempool_changes.subscribe();
     tokio::spawn(async move { while changes.recv().await.is_ok() {} });
 
