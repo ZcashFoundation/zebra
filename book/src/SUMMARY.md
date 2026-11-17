@@ -20,6 +20,7 @@
   - [Lightwalletd](user/lightwalletd.md)
   - [zk-SNARK Parameters](user/parameters.md)
   - [Mining](user/mining.md)
+    - [Getting New Work to Mining Pools](user/mining-pools.md)
     - [Testnet Mining with s-nomp](user/mining-testnet-s-nomp.md)
     - [Mining with Zebra in Docker](user/mining-docker.md)
   - [Forking the Zcash Testnet with Zebra](user/fork-zebra-testnet.md)
