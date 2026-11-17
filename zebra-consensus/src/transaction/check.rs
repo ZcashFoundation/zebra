@@ -3,7 +3,6 @@
 //! Code in this file can freely assume that no pre-V4 transactions are present.
 
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
     sync::Arc,
@@ -26,6 +25,9 @@ use zebra_chain::{
 };
 
 use crate::error::TransactionError;
+
+#[cfg(test)]
+mod tests;
 
 /// Checks if the transaction's lock time allows this transaction to be included in a block.
 ///
@@ -382,59 +384,47 @@ pub fn disabled_add_to_sprout_pool(
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
-    // All the nullifier accessors yield owned values, so they are wrapped as `Cow::Owned`.
-    // Ironwood and Orchard nullifiers are disjoint.
-    let transparent_outpoints: Vec<_> = transaction.spent_outpoints().collect();
-    let sprout_nullifiers: Vec<_> = transaction.sprout_nullifiers().collect();
-    let sapling_nullifiers: Vec<_> = transaction.sapling_nullifiers().collect();
-    let orchard_nullifiers: Vec<_> = transaction.orchard_nullifiers().collect();
-    let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
-
+    // Each pool has a separate nullifier domain, including Orchard and Ironwood.
+    check_for_duplicates(transaction.spent_outpoints(), DuplicateTransparentSpend)?;
+    check_for_duplicates(transaction.sprout_nullifiers(), DuplicateSproutNullifier)?;
+    check_for_duplicates(transaction.sapling_nullifiers(), DuplicateSaplingNullifier)?;
+    check_for_duplicates(transaction.orchard_nullifiers(), DuplicateOrchardNullifier)?;
     check_for_duplicates(
-        transparent_outpoints.into_iter().map(Cow::Owned),
-        DuplicateTransparentSpend,
-    )?;
-    check_for_duplicates(
-        sprout_nullifiers.into_iter().map(Cow::Owned),
-        DuplicateSproutNullifier,
-    )?;
-    check_for_duplicates(
-        sapling_nullifiers.into_iter().map(Cow::Owned),
-        DuplicateSaplingNullifier,
-    )?;
-    check_for_duplicates(
-        orchard_nullifiers.into_iter().map(Cow::Owned),
-        DuplicateOrchardNullifier,
-    )?;
-    check_for_duplicates(
-        ironwood_nullifiers.into_iter().map(Cow::Owned),
+        transaction.ironwood_nullifiers(),
         DuplicateIronwoodNullifier,
     )?;
 
     Ok(())
 }
 
-/// Check for duplicate items in a collection.
+/// Checks for duplicates without allocating for empty and single-spend domains.
 ///
-/// Each item should be wrapped by a [`Cow`] instance so that this helper function can properly
-/// handle borrowed items and owned items.
-///
-/// If a duplicate is found, an error created by the `error_wrapper` is returned.
-fn check_for_duplicates<'t, T>(
-    items: impl IntoIterator<Item = Cow<'t, T>>,
+/// Returns the first repeated item using `error_wrapper`.
+fn check_for_duplicates<T>(
+    items: impl IntoIterator<Item = T>,
     error_wrapper: impl FnOnce(T) -> TransactionError,
 ) -> Result<(), TransactionError>
 where
-    T: Clone + Eq + Hash + 't,
+    T: Eq + Hash,
 {
-    let mut hash_set = HashSet::new();
-
+    let mut items = items.into_iter();
+    let Some(first) = items.next() else {
+        return Ok(());
+    };
+    let Some(second) = items.next() else {
+        return Ok(());
+    };
+    if first == second {
+        return Err(error_wrapper(first));
+    }
+    let mut hash_set = HashSet::with_capacity(items.size_hint().0.saturating_add(2));
+    hash_set.insert(first);
+    hash_set.insert(second);
     for item in items {
         if let Some(duplicate) = hash_set.replace(item) {
-            return Err(error_wrapper(duplicate.into_owned()));
+            return Err(error_wrapper(duplicate));
         }
     }
-
     Ok(())
 }
 
