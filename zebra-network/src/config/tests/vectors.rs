@@ -708,3 +708,50 @@ async fn failing_dns_returns_cached_peers() {
 
     assert_eq!(peers, cached_peers);
 }
+
+/// Persistent targets keep operator order, deduplicate entries, and survive both config conversions.
+#[test]
+fn persistent_peers_round_trip_preserves_order_and_uniqueness() {
+    let config: Config = toml::from_str(
+        "persistent_peers = ['edge.internal:8233', '[::1]:18233', 'edge.internal:8233']",
+    )
+    .unwrap();
+    assert_eq!(
+        config
+            .persistent_peers
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["edge.internal:8233", "[::1]:18233"],
+    );
+    let restored: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(config, restored);
+    assert!(Config::default().persistent_peers.is_empty());
+}
+
+/// Targets must have usable ports and must not consume every ordinary outbound slot.
+#[test]
+fn persistent_peers_validate_targets_and_reserved_capacity() {
+    for peer in [
+        "edge",
+        "edge:0",
+        "edge:65536",
+        ":8233",
+        "[::1]",
+        "[::1]:0",
+        "edge/path:1",
+    ] {
+        assert!(toml::from_str::<Config>(&format!("persistent_peers = [{peer:?}]")).is_err());
+    }
+    let two: Config = toml::from_str(
+        "peerset_initial_target_size = 1\npersistent_peers = ['edge-a:1', 'edge-b:1']",
+    )
+    .unwrap();
+    assert_eq!(two.ordinary_outbound_connection_limit(), 1);
+    let full = "peerset_initial_target_size = 1\n\
+                persistent_peers = ['edge-a:1', 'edge-b:1', 'edge-c:1']";
+    assert!(toml::from_str::<Config>(full).is_err());
+    let mut programmatic = two;
+    programmatic.persistent_peers.insert("edge-c:1".into());
+    assert!(programmatic.validate_persistent_peers().is_err());
+}

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Learn public listening IPs from agreeing, independent outbound peers and advertise them in address and version messages. Explicit external addresses take precedence; learned addresses retain the listening port and survive observation expiry.
+time: 2026-11-14T07:29:02.897912305+01:00
