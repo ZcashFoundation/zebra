@@ -1,0 +1,12 @@
+project: zebra-state
+kind: Changed
+body: >-
+  Restart and migration checks fail closed when required block history is unavailable.
+  Periodic checks make at most three attempts when concurrent pruning invalidates their
+  captured history window, without retrying away permanent metadata corruption.
+  Read-only initialization can inspect a reusable older-major archive without moving it.
+  It returns `StateInitError::ReadOnlyDatabaseNeedsUpgrade` if the recorded major differs
+  from that directory or migration is required; current-major secondary opens are unchanged.
+  The new `ZebraDb::ready_for_pruning()` gate becomes true only after migrations,
+  spending-index conversion, and initial format checks complete.
+time: 2026-10-24T23:19:52.693386634+02:00
