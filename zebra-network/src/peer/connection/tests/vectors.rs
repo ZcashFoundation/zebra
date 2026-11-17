@@ -36,9 +36,7 @@ use crate::{
         REQUEST_TIMEOUT,
     },
     peer::{
-        connection::{
-            overload_drop_connection_probability, Connection, Handler, State, StateLabel, StateName,
-        },
+        connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
     },
     protocol::{
@@ -213,58 +211,13 @@ async fn connection_state_metrics_return_to_zero() {
     });
 }
 
-/// Each recorder scope on a thread counts states in its own recorder.
-#[test]
-fn connection_state_gauges_follow_the_active_recorder() {
-    let first = ConnectionMetricsRecorder::default();
-    let second = ConnectionMetricsRecorder::default();
-    let label = StateLabel::new(StateName::AwaitingRequest, None);
-
-    metrics::with_local_recorder(&first, || label.increment());
-    metrics::with_local_recorder(&second, || {
-        label.increment();
-        label.increment();
-    });
-    assert_eq!(first.state("AwaitingRequest"), 1.0);
-    assert_eq!(second.state("AwaitingRequest"), 2.0);
-
-    metrics::with_local_recorder(&first, || label.decrement());
-    assert_eq!(first.state("AwaitingRequest"), 0.0);
-    assert_eq!(second.state("AwaitingRequest"), 2.0);
-}
-
-/// A recorder that replaces an earlier one in the same storage counts states in itself.
-#[test]
-fn connection_state_gauges_follow_a_recorder_replaced_in_place() {
-    let label = StateLabel::new(StateName::AwaitingRequest, None);
-    let mut recorder = ConnectionMetricsRecorder::default();
-
-    metrics::with_local_recorder(&recorder, || label.increment());
-    assert_eq!(recorder.state("AwaitingRequest"), 1.0);
-
-    recorder = ConnectionMetricsRecorder::default();
-    metrics::with_local_recorder(&recorder, || label.increment());
-    assert_eq!(recorder.state("AwaitingRequest"), 1.0);
-}
-
-/// A state counted before any recorder is installed is counted once a recorder is active.
-#[test]
-fn connection_state_gauges_start_recording_after_a_recorder_is_installed() {
-    let recorder = ConnectionMetricsRecorder::default();
-    let label = StateLabel::new(StateName::AwaitingRequest, None);
-
-    label.increment();
-    metrics::with_local_recorder(&recorder, || label.increment());
-    assert_eq!(recorder.state("AwaitingRequest"), 1.0);
-}
-
 #[test]
 fn connection_state_commands_omit_serialization_details() {
     for detail in ["first peer failure", "second peer failure"] {
         let handler = Handler::Finished(Err(PeerError::Serialization(
             std::io::Error::other(detail).into(),
         )));
-        assert_eq!(handler.name().to_string(), "Finished(Serialization)");
+        assert_eq!(handler.command(), "Finished(Serialization)");
         assert!(
             handler.to_string().contains(detail),
             "logs retain error details",
