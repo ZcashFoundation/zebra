@@ -1,6 +1,6 @@
 # Configuring Zebra
 
-Zebra 7.0.0 reads configuration from a TOML file and environment variables.
+Zebra reads configuration from a TOML file and environment variables.
 The file represents the
 [`ZebradConfig` Rust type](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html).
 Keep only settings that must differ from the defaults; copying every generated
@@ -142,10 +142,11 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `listen_addr` | IP address string, optional port | `"[::]"`, resolved to `"[::]:8233"` on Mainnet | P2P listener. An omitted port becomes `8233` on Mainnet or `18233` on Testnet and Regtest. The generated Mainnet configuration includes the explicit port. |
-| `external_addr` | Optional IP address string, optional port | Absent | Address advertised to peers instead of the listener address, for network address translation (NAT), containers, or load balancers. Does not change the bind address. Uses the selected network's default port if omitted. |
+| `external_addr` | Optional IP address string, optional port | Absent | Address advertised to peers instead of the listener address, for network address translation (NAT), containers, or load balancers. Overrides automatic public-address discovery. Does not change the bind address. Uses the selected network's default port if omitted. |
 | `network` | Network-name string or parameter table | `"Mainnet"` | Select `"Mainnet"`, `"Testnet"`, or `"Regtest"`, or use a configured-network table as described below. |
 | `initial_mainnet_peers` | Array of address strings | Mainnet seed list below | Initial Mainnet peers; each IP address or DNS name must include a port. Duplicate strings are removed while preserving order. |
 | `initial_testnet_peers` | Array of address strings | Testnet seed list below | Initial Testnet peers. Regtest removes public seed names and retains only resolved loopback addresses. |
+| `persistent_peers` | Array of `host:port` strings | `[]` | Operator-selected peers kept connected independently of ordinary peer demand; see [selected peers](run.md#maintaining-connections-to-selected-peers). IPv6 literals need brackets. Each target reserves one outbound slot and must leave at least one for ordinary peers. Regtest connects only to localhost targets. |
 | `cache_dir` | Boolean or path string | `true` | Use the default cache directory when `true`, disable the peer disk cache when `false`, or use the supplied directory. Independent of `[state] cache_dir`. |
 | `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Zero produces a warning and becomes `25`. |
 | `crawl_new_peer_interval` | Duration string | `"1m 1s"` | Interval between routine peer-address crawls. Zebra also crawls when all peers are busy and no connection candidates remain. The old key `new_peer_interval` is an accepted alias. |
