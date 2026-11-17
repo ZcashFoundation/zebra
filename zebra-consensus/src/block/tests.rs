@@ -30,6 +30,7 @@ use super::*;
 mod dispatch;
 mod nu7;
 mod request_lifetime;
+mod transparent_spends;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {

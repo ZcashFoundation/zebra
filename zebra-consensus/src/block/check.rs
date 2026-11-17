@@ -12,6 +12,7 @@ use zebra_chain::{
         Network, NetworkUpgrade,
     },
     transaction::{self, Transaction},
+    transparent,
     work::{
         difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
         equihash,
@@ -22,7 +23,7 @@ use crate::{block::ShieldedActionCounts, error::*};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
-/// Returns the coinbase transaction is successful.
+/// Returns the coinbase transaction if successful.
 ///
 /// > A transaction that has a single transparent input with a null prevout field,
 /// > is called a coinbase transaction. Every block has a single coinbase
@@ -48,18 +49,46 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     // > field, is called a coinbase transaction.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
-    let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
         Err(TransactionError::CoinbasePosition)?;
     }
     // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
     //
     // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    if !rest.all(|tx| tx.is_valid_non_coinbase()) {
+    if !block
+        .transactions
+        .iter()
+        .skip(1)
+        .all(|tx| tx.is_valid_non_coinbase())
+    {
         Err(TransactionError::CoinbaseAfterFirst)?;
     }
 
     Ok(first.clone())
+}
+
+/// Rejects duplicate transparent outpoints within or across non-coinbase block transactions.
+///
+/// Call [`coinbase_is_first`] first to validate coinbase placement and null prevouts.
+pub fn no_duplicate_transparent_spends(block: &Block) -> Result<(), BlockError> {
+    let mut spends = HashSet::new();
+    for input in block
+        .transactions
+        .iter()
+        .skip(1)
+        .filter_map(|tx| tx.transparent_bundle())
+        .flat_map(|bundle| &bundle.vin)
+    {
+        let outpoint = transparent::OutPoint {
+            hash: transaction::Hash(*input.prevout().hash()),
+            index: input.prevout().n(),
+        };
+        if !spends.insert(outpoint) {
+            return Err(TransactionError::DuplicateTransparentSpend(outpoint).into());
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns `Ok(ExpandedDifficulty)` if the`difficulty_threshold` of `header` is at least as difficult as
