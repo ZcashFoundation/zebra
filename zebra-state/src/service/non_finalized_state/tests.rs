@@ -10,6 +10,7 @@ mod commit_phases;
 mod dense_chain;
 mod prop;
 mod rejections;
+mod shared_snapshot;
 mod tree_first;
 mod tree_first_gate;
 mod vectors;
