@@ -611,7 +611,8 @@ where
     /// Receives block adverts independently of the current request's response.
     pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<BlockAdvert>,
 
-    /// Selected receive sources share three permits, released on demotion before notifying the peer.
+    /// Selected receive sources share three permits. A demoted source keeps its permit until the
+    /// `sendcmpct` message disabling high-bandwidth announcements is sent or the connection fails.
     pub(super) compact_receive_rx:
         tokio::sync::watch::Receiver<Option<Arc<tokio::sync::Semaphore>>>,
     compact_receive_permit: Option<tokio::sync::OwnedSemaphorePermit>,
