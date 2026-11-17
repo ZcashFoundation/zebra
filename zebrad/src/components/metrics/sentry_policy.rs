@@ -38,7 +38,6 @@
 use std::{
     cell::Cell,
     collections::HashMap,
-    hash::{BuildHasher, RandomState},
     mem,
     ops::AddAssign,
     sync::{atomic::Ordering, Arc, Mutex, MutexGuard, PoisonError},
@@ -850,32 +849,9 @@ fn sample_slot(index: u64) -> Option<usize> {
         return Some(index);
     }
 
-    usize::try_from(random_below(index.saturating_add(1)))
+    usize::try_from(rand::random_range(0..=index))
         .ok()
         .filter(|slot| *slot < HISTOGRAM_CAP)
-}
-
-thread_local! {
-    /// The state of this thread's [SplitMix64] generator, which only picks sampled values, so it
-    /// doesn't need to be cryptographically secure.
-    ///
-    /// [SplitMix64]: https://prng.di.unimi.it/splitmix64.c
-    static RANDOM_STATE: Cell<u64> = Cell::new(BuildHasher::hash_one(&RandomState::new(), 0_u8));
-}
-
-/// Returns a random number below `bound`, or zero if `bound` is zero.
-fn random_below(bound: u64) -> u64 {
-    let state = RANDOM_STATE.get().wrapping_add(0x9e37_79b9_7f4a_7c15);
-    RANDOM_STATE.set(state);
-
-    let mut random = state;
-    random = (random ^ (random >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    random = (random ^ (random >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    random ^= random >> 31;
-
-    // The high 64 bits of a 64-bit number times `bound` are below `bound`, so they fit in u64.
-    // This is biased by at most `bound / 2^64`, which doesn't matter for sampling.
-    ((u128::from(random) * u128::from(bound)) >> 64) as u64
 }
 
 /// A histogram handle that records its event attributes beside each value.
