@@ -307,10 +307,10 @@ async fn mempool_fee_policy_follows_jumps_and_rollbacks() {
         mempool.dummy_call().await;
         let reverify = async {
             state
-                .expect_request(zs::Request::Transaction(transaction.id.mined_id()))
+                .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
                 .await
                 .unwrap()
-                .respond(zs::Response::Transaction(None));
+                .respond(zs::Response::KnownTransaction(false));
             state
                 .expect_request(zs::Request::Tip)
                 .await
@@ -1473,10 +1473,10 @@ async fn delayed_fee_rejections_follow_current_activation_policy() {
         };
         let mut rpc_response = responses.pop().map(Result::unwrap);
         state_service
-            .expect_request(zs::Request::Transaction(transaction.id.mined_id()))
+            .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
             .await
             .unwrap()
-            .respond(zs::Response::Transaction(None));
+            .respond(zs::Response::KnownTransaction(false));
         state_service
             .expect_request(zs::Request::Tip)
             .await
@@ -1508,10 +1508,10 @@ async fn delayed_fee_rejections_follow_current_activation_policy() {
         let reverify = async {
             if should_retry {
                 state_service
-                    .expect_request(zs::Request::Transaction(transaction.id.mined_id()))
+                    .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
                     .await
                     .unwrap()
-                    .respond(zs::Response::Transaction(None));
+                    .respond(zs::Response::KnownTransaction(false));
                 state_service
                     .expect_request(zs::Request::Tip)
                     .await
