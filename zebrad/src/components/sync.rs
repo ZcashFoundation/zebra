@@ -1861,7 +1861,7 @@ where
                     | zs::ValidateContextError::HistoryTreeError(_)
             )
         };
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1879,6 +1879,12 @@ where
                 _ => return false,
             },
         };
+        // Early-relay wrappers keep the verifier's own failure.
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block {
                 source: BlockError::Other(_),
@@ -1898,7 +1904,10 @@ where
             VerifyBlockError::Block { .. }
             | VerifyBlockError::Equihash { .. }
             | VerifyBlockError::Time(_)
-            | VerifyBlockError::Subsidy(_) => true,
+            | VerifyBlockError::Subsidy(_)
+            // Failed early-relay authentication, or a hash that already failed verification.
+            | VerifyBlockError::EarlyRelayAdmission(_)
+            | VerifyBlockError::EarlyRelayRejected => true,
             VerifyBlockError::Commit(error) => invalid_commit(error),
             _ => false,
         }
@@ -1909,7 +1918,7 @@ where
         if !Self::is_block_validation_error(error) {
             return false;
         }
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1917,6 +1926,11 @@ where
                 _ => return false,
             },
         };
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block { source } => !matches!(
                 source,
