@@ -120,6 +120,6 @@ that wallet and verify the pool's payout integration separately before productio
 
 ## Monitor mining
 
-Use the [mining metrics](metrics.md#mining-metrics) to watch template build time, submission outcomes,
-and mined-block announcement failures and latency for signs of stale-block risk.
+Use the [mining metrics](metrics.md#mining-metrics) to watch template build time, new-tip to first-template
+latency, submission outcomes, and mined-block announcement failures and latency for stale-block risk.
 Announcement completion measures local writes, not peer receipt or network-wide propagation.
