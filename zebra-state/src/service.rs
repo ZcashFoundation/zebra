@@ -1576,7 +1576,15 @@ impl Service<Request> for StateService {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
                 let hash = block.hash();
-                if !self.read_service.mining_candidate_is_allowed(hash) {
+                // Only a child of the best tip can be mined on next. Checking before taking the
+                // single slot stops a gossiped orphan from holding it until its verification ends.
+                let parent = block.header.previous_block_hash;
+                if !self.read_service.mining_candidate_is_allowed(hash)
+                    || self
+                        .read_service
+                        .best_tip()
+                        .is_some_and(|(_, tip)| tip != parent)
+                {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
                 let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {

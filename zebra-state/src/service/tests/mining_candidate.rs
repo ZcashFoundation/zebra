@@ -59,7 +59,7 @@ async fn assert_unpublished_candidate_releases_slot(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn orphaned_mining_candidate_releases_slot_while_guard_is_retained() {
+async fn orphaned_mining_candidate_is_not_admitted() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(30), async {
         let (mut state, read) = state(false).await;
@@ -70,10 +70,32 @@ async fn orphaned_mining_candidate_releases_slot_while_guard_is_retained() {
             orphan.header.previous_block_hash,
             read.best_tip().unwrap().1
         );
-        assert_unpublished_candidate_releases_slot(&mut state, &read, Arc::new(orphan), next).await;
+        // Admission needs a subscriber, so the refusal below is about the parent alone.
+        let _changes = subscribe(&read).await;
+        let Response::MiningCandidate(None) = state
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::MiningCandidate(Arc::new(orphan)))
+            .await
+            .unwrap()
+        else {
+            panic!("a block whose parent isn't the best tip must not take the slot");
+        };
+        let Response::MiningCandidate(Some(next_guard)) = state
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::MiningCandidate(next))
+            .await
+            .unwrap()
+        else {
+            panic!("the slot stays free for a child of the best tip");
+        };
+        drop(next_guard);
     })
     .await
-    .expect("an unavailable parent must not reserve admission until its verifier finishes");
+    .expect("an orphan must be refused without waiting for its verifier");
 }
 
 #[tokio::test(flavor = "multi_thread")]

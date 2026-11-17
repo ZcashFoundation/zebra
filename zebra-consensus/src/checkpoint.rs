@@ -374,9 +374,8 @@ where
                 tokio::select! {
                     Some(task) = commit_tasks.recv() => pending.push(task),
                     Some(result) = pending.next(), if !pending.is_empty() => {
-                        result
-                            .panic_if_task_has_panicked()
-                            .expect("accepted checkpoint commit tasks are never aborted");
+                        // Propagate panics; a cancelled task means the runtime is shutting down.
+                        let _ = result.panic_if_task_has_panicked();
                     }
                     else => break,
                 }
@@ -444,10 +443,9 @@ where
             .as_mut()
             .and_then(|handle| handle.now_or_never())
         {
-            result
-                .panic_if_task_has_panicked()
-                .expect("checkpoint commit supervision is never aborted");
-            panic!("checkpoint commit supervision must outlive its verifier");
+            // The supervisor only ends when the runtime cancels it during shutdown.
+            self.commit_task_handle = None;
+            let _ = result.panic_if_task_has_panicked();
         }
     }
 
@@ -1858,9 +1856,8 @@ where
         let task = tokio::spawn(async move {
             let _ = result_tx.send(commit_checkpoint_verified.await);
         });
-        self.commit_task_sender
-            .send(task)
-            .expect("checkpoint commit supervision must outlive its verifier");
+        // The supervisor is only gone during shutdown; the task still runs and reports its result.
+        let _ = self.commit_task_sender.send(task);
 
         async move {
             let result = result_rx.await;
