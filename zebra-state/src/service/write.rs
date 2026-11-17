@@ -157,7 +157,9 @@ fn finalize_root_blocks_and_forget_evicted(
 /// If `backup_dir_path` is `Some`, the non-finalized state is written to the backup
 /// directory before updating the channels.
 ///
-/// Returns the latest chain tip height, or `None` if both states are empty.
+/// Returns the latest chain tip height, or `None` if both states are empty, and the snapshot
+/// that the new one replaced. Callers drop it after they respond, because freeing a large
+/// snapshot would otherwise delay the tip update and the response.
 #[instrument(
     level = "debug",
     skip(
@@ -175,7 +177,7 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
-) -> Option<block::Height> {
+) -> (Option<block::Height>, NonFinalizedState) {
     let non_finalized_tip = non_finalized_state
         .best_tip_block()
         .cloned()
@@ -190,8 +192,7 @@ fn update_latest_chain_channels(
         non_finalized_state.write_to_backup(backup_dir_path);
     }
 
-    // If the final receiver was just dropped, ignore the error.
-    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+    let replaced_snapshot = non_finalized_state_sender.send_replace(non_finalized_state.clone());
 
     if let Some(tip) = non_finalized_tip {
         chain_tip_sender.set_best_non_finalized_tip(tip);
@@ -204,7 +205,7 @@ fn update_latest_chain_channels(
         chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
     }
 
-    tip_block_height
+    (tip_block_height, replaced_snapshot)
 }
 
 /// A worker task that reads, validates, and writes blocks to the
@@ -562,14 +563,15 @@ impl WriteBlockWorkerTask {
             // TODO: if this causes state request errors due to chain conflicts,
             //       fix the `service::read` bugs,
             //       or do the channel update after the finalized state commit
-            let tip_block_height = update_latest_chain_channels(
+            let (tip_block_height, replaced_snapshot) = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
                 chain_tip_sender,
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
-            )
-            .expect("just successfully inserted a non-finalized block above");
+            );
+            let tip_block_height =
+                tip_block_height.expect("just successfully inserted a non-finalized block above");
 
             // Readers can now find the block's outputs in the published state, so the state
             // service doesn't need its own copies.
@@ -578,6 +580,7 @@ impl WriteBlockWorkerTask {
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+            drop(replaced_snapshot);
 
             finalize_root_blocks_and_forget_evicted(
                 finalized_state,

@@ -142,6 +142,32 @@ failure, so it logs `waiting to restart sync` at INFO instead. The `chain update
 warning includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
 `oldest_in_flight_secs`.
 
+## Block writer metrics
+
+The state's block writer times the sub-phases of committing a semantically verified block to the
+non-finalized state.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `state.block_writer.phase.duration_seconds` | Summary | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
+
+| `phase` | Measures |
+| --- | --- |
+| `transparent_spend` | The transparent spend checks, including UTXO reads from the database. |
+| `anchor_reads` | The Sapling and Orchard anchor checks and the Sprout treestate reads. |
+| `pickup` | The wait for a rayon thread to start the job that copies the parent chain. |
+| `chain_clone` | Copying the parent chain before adding the block to it. |
+| `trees` | The note commitment tree appends and root calculations. |
+| `chain_updates` | The chain's other indexes and value pools. |
+| `history` | The history tree update, which needs the new tree roots. |
+
+The sub-phases are recorded once a block is committed, so rejected blocks have none. They are not
+recorded for block proposals, or for mined blocks committed from an already validated proposal. At
+startup they include blocks restored from the non-finalized state backup. The `trees` sub-phase runs
+in parallel with the sub-phases before `history`, so the sub-phases don't add up to the whole
+commit. A `zebra-rpc` trusted chain sync, which follows another node's chain without a block
+writer, also records the sub-phases.
+
 ## Memory metrics
 
 These metrics show how much memory `zebrad` uses, and how large the non-finalized state is.
