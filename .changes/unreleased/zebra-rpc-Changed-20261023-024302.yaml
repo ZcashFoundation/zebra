@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: Precompute fee-bearing shielded coinbases while a mining candidate is being verified, reusing the proof only when the committed template has matching fees and subsidy context. Limit speculation to one fee proof per committed parent and skip mempool-reset boundaries.
+body: Precompute fee-bearing shielded coinbases while a mining candidate is being verified, reusing the proof only when the committed template has matching fees and subsidy context. Limit speculation to one fee proof per committed parent and skip mempool-reset boundaries. The coinbase cache keeps the committed tip's proofs alongside the candidate child's, so an expired or withdrawn candidate doesn't re-prove the tip's coinbase, the tip's rebuild doesn't prove the child's coinbase again, and a committed candidate reuses its child's coinbase without waiting for a redundant proof.
 time: 2026-10-23T02:43:02.124306602+02:00

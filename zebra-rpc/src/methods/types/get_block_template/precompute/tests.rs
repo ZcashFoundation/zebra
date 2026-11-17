@@ -460,6 +460,169 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
     .expect("the replacement proof should complete");
 }
 
+/// Early work for a candidate's child must keep the committed tip's coinbase, so a withdrawn
+/// candidate doesn't re-prove it, and the candidate's commit still reuses the child coinbase.
+#[tokio::test]
+async fn candidate_coinbase_keeps_the_committed_tip_coinbase() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .expect("hard-coded transparent address is valid"),
+    );
+    let coinbase = |height| {
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
+            .expect("test parameters produce a valid coinbase")
+    };
+    let height = Height(template().height);
+    let child_height = height.next().expect("test height is below the maximum");
+    let cache = CoinbaseCache::default();
+    cache.select(height, None);
+    cache.store(height, Amount::zero(), None, coinbase(height));
+    let mut next_coinbase = None;
+    start_precomputing_coinbase(
+        &mut next_coinbase,
+        &net,
+        &miner_params,
+        child_height,
+        &cache,
+    );
+    store_precomputed_coinbase(&mut next_coinbase, child_height, &cache).await;
+
+    // The candidate expires or is rejected, so the tip's template is rebuilt, then it commits.
+    for height in [height, child_height] {
+        cache.select(height, None);
+        assert_eq!(
+            cache.get(height, Amount::zero(), None),
+            Some(coinbase(height))
+        );
+    }
+}
+
+/// After a candidate expires, the committed tip's rebuild can start a redundant proof for the
+/// candidate child's height. The candidate's commit must reuse the cached coinbase instead of
+/// waiting for that proof, which stays tracked until it finishes.
+#[tokio::test]
+async fn cached_coinbase_does_not_wait_for_a_redundant_proof() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .expect("hard-coded transparent address is valid"),
+    );
+    let height = Height(template().height);
+    let child_height = height.next().expect("test height is below the maximum");
+    let coinbase =
+        TransactionTemplate::new_coinbase(&net, child_height, &miner_params, Amount::zero())
+            .expect("test parameters produce a valid coinbase");
+    let cache = CoinbaseCache::default();
+    // The candidate stored its child's coinbase, then its expiry selected the tip's context.
+    cache.select(child_height, None);
+    cache.store(child_height, Amount::zero(), None, coinbase.clone());
+    cache.select(height, None);
+    let (release_proof, proof_released) = tokio::sync::oneshot::channel::<()>();
+    let redundant = coinbase.clone();
+    let mut next_coinbase = Some((
+        child_height,
+        tokio::task::spawn_blocking(move || {
+            // Dropping the sender after a failed assertion also releases this proof.
+            let _ = proof_released.blocking_recv();
+            redundant
+        }),
+    ));
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        store_precomputed_coinbase(&mut next_coinbase, child_height, &cache),
+    )
+    .await
+    .expect("a cached coinbase must not wait for a redundant proof");
+    assert_eq!(
+        cache.get(child_height, Amount::zero(), None),
+        Some(coinbase)
+    );
+    let (tracked_height, proof) = next_coinbase
+        .take()
+        .expect("the redundant proof stays tracked until it finishes");
+    assert_eq!(tracked_height, child_height);
+    drop(release_proof);
+    proof.await.expect("the released proof finishes");
+}
+
+/// After a candidate expires, rebuilding the committed tip's template must not start a redundant
+/// proof for the candidate child's height, so the template built when the candidate commits
+/// doesn't wait for the shared build permit.
+#[test]
+fn cached_candidate_child_coinbase_is_not_proved_again() {
+    let _init_guard = zebra_test::init();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("the test runtime builds");
+    runtime.block_on(async {
+        let net = Network::Mainnet;
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &net,
+                default_miner_address(net.kind(), &MinerAddressType::Transparent),
+            )
+            .expect("hard-coded transparent address is valid"),
+        );
+        let height = Height(template().height);
+        let child_height = height.next().expect("test height is below the maximum");
+        let coinbase =
+            TransactionTemplate::new_coinbase(&net, child_height, &miner_params, Amount::zero())
+                .expect("test parameters produce a valid coinbase");
+        let cache = CoinbaseCache::default();
+        // The candidate stored its child's coinbase, then its expiry selected the tip's context.
+        cache.select(child_height, None);
+        cache.store(child_height, Amount::zero(), None, coinbase.clone());
+        cache.select(height, None);
+        // Occupy the only blocking thread, so a redundant proof would keep the build permit.
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let blocker = tokio::task::spawn_blocking(move || {
+            // Dropping the sender after a failed assertion also releases this thread.
+            let _ = released.blocking_recv();
+        });
+
+        // The tip's rebuild precomputes the block after next, which is the candidate's child.
+        let mut next_coinbase = None;
+        start_precomputing_coinbase(
+            &mut next_coinbase,
+            &net,
+            &miner_params,
+            child_height,
+            &cache,
+        );
+        assert!(
+            next_coinbase.is_none(),
+            "a cached coinbase must not be proved again"
+        );
+
+        // The candidate commits.
+        store_precomputed_coinbase(&mut next_coinbase, child_height, &cache).await;
+        assert!(
+            cache.build.try_lock().is_ok(),
+            "the committed candidate's template must not wait for a redundant proof"
+        );
+        cache.select(child_height, None);
+        assert_eq!(
+            cache.get(child_height, Amount::zero(), None),
+            Some(coinbase)
+        );
+
+        drop(release);
+        blocker.await.expect("the released blocking task finishes");
+    });
+}
+
 /// Checks that a shielded miner address waits longer for a precomputed template than a transparent
 /// one, because falling back to an on-demand build runs a coinbase proof per request.
 #[test]

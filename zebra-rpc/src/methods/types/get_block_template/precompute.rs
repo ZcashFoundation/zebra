@@ -1521,7 +1521,11 @@ fn candidate_mempool(
 }
 
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
-/// already built or another coinbase is still being built.
+/// already built or cached, or another coinbase is still being built.
+///
+/// A withdrawn or expired candidate's template can already have cached its child's coinbase.
+/// Proving it again would hold the shared build permit, delaying the template built when that
+/// candidate commits.
 fn start_precomputing_coinbase(
     next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     network: &Network,
@@ -1539,6 +1543,9 @@ fn start_precomputing_coinbase(
             *precomputed_height == height || !task.is_finished()
         })
     {
+        return;
+    }
+    if coinbase_cache.holds(height, Amount::zero(), None) {
         return;
     }
     let Ok(build_guard) = coinbase_cache.build.clone().try_lock_owned() else {
@@ -1560,7 +1567,9 @@ fn start_precomputing_coinbase(
 /// Moves the precomputed coinbase transaction into `coinbase_cache`, if it was built for `height`.
 ///
 /// A coinbase built for another height has the wrong BIP-34 height and subsidy. Keep tracking it
-/// until it finishes, so a later precomputation cannot detach an unfinished proof.
+/// until it finishes, so a later precomputation cannot detach an unfinished proof. If the cache
+/// already holds this height's zero-fee coinbase, such as one built for a withdrawn candidate's
+/// child, the redundant proof stays tracked and this returns without waiting for it.
 async fn store_precomputed_coinbase(
     next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     height: Height,
@@ -1573,10 +1582,13 @@ async fn store_precomputed_coinbase(
         return;
     }
 
+    coinbase_cache.select(height, None);
+    if coinbase_cache.get(height, Amount::zero(), None).is_some() {
+        return;
+    }
     let (_, coinbase) = next_coinbase
         .take()
         .expect("the precomputed height was checked above");
-    coinbase_cache.select(height, None);
 
     match coinbase.await {
         // Reuse this proof when publishing the next height's coinbase-only template.

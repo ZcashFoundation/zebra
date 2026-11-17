@@ -664,7 +664,8 @@ pub(crate) fn nsm_value_balance_for_next_block(
 /// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
 /// Shielded coinbases require expensive proofs. Keep coinbase-only and fee-bearing coinbases for
-/// the selected context, discarding old proof completions rather than evicting newer work.
+/// the selected and previously selected contexts, discarding old proof completions rather than
+/// evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
 pub(crate) struct CoinbaseCache {
@@ -674,10 +675,18 @@ pub(crate) struct CoinbaseCache {
 }
 
 /// The context selected by the latest request and its bounded fee variants.
+///
+/// The previously selected context keeps its variants, so early work for a candidate's child
+/// doesn't discard the committed tip's proofs when that candidate is withdrawn, and the
+/// candidate's commit still reuses its child's proofs.
 #[derive(Default)]
 struct CachedCoinbases {
     context: Option<(block::Height, Option<Amount<NonNegative>>)>,
     transactions: HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    previous: (
+        Option<(block::Height, Option<Amount<NonNegative>>)>,
+        HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    ),
     /// The last speculative parent, retained when rejection restores an older cache context.
     speculative_parent: Option<block::Hash>,
 }
@@ -717,9 +726,15 @@ impl CoinbaseCache {
             .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if cache.context != Some((height, parent_nsm_value_balance)) {
-            cache.context = Some((height, parent_nsm_value_balance));
-            cache.transactions.clear();
+        let context = Some((height, parent_nsm_value_balance));
+        if cache.context != context {
+            let cache = &mut *cache;
+            std::mem::swap(&mut cache.context, &mut cache.previous.0);
+            std::mem::swap(&mut cache.transactions, &mut cache.previous.1);
+            if cache.context != context {
+                cache.context = context;
+                cache.transactions.clear();
+            }
         }
     }
 
@@ -738,6 +753,22 @@ impl CoinbaseCache {
             return None;
         }
         cache.transactions.get(&fee).cloned()
+    }
+
+    /// Returns `true` if the selected or previous context already holds this fee variant.
+    fn holds(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> bool {
+        let cache = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let context = Some((height, parent_nsm_value_balance));
+        (cache.context == context && cache.transactions.contains_key(&fee))
+            || (cache.previous.0 == context && cache.previous.1.contains_key(&fee))
     }
 
     /// Stores a completed build only if its height and parent balance are still selected.
