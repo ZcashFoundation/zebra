@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added the `zebra.consensus.block.phase.duration_seconds` histogram, which the block verifier records for its block checks, transaction verification, and state commit phases, with a `phase` label. Block proposals are not recorded.
+time: 2026-11-17T12:26:26.863383Z
