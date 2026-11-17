@@ -172,7 +172,8 @@ pub struct InventoryRegistry {
 
     /// Connected opted-in peers, ordered by their most recent first committed-block announcement.
     compact_sources: IndexMap<PeerSocketAddr, watch::Sender<Option<Arc<Semaphore>>>>,
-    /// Demotion releases a connection's slot before its low-bandwidth write.
+    /// A demoted source keeps its slot until the `sendcmpct` message disabling high-bandwidth
+    /// announcements is sent or its connection fails.
     compact_receive_slots: Arc<Semaphore>,
 }
 
