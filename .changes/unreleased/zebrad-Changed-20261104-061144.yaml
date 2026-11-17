@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: SIGINT and SIGTERM now run node cleanup, close health listeners and connections, and stop a managed zcashd while its output is still logged. Signals during startup still cancel initialization promptly.
+time: 2026-11-04T06:11:44.769282944+01:00

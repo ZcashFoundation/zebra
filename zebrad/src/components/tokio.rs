@@ -17,6 +17,9 @@ use tokio::runtime::Runtime;
 
 use crate::prelude::*;
 
+#[cfg(test)]
+mod tests;
+
 /// When Zebra is shutting down, wait this long for tokio tasks to finish.
 const TOKIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -48,29 +51,43 @@ impl TokioComponent {
 
 /// Zebrad's graceful shutdown function, blocks until one of the supported
 /// shutdown signals is received.
-async fn shutdown() {
+pub(crate) async fn shutdown() {
     imp::shutdown().await;
 }
 
-/// Extension trait to centralize entry point for runnable subcommands that
-/// depend on tokio
+/// Cancels incomplete startup on a signal, or lets an initialized node finish its shutdown.
+pub(crate) async fn run_until_shutdown(
+    start: impl Future<Output = Result<(), Report>>,
+    signal: impl Future<Output = ()>,
+    mut initialized: tokio::sync::oneshot::Receiver<()>,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+) -> Result<(), Report> {
+    tokio::pin!(start);
+    tokio::select! {
+        biased;
+        _ = signal => {
+            if initialized.try_recv().is_ok() {
+                let _ = shutdown.send(());
+                start.await
+            } else {
+                // Dropping startup cancels pending initialization, including DNS retries.
+                Ok(())
+            }
+        }
+        result = &mut start => result,
+    }
+}
+
+/// Extension trait to centralize entry points for runnable subcommands that depend on Tokio.
+///
+/// Each subcommand handles shutdown signals so it can stop its tasks before returning.
 pub(crate) trait RuntimeRun {
     fn run(self, fut: impl Future<Output = Result<(), Report>>);
 }
 
 impl RuntimeRun for Runtime {
     fn run(self, fut: impl Future<Output = Result<(), Report>>) {
-        let result = self.block_on(async move {
-            // Always poll the shutdown future first.
-            //
-            // Otherwise, a busy Zebra instance could starve the shutdown future,
-            // and delay shutting down.
-            tokio::select! {
-                biased;
-                _ = shutdown() => Ok(()),
-                result = fut => result,
-            }
-        });
+        let result = self.block_on(fut);
 
         // Don't wait for long blocking tasks before shutting down
         info!(
@@ -79,12 +96,9 @@ impl RuntimeRun for Runtime {
         );
         self.shutdown_timeout(TOKIO_SHUTDOWN_TIMEOUT);
 
-        // On SIGINT/SIGTERM the select above drops `fut` — including the
-        // zcashd-compat supervisor task — without running its graceful
-        // shutdown path, and on errors `APPLICATION.shutdown` below never
-        // returns. Terminate any abandoned supervised zcashd synchronously,
-        // now that the runtime has shut down. This is a no-op when no
-        // supervised child is running.
+        // On errors, the application shutdown below never returns. Terminate any abandoned
+        // supervised child synchronously, now that the runtime has shut down.
+        // This is a no-op when the supervisor already stopped its child.
         {
             let config = APPLICATION.config();
             if config.zcashd_compat.enabled && config.zcashd_compat.manage_zcashd {
