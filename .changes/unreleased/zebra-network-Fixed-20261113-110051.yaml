@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: Log configured initial peers that aren't default DNS seeders as `custom` at INFO level and in the invalid peer address panic, so private peer addresses don't reach error reporting such as Sentry. DEBUG logs keep the configured entry.
+time: 2026-11-13T11:00:51.396762366Z

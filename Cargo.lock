@@ -7381,6 +7381,7 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "tracing-error",
+ "tracing-subscriber",
  "zebra-chain",
  "zebra-test",
 ]

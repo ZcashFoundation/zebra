@@ -1,7 +1,7 @@
 //! Configuration for Zebra's network communication.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -339,16 +339,17 @@ impl Config {
             }
 
             if !retry_until_found {
+                tracing::debug!(?peers, "configured initial peers failed DNS resolution");
                 tracing::info!(
-                    ?peers,
+                    peers = ?seed_labels(peers),
                     "empty peer list after DNS resolution, using the cached peers",
                 );
                 return peer_addresses;
             }
 
+            tracing::debug!(?peers, "configured initial peers failed DNS resolution");
             tracing::info!(
-                ?peers,
-                ?peer_addresses,
+                peers = ?seed_labels(peers),
                 "empty peer list after DNS resolution, retrying after {} seconds",
                 DNS_LOOKUP_TIMEOUT.as_secs(),
             );
@@ -372,14 +373,14 @@ impl Config {
 
             if retries < max_retries {
                 tracing::info!(
-                    ?host,
+                    seed = seed_metric_label(host),
                     previous_attempts = ?(retries + 1),
                     "Waiting {DNS_LOOKUP_TIMEOUT:?} to retry seed peer DNS resolution",
                 );
                 tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
             } else {
                 tracing::info!(
-                    ?host,
+                    seed = seed_metric_label(host),
                     attempts = ?(retries + 1),
                     "Seed peer DNS resolution failed, checking for addresses from other seed peers",
                 );
@@ -407,8 +408,7 @@ impl Config {
 
                 // This log is needed for user debugging, but it's annoying during tests.
                 #[cfg(not(test))]
-                info!(seed = ?host, remote_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
-                #[cfg(test)]
+                info!(seed = seed_metric_label(host), remote_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
                 debug!(seed = ?host, remote_ip_count = ?ip_addrs.len(), "resolved seed peer IP addresses");
 
                 // Count the initial peers from this seed. If an IP is returned by multiple seeds,
@@ -422,17 +422,30 @@ impl Config {
             }
             Ok(Err(e)) if e.kind() == ErrorKind::InvalidInput => {
                 // TODO: add testnet/mainnet ports, like we do with the listener address
+                debug!(?host, ?e, "invalid initial peer address in Zebra config");
                 panic!(
                     "Invalid peer IP address in Zebra config: addresses must have ports:\n\
-                     resolving {host:?} returned {e:?}"
+                     resolving {:?} initial peer returned {e:?}. \
+                     Check the initial_mainnet_peers and initial_testnet_peers entries.",
+                    seed_metric_label(host),
                 );
             }
             Ok(Err(e)) => {
-                tracing::info!(?host, ?e, "DNS error resolving peer IP addresses");
+                tracing::debug!(?host, ?e, "DNS error resolving peer IP addresses");
+                tracing::info!(
+                    seed = seed_metric_label(host),
+                    ?e,
+                    "DNS error resolving peer IP addresses"
+                );
                 Err(e.into())
             }
             Err(e) => {
-                tracing::info!(?host, ?e, "DNS timeout resolving peer IP addresses");
+                tracing::debug!(?host, ?e, "DNS timeout resolving peer IP addresses");
+                tracing::info!(
+                    seed = seed_metric_label(host),
+                    ?e,
+                    "DNS timeout resolving peer IP addresses"
+                );
                 Err(e.into())
             }
         }
@@ -908,6 +921,24 @@ fn is_default_initial_peer(peer: &str) -> bool {
         .iter()
         .chain(&DEFAULT_TESTNET_PEERS)
         .any(|default| peer_host.eq_ignore_ascii_case(hostname(default)))
+}
+
+/// Returns `host` if it is exactly one of the default DNS seeders, and `custom` otherwise.
+///
+/// Operators can configure private peer addresses, which must not reach metrics or
+/// error-reporting backends. Logs above DEBUG use this label instead of the configured entry.
+fn seed_metric_label(host: &str) -> &'static str {
+    DEFAULT_MAINNET_PEERS
+        .iter()
+        .chain(&DEFAULT_TESTNET_PEERS)
+        .find(|default| **default == host)
+        .copied()
+        .unwrap_or("custom")
+}
+
+/// Returns the sorted, deduplicated [`seed_metric_label`]s of `peers`.
+fn seed_labels(peers: &HashSet<String>) -> BTreeSet<&'static str> {
+    peers.iter().map(|peer| seed_metric_label(peer)).collect()
 }
 
 fn build_configured_testnet<'de, D>(
