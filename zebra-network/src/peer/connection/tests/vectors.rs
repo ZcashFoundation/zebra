@@ -847,8 +847,6 @@ async fn abandoned_block_advert_preserves_request_deadline() {
         .try_send(ClientRequest {
             request: Request::Peers,
             tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .unwrap();
@@ -895,8 +893,6 @@ async fn abandoned_block_advert_preserves_request_deadline() {
         .try_send(ClientRequest {
             request: Request::Peers,
             tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .unwrap();
@@ -930,8 +926,6 @@ async fn ping_deadline_closes_connection_with_or_without_stalled_block_advert() 
             .try_send(ClientRequest {
                 request: Request::Ping(nonce),
                 tx,
-                inv_collector: None,
-                transient_addr: None,
                 span: Span::current(),
             })
             .unwrap();
