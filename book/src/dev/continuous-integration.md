@@ -42,6 +42,9 @@ to merge pull requests. To merge, a PR has to pass all required `main` checks an
 approving review, as stated by the `PR Requirements` ruleset. A maintainer's PR can be approved
 by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
 
+PRs targeting `main` that change Copilot review instructions or review skills require a
+Zebra Team approval under the [PR Requirements ruleset](https://github.com/ZcashFoundation/zebra/rules/746379).
+
 Once a PR is approved and green, a Zebra maintainer presses **Merge when ready**. This
 manual enrollment applies to Zebra-owned and fork PRs; authors do not need write access
 to the queue. The queue builds the PR on top of `main` plus every PR ahead of it,
