@@ -93,6 +93,11 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                             read.clone().oneshot(zs::ReadRequest::MiningCandidate).await.unwrap(),
                             zs::ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == hash
                         ));
+                        // The verifier's announcement task counts the admission, and a loaded
+                        // runtime can run it after the state has published the candidate.
+                        while admissions.load(Ordering::SeqCst) == 0 {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                        }
                     } else {
                         assert!(!changes.is_current(hash));
                         assert!(changes.block(hash).is_none());
@@ -154,7 +159,7 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                 }
             })
             .await
-            .expect("ordinary rejection and both replay paths must finish before candidate expiry");
+            .expect("ordinary rejection and both replay paths must finish within the timeout");
         }
     }
 }
