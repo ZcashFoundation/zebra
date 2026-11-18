@@ -107,7 +107,7 @@ When the PR adds abstraction, flags, generics, or refactors:
 - **`zebra-state`**: Read/write separation, long-lived locks, timeouts, database migrations
 - **`zebra-network`**: All inputs are attacker-controlled; check bounds, rate limits, protocol compatibility
 - **`zebra-rpc`**: zcashd compatibility (response shapes, errors, timeouts), user-facing behavior
-- **`zebra-script`**: FFI memory safety, lifetime/ownership across boundaries
+- **`zebra-script`**: zcashd script compatibility, sighash computation, sigop counting
 
 ## Output Format
 

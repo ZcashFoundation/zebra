@@ -443,8 +443,8 @@ pub fn p2sh_input_sigop_count(
 
     // Count the redeem script's sigops in zcashd's "accurate" mode, matching
     // `GetP2SHSigOpCount` -> `CScript::GetSigOpCount(scriptSig)` -> `subscript.GetSigOpCount(true)`.
-    // Relies on the patched `zcash_script` (see `[patch.crates-io]`) whose `sig_op_count` no longer
-    // short-circuits on disabled opcodes (incl. OP_CODESEPARATOR), which would otherwise undercount.
+    // The redeem script is at most 520 bytes, so `zcash_script`'s execution push limit cannot stop
+    // this count early. Disabled opcodes, including OP_CODESEPARATOR, do not stop it either.
     script::Code(redeemed_bytes).sig_op_count(true)
 }
 
