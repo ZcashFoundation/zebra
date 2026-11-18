@@ -550,15 +550,11 @@ fn compact_cf_range_drops_deleted_entries() {
         db.put_cf(&cf, i.to_be_bytes(), []).unwrap();
     }
     db.flush_cf(&cf).unwrap();
+    assert!(sst_size() > 0, "the entries are on disk");
     for i in 0u32..1_000 {
         db.delete_cf(&cf, i.to_be_bytes()).unwrap();
     }
-    db.flush_cf(&cf).unwrap();
-    assert!(
-        sst_size() > 0,
-        "the entries and their deletion markers are on disk"
-    );
-
+    // Manual compaction flushes the pending deletion markers before compacting the files.
     db.compact_cf_range(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, None, None);
 
     assert_eq!(
