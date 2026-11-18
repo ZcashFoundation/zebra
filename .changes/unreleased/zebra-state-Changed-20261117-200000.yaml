@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Database format 29.2.0 compacts the address UTXO index once and keeps it compacted as outputs are spent, so address queries no longer step over the deletion markers of spent outputs. The upgrade does not rewrite any records, so read-only opens of older 29.x and 28.x databases still work.'
+time: 2026-11-17T20:00:00.000000000Z

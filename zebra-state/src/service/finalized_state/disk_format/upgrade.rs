@@ -30,6 +30,7 @@ pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
+pub(crate) mod compact_address_utxo_index;
 pub(crate) mod fix_tree_key_type;
 pub(crate) mod no_migration;
 pub(crate) mod prune_trees;
@@ -85,6 +86,11 @@ pub trait DiskFormatUpgrade {
         true
     }
 
+    /// Returns true if the upgrade rewrites records, so older readers can't read the database until it runs.
+    fn changes_record_format(&self) -> bool {
+        self.needs_migration()
+    }
+
     /// Returns whether running this migration requires complete historical block bodies.
     ///
     /// New migrations must opt out only if they can run entirely on retained data.
@@ -132,7 +138,8 @@ fn format_upgrades(
             "add fast sync tree roots",
             Version::new(29, 1, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 8])
+        Box::new(compact_address_utxo_index::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 9])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -151,7 +158,7 @@ pub fn restorable_db_versions() -> Vec<u64> {
 
 /// Whether the existing records can be read without applying any intervening migrations.
 pub(crate) fn can_read_without_migration(disk_version: &Version) -> bool {
-    !format_upgrades(Some(disk_version.clone())).any(|upgrade| upgrade.needs_migration())
+    !format_upgrades(Some(disk_version.clone())).any(|upgrade| upgrade.changes_record_format())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -956,5 +963,57 @@ fn format_upgrades_are_in_version_order() {
     for upgrade in format_upgrades(None) {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
+    }
+}
+
+#[test]
+fn compact_address_utxo_index_runs_once_after_29_1_0() {
+    let versions: Vec<_> = format_upgrades(None)
+        .map(|upgrade| upgrade.version())
+        .collect();
+    let position = versions
+        .iter()
+        .position(|version| *version == Version::new(29, 2, 0))
+        .expect("the 29.2.0 upgrade is registered");
+    assert_eq!(versions[position - 1], Version::new(29, 1, 0));
+
+    let from_29: Vec<_> = format_upgrades(Some(Version::new(29, 1, 0))).collect();
+    assert_eq!(
+        from_29.len(),
+        1,
+        "only the compaction runs on a 29.1.0 database"
+    );
+    assert_eq!(from_29[0].version(), Version::new(29, 2, 0));
+    assert!(from_29[0].needs_migration());
+    assert!(!from_29[0].is_reusable_major_upgrade());
+    assert!(
+        !from_29[0].requires_full_history(),
+        "pruned nodes can run the compaction"
+    );
+    assert!(
+        !from_29[0].changes_record_format(),
+        "the compaction leaves records readable"
+    );
+
+    let mut in_code = crate::constants::state_database_format_version_in_code();
+    in_code.build = semver::BuildMetadata::EMPTY;
+    assert_eq!(
+        versions.last(),
+        Some(&in_code),
+        "the last upgrade is the version in code"
+    );
+}
+
+#[test]
+fn compaction_does_not_block_read_only_reuse() {
+    for disk_version in [
+        Version::new(28, 1, 0),
+        Version::new(29, 0, 0),
+        Version::new(29, 1, 0),
+    ] {
+        assert!(
+            can_read_without_migration(&disk_version),
+            "{disk_version} is readable before the compaction runs"
+        );
     }
 }

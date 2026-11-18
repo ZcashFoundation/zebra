@@ -222,7 +222,7 @@ deletion while compaction runs, so also monitor free space and the existing Rock
 
 ## Database kinds, recovery, and copies
 
-Both database kinds use format **29.1.0** and the normal linear upgrade sequence.
+Both database kinds use format **29.2.0** and the normal linear upgrade sequence.
 Archives that never opted in remain in `state/v29/<network>/`, preserving ordinary
 rollback to Zebra 7.1.0. Existing archives require the explicit stopped-node activation
 above before enabling pruning; startup never moves an archive automatically. Fresh pruning

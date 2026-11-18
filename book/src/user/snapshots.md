@@ -70,7 +70,7 @@ instead.
 
 The snapshot's database format _major_ version must match the version supported by the binary,
 unless its release documents a supported upgrade. Current archive and pruned databases share
-format **29.1.0**, but use different kinds: `state/v29/<network>/` for archives and
+format **29.2.0**, but use different kinds: `state/v29/<network>/` for archives and
 `state-pruned/v29/<network>/` for pruning-enabled state. The major version alone does not tell
 you whether historical bodies are available. Verify the producer's archive/pruned kind and
 actual retention as well; preserve that kind when extracting.
