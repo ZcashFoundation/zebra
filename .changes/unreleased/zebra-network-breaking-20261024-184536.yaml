@@ -1,4 +1,4 @@
 project: zebra-network
 kind: breaking
-body: 'Deserializing a `Config` returns an error instead of panicking when Testnet or Regtest funding streams or lockbox disbursements are invalid. Regtest configurations with too few funding stream addresses, which previously loaded, are now rejected.'
+body: 'Return an error instead of panicking when deserializing a `Config` with invalid Testnet or Regtest funding streams or lockbox disbursements. Regtest configurations with too few funding stream addresses, which previously loaded, are now rejected ([#12048](https://github.com/ZcashFoundation/zebra/pull/12048)).'
 time: 2026-10-24T18:45:36.499524555+02:00

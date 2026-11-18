@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Fixed
-body: 'Block proposals built from Regtest templates carry the Regtest-sized null solution, so a template near the maximum block size is no longer rejected as oversized by its proposal check.'
+body: 'Fixed `proposal_block_from_template` to give Regtest proposals the Regtest-sized null solution, so a proposal built from a Regtest template near the maximum block size no longer exceeds that size.'
 time: 2026-11-03T00:00:00Z

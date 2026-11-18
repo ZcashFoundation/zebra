@@ -1,4 +1,4 @@
 project: zebra-chain
 kind: Changed
-body: Round `founders_reward` down to a fifth of the scheduled block subsidy instead of panicking on custom Testnets.
+body: 'Round `founders_reward` down to a fifth of the scheduled block subsidy instead of panicking on custom Testnets ([#12050](https://github.com/ZcashFoundation/zebra/pull/12050)).'
 time: 2026-10-24T19:10:32.325161831+02:00

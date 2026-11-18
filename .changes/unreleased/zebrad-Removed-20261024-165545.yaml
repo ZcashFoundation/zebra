@@ -1,0 +1,4 @@
+project: zebrad
+kind: Removed
+body: 'Removed the example Grafana errors dashboard, which queried sighash error series Zebra doesn''t export ([#12041](https://github.com/ZcashFoundation/zebra/pull/12041)).'
+time: 2026-10-24T16:55:45.000000000+02:00

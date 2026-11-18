@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: Added
-body: 'Re-exported `SemanticBlockVerifier` at the crate root.'
+body: 'Re-exported `SemanticBlockVerifier` at the crate root with the `proptest-impl` feature.'
 time: 2026-10-11T00:00:00Z
