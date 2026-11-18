@@ -106,7 +106,9 @@ Zebra accepts these environment variables for observability:
 | `ZEBRA_RPC__LISTEN_ADDR` | - | RPC endpoint for JSON-RPC requests |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Jaeger OTLP endpoint (e.g., `http://jaeger:4318`) |
 | `OTEL_SERVICE_NAME` | `zebra` | Service name in traces |
-| `OTEL_TRACES_SAMPLER_ARG` | `100` | Sampling percentage (0-100)* |
+| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Standard OpenTelemetry sampler, such as `traceidratio` |
+| `OTEL_TRACES_SAMPLER_ARG` | - | Sampler argument: the ratio of traces to sample (0.0-1.0) for `traceidratio` |
+| `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT` | - | Percentage of traces to sample (0-100). Overrides `OTEL_TRACES_SAMPLER` |
 
 ### Trace Sampling
 
@@ -116,7 +118,8 @@ During high-volume operations (initial sync), reduce sampling to avoid overwhelm
 # docker-compose.observability.yml
 zebra:
   environment:
-    - OTEL_TRACES_SAMPLER_ARG=10  # 10% sampling during sync
+    - OTEL_TRACES_SAMPLER=traceidratio
+    - OTEL_TRACES_SAMPLER_ARG=0.1  # 10% sampling during sync
 ```text
 
 | Scenario | Percentage | Notes |
@@ -125,7 +128,9 @@ zebra:
 | Steady state | 10-50 | Normal operation |
 | Debugging | 100 | Full traces for investigation |
 
-*Note: Zebra uses percentage (0-100) for consistency with other config options, unlike the standard OpenTelemetry ratio (0.0-1.0).
+`OTEL_TRACES_SAMPLER_ARG` is a ratio, as in the OpenTelemetry specification, and Zebra ignores it unless `OTEL_TRACES_SAMPLER` is set. `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT` takes a percentage instead.
+
+Each trace is one operation: a peer connection attempt or handshake, a peer request with any inbound or mempool request inside it, a checkpoint verification, or an RPC or gRPC request. Long-running tasks such as the syncer and the peer crawler are not exported, and only WARN and ERROR log events are attached to the exported spans.
 
 ## Directory Structure
 
@@ -198,7 +203,8 @@ Reduce trace sampling during sync:
 
 ```yaml
 environment:
-  - OTEL_TRACES_SAMPLER_ARG=10  # Sample only 10%
+  - OTEL_TRACES_SAMPLER=traceidratio
+  - OTEL_TRACES_SAMPLER_ARG=0.1  # Sample only 10%
 ```text
 
 ## Related Documentation
