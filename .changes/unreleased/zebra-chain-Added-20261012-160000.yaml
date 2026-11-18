@@ -3,5 +3,6 @@ kind: Added
 body: >-
   `sapling::tree::NoteCommitmentTree::append_batch` and
   `orchard::tree::NoteCommitmentTree::append_batch` append a block of note commitments at
-  once, reducing aligned subtrees in parallel.
+  once. The Sapling tree hashes independent subtrees in parallel, and the Orchard tree, which
+  Ironwood also uses, batches independent parent hashes by tree level.
 time: 2026-10-12T16:00:00.000000000+02:00
