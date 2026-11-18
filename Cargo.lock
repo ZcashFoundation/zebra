@@ -3568,7 +3568,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.16.0"
-source = "git+https://github.com/upbqdn/orchard?rev=82a3f6dc39276c3ea21e175b3c75ad15261096e4#82a3f6dc39276c3ea21e175b3c75ad15261096e4"
+source = "git+https://github.com/upbqdn/orchard?rev=de4537bfc59b8fc204b95000f52f4d38bd29b2db#de4537bfc59b8fc204b95000f52f4d38bd29b2db"
 dependencies = [
  "aes",
  "bitvec",
@@ -3589,6 +3589,7 @@ dependencies = [
  "pasta_curves",
  "rand 0.10.2",
  "rand_core 0.10.1",
+ "rayon",
  "reddsa",
  "serde",
  "sinsemilla",
