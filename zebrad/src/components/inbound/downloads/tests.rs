@@ -1266,9 +1266,10 @@ async fn verified_block_records_download_and_verify_durations() {
     let block = block_1();
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let advertiser_info = zn::test_support::connection_info(advertiser);
 
     assert!(matches!(
-        downloads.download_and_verify(hash, Some(advertiser)),
+        downloads.download_and_verify(hash, Some(advertiser_info.clone())),
         DownloadAction::AddedToQueue
     ));
     state
@@ -1278,7 +1279,7 @@ async fn verified_block_records_download_and_verify_durations() {
     let download = network
         .expect_request(zn::Request::BlockDownload {
             hash,
-            advertiser: Some(advertiser),
+            advertiser: Some(advertiser_info),
         })
         .await;
     tokio::time::advance(DOWNLOAD).await;
@@ -1286,6 +1287,10 @@ async fn verified_block_records_download_and_verify_durations() {
         block.clone(),
         Some(advertiser),
     ))]));
+    state
+        .expect_request(zs::Request::KnownBlock(block.header.previous_block_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
     let verify = verifier
         .expect_request(zebra_consensus::Request::Commit(block))
         .await;
