@@ -150,10 +150,6 @@ enum Command {
         #[arg(long)]
         end: Height,
 
-        /// The Participation Threshold, as a percentage.
-        #[arg(long, value_parser = parse_percentage)]
-        threshold: f64,
-
         /// Address and port of the node's RPC server.
         #[arg(long, default_value = "127.0.0.1:8232")]
         addr: SocketAddr,
@@ -177,14 +173,6 @@ fn parse_election(id: &str) -> Result<String, String> {
         Ok(id.to_owned())
     } else {
         Err("must have 1 to 16 characters, each `a`-`z`, `0`-`9`, or `-`".to_owned())
-    }
-}
-
-/// Parses a percentage.
-fn parse_percentage(percentage: &str) -> Result<f64, String> {
-    match percentage.parse() {
-        Ok(percentage) if (0.0..=100.0).contains(&percentage) => Ok(percentage),
-        _ => Err("must be a number from 0 to 100".to_owned()),
     }
 }
 
@@ -478,7 +466,7 @@ impl Tally {
 
     /// Returns the results of a Voting Period with `blocks` blocks, with percentages relative to
     /// `blocks`.
-    fn results(&self, blocks: u32, threshold: f64) -> Value {
+    fn results(&self, blocks: u32) -> Value {
         let percentage = |count: u32| 100.0 * f64::from(count) / f64::from(blocks);
 
         let questions: Vec<Value> = self
@@ -500,7 +488,6 @@ impl Tally {
                     "options": options,
                     "not_answered": blocks - answered,
                     "not_answered_percentage": percentage(blocks - answered),
-                    "representative": percentage(answered) >= threshold,
                 })
             })
             .collect();
@@ -598,7 +585,6 @@ async fn tally(
     network: &Network,
     start: Height,
     end: Height,
-    threshold: f64,
     rpc: &Rpc,
 ) -> Result<Value> {
     ensure!(
@@ -677,13 +663,11 @@ async fn tally(
         "voting_start_height": start.0,
         "voting_end_height": end.0,
         "voting_end_block_hash": end_hash,
-        "participation_threshold_percentage": threshold,
         "final": last == end.0 && confirmations >= FINAL_CONFIRMATIONS,
         "tallied_through_height": last,
     });
     let blocks = end.0 - start.0 + 1;
-    if let (Some(results), Value::Object(counts)) =
-        (results.as_object_mut(), tally.results(blocks, threshold))
+    if let (Some(results), Value::Object(counts)) = (results.as_object_mut(), tally.results(blocks))
     {
         results.extend(counts);
     }
@@ -715,7 +699,6 @@ async fn main() -> Result<()> {
             network,
             start,
             end,
-            threshold,
             addr,
             cookie_dir,
         } => {
@@ -725,7 +708,6 @@ async fn main() -> Result<()> {
                 &network,
                 start,
                 end,
-                threshold,
                 &Rpc::new(addr, cookie_dir_for(addr, cookie_dir).as_deref()),
             )
             .await?;

@@ -260,8 +260,8 @@ fn text_memos() {
     assert!(!is_text_memo(&memo(b"\xf5zpoll:nu8:2311-")));
 }
 
-/// Percentages are relative to all blocks in the Voting Period, and each question is assessed
-/// against the Participation Threshold separately, as in the ZIP's examples.
+/// Percentages are relative to all blocks in the Voting Period, and each question reports its
+/// own blocks that don't answer it, as in the ZIP's examples.
 #[test]
 fn tally_results() {
     let poll = nu8();
@@ -271,7 +271,7 @@ fn tally_results() {
     for _ in 0..10 {
         few.add(&ballot(b"zpoll:nu8:2311-"));
     }
-    let results = few.results(100_000, 0.5);
+    let results = few.results(100_000);
     assert_eq!(results["participation_percentage"], json!(0.01));
     assert_eq!(results["questions"][0]["options"][1]["votes"], json!(10));
     assert_eq!(
@@ -279,7 +279,6 @@ fn tally_results() {
         json!(0.01)
     );
     assert_eq!(results["questions"][0]["not_answered"], json!(99_990));
-    assert_eq!(results["questions"][0]["representative"], json!(false));
 
     let mut partial = Tally::new(&poll);
     for _ in 0..99_990 {
@@ -288,17 +287,13 @@ fn tally_results() {
     for _ in 0..10 {
         partial.add(&ballot(b"zpoll:nu8:23113"));
     }
-    let results = partial.results(100_000, 0.5);
+    let results = partial.results(100_000);
     assert_eq!(results["participation_percentage"], json!(100.0));
     for question in 0..4 {
-        assert_eq!(
-            results["questions"][question]["representative"],
-            json!(true)
-        );
+        assert_eq!(results["questions"][question]["not_answered"], json!(0));
     }
     assert_eq!(results["questions"][4]["options"][2]["votes"], json!(10));
     assert_eq!(results["questions"][4]["not_answered"], json!(99_990));
-    assert_eq!(results["questions"][4]["representative"], json!(false));
 }
 
 /// A block that selects several options of a question votes for each of them, but answers the
@@ -315,7 +310,7 @@ fn multiple_choice_tally_results() {
     for _ in 0..20 {
         tally.add(&ballot(b"zpoll:devfund:(3)-"));
     }
-    let results = tally.results(100, 50.0);
+    let results = tally.results(100);
 
     let q1 = &results["questions"][0];
     assert_eq!(q1["options"][0]["votes"], json!(30));
@@ -323,11 +318,9 @@ fn multiple_choice_tally_results() {
     assert_eq!(q1["options"][2]["percentage"], json!(50.0));
     assert_eq!(q1["options"][4]["votes"], json!(30));
     assert_eq!(q1["not_answered"], json!(50));
-    assert_eq!(q1["representative"], json!(true));
 
     let q2 = &results["questions"][1];
     assert_eq!(q2["not_answered"], json!(70));
-    assert_eq!(q2["representative"], json!(false));
 }
 
 /// Miner Ballots cast with Zebra's `extra_coinbase_data` and `miner_memo` options are found in
@@ -454,15 +447,7 @@ async fn tally_fake_node(
     })
     .await;
 
-    tally(
-        &nu8(),
-        network,
-        Height(1),
-        Height(3),
-        50.0,
-        &Rpc::new(addr, None),
-    )
-    .await
+    tally(&nu8(), network, Height(1), Height(3), &Rpc::new(addr, None)).await
 }
 
 /// Mainnet blocks 1 to 3.
