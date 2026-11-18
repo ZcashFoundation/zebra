@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Checkpoint-verified blocks that update their note commitment trees record `checkpoint_*` phases in the `state.block_writer.phase.duration_seconds` histogram.'
+time: 2026-11-18T14:01:00.000000000Z

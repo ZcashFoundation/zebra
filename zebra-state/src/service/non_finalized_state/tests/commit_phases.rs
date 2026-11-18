@@ -14,6 +14,7 @@ use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
 use crate::{
     arbitrary::Prepare,
     tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
+    CheckpointVerifiedBlock,
 };
 
 /// The phases that the non-finalized state records for each committed block.
@@ -158,5 +159,58 @@ fn commit_records_each_sub_phase_once_per_committed_block() {
         samples_by_phase(&samples),
         BTreeMap::new(),
         "a state that doesn't count metrics must not record commit phases",
+    );
+}
+
+/// The phases that a checkpoint commit to the finalized state records for each block, apart from
+/// the block writer loop's `checkpoint_next_height` and `checkpoint_tip_update`.
+const CHECKPOINT_COMMIT_PHASES: [&str; 10] = [
+    "checkpoint_history_tree_load",
+    "checkpoint_trees_and_commitment",
+    "checkpoint_history_tree_push",
+    "checkpoint_value_pool",
+    "checkpoint_finalized_block",
+    "checkpoint_tip_checks",
+    "checkpoint_spent_outputs",
+    "checkpoint_address_balances",
+    "checkpoint_batch_build",
+    "checkpoint_db_write",
+];
+
+/// Each checkpoint commit to the finalized state records every checkpoint commit phase once.
+#[test]
+fn checkpoint_commit_records_each_phase_once_per_block() {
+    let _init_guard = zebra_test::init();
+
+    let (mut finalized, _state, _genesis) = new_state_with_mainnet_genesis();
+    let blocks: [&[u8]; 2] = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ];
+
+    let (recorder, samples) = PhaseRecorder::new();
+    metrics::with_local_recorder(&recorder, || {
+        for bytes in blocks {
+            let block: Arc<Block> = bytes
+                .zcash_deserialize_into()
+                .expect("test vectors are valid blocks");
+            finalized
+                .commit_finalized_direct(CheckpointVerifiedBlock::from(block).into(), None, "test")
+                .expect("test vectors are valid children of their parents");
+        }
+    });
+
+    let recorded = samples_by_phase(&samples);
+    for phase in CHECKPOINT_COMMIT_PHASES {
+        assert_eq!(
+            recorded.get(phase).map(Vec::len),
+            Some(blocks.len()),
+            "phase {phase} must be recorded once per committed block: {recorded:?}",
+        );
+    }
+    assert_eq!(
+        recorded.len(),
+        CHECKPOINT_COMMIT_PHASES.len(),
+        "a direct checkpoint commit records only the checkpoint commit phases: {recorded:?}",
     );
 }

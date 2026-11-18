@@ -23,7 +23,7 @@ use crate::{
     service::{
         check,
         fast_tree_sync::{CheckpointCommit, FastTreeSyncWriter, TreeRootsCache},
-        finalized_state::{FinalizedState, ZebraDb},
+        finalized_state::{record_phase, FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
@@ -482,6 +482,8 @@ fn commit_checkpoint_verified(
         }
         None => CheckpointCommit::Normal(checkpoint_verified),
     };
+    // Like the commit phases, only normal checkpoint commits time the tip update.
+    let timed = matches!(commit, CheckpointCommit::Normal(_));
 
     let (result, frozen_sizes, successor_error) = match commit {
         CheckpointCommit::Fast {
@@ -521,7 +523,9 @@ fn commit_checkpoint_verified(
             let hash = tip_block.hash;
             *prev_finalized_note_commitment_trees = Some(note_commitment_trees);
             fast_tree_sync.committed(height, frozen_sizes);
+            let mut phase_timer = timed.then(Instant::now);
             chain_tip_sender.set_finalized_tip(tip_block);
+            record_phase!(phase_timer, "checkpoint_tip_update");
             if let Some(wake) = pruning_wake {
                 let _ = wake.try_send(());
             }
@@ -702,11 +706,16 @@ impl WriteBlockWorkerTask {
                 Some(held_block) => {
                     (held_block.0.height + 1).expect("held heights are below the maximum height")
                 }
-                None => finalized_state
-                    .db
-                    .finalized_tip_height()
-                    .map(|height| (height + 1).expect("committed heights are valid"))
-                    .unwrap_or(Height(0)),
+                None => {
+                    let mut phase_timer = Some(Instant::now());
+                    let next_valid_height = finalized_state
+                        .db
+                        .finalized_tip_height()
+                        .map(|height| (height + 1).expect("committed heights are valid"))
+                        .unwrap_or(Height(0));
+                    record_phase!(phase_timer, "checkpoint_next_height");
+                    next_valid_height
+                }
             };
 
             if ordered_block.0.height != next_valid_height {

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added `checkpoint_*` phases to the `state.block_writer.phase.duration_seconds` histogram, which time each step of committing a checkpoint-verified block with its note commitment tree updates: reading the next height, loading and updating the history tree, updating the note commitment trees and checking the block commitment, reading the value pool, checking the tip, reading spent outputs and address balances, building the write batch, writing it, and updating the chain tip. Fast-synced blocks are not timed.'
+time: 2026-11-18T14:00:00.000000000Z

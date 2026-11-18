@@ -168,6 +168,27 @@ in parallel with the sub-phases before `history`, so the sub-phases don't add up
 commit. A `zebra-rpc` trusted chain sync, which follows another node's chain without a block
 writer, also records the sub-phases.
 
+Checkpoint-verified blocks that update their note commitment trees are written straight to the
+database, and record `checkpoint_*` phases in the same histogram, one sample per block. They run in
+order, so they add up to most of the commit.
+
+| `phase` | Measures |
+| --- | --- |
+| `checkpoint_next_height` | Reading the finalized tip to find the next height to commit. |
+| `checkpoint_history_tree_load` | Reading the tip's history tree. |
+| `checkpoint_trees_and_commitment` | The note commitment tree update and the block commitment check, which can overlap. |
+| `checkpoint_history_tree_push` | Adding the block to the history tree. |
+| `checkpoint_value_pool` | Reading the value pool for the deferred pool balance change. |
+| `checkpoint_finalized_block` | Building the finalized block. |
+| `checkpoint_tip_checks` | Checking that the block is a child of the finalized tip. |
+| `checkpoint_spent_outputs` | Reading the outputs the block spends. |
+| `checkpoint_address_balances` | Reading the balances of the transparent addresses the block changes. |
+| `checkpoint_batch_build` | Building the database write batch. |
+| `checkpoint_db_write` | Writing the batch to the database. |
+| `checkpoint_tip_update` | Updating the finalized chain tip. |
+
+Blocks committed with fast checkpoint sync don't record them.
+
 ## Memory metrics
 
 These metrics show how much memory `zebrad` uses, and how large the non-finalized state is.
