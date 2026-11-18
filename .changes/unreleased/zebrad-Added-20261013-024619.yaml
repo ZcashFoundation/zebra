@@ -1,4 +1,4 @@
 project: zebrad
 kind: Added
-body: Block-acceptance timing histogram `zebra.consensus.block.phase.duration_seconds`, and write queue, contextual commit, tip channel update and finalization phases in `state.block_writer.phase.duration_seconds`, excluding block proposals.
+body: Added the `queue`, `contextual_commit`, `update_latest_chain_channels` and `finalization` phases of blocks committed after checkpoint sync to the `state.block_writer.phase.duration_seconds` histograms.
 time: 2026-10-13T02:46:19.944659189+02:00
