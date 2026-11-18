@@ -299,6 +299,9 @@ tokio-stream = { workspace = true }
 # test feature sentry
 sentry = { workspace = true, features = ["test"] }
 
+# test feature opentelemetry
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
 tonic = { workspace = true }
