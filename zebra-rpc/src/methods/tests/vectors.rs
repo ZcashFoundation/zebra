@@ -9166,3 +9166,87 @@ async fn rpc_treestate_reports_a_fast_synced_height_as_unavailable() {
         "tree state unavailable: fast-synced height"
     );
 }
+
+/// `z_gettreestate` reports a missing block, not empty trees, when an active pool's tree lookup
+/// finds nothing after the header lookup succeeded and the height wasn't fast-synced.
+#[tokio::test(flavor = "multi_thread")]
+async fn z_get_treestate_reports_missing_block_when_tree_vanishes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+
+    for missing_orchard in [false, true] {
+        // Sapling is active at both heights; Orchard only at the NU5 one.
+        let height = if missing_orchard {
+            zebra_chain::parameters::NetworkUpgrade::Nu5
+        } else {
+            zebra_chain::parameters::NetworkUpgrade::Sapling
+        }
+        .activation_height(&Mainnet)
+        .unwrap();
+
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+            .with_max_request_delay(std::time::Duration::from_secs(5))
+            .for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        let treestate = tokio::spawn(async move { rpc.z_get_treestate(hash.to_string()).await });
+
+        read_state
+            .expect_request(ReadRequest::BlockHeader(hash.into()))
+            .await
+            .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+                header: block.header.clone(),
+                hash,
+                height,
+                next_block_hash: None,
+            })));
+        let sapling = read_state
+            .expect_request(ReadRequest::AnyChainSaplingTree(hash))
+            .await;
+        if missing_orchard {
+            sapling.respond(ReadResponse::SaplingTree(Some(Default::default())));
+            read_state
+                .expect_request(ReadRequest::AnyChainOrchardTree(hash))
+                .await
+                .respond(ReadResponse::OrchardTree(None));
+        } else {
+            sapling.respond(ReadResponse::SaplingTree(None));
+        }
+        read_state
+            .expect_request(ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .respond(ReadResponse::FastSyncTreeRoots(None));
+
+        let error = treestate
+            .await
+            .expect("task should not panic")
+            .expect_err("a vanished tree should be an error");
+        assert_eq!(error.code(), -8, "missing_orchard: {missing_orchard}");
+        assert_eq!(
+            error.message(),
+            "the requested block is not in the main chain"
+        );
+    }
+}
