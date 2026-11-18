@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: '`z_gettreestate` reports a missing block, or an unavailable tree state at fast-synced heights, instead of empty trees when an active pool''s tree is not found after its header.'
+time: 2026-11-18T14:02:00.000000000Z
