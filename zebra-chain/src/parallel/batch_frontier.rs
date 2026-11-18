@@ -1,8 +1,8 @@
 //! Batch appends shared by the depth-32 Sapling and Orchard note commitment trees.
 
 use incrementalmerkletree::{
-    frontier::{Frontier, FrontierError},
-    Hashable,
+    frontier::{Frontier, FrontierError, NonEmptyFrontier},
+    Hashable, Level,
 };
 use rayon::prelude::*;
 
@@ -17,6 +17,11 @@ const PARALLEL_THRESHOLD: usize = 32;
 
 /// A tree node type that chooses how batch appends hash aligned chunks of new leaves.
 pub(crate) trait BatchNode: Hashable + Copy + Send + Sync {
+    /// Hashes two children; the same as [`Hashable::combine`], which a tree type can make faster.
+    fn combine_one(level: Level, lhs: &Self, rhs: &Self) -> Self {
+        Self::combine(level, lhs, rhs)
+    }
+
     /// Returns the subtree roots of `chunks`, aligned power-of-two leaf runs in leaf order.
     ///
     /// By default, independent subtrees are hashed in parallel.
@@ -30,6 +35,25 @@ pub(crate) trait BatchNode: Hashable + Copy + Send + Sync {
             .map(|leaves| perfect_subtree_root(leaves, to_node))
             .collect()
     }
+}
+
+/// The root of the subtree at `root_level` containing the frontier's tip, as
+/// [`NonEmptyFrontier::root`] computes it.
+pub(crate) fn frontier_root<H: BatchNode>(frontier: &NonEmptyFrontier<H>, root_level: u8) -> H {
+    let position = u64::from(frontier.position());
+    let mut ommers = frontier.ommers().iter();
+    let mut digest = *frontier.leaf();
+    for level in 0..root_level {
+        digest = if position & (1u64 << level) != 0 {
+            let ommer = ommers
+                .next()
+                .expect("a frontier has one ommer per set position bit");
+            H::combine_one(level.into(), ommer, &digest)
+        } else {
+            H::combine_one(level.into(), &digest, &H::empty_root(level.into()))
+        };
+    }
+    digest
 }
 
 /// Appends in order and returns the last completed tracked subtree, if any.
@@ -66,10 +90,12 @@ where
             let index = ((frontier.tree_size() >> TRACKED_SUBTREE_HEIGHT) - 1)
                 .try_into()
                 .expect("a depth-32 tree has at most 2^16 tracked subtrees");
-            let root = frontier
-                .value()
-                .expect("the segment appended at least one leaf")
-                .root(Some(TRACKED_SUBTREE_HEIGHT.into()));
+            let root = frontier_root(
+                frontier
+                    .value()
+                    .expect("the segment appended at least one leaf"),
+                TRACKED_SUBTREE_HEIGHT,
+            );
             completed = Some((NoteCommitmentSubtreeIndex(index), root));
         }
     }
@@ -142,9 +168,9 @@ where
 }
 
 /// Carries a newer complete subtree through occupied slots, always hashing older roots on the left.
-fn merge<H: Hashable + Copy>(slots: &mut [Option<H>], mut level: u8, mut node: H) {
+fn merge<H: BatchNode>(slots: &mut [Option<H>], mut level: u8, mut node: H) {
     while let Some(left) = slots[usize::from(level)].take() {
-        node = H::combine(level.into(), &left, &node);
+        node = H::combine_one(level.into(), &left, &node);
         level += 1;
     }
     slots[usize::from(level)] = Some(node);

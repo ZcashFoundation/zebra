@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: 'Sapling note commitment tree appends and root calculation use a faster Merkle hash with the same output.'
+time: 2026-11-09T21:00:00.000000000Z
