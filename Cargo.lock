@@ -7749,6 +7749,7 @@ dependencies = [
  "tracing-error",
  "tracing-flame",
  "tracing-journald",
+ "tracing-log 0.2.0",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",

@@ -17,6 +17,46 @@ if the config had `endpoint_addr = '127.0.0.1:3000'`, then
 
 See the [`filter`][filter] documentation for more details.
 
+## JSON Logs
+
+Set [`log_format`][log_format] to `"json"`, or `ZEBRA_TRACING__LOG_FORMAT=json`,
+to write one JSON object per line instead of text. Log collectors such as Google
+Cloud Logging, Azure Monitor, Grafana Loki, and Datadog can read the level,
+message, and fields of each line without a custom parser:
+
+```json
+{"timestamp":"2026-11-18T13:33:33.558999Z","level":"WARN","severity":"WARNING","message":"peer connection failed","target":"zebra_network::peer_set","addr":"203.0.113.7:8233","spans":[{"name":"crawl"}],"code.file.path":"zebra-network/src/peer_set/initialize.rs","code.line.number":812}
+```
+
+Each line has these keys, in this order:
+
+| Key | Value |
+|-----|-------|
+| `timestamp` | When Zebra logged the event, in RFC 3339 format, in UTC |
+| `level` | `TRACE`, `DEBUG`, `INFO`, `WARN`, or `ERROR` |
+| `severity` | The same level, as a [Google Cloud Logging severity][gcp_severity]: `DEBUG` for `TRACE` and `DEBUG`, `WARNING` for `WARN`, and `CRITICAL` for a panic |
+| `message` | The log message |
+| `target` | The module that logged the event |
+| the event's fields | Numbers, booleans, and strings |
+| `spans` | The spans the event happened in, outermost first, each with its `name` and fields |
+| `code.file.path`, `code.line.number` | The source location of the event |
+| `trace_id`, `span_id` | The OpenTelemetry trace and span, if the event happened in a sampled trace |
+
+Only these keys are stable. The event and span fields can change in any release.
+An event field named like one of these keys is written as `field.<name>`, and a
+span field called `name` as `field.name`. Integers too large for a 64-bit float
+to hold exactly are written as strings. Long field values are cut to 4 KiB, and
+a line that would be longer than 16 KiB keeps only its first five keys and
+`"truncated":true`, so container runtimes don't split it.
+
+A panic is written to standard error as one JSON line, with its stack trace in
+`exception.stacktrace`. JSON logs never use color, and Zebra doesn't print its
+startup banner.
+
+Google Cloud Logging uses `severity` and `message`, but on Container-Optimized OS
+it records the time Docker received the line, not `timestamp`. Azure Monitor
+reads `level`, and Grafana Loki and Datadog read either key.
+
 ## `journald` Logging
 
 Zebra can send tracing spans and events to [systemd-journald][systemd_journald],
@@ -170,6 +210,8 @@ no function names or source locations.
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
 [flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph
+[log_format]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.log_format
+[gcp_severity]: https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity
 [flamegraphs]: http://www.brendangregg.com/flamegraphs.html
 [otel_sample_percent]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.opentelemetry_sample_percent
 [systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
