@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Speed up verification of blocks with many Orchard or Ironwood transactions.
-time: 2026-11-18T19:15:00Z

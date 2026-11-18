@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Build with unreleased Pasta, Halo2, RedDSA, Sinsemilla and sapling-crypto revisions that speed up Orchard and Sapling proof, signature and hash verification, and parse large Sapling proof lists in parallel. The revisions are pinned by commit until the crates publish them.
+body: 'Build with unreleased Pasta, Halo2, RedDSA, orchard, Sinsemilla and sapling-crypto revisions, pinned by commit until the crates publish them. They speed up Orchard, Ironwood and Sapling proof, signature and hash verification, especially in blocks with many Orchard or Ironwood transactions, and parse large Sapling proof lists in parallel.'
 time: 2026-11-17T17:15:00.000000000+01:00
