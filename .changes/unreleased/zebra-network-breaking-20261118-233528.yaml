@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: The runtime `Config::limited_service_from` field requires updates to exhaustive `Config` literals; `Request::AdvertiseCompactBlock` now includes its parent hash, and exhaustive `Request` matches must handle `BlockDownloadAtHeight`. `PeerServices::NODE_NETWORK_LIMITED` (bit 10) identifies peers serving the recent 2,304-block window.
+time: 2026-11-18T23:35:28.351564538+01:00

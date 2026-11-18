@@ -53,6 +53,21 @@ use crate::{
 
 use InventoryResponse::*;
 
+/// Both cached serving paths use the same inclusive limited-service boundary.
+#[test]
+fn cached_blocks_respect_limited_window() {
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let height = block.coinbase_height().unwrap();
+    let boundary = Height(height.0 + zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS);
+    let allowed = super::super::cached_block_in_limited_window;
+
+    assert!(!allowed(None, &block));
+    assert!(allowed(Some(boundary), &block));
+    assert!(!allowed(Some(Height(boundary.0 + 1)), &block));
+}
+
 /// Maximum time to wait for a network service request.
 ///
 /// The default [`MockService`] value can be too short for some of these tests that take a little
@@ -2544,15 +2559,17 @@ async fn compact_and_sync_share_committed_success_and_recover_owner() -> Result<
                     .await?
                     .call(Request::AdvertiseCompactBlock(
                         hash,
-                        Some(advertiser_info.clone())
+                        Some(advertiser_info.clone()),
+                        block.header.previous_block_hash,
                     ))
                     .await?,
                 Response::Nil,
             );
             let mut compact_download = Some(
                 peers
-                    .expect_request(Request::BlockDownload {
+                    .expect_request(Request::BlockDownloadAtHeight {
                         hash,
+                        height: Height(2),
                         advertiser: Some(advertiser_info),
                     })
                     .await,

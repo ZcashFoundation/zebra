@@ -120,6 +120,13 @@ pub struct Config {
     #[serde(skip)]
     pub local_services: PeerServices,
 
+    /// Startup tip height from which new handshakes can advertise limited service.
+    ///
+    /// Runtime-only: a restored pruned state may need to sync before it holds the complete
+    /// limited-service window. Existing connections retain the services they negotiated.
+    #[serde(skip)]
+    pub limited_service_from: Option<zebra_chain::block::Height>,
+
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
     pub initial_mainnet_peers: IndexSet<String>,
@@ -649,6 +656,7 @@ impl Default for Config {
             network: Network::Mainnet,
             compact_block_relay: true,
             local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
+            limited_service_from: None,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             persistent_peers: IndexSet::new(),
@@ -823,6 +831,7 @@ impl From<Config> for DConfig {
             network,
             compact_block_relay,
             local_services: _,
+            limited_service_from: _,
             initial_mainnet_peers,
             initial_testnet_peers,
             persistent_peers,
@@ -961,6 +970,7 @@ impl<'de> Deserialize<'de> for Config {
             network,
             compact_block_relay,
             local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
+            limited_service_from: None,
             initial_mainnet_peers,
             initial_testnet_peers,
             persistent_peers,

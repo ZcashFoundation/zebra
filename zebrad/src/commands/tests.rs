@@ -77,8 +77,7 @@ async fn halo2_key_preload_panic_exits_zebra() {
 
 /// Startup policy, local advertisements, and RPC service reporting agree for every pruning state.
 ///
-/// Archive nodes advertise `NODE_NETWORK` without `NODE_PRUNED`, and pruned nodes advertise
-/// `NODE_NETWORK | NODE_PRUNED`.
+/// Archive nodes advertise `NODE_NETWORK`, and pruned nodes advertise `NODE_NETWORK_LIMITED`.
 #[tokio::test(flavor = "current_thread")]
 async fn pruned_network_services_preserve_independent_capabilities() {
     use std::sync::{Arc, Mutex};
@@ -110,25 +109,19 @@ async fn pruned_network_services_preserve_independent_capabilities() {
                 "pruned history",
                 None,
                 Height(10_000),
-                PeerServices::NODE_NETWORK
-                    | PeerServices::NODE_PRUNED
-                    | PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_TREE_ROOTS,
             ),
             (
                 "pruning configured before deletion",
                 Some(10_000),
                 Height(0),
-                PeerServices::NODE_NETWORK
-                    | PeerServices::NODE_PRUNED
-                    | PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_TREE_ROOTS,
             ),
             (
                 "pruning configured after deletion",
                 Some(10_000),
                 Height(10_000),
-                PeerServices::NODE_NETWORK
-                    | PeerServices::NODE_PRUNED
-                    | PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_TREE_ROOTS,
             ),
         ] {
             config.state.prune_blocks_older_than = retention;
@@ -137,6 +130,7 @@ async fn pruned_network_services_preserve_independent_capabilities() {
                 HistoryCapabilities {
                     lowest_retained_height,
                 },
+                Some(Height(13_000)),
             )
             .unwrap();
             let expected = expected | independent_services;
@@ -188,19 +182,88 @@ async fn pruned_network_services_preserve_independent_capabilities() {
         }
     }
 
-    // Archive nodes clear a configured `NODE_PRUNED`, so they never advertise it.
+    // Archive nodes clear any configured pruning capabilities.
     let mut config = crate::config::ZebradConfig::default();
-    config.network.local_services |= PeerServices::NODE_PRUNED;
+    config.network.local_services |= PeerServices::NODE_PRUNED | PeerServices::NODE_NETWORK_LIMITED;
     let services = super::StartCmd::network_services(
         &config,
         HistoryCapabilities {
             lowest_retained_height: Height(0),
         },
+        None,
     )
     .unwrap();
     assert_eq!(
         services,
         PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
+    );
+
+    // A restored pruned state must not claim blocks it has not yet downloaded.
+    config.state.prune_blocks_older_than = Some(10_000);
+    let services = super::StartCmd::network_services(
+        &config,
+        HistoryCapabilities {
+            lowest_retained_height: Height(10_000),
+        },
+        Some(Height(12_302)),
+    )
+    .unwrap();
+    assert_eq!(services, PeerServices::NODE_TREE_ROOTS);
+
+    // Regtest can prune to fewer than 2,304 blocks, so it cannot claim limited service.
+    config.state.prune_blocks_older_than = Some(1_001);
+    let services = super::StartCmd::network_services(
+        &config,
+        HistoryCapabilities::default(),
+        Some(Height(10_000)),
+    )
+    .unwrap();
+    assert_eq!(services, PeerServices::NODE_TREE_ROOTS);
+}
+
+#[test]
+fn limited_service_starts_when_the_missing_history_window_is_complete() {
+    use zebra_chain::block::Height;
+    use zebra_network::{constants::NODE_NETWORK_LIMITED_BLOCKS, types::PeerServices};
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    let history = HistoryCapabilities {
+        lowest_retained_height: Height(10_000),
+    };
+    config.state.prune_blocks_older_than = Some(NODE_NETWORK_LIMITED_BLOCKS - 1);
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, history),
+        None
+    );
+
+    config.state.prune_blocks_older_than = Some(NODE_NETWORK_LIMITED_BLOCKS);
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, history),
+        Some(Height(12_303))
+    );
+    assert!(
+        !super::StartCmd::network_services(&config, history, Some(Height(12_302)))
+            .unwrap()
+            .contains(PeerServices::NODE_NETWORK_LIMITED)
+    );
+    assert!(
+        super::StartCmd::network_services(&config, history, Some(Height(12_303)))
+            .unwrap()
+            .contains(PeerServices::NODE_NETWORK_LIMITED)
+    );
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, HistoryCapabilities::default()),
+        None
+    );
+    assert_eq!(
+        super::StartCmd::limited_service_from(
+            &config,
+            HistoryCapabilities {
+                lowest_retained_height: Height(u32::MAX),
+            },
+        ),
+        None
     );
 }
 
@@ -214,7 +277,7 @@ fn pruned_history_rejects_both_sidecar_modes() {
     for managed in [false, true] {
         config.zcashd_compat.manage_zcashd = managed;
         config.state.prune_blocks_older_than = None;
-        super::StartCmd::network_services(&config, HistoryCapabilities::default())
+        super::StartCmd::network_services(&config, HistoryCapabilities::default(), None)
             .expect("archive nodes can serve sidecars");
         for (retention, lowest_retained_height) in [
             (None, Height(10_000)),
@@ -227,6 +290,7 @@ fn pruned_history_rejects_both_sidecar_modes() {
                 HistoryCapabilities {
                     lowest_retained_height,
                 },
+                None,
             )
             .expect_err("sidecars require complete block history and pruning disabled");
             assert!(error

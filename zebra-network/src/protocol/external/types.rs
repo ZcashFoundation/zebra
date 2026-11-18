@@ -182,6 +182,11 @@ bitflags! {
         /// does not provide network services.
         const NODE_NETWORK = 1;
 
+        /// Serves all blocks whose height is greater than the best tip height minus 2,304.
+        ///
+        /// Defined by the draft Limited Block Serving Service Flag ZIP.
+        const NODE_NETWORK_LIMITED = 1 << 10;
+
         /// Serves note commitment tree roots for its finalized chain in response to `gettreeroots`.
         ///
         /// The draft P2P v2 ZIP (`draft-arya-jvff-p2p-quic-transport`) assigns this bit to
@@ -198,8 +203,9 @@ bitflags! {
 
         /// NODE_PRUNED means the node may have deleted historic block bodies.
         ///
-        /// Zebra and Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental
-        /// bit 25). They don't answer `getblocks` for heights below what they keep.
+        /// Zakura peers can advertise it alongside `NODE_NETWORK` (experimental bit 25).
+        /// Zebra recognizes those peers as non-archive but advertises `NODE_NETWORK_LIMITED`
+        /// instead when pruning is enabled.
         const NODE_PRUNED = 1 << 25;
     }
 }

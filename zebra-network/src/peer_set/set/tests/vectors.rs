@@ -2847,6 +2847,182 @@ fn peer_set_with_services(
     (peer_set, peer_set_guard, addrs, handles, best_tip)
 }
 
+/// Limited peers only receive discovery extending our tip while our estimated lag is small.
+#[test]
+fn limited_peer_find_blocks_requires_recent_tip_locator() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    let tip_hash = block::Hash([42; 32]);
+
+    runtime.block_on(async {
+        for (estimated_lag, locator_is_tip, expected_route) in [
+            (0, true, true),
+            (1_152, true, true),
+            (0, false, false),
+            (1_153, true, false),
+            (-1_152, true, true),
+            (-1_153, true, false),
+        ] {
+            let (mut peer_set, _guard, _, mut handles, best_tip) =
+                peer_set_with_services(&[PeerServices::NODE_NETWORK_LIMITED]);
+            best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
+            best_tip.send_best_tip_hash(Some(tip_hash));
+            best_tip.send_estimated_distance_to_network_chain_tip(estimated_lag);
+            let request = Request::FindBlocks {
+                known_blocks: vec![if locator_is_tip {
+                    tip_hash
+                } else {
+                    block::Hash([43; 32])
+                }],
+                stop: None,
+            };
+            if expected_route {
+                respond_to_request(
+                    &mut peer_set,
+                    &mut handles[0],
+                    request,
+                    Ok(Response::BlockHashes(vec![])),
+                )
+                .await
+                .expect("limited peer can discover a tip extension");
+            } else {
+                let response = peer_set.ready().await.unwrap().call(request);
+                assert!(
+                    handles[0]
+                        .try_to_receive_outbound_client_request()
+                        .request()
+                        .is_none(),
+                    "limited peer must not receive a historic or far-behind getblocks"
+                );
+                drop(response);
+            }
+        }
+    });
+}
+
+/// A block hash alone does not establish that it falls within the limited-service window.
+#[test]
+fn limited_peer_does_not_get_unknown_height_block_download() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    runtime.block_on(async {
+        let (mut peer_set, _guard, _, mut handles, best_tip) =
+            peer_set_with_services(&[PeerServices::NODE_NETWORK_LIMITED]);
+        best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
+        best_tip.send_estimated_distance_to_network_chain_tip(0);
+        let response = peer_set
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::BlockDownload {
+                hash: block::Hash([7; 32]),
+                advertiser: None,
+            });
+        assert!(
+            handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .is_none(),
+            "unknown-height block request must not reach a limited peer"
+        );
+        assert!(response.await.is_err(), "no eligible peer can answer");
+    });
+}
+
+/// A limited peer receives only the screened block it announced, inside both tip windows.
+#[test]
+fn limited_peer_block_download_requires_known_recent_height_and_current_advertiser() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    runtime.block_on(async {
+        for (height, lag, stale_advertiser, parent_recovery, expected_route) in [
+            (block::Height(2_497_696), 1_152, false, false, true),
+            (block::Height(2_497_695), 0, false, false, false),
+            (block::Height(2_499_999), 1_153, false, false, false),
+            (block::Height(2_500_001), 0, true, false, false),
+            (block::Height(2_500_001), 0, false, true, false),
+        ] {
+            let (mut peer_set, _guard, addrs, mut handles, best_tip) =
+                peer_set_with_services(&[PeerServices::NODE_NETWORK_LIMITED]);
+            best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
+            best_tip.send_estimated_distance_to_network_chain_tip(lag);
+            peer_set.ready().await.unwrap();
+            let advertiser = if stale_advertiser {
+                crate::test_support::connection_info(addrs[0])
+            } else {
+                peer_set.find_peer_queue[0].1.clone()
+            };
+            let hash = block::Hash([17; 32]);
+            let request = if parent_recovery {
+                Request::BlockDownload {
+                    hash,
+                    advertiser: Some(advertiser),
+                }
+            } else {
+                Request::BlockDownloadAtHeight {
+                    hash,
+                    height,
+                    advertiser: Some(advertiser),
+                }
+            };
+            if expected_route {
+                respond_to_request(
+                    &mut peer_set,
+                    &mut handles[0],
+                    request,
+                    Ok(Response::Blocks(vec![])),
+                )
+                .await
+                .unwrap();
+            } else {
+                let response = peer_set.call(request);
+                assert!(
+                    handles[0]
+                        .try_to_receive_outbound_client_request()
+                        .request()
+                        .is_none(),
+                    "a limited peer must not receive an ineligible block request"
+                );
+                assert!(response.await.is_err());
+            }
+        }
+    });
+}
+
+/// A queued compact download keeps its source preference deadline, then uses another peer.
+#[test]
+fn known_height_download_falls_back_after_advertiser_wait() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async {
+        let (mut peer_set, _guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+        let _busy = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+        let request = Request::BlockDownloadAtHeight {
+            hash: block::Hash([2; 32]),
+            height: block::Height(2_500_001),
+            advertiser: Some(peer_set.find_peer_queue[0].1.clone()),
+        };
+        let response = peer_set.ready().await.unwrap().call(request.clone());
+        assert_eq!(received_request(&mut handles[1]), None);
+
+        tokio::time::advance(
+            super::super::BLOCK_ADVERTISER_WAIT_TIMEOUT + Duration::from_millis(1),
+        )
+        .await;
+        peer_set.ready().await.unwrap();
+        let client_request = handles[1]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("expired source preference routes to another ready peer");
+        assert_eq!(client_request.request, request);
+        client_request.tx.send(Ok(Response::Nil)).unwrap();
+        assert_eq!(response.await.unwrap(), Response::Nil);
+    });
+}
+
 /// Sends an inventory change to the peer set.
 ///
 /// The test inventory channel only holds one change, so poll the peer set before sending the next

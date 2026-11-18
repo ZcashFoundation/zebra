@@ -333,6 +333,9 @@ pub const GET_ADDR_FANOUT: usize = 1;
 /// requests to many peers instead of just a few peers.)
 pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
 
+/// The minimum number of recent blocks a `NODE_NETWORK_LIMITED` peer must serve.
+pub const NODE_NETWORK_LIMITED_BLOCKS: u32 = 2_304;
+
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
 /// `addr`:

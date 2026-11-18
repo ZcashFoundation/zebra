@@ -14,9 +14,8 @@ body: >-
   Mainnet/Testnet or 1,001 on Regtest. Increasing retention affects future deletion only.
   Catch-up pruning compacts deleted bodies after clearing the backlog; normal compaction handles
   ongoing deletion.
-  Enabling pruning immediately adds the experimental `NODE_PRUNED` service bit (bit 25, as in
-  Zakura) to the advertised `NODE_NETWORK` service, so peers can still discover the node and
-  download recent blocks from it, and rejects zcashd sidecars.
+  Enabling pruning removes `NODE_NETWORK`, advertises `NODE_NETWORK_LIMITED` only after the
+  complete recent 2,304-block window is available, and rejects zcashd sidecars.
   Unavailable bodies return `notfound`; block inventory stops at missing history while headers
   remain available. Pruning retains a restart witness and waits without deleting bodies when
   a bounded search finds none; valid branchless suffixes do not stop the running node.

@@ -379,6 +379,25 @@ where
         hash: block::Hash,
         advertiser: Option<Arc<zn::ConnectionInfo>>,
     ) -> DownloadAction {
+        self.queue_download(hash, advertiser, None)
+    }
+
+    /// A compact header supplies a parent hash whose height we verify from local state.
+    pub(crate) fn download_and_verify_compact(
+        &mut self,
+        hash: block::Hash,
+        advertiser: Option<Arc<zn::ConnectionInfo>>,
+        parent_hash: block::Hash,
+    ) -> DownloadAction {
+        self.queue_download(hash, advertiser, Some(parent_hash))
+    }
+
+    fn queue_download(
+        &mut self,
+        hash: block::Hash,
+        advertiser: Option<Arc<zn::ConnectionInfo>>,
+        compact_parent: Option<block::Hash>,
+    ) -> DownloadAction {
         if self.submitted_blocks.get(&hash).is_some()
             || self
                 .early_blocks
@@ -425,9 +444,9 @@ where
             metrics::counter!("gossip.peer.limit.dropped.block.hash.count").increment(1);
             return DownloadAction::TooManyFromPeer;
         }
-        let Some(task) = self
-            .spawner
-            .spawn_download(&mut admission, hash, advertiser, None)
+        let Some(task) =
+            self.spawner
+                .spawn_download(&mut admission, hash, advertiser, compact_parent, None)
         else {
             debug!(
                 ?hash,
@@ -495,9 +514,13 @@ where
         {
             return;
         }
-        let Some(task) =
-            self.spawn_download(&mut admission, hash, advertiser, Some(Box::new(child_work)))
-        else {
+        let Some(task) = self.spawn_download(
+            &mut admission,
+            hash,
+            advertiser,
+            None,
+            Some(Box::new(child_work)),
+        ) else {
             return;
         };
         admission.parent_recoveries.insert(hash, source_ip);
@@ -510,6 +533,7 @@ where
         admission: &mut Admission,
         hash: block::Hash,
         advertiser: Option<Arc<zn::ConnectionInfo>>,
+        compact_parent: Option<block::Hash>,
         child_work: Option<Box<dyn FnOnce() -> bool + Send>>,
     ) -> Option<DownloadHandle> {
         let ownership = self.sync_downloads.claim(hash)?;
@@ -554,12 +578,39 @@ where
             }
             .map_err(|e| (e, None))?;
 
+            // Compact announcements can bypass header screening when throttled. Only the
+            // validated local parent header establishes height; an unknown parent leaves
+            // the download on archive peers.
+            let known_height = if let Some(parent) = compact_parent {
+                match timeout(
+                    PARENT_LOOKUP_TIMEOUT,
+                    state
+                        .clone()
+                        .oneshot(zs::Request::BlockHeader(parent.into())),
+                )
+                .await
+                {
+                    Ok(Ok(zs::Response::BlockHeader(Some(header)))) => header.height + 1,
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
             let download_start = Instant::now();
             let response = timeout(
                 zn::constants::REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
-                network.oneshot(zn::Request::BlockDownload {
-                    hash,
-                    advertiser: advertiser.clone(),
+                network.oneshot(if let Some(height) = known_height {
+                    zn::Request::BlockDownloadAtHeight {
+                        hash,
+                        height,
+                        advertiser: advertiser.clone(),
+                    }
+                } else {
+                    zn::Request::BlockDownload {
+                        hash,
+                        advertiser: advertiser.clone(),
+                    }
                 }),
             )
             .await

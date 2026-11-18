@@ -59,7 +59,9 @@ async fn connect_pruned_peer(network: &Network, address: std::net::SocketAddr) -
     .map_err(|_| eyre!("pruned-node handshake timed out"))?
     .map_err(|error| eyre!(error))?;
     let services = peer.connection_info.remote.services;
-    assert!(services.contains(PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED));
+    assert!(!services.intersects(
+        PeerServices::NODE_NETWORK | PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_PRUNED
+    ));
     assert!(!services.serves_full_history());
     Ok(peer)
 }
@@ -129,12 +131,7 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .map_err(|error| eyre!(error))?;
         assert_eq!(
             services["localservices"],
-            format!(
-                "{:016x}",
-                PeerServices::NODE_NETWORK
-                    | PeerServices::NODE_PRUNED
-                    | PeerServices::NODE_TREE_ROOTS
-            )
+            format!("{:016x}", PeerServices::NODE_TREE_ROOTS)
         );
 
         client.generate(1).await?;
@@ -176,12 +173,7 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .map_err(|error| eyre!(error))?;
         assert_eq!(
             services["localservices"],
-            format!(
-                "{:016x}",
-                PeerServices::NODE_NETWORK
-                    | PeerServices::NODE_PRUNED
-                    | PeerServices::NODE_TREE_ROOTS
-            )
+            format!("{:016x}", PeerServices::NODE_TREE_ROOTS)
         );
         let missing = peer_request(
             &mut peer,
@@ -389,6 +381,77 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .wait_with_output()?;
         output.stderr_line_matches(regex::escape(&expected.to_string()))?;
         output.assert_failure()?.assert_was_not_killed()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// A limited node refuses retained bodies outside its fixed serving window.
+#[tokio::test(flavor = "multi_thread")]
+async fn limited_service_does_not_reveal_retention_depth() -> Result<()> {
+    const TIP: u32 = zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS + 1;
+    const TEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.state.prune_blocks_older_than =
+            Some(zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS);
+        config.tracing.filter =
+            Some("warn,zebra_rpc::server=info,zebra_network::peer_set::initialize=info".to_owned());
+        let mut node = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?
+            .with_timeout(TEST_TIMEOUT)?;
+        let p2p_address =
+            read_listen_addr_from_logs(&mut node, "Opened Zcash protocol endpoint at ")?;
+        let rpc_address = read_listen_addr_from_logs(&mut node, OPENED_RPC_ENDPOINT_MSG)?;
+        let client = RpcRequestClient::new_with_timeout(rpc_address, TEST_TIMEOUT);
+        wait_for_mempool_activation(&client).await?;
+        let mut peer = connect_isolated_tcp_direct(&network, p2p_address, String::new())
+            .await
+            .map_err(|error| eyre!(error))?;
+        assert!(peer
+            .connection_info
+            .remote
+            .services
+            .contains(PeerServices::NODE_NETWORK_LIMITED));
+        client.generate(TIP).await?;
+
+        let genesis = client
+            .get_block(0)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("genesis remains in the pruned database");
+        let boundary = client
+            .get_block(1)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("the boundary block remains in the pruned database");
+        let missing = peer_request(
+            &mut peer,
+            PeerRequest::BlocksByHash(HashSet::from([genesis.hash()])),
+        )
+        .await
+        .expect_err("retained genesis is outside the limited-service window");
+        assert!(
+            missing.to_string().contains("NotFoundResponse"),
+            "{missing}"
+        );
+        assert!(matches!(
+            peer_request(&mut peer, PeerRequest::BlocksByHash(HashSet::from([boundary.hash()])))
+                .await?,
+            PeerResponse::Blocks(blocks)
+                if matches!(blocks.as_slice(), [InventoryResponse::Available((block, _))]
+                    if block.hash() == boundary.hash())
+        ));
         Ok(())
     })
     .await?

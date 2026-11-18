@@ -711,6 +711,16 @@ where
             (their_addr, our_services, advertise_addr)
         }
     };
+    if let Some(from) = config.limited_service_from {
+        our_services.set(
+            PeerServices::NODE_NETWORK_LIMITED,
+            !matches!(connected_addr, Isolated)
+                && minimum_peer_version
+                    .chain_tip()
+                    .best_tip_height()
+                    .is_some_and(|tip| tip >= from),
+        );
+    }
     our_services.set(
         PeerServices::NODE_COMPACT_BLOCKS,
         config.compact_block_relay && !matches!(connected_addr, Isolated),

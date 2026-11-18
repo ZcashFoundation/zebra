@@ -93,7 +93,7 @@ use tokio::{
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing::Instrument;
 
-use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_chain::{block::genesis::regtest_genesis_block, chain_tip::ChainTip};
 use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
 
@@ -275,15 +275,15 @@ impl StartCmd {
 
     /// Returns the services advertised to peers, and rejects sidecars, for the node's storage mode.
     ///
-    /// As soon as pruning is enabled or history is missing, the node keeps advertising
-    /// `NODE_NETWORK`, so peers can still discover, reconnect to, and download recent blocks from
-    /// it, and also advertises the experimental `NODE_PRUNED` flag (bit 25, matching Zakura), so
-    /// updated peers don't ask it for historic blocks while they sync. Archive nodes never
-    /// advertise `NODE_PRUNED`.
+    /// A pruned node with the complete recent window advertises `NODE_NETWORK_LIMITED`, never
+    /// `NODE_NETWORK` or `NODE_PRUNED`. Archive nodes advertise `NODE_NETWORK`.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
+        tip: Option<zebra_chain::block::Height>,
     ) -> Result<zebra_network::types::PeerServices, Report> {
+        use zebra_network::types::PeerServices;
+
         let mut services = config.network.local_services;
         let is_pruned = config.state.prune_blocks_older_than.is_some() || history.is_pruned();
         if is_pruned && config.zcashd_compat.enabled {
@@ -291,8 +291,53 @@ impl StartCmd {
                 "zcashd-compat requires an archive node; pruning is enabled or history is missing"
             ));
         }
-        services.set(zebra_network::types::PeerServices::NODE_PRUNED, is_pruned);
+        services.remove(
+            PeerServices::NODE_NETWORK
+                | PeerServices::NODE_NETWORK_LIMITED
+                | PeerServices::NODE_PRUNED,
+        );
+        if !is_pruned {
+            services.insert(PeerServices::NODE_NETWORK);
+        } else if config
+            .state
+            .prune_blocks_older_than
+            .is_some_and(|retention| {
+                retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+            })
+            && (history.lowest_retained_height == zebra_chain::block::Height::MIN
+                || tip.is_some_and(|tip| {
+                    history.lowest_retained_height.0
+                        <= tip
+                            .0
+                            .saturating_sub(zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS)
+                            .saturating_add(1)
+                }))
+        {
+            services.insert(PeerServices::NODE_NETWORK_LIMITED);
+        }
         Ok(services)
+    }
+
+    /// The first tip that holds all 2,304 promised blocks above a missing prefix.
+    pub(super) fn limited_service_from(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Option<zebra_chain::block::Height> {
+        if !history.is_pruned()
+            || !config
+                .state
+                .prune_blocks_older_than
+                .is_some_and(|retention| {
+                    retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+                })
+        {
+            return None;
+        }
+        history
+            .lowest_retained_height
+            .0
+            .checked_add(zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS - 1)
+            .map(zebra_chain::block::Height)
     }
 
     /// Starts the node, rejecting incompatible pruning settings before opening writable state.
@@ -321,7 +366,7 @@ impl StartCmd {
 
         // State initialization can prune immediately. Check the pruning config before starting
         // services; check persisted history separately once the state is open.
-        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default(), None)?;
         config.notify.validate()?;
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
@@ -431,7 +476,9 @@ impl StartCmd {
             unreachable!("state returns history capabilities for its capabilities request");
         };
         let mut network_config = config.network.clone();
-        network_config.local_services = Self::network_services(&config, history)?;
+        network_config.local_services =
+            Self::network_services(&config, history, latest_chain_tip.best_tip_height())?;
+        network_config.limited_service_from = Self::limited_service_from(&config, history);
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
@@ -478,6 +525,17 @@ impl StartCmd {
                     .with_compact_relay(
                         config.network.network.clone(),
                         read_only_state_service.clone(),
+                    )
+                    .with_limited_tip(
+                        network_config
+                            .local_services
+                            .contains(zebra_network::types::PeerServices::NODE_NETWORK_LIMITED)
+                            .then(|| latest_chain_tip.clone())
+                            .or_else(|| {
+                                network_config
+                                    .limited_service_from
+                                    .map(|_| latest_chain_tip.clone())
+                            }),
                     ),
             );
 

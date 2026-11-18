@@ -320,12 +320,13 @@ where
                         deadline: Instant::now() + constants::REQUEST_TIMEOUT,
                     });
                 }
+                let announcement = Request::AdvertiseCompactBlock(
+                    hash,
+                    advertiser,
+                    block.header.previous_block_hash,
+                );
                 if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
-                    if matches!(
-                        self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
-                            .await,
-                        Some(Response::Nil)
-                    ) {
+                    if matches!(self.compact_query(announcement).await, Some(Response::Nil)) {
                         if !completes_discovery {
                             self.compact.discovery = Some(Discovery {
                                 parent: block.header.previous_block_hash,
@@ -336,8 +337,9 @@ where
                         self.compact.received = Some((block, Instant::now() + RETENTION, permit));
                     }
                 } else {
-                    self.drive_peer_request(Request::AdvertiseBlock(hash, advertiser))
-                        .await;
+                    // A full-block download still needs the screened parent when compact slots
+                    // are full, so a limited miner can provide its newly announced block.
+                    let _ = self.compact_query(announcement).await;
                 }
                 if completes_discovery {
                     // Admission and the framed ping write can both wait. Recheck live eligibility
@@ -360,8 +362,12 @@ where
             }
         }
         // Reconstruction starts only after the downloader applies its global/per-IP admission.
-        self.drive_peer_request(Request::AdvertiseBlock(hash, advertiser))
-            .await;
+        self.drive_peer_request(Request::AdvertiseCompactBlock(
+            hash,
+            advertiser,
+            block.header.previous_block_hash,
+        ))
+        .await;
     }
 
     pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {

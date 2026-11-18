@@ -1414,7 +1414,7 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
-            (AwaitingRequest, BlockDownload { hash, .. }) => self.download_block(hash).await,
+            (AwaitingRequest, BlockDownload { hash, .. } | BlockDownloadAtHeight { hash, .. }) => self.download_block(hash).await,
             (AwaitingRequest, BlocksByHash(hashes)) if hashes.len() == 1 => {
                 let hash = *hashes.iter().next().expect("the set contains exactly one hash");
                 self.download_block(hash).await
@@ -1898,16 +1898,23 @@ where
                     self.handle_inbound_overload(req, now, PeerError::InboundTimeout)
                         .await;
                 } else {
-                    // We could send a reject to the remote peer, but that might cause
-                    // them to disconnect, and we might be using them to sync blocks.
-                    // For similar reasons, we don't want to fail_with() here - we
-                    // only close the connection if the peer is doing something wrong.
-                    info!(
-                        %e,
-                        connection_state = ?self.state,
-                        client_receiver = ?self.client_rx,
-                        "error processing peer request",
-                    );
+                    // Rejected compact announcements are a normal bounded admission outcome.
+                    // A peer can retry during its cooldown, so don't log the full connection
+                    // state at info level for each rejection.
+                    if matches!(&req, Request::AdvertiseCompactBlock(..)) {
+                        debug!(%e, "error processing compact advertisement");
+                    } else {
+                        // We could send a reject to the remote peer, but that might cause
+                        // them to disconnect, and we might be using them to sync blocks.
+                        // For similar reasons, we don't want to fail_with() here - we
+                        // only close the connection if the peer is doing something wrong.
+                        info!(
+                            %e,
+                            connection_state = ?self.state,
+                            client_receiver = ?self.client_rx,
+                            "error processing peer request",
+                        );
+                    }
                     self.update_state_metrics(Some(format_args!(
                         "In::Req::{}/Rsp::Error",
                         req.command()

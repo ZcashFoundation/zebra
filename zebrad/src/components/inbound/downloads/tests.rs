@@ -489,6 +489,37 @@ async fn early_relay_download_preserves_validation_and_source() {
     }
 }
 
+/// A compact announcement does not gain limited-peer eligibility without a locally known parent.
+#[tokio::test]
+async fn compact_unknown_parent_uses_plain_block_download() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, _verifier, mut state) = mock_downloads(Height(0));
+    let hash = block_1().hash();
+    let missing_parent = zebra_chain::block::Hash([9; 32]);
+    let advertiser = zn::test_support::connection_info(ADVERTISER.parse().unwrap());
+
+    assert!(matches!(
+        downloads.download_and_verify_compact(hash, Some(advertiser.clone()), missing_parent),
+        DownloadAction::AddedToQueue
+    ));
+    state
+        .expect_request(zs::Request::KnownBlock(hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    state
+        .expect_request(zs::Request::BlockHeader(missing_parent.into()))
+        .await
+        .respond(zs::Response::BlockHeader(None));
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
+        .await
+        .respond_error("the test ends after checking the fallback request".into());
+    assert!(downloads.next().await.unwrap().is_err());
+}
+
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
 fn block_1() -> Arc<Block> {
     zebra_test::vectors::BLOCK_MAINNET_1_BYTES
