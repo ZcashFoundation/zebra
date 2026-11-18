@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Handle the new `Request::RejectBlock` and `Response::Rejected` variants in exhaustive matches. Send `RejectBlock` only after authenticating deterministic verifier failures ([#12292](https://github.com/ZcashFoundation/zebra/pull/12292)).
+time: 2026-11-05T08:51:52.900158479+01:00

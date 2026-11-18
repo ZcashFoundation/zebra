@@ -745,12 +745,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])) by (le))",
-          "legendFormat": "p99",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])))",
+          "legendFormat": "{{ method }} p99",
           "refId": "A"
         }
       ],
-      "title": "RPC p99 Latency",
+      "title": "RPC p99 Latency by Method",
       "type": "stat"
     },
     {

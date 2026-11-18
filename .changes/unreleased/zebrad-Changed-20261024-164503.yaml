@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Apply top-level `--filters` when `start` is given explicitly, unless positional `start` filters are provided.
+time: 2026-10-24T16:45:03.26069222+02:00

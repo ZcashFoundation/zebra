@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Build with an unreleased orchard revision that derives the Orchard and Ironwood binding validating key from the public value balance in variable time, speeding up their signature verification. The revision is pinned by commit until the crate publishes it.
+time: 2026-11-18T02:55:51.23055613+01:00

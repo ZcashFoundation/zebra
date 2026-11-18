@@ -1944,7 +1944,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
+source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1968,7 +1968,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
-source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
+source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
 dependencies = [
  "bitvec",
  "ff",
@@ -1979,7 +1979,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.1"
-source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
+source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3568,8 +3568,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae7ceb7b5387bd76cf3c0712f57708795c925cecf097036cedb60b5c3706e8f"
+source = "git+https://github.com/upbqdn/orchard?rev=de4537bfc59b8fc204b95000f52f4d38bd29b2db#de4537bfc59b8fc204b95000f52f4d38bd29b2db"
 dependencies = [
  "aes",
  "bitvec",
@@ -3590,6 +3589,7 @@ dependencies = [
  "pasta_curves",
  "rand 0.10.2",
  "rand_core 0.10.1",
+ "rayon",
  "reddsa",
  "serde",
  "sinsemilla",
@@ -3687,7 +3687,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.3"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=95df6839da3dd8e5588bb547f63ac26575f1037e#95df6839da3dd8e5588bb547f63ac26575f1037e"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=67d1040a18798101541c66f8a012b57e770e3d44#67d1040a18798101541c66f8a012b57e770e3d44"
 dependencies = [
  "blake2b_simd",
  "cpufeatures 0.3.1",
@@ -4373,7 +4373,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "git+https://github.com/ZcashFoundation/reddsa?rev=8be350c737225b2f3c6e0f34e2a118cecec1768b#8be350c737225b2f3c6e0f34e2a118cecec1768b"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=9d272a0f08def464067673cf92edbe1a0d01986e#9d272a0f08def464067673cf92edbe1a0d01986e"
 dependencies = [
  "blake2b_simd",
  "byteorder",

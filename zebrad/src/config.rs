@@ -48,7 +48,7 @@ fn is_sensitive_leaf_key(leaf_key: &str) -> bool {
 /// | -------- | ------------------------------------- | ---------------------------------------------- |
 /// | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
 /// | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
-/// | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
+/// | Windows  | `{FOLDERID_LocalAppData}`             | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
 #[derive(Clone, Default, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZebradConfig {
@@ -107,6 +107,9 @@ impl ZebradConfig {
     /// - `KEY` is the configuration key within that section
     /// - Double underscores (`__`) separate nested keys
     ///
+    /// Variables with the `ZEBRA_TARGET_` prefix are reserved for `copy-state` target overrides
+    /// and are ignored here.
+    ///
     /// # Security
     ///
     /// Environment variables whose leaf key names end with sensitive suffixes (case-insensitive)
@@ -128,6 +131,8 @@ impl ZebradConfig {
     /// the `copy-state` command) to keep overrides separate. For example:
     /// - Source/base config uses `ZEBRA_...` env vars (default prefix)
     /// - Target config uses `ZEBRA_TARGET_...` env vars
+    ///
+    /// The `ZEBRA` prefix excludes `ZEBRA_TARGET_` variables before checking for sensitive keys.
     ///
     /// The nested key separator remains `__`, e.g., `ZEBRA_TARGET_STATE__CACHE_DIR`.
     pub fn load_with_env(
@@ -154,6 +159,10 @@ impl ZebradConfig {
         let mut filtered_env: HashMap<String, String> = HashMap::new();
         let required_prefix = format!("{}_", env_prefix);
         for (key, value) in std::env::vars() {
+            if env_prefix == "ZEBRA" && key.starts_with("ZEBRA_TARGET_") {
+                continue;
+            }
+
             if let Some(without_prefix) = key.strip_prefix(&required_prefix) {
                 // Check for sensitive keys on the stripped key.
                 let parts: Vec<&str> = without_prefix.split("__").collect();

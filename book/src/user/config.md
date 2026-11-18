@@ -104,13 +104,12 @@ from modification by other users.
 - Zebra rejects leaf keys ending in `password`, `secret`, `token`, `cookie`,
   or `private_key`, ignoring case, even for unknown fields. Store these values
   in the file. Path fields such as `cookie_dir` are not rejected.
-- Do not export `ZEBRA_TARGET_` variables for `copy-state`. Its target loader
-  uses this prefix with `--target-config-path`, but Zebra 7.0.0's base loader
-  also reads it through `ZEBRA_`: `ZEBRA_TARGET_STATE__CACHE_DIR` creates the
-  unknown root key `target_state` and fails loading before the copy starts.
-  Put target settings in the `--target-config-path` file. Only its `[state]`
-  settings are used, although the whole file is deserialized. Without that
-  option, the target uses an ephemeral state configuration.
+- For `copy-state`, use `ZEBRA_TARGET_` variables with `--target-config-path`
+  to override target settings, for example
+  `ZEBRA_TARGET_STATE__CACHE_DIR=/srv/zebra-target`. The source/base loader
+  ignores this prefix. Only the target's `[state]` settings are used, although
+  the whole file is deserialized. Without `--target-config-path`, the target
+  uses an ephemeral state configuration and ignores target overrides.
 
 | Environment variable | TOML setting |
 | --- | --- |
@@ -147,6 +146,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `initial_mainnet_peers` | Array of address strings | Mainnet seed list below | Initial Mainnet peers; each IP address or DNS name must include a port. Duplicate strings are removed while preserving order. |
 | `initial_testnet_peers` | Array of address strings | Testnet seed list below | Initial Testnet peers. Regtest removes public seed names and retains only resolved loopback addresses. |
 | `persistent_peers` | Array of `host:port` strings | `[]` | Operator-selected peers kept connected independently of ordinary peer demand; see [selected peers](run.md#maintaining-connections-to-selected-peers). IPv6 literals need brackets. Each target reserves one outbound slot and must leave at least one for ordinary peers. Regtest connects only to localhost targets. |
+| `compact_block_relay` | Boolean | `true` | Negotiate compact blocks and early block relay with peers that also enable it; see [compact block relay](mining.md#compact-block-relay). Every block is still fully verified, and other peers keep ordinary relay. |
 | `cache_dir` | Boolean or path string | `true` | Use the default cache directory when `true`, disable the peer disk cache when `false`, or use the supplied directory. Independent of `[state] cache_dir`. |
 | `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Near the network tip, at most this many ordinary outbound connections (persistent peers excluded) go to peers that don't serve historic blocks. Zero produces a warning and becomes `25`. |
 | `crawl_new_peer_interval` | Duration string | `"1m 1s"` | Interval between routine peer-address crawls. Zebra also crawls when all peers are busy and no connection candidates remain. The old key `new_peer_interval` is an accepted alias. |
@@ -224,21 +224,21 @@ These fields also apply under `[network.network]` for configured Testnet or
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `network_name` | Optional string | Absent; configured name `"UnknownTestnet"` | Custom Testnet name, at most 30 UTF-8 bytes, containing only alphanumeric characters or `_`. Case-insensitive reserved names are `Mainnet`, `Testnet`, `Regtest`, `MainnetKind`, `TestnetKind`, and `RegtestKind`. Unchanged public parameters can retain the canonical name `Testnet`. Ignored on Regtest, whose name is `Regtest`. |
-| `network_magic` | Optional array of four `u8` integers | Absent; `[250, 26, 249, 191]` on Testnet | P2P wire identifier. Mainnet `[36, 233, 39, 100]` and Regtest `[170, 232, 63, 95]` magic values are reserved. Ignored on Regtest. |
-| `slow_start_interval` | Optional block height | Absent; `20000` on Testnet | Subsidy slow-start interval in blocks; the slow-start shift is half this value. Ignored on Regtest, which uses `0`. |
-| `target_difficulty_limit` | Optional hexadecimal unsigned 256-bit integer string | Absent; compact-rounded `2^251 - 1` on Testnet | Maximum expanded proof-of-work target, not a fixed target for every block. Compact conversion can discard low-order precision; invalid or zero values fail startup. Ignored on Regtest, which uses the compact-rounded 256-bit value consisting of 32 `0x0f` bytes. |
-| `disable_pow` | Optional boolean | Absent; `false` on Testnet | Disable proof-of-work checks for an isolated test network. Ignored on Regtest, which always disables those checks. |
-| `genesis_hash` | Optional 64-digit hexadecimal string | Absent; `05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38` | Testnet genesis block hash. Ignored on Regtest, which uses `029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327`. |
+| `network_magic` | Optional array of four `u8` integers | Absent; `[250, 26, 249, 191]` on Testnet | P2P wire identifier. Mainnet `[36, 233, 39, 100]` and Regtest `[170, 232, 63, 95]` magic values are reserved. On Regtest, only `[170, 232, 63, 95]` is accepted. |
+| `slow_start_interval` | Optional block height | Absent; `20000` on Testnet | Subsidy slow-start interval in blocks; the slow-start shift is half this value. On Regtest, only `0` is accepted. |
+| `target_difficulty_limit` | Optional hexadecimal unsigned 256-bit integer string | Absent; compact-rounded `2^251 - 1` on Testnet | Maximum expanded proof-of-work target, not a fixed target for every block. Compact conversion can discard low-order precision; invalid or zero values fail startup. On Regtest, only the compact-rounded 256-bit value consisting of 32 `0x0f` bytes is accepted. |
+| `disable_pow` | Optional boolean | Absent; `false` on Testnet | Disable proof-of-work checks for an isolated test network. On Regtest, only `true` is accepted. |
+| `genesis_hash` | Optional 64-digit hexadecimal string | Absent; `05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38` | Testnet genesis block hash. On Regtest, only `029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327` is accepted. |
 | `activation_heights` | Optional table | Absent; public Testnet schedule below | Replace the activation schedule, not individual public-network defaults. Without overrides, Regtest activates through Canopy at height `1`; later upgrades remain inactive. |
 | `nsm_reissuance_height` | Optional block height | Absent | Override the calculated first [Network Sustainability Mechanism (NSM)](https://zips.z.cash/zip-0237) reissuance height. Must be nonzero and within the height range. Without an override, Zebra calculates the ZIP 237 scheduled-issuance crossover; a custom schedule can have no crossover. |
 | `pre_nu6_funding_streams` | Optional funding-stream table | Absent | Legacy funding-stream group prepended before the current list. Missing group fields inherit the first public Testnet group. |
 | `post_nu6_funding_streams` | Optional funding-stream table | Absent | Legacy group inserted after the pre-NU6 legacy group and before the current list. Missing group fields inherit the second public Testnet group. |
 | `funding_streams` | Optional array of funding-stream tables | Absent; public Testnet groups below, or `[]` on Regtest | Replace the funding-stream list. An explicit `[]` disables streams. |
-| `pre_blossom_halving_interval` | Optional `u32` | Absent; `840000` on Testnet | Pre-Blossom halving interval in blocks, in `1..=2147483647`. Later intervals are derived. Ignored on Regtest, which uses `144` before Blossom, `288` after Blossom, and `864` after NU7. |
+| `pre_blossom_halving_interval` | Optional `u32` | Absent; `840000` on Testnet | Pre-Blossom halving interval in blocks, in `1..=2147483647`. Later intervals are derived. On Regtest, only `144` is accepted, giving `288` after Blossom and `864` after NU7. |
 | `lockbox_disbursements` | Optional array of disbursement tables | Absent; ten public Testnet outputs below, or `[]` on Regtest | Expected one-time lockbox outputs at NU6.1 activation. An explicit `[]` removes them. |
 | `checkpoints` | Boolean, path string, or array of `[height, hash]` pairs | `false` in a parameter table | With `false`, use only the configured genesis checkpoint; with `true`, use the public Testnet checkpoint list. Strings are file paths, not a `"default"` selector. An array supplies the list directly. Plain `network = "Testnet"` without a parameter table uses the full public list instead. Regtest defaults to genesis only. |
 | `extend_funding_stream_addresses_as_required` | Optional boolean | Absent; no extension | When `true`, repeat configured funding-stream address sequences to cover their required address periods. |
-| `temporary_orchard_disabling_soft_fork_height` | Optional block height | Absent; `4048500` on Testnet | Override the start height of the temporary Orchard-action restriction, which ends at NU6.2 activation. Omission does not disable it, and there is no TOML disabling switch. Ignored on Regtest, where the restriction is disabled. |
+| `temporary_orchard_disabling_soft_fork_height` | Optional block height | Absent; `4048500` on Testnet | Override the start height of the temporary Orchard-action restriction, which ends at NU6.2 activation. Omission does not disable it on Testnet, and there is no TOML disabling switch. Rejected on Regtest, where the restriction is disabled. |
 | `should_allow_unshielded_coinbase_spends` | Optional boolean | Absent; `true` on Regtest | Regtest-only permission for transactions spending coinbase outputs to have transparent outputs. Zebra rejects this field on configured Testnet, even when set to `false`. |
 | `initial_nsm_value_balance` | Optional integer amount | Absent; `55768414957` zatoshis with public Testnet magic, otherwise `0` | NSM reserve seeded at NU7. Explicit values must be between `0` and `2100000000000000` zatoshis. Regtest defaults to `0`. |
 
@@ -302,6 +302,11 @@ Each supplied recipient has these fields:
 | `numerator` | `u64` | Required | Share of the block subsidy over a fixed denominator of `100`. |
 | `addresses` | Optional array of strings | Absent; empty address sequence | Transparent funding addresses in period order. Deferred recipients do not require addresses. Non-deferred recipients use P2PKH or P2SH addresses, not `tex` addresses. |
 
+On Testnet and Regtest, Zebra rejects invalid ranges, missing defaults,
+numerator totals above `100`, and malformed addresses during loading.
+Non-deferred recipients need Testnet addresses covering every address period.
+Extension can repeat a nonempty list but cannot fill a required empty list.
+
 The three public Testnet groups are, in order:
 
 | Height range, end exclusive | Receiver shares | Address defaults |
@@ -318,6 +323,10 @@ Each `lockbox_disbursements` element has these fields:
 | --- | --- | --- | --- |
 | `address` | String | Required | Transparent address receiving the specified one-time disbursement. |
 | `amount` | Integer amount | Required | Output value in zatoshis, from `0` through `2100000000000000`. |
+
+Zebra validates lockbox addresses during loading: they must be P2PKH or P2SH,
+not `tex`. The sum of all disbursements must not exceed `2100000000000000`
+zatoshis.
 
 The default Testnet list contains ten identical outputs, each paying
 `787500000000` zatoshis to `t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8`.
@@ -337,7 +346,8 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
-| `prune_blocks_older_than` | Optional `u32` | Absent | Retain this many recent finalized block bodies and delete older transaction bodies; omission keeps an archive. The minimum is `10000` on Mainnet and Testnet, or `1001` on Regtest; zero is invalid. Genesis and non-finalized blocks are always retained. Deleted bodies are never restored, and enabling pruning adds the experimental `NODE_PRUNED` service bit to the advertised `NODE_NETWORK` service. Existing archives must be moved to the pruned state directory while stopped before enabling it. See [Pruned Mining Nodes](pruning.md). |
+| `prune_blocks_older_than` | Optional `u32` | Absent | Retain this many recent finalized block bodies and delete older transaction bodies; omission keeps an archive. The minimum is `10000` on Mainnet and Testnet, or `1001` on Regtest; zero is invalid. Genesis and non-finalized blocks are always retained. Deleted bodies are never restored, and enabling pruning adds the experimental `NODE_PRUNED` service bit to the advertised `NODE_NETWORK` service. Existing archives must be moved to the pruned state directory while stopped before enabling it. See [Pruned mining nodes](pruning.md). |
+| `fast_tree_sync` | Boolean | `false` | Experimental fast checkpoint sync: take note commitment tree roots from peers advertising `NODE_TREE_ROOTS` instead of computing the Sapling, Orchard, and Ironwood trees, up to the trees embedded in Zebra. Starts once peers at 3 distinct IP addresses supply roots and must then finish even if disabled. Fast-synced heights have no historical trees, so do not enable it on nodes that serve wallets or direct database readers; see [fast-synced DB 29.1 compatibility](../dev/state-db-upgrades.md#fast-synced-db-291-compatibility). |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
 | `debug_validity_check_interval` | Optional duration string | Absent | Run additional periodic state-validity checks. Without it, normal format checks still run at startup and shutdown. |
 | `debug_skip_non_finalized_state_backup_task` | Boolean | `false` | Developer option: replace the periodic backup task with synchronous writes before non-finalized-state and chain-tip updates. Does not disable restoring backups or override `ephemeral`/backup disabling. |
@@ -503,6 +513,7 @@ Rust API: [`zebrad::components::notify::Config`](https://docs.rs/zebrad/latest/z
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `block_notify_command` | Optional string | Absent | Shell command launched after a best-chain tip change when Zebra is close to the network tip. Every `%s` becomes the new tip's 64-digit hexadecimal block hash. |
+| `zmqpubhashblock` | Optional string | Absent | ZMQ publisher endpoint for best-chain tip hashes, equivalent to zcashd's `-zmqpubhashblock`, such as `"tcp://127.0.0.1:28332"`. Requires the `zmq` [Cargo feature](install.md#cargo-features); configuring it without the feature fails startup. See [ZMQ block notifications](mining.md#zmq-block-notifications). |
 
 Zebra executes the command through `/bin/sh -c` on Unix or `cmd /C` on Windows,
 with the node process's privileges. Standard input, output, and error are

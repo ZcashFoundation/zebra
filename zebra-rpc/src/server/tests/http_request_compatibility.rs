@@ -615,9 +615,11 @@ proptest! {
     #[test]
     fn pass_through_requests_read_like_re_encoded_ones(body in any_request_body()) {
         if is_canonical_json_rpc_2_request(&body) {
-            let request: JsonRpcRequest<'_> =
-                serde_json::from_slice(&body).expect("canonical requests are valid requests");
-            let re_encoded = serde_json::to_vec(&request.into_2()).expect("serializable");
+            // Decode and re-encode, as the slow path does: re-encoding `JsonRpcRequest` would copy
+            // its raw params and id byte for byte, so the comparison could never fail.
+            let decoded: Value =
+                serde_json::from_slice(&body).expect("canonical requests are valid JSON");
+            let re_encoded = serde_json::to_vec(&decoded).expect("serializable");
             prop_assert_eq!(jsonrpsee_reads(&body), jsonrpsee_reads(&re_encoded));
             prop_assert!(jsonrpsee_reads(&body).is_some(), "jsonrpsee reads every canonical call");
         }

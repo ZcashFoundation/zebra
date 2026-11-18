@@ -147,7 +147,7 @@ this is not a guarantee that every failure matches `zcashd` byte for byte.
 
 ## Methods
 
-Zebra registers the following 41 JSON-RPC method names. The
+Zebra registers the following 42 JSON-RPC method names. The
 [RPC trait and implementation](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/methods.rs)
 define their parameters and results. The `rpc.discover` method returns an
 OpenRPC 1.3.2 document with machine-readable method and type schemas.
@@ -174,10 +174,11 @@ OpenRPC 1.3.2 document with machine-readable method and type schemas.
 | `getblockheader` | Returns a block header by hash or height as hexadecimal data or a structured response. |
 | `getdifficulty` | Returns proof-of-work difficulty relative to the minimum difficulty. |
 | `gettxout` | Returns an unspent transparent output, optionally accounting for the mempool. |
-| `z_gettreestate` | Returns Sapling, Orchard, and Ironwood shielded tree state at a block, according to pool activation. |
+| `z_gettreestate` | Returns Sapling, Orchard, and Ironwood shielded tree state at a block, according to pool activation. Returns an error at heights committed by [fast tree sync](config.md#state). |
 | `z_getsubtreesbyindex` | Returns indexed subtree roots and completion heights for Sapling, Orchard, or Ironwood. |
 | `invalidateblock` | Invalidates a block in non-finalized state; cannot invalidate finalized blocks. |
 | `reconsiderblock` | Reconsiders a cached invalidated block and returns the reconsidered block hashes. |
+| `preciousblock` | Prefers a non-finalized chain tip over competing tips with equal cumulative work until that tip is extended or forked; the preference is not kept across restarts. Returns null, or `Block not found` for an unknown hash. |
 
 ### Transactions and mempool
 

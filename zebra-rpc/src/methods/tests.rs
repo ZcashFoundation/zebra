@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
+mod book;
 mod first_template;
 mod prop;
 mod proposal;

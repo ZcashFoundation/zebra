@@ -10,6 +10,7 @@ mod commit_phases;
 mod dense_chain;
 mod prop;
 mod rejections;
+mod shared_snapshot;
 mod tree_first;
 mod tree_first_gate;
 mod vectors;
@@ -67,10 +68,9 @@ impl super::NonFinalizedState {
             db.finalized_value_pool(),
         );
         chain.height_by_hash.insert(hash, height);
-        chain.blocks.insert(
-            height,
-            std::sync::Arc::new(parent.prepare().test_with_zero_chain_pool_change()),
-        );
+        let block = parent.prepare().test_with_zero_chain_pool_change();
+        chain.index_entry_total += chain.block_index_entry_count(&block);
+        chain.blocks.insert(height, std::sync::Arc::new(block));
         self.chain_set.clear();
         self.chain_set.insert(std::sync::Arc::new(chain));
     }

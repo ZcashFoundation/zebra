@@ -266,7 +266,7 @@ Cargo feature resolution. See [Arti support](https://github.com/ZcashFoundation/
 
 Cargo features select code at build time; configuration selects runtime
 behavior. The table covers every explicit feature in
-[`zebrad/Cargo.toml`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/Cargo.toml#L64-L156).
+[`zebrad/Cargo.toml`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/Cargo.toml#L64-L159).
 “Default” includes features enabled transitively by `default`.
 Mining RPCs require no optional Cargo feature; `internal-miner` adds the
 built-in solver, not the mining API.
@@ -274,7 +274,7 @@ built-in solver, not the mining API.
 | Feature | Default | Purpose | Runtime prerequisites or configuration |
 | --- | --- | --- | --- |
 | `default` | Yes | Production feature selector; enables `default-release-binaries`. | Each included component retains its own runtime activation requirements. |
-| `default-release-binaries` | Yes | Production bundle: `release_max_level_info`, `progress-bar`, `prometheus`, `sentry`, and `opentelemetry`. | The archive workflow explicitly selects this bundle. |
+| `default-release-binaries` | Yes | Production bundle: `release_max_level_info`, `progress-bar`, `prometheus`, `sentry`, `opentelemetry`, and `pasta-asm`. | The archive workflow explicitly selects this bundle. |
 | `indexer` | No | Production integration: adds state indexes mapping spent outputs and revealed nullifiers to spending transactions. | No runtime switch; opening a populated state adds the indexes. A build without the feature removes them. The indexer gRPC listener is separate and uses `[rpc] indexer_listen_addr` without requiring this feature. |
 | `zmq` | No | Mining integration: publishes zcashd-compatible ZMQ `hashblock` notifications with a pure-Rust publisher; no system ZMQ library is needed. | Set `[notify] zmqpubhashblock`; see [ZMQ block notifications](mining.md#zmq-block-notifications). Configuring the endpoint without this feature is a startup error. |
 | `internal-miner` | No | Experimental CPU Equihash miner; runs one solver and checks the target difficulty. | Set `[mining] miner_address` and `internal_miner = true`; see [internal miner setup](regtest.md#using-zebras-internal-miner). Use generation RPCs, not this solver, for deterministic Regtest block production. |
@@ -284,6 +284,7 @@ built-in solver, not the mining API.
 | `opentelemetry` | Yes | Production observability: exports traces using OpenTelemetry. | Set `[tracing] opentelemetry_endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP collector; see [trace export](tracing.md#opentelemetry-export). |
 | `progress-bar` | Yes | Operator display: renders synchronization, mempool, and network progress. | Set `[tracing] progress_bar` to `"summary"` or `"detailed"`. Zebra redirects logs to a file when progress display is active. |
 | `prometheus` | Yes | Production monitoring: exposes Prometheus metrics. | Set `[metrics] endpoint_addr`; see [metrics](metrics.md). No listener is enabled by default. |
+| `pasta-asm` | Yes | Performance: Pasta field arithmetic in assembly on AArch64, and on non-Apple 64-bit x86_64 CPUs with BMI2 and ADX selected at runtime. | No configuration; other CPUs and targets fall back to portable arithmetic, and startup logs the selected backend. See [Pasta assembly](mining.md#pasta-assembly). |
 | `error-debug` | No | Debugging: enables error caller tracking and span-trace capture through `color-eyre`. | No Zebra configuration switch; error reporting uses the configured tracing context. |
 | `release_max_level_warn` | No | Production log-volume control: removes tracing levels more verbose than `warn` in release builds. | Runtime filters can select only levels retained by the build. |
 | `release_max_level_info` | Yes | Production logging: removes `debug` and `trace` calls from both `tracing` and `log` in release builds. | Runtime filters cannot enable debug or trace output in the default release binary. |

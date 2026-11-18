@@ -28,6 +28,7 @@ use zebra_chain::{
 use crate::{
     block::{Request, SemanticBlockVerifier, VerifyBlockError},
     error::{BlockError, TransactionError},
+    primitives::halo2::tests::{with_value_balance_plus_one, with_wrong_binding_signature},
     transaction::BlockTxVerifier,
     BoxError,
 };
@@ -212,7 +213,8 @@ fn ironwood_transaction(nu: NetworkUpgrade, bundle: Bundle<Authorized, ZatBalanc
 }
 
 /// Generate a real one-action Ironwood proof once, then sign it for both sides of NU7.
-/// The invalid cases change only the branch/signatures or proof, never its canonical size.
+/// The invalid cases change only the branch, signatures, proof, or value balance, never the proof's
+/// canonical size.
 #[test]
 fn nu7_semantic_block_ironwood_proof_and_signatures() {
     let _init_guard = zebra_test::init();
@@ -321,7 +323,7 @@ fn nu7_semantic_block_ironwood_proof_and_signatures() {
             "unexpected result: {result:?}"
         );
 
-        let corrupt = bundle.map_authorization(
+        let corrupt = bundle.clone().map_authorization(
             &mut (),
             |_, _, signature| signature,
             |_, authorization| {
@@ -344,5 +346,24 @@ fn nu7_semantic_block_ironwood_proof_and_signatures() {
             ),
             "unexpected result: {result:?}"
         );
+
+        // A binding signature that no longer matches the bundle is rejected the same way.
+        for tampered in [
+            with_wrong_binding_signature(bundle.clone()),
+            with_value_balance_plus_one(bundle),
+        ] {
+            let tampered_tx = ironwood_transaction(NetworkUpgrade::Nu7, tampered);
+            let result = verify(&network, block_at(&network, ACTIVATION, tampered_tx)).await;
+            assert!(
+                matches!(
+                    result,
+                    Err(VerifyBlockError::Transaction(
+                        TransactionError::Halo2VerificationFailed
+                    ))
+                ),
+                "unexpected result: {result:?}"
+            );
+            assert_eq!(result.unwrap_err().misbehavior_score(), 100);
+        }
     });
 }

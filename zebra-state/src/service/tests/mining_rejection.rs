@@ -473,8 +473,13 @@ async fn side_fork_child_authenticates_and_remembers_rejection() {
             panic!("a parent retained on a side fork authenticates its child");
         };
         guard.reject();
+        // Keep the state service alive: dropping it stops the block writer, which closes the
+        // snapshot channel, and authentication then fails closed with `None`.
         let Response::EarlyRelay(Some(replay)) = state
-            .oneshot(Request::EarlyRelay {
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::EarlyRelay {
                 block: child,
                 require_authentication: true,
                 origin: crate::EarlyRelayOrigin::Peer,

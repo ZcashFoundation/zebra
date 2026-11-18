@@ -2417,8 +2417,8 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
 }
 
 /// A non-coinbase V4/V5/V6 transaction with an expiry height in the out-of-range wire band
-/// [2^31, 2^32 - 1] is rejected: `expiry_height()` maps these values to `None`, so the check
-/// must read the raw wire value instead of treating them as "no expiry".
+/// [2^31, 2^32 - 1] is rejected. `expiry_height()` preserves these nonzero raw values rather
+/// than treating them as "no expiry".
 #[tokio::test]
 async fn transaction_with_out_of_range_expiry_height() {
     let network = Network::Mainnet;
@@ -5816,6 +5816,48 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
         matches!(*tx_err, TransactionError::Halo2VerificationFailed),
         "expected Halo2VerificationFailed for garbage Orchard proofs; got: {tx_err:?}"
     );
+}
+
+/// A real Orchard transaction whose binding signature no longer matches it, because the signature
+/// was corrupted or the value balance was changed after signing, is rejected like any other
+/// invalid Halo2 bundle.
+///
+/// It runs on [`zebra_test::MULTI_THREADED_RUNTIME`] because it reaches a global verifier.
+#[test]
+fn orchard_binding_mismatch_is_rejected() {
+    use crate::primitives::halo2::tests::with_wrong_binding_signature;
+
+    let _init_guard = zebra_test::init();
+
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let tx = cacheable_mainnet_orchard_transaction();
+        let height = tx
+            .expiry_height()
+            .expect("a V5 transaction has an expiry height");
+        let bundle = tx
+            .orchard_bundle()
+            .expect("the transaction was selected for having an Orchard bundle")
+            .clone();
+        let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+        let mut verifier = BlockTxVerifier::new(&Network::Mainnet, state);
+
+        for tampered in [
+            tx.clone()
+                .with_orchard_bundle(Some(with_wrong_binding_signature(bundle.clone()))),
+            with_orchard_value_balance(tx.clone(), i64::from(*bundle.value_balance()) + 1),
+        ] {
+            let error = verifier
+                .ready()
+                .await
+                .expect("the block verifier must become ready")
+                .call(cache_test_block_request(&tampered, height))
+                .await
+                .expect_err("a binding signature mismatch must be rejected");
+
+            assert_eq!(error, TransactionError::Halo2VerificationFailed);
+            assert_eq!(error.mempool_misbehavior_score(), 100);
+        }
+    });
 }
 
 /// Regression test for the mempool-cache expiry bypass vulnerability.

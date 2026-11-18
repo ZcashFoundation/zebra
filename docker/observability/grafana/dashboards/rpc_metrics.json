@@ -275,12 +275,12 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])) by (le))",
-          "legendFormat": "p99 Latency",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])))",
+          "legendFormat": "{{ method }} p99",
           "refId": "A"
         }
       ],
-      "title": "p99 Latency (5m)",
+      "title": "p99 Latency by Method",
       "type": "stat"
     },
     {
@@ -449,7 +449,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.5, sum by (le, method) (rate(rpc_request_duration_seconds_bucket[5m])))",
           "legendFormat": "{{ method }} p50",
           "refId": "A"
         },
@@ -458,7 +458,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(rpc_request_duration_seconds_bucket[5m])))",
           "legendFormat": "{{ method }} p95",
           "refId": "B"
         },
@@ -467,7 +467,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(rpc_request_duration_seconds_bucket[5m])))",
           "legendFormat": "{{ method }} p99",
           "refId": "C"
         }
@@ -753,7 +753,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.5, sum by (le, method) (rate(rpc_request_duration_seconds_bucket[5m])))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -764,7 +764,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(rpc_request_duration_seconds_bucket[5m])))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
