@@ -170,7 +170,7 @@ queries can group nodes by the commit they run.
 | Metric | Unit | Labels | Description |
 |---|---|---|---|
 | `zebra.consensus.block.phase.duration_seconds` | seconds | `phase` | Time each phase of full block verification took: `block_checks`, `transaction_verification`, or `state_commit`. Recorded for blocks from sync, gossip, and `submitblock`, but not for block proposals. `block_checks` and `transaction_verification` are recorded when they pass, even if a later phase rejects the block. `state_commit` is recorded only for committed blocks, and includes any wait for the parent block. |
-| `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a checkpoint-verified block took, from loading the history tree to the RocksDB write. The phases start with `checkpoint_`. |
+| `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a block took. Checkpoint-verified blocks record phases that start with `checkpoint_`, from loading the history tree to the RocksDB write. [Block writer metrics](#block-writer-metrics) describes the phases of other blocks. |
 | `zebra.net.block.decode.wait_seconds` | seconds | | Time a received block message waited for a rayon thread to start decoding it. |
 | `zebra.net.block.decode.duration_seconds` | seconds | | Time taken to decode a received block message, including that wait. |
 | `gossip.block.download.duration_seconds` | seconds | | Time taken to download a gossiped block from a peer. |
@@ -235,7 +235,7 @@ non-finalized state.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `state.block_writer.phase.duration_seconds` | Summary | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
+| `state.block_writer.phase.duration_seconds` | Histogram | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
 
 | `phase` | Measures |
 | --- | --- |
@@ -321,15 +321,15 @@ metrics in Prometheus or [Sentry](tracing.md#sentry-production-monitoring).
 
 Prometheus replaces dots in metric names with underscores. The RPC dashboard includes mining
 outcomes and mean build and announcement durations.
-Zebra exports duration metrics as Prometheus summaries, with quantiles plus `_sum` and `_count` series.
+Zebra exports these durations as Prometheus histograms, with `_bucket`, `_sum`, and `_count` series.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
 | `rpc.submitblock.outcomes.total` | Counter | `outcome` | Submission results: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
-| `rpc.getblocktemplate.build.duration_seconds` | Summary | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
-| `rpc.getblocktemplate.first_template.duration_seconds` | Summary | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
+| `rpc.getblocktemplate.build.duration_seconds` | Histogram | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | Histogram | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
 | `sync.mined.block.announcement.outcomes.total` | Counter | `outcome` | Mined-block announcement attempts: `completed` or `failed`. |
-| `sync.mined.block.announcement.duration_seconds` | Summary | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
+| `sync.mined.block.announcement.duration_seconds` | Histogram | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
 
 Submission labels follow the zcashd-compatible result, with `accepted` representing JSON `null`.
 Operational JSON-RPC errors remain in `rpc.errors.total`; they are not consensus rejections.

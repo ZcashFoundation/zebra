@@ -19,10 +19,12 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `zebra.state.rocksdb.num_files_at_level`:
 ///   - `level`: a RocksDB level, `0` to `6`.
 /// - `state.block_writer.phase.duration_seconds`:
-///   - `phase`: `checkpoint_history_tree_load`, `checkpoint_trees_and_commitment`,
-///     `checkpoint_history_tree_push`, `checkpoint_value_pool`, `checkpoint_tip_checks`,
-///     `checkpoint_spent_outputs`, `checkpoint_address_balances`, `checkpoint_batch_build`, or
-///     `checkpoint_db_write`.
+///   - `phase`: for checkpoint-verified blocks, `checkpoint_history_tree_load`,
+///     `checkpoint_trees_and_commitment`, `checkpoint_history_tree_push`, `checkpoint_value_pool`,
+///     `checkpoint_tip_checks`, `checkpoint_spent_outputs`, `checkpoint_address_balances`,
+///     `checkpoint_batch_build`, or `checkpoint_db_write`; for other blocks, `queue`,
+///     `contextual_commit`, `update_latest_chain_channels`, `finalization`, `transparent_spend`,
+///     `anchor_reads`, `pickup`, `chain_clone`, `trees`, `chain_updates`, or `history`.
 pub const LABELS: &[(&str, &[&str])] = &[
     ("state.requests", &["service", "type"]),
     ("zcash.pool.value.zatoshis", &["name"]),
@@ -298,7 +300,8 @@ pub fn describe() {
     describe_histogram!(
         "state.block_writer.phase.duration_seconds",
         Unit::Seconds,
-        "Time each phase of committing a checkpoint-verified block to the finalized state took."
+        "Time each phase of committing a block took: the checkpoint_ phases for \
+         checkpoint-verified blocks, and the block writer's phases and sub-phases for other blocks."
     );
 
     // Pruning

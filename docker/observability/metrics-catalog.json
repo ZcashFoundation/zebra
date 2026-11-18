@@ -1153,7 +1153,7 @@
       "name": "state.block_writer.phase.duration_seconds",
       "kind": "histogram",
       "unit": "seconds",
-      "description": "Time each phase of committing a checkpoint-verified block to the finalized state took.",
+      "description": "Time each phase of committing a block took: the checkpoint_ phases for checkpoint-verified blocks, and the block writer's phases and sub-phases for other blocks.",
       "labels": [
         "phase"
       ],
