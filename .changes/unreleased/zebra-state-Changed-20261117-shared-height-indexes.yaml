@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Reduced the time to commit and finalize blocks at the chain tip, by sharing the non-finalized chain's per-block indexes with the published snapshot instead of copying them for every block.
-time: 2026-11-17T22:00:00.000000000Z

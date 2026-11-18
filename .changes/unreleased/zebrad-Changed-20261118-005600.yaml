@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Orchard proof batch verification prepares the inputs of its final multi-scalar multiplication in one parallel pass on multi-core hosts instead of on the verifying thread.
-time: 2026-11-18T00:56:00.000000000+01:00

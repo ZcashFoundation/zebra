@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Reduced the time to commit blocks at the chain tip, by starting each block's note commitment tree updates before its other contextual checks, and by freeing the replaced non-finalized state snapshot after the commit is acknowledged.
+body: 'Reduced the time to commit blocks at the chain tip, by starting each block''s note commitment tree updates before its other contextual checks, by sharing the non-finalized chain''s per-block indexes between chain copies instead of copying them on every commit and finalization, and by freeing the replaced non-finalized state snapshot after the commit is acknowledged.'
 time: 2026-11-03T07:37:41-05:00
