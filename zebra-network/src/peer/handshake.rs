@@ -823,11 +823,11 @@ where
 
     // # Security
     //
-    // While syncing, require `NODE_NETWORK` from outbound peers: peers without it can't serve
-    // us historic blocks, but still occupy outbound slots and receive syncer block requests.
-    // When many reachable listeners are non-serving, those slots can fill up and stall a fresh
-    // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
-    // initial block download.
+    // While syncing, require `NODE_NETWORK` without `NODE_PRUNED` from outbound peers: other
+    // peers can't serve us historic blocks, but still occupy outbound slots and receive syncer
+    // block requests. When many reachable listeners are non-serving, those slots can fill up and
+    // stall a fresh sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers
+    // during initial block download.
     //
     // At or near the network tip, non-serving peers (like pruned nodes) can still serve recent
     // blocks and transactions, so they can fill up to `peerset_initial_target_size` ordinary
@@ -836,7 +836,7 @@ where
     // blocks. Inbound and isolated connections are always exempt, so light clients can still
     // connect to us.
     if matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
-        && !remote.services.contains(PeerServices::NODE_NETWORK)
+        && !remote.services.serves_full_history()
         && (is_syncing
             || !connection_tracker.try_mark_non_serving(config.peerset_initial_target_size))
     {
