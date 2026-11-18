@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `Request::TransactionsByIdFromAdvertisers` to route transaction retries only to connected peers that advertised the requested ID.
+time: 2026-11-18T20:06:32.883761554+01:00

@@ -1162,12 +1162,11 @@ where
         }
     }
 
-    /// Records block requests that peers failed to answer, and blocks that peers returned after
-    /// they were chosen for an advertisement or in a repeat request, in the inventory registry.
+    /// Records block and transaction requests that peers failed to answer, and blocks that peers
+    /// returned after they were chosen for an advertisement or in a repeat request.
     ///
-    /// Peers declare their own services, and request timeouts don't mark inventory as missing. So
-    /// otherwise a peer that falsely claims to serve blocks, and withholds them, could get every
-    /// retry for a block.
+    /// Request timeouts don't mark inventory as missing, so without this record a peer that
+    /// falsely claims to serve inventory and withholds it could get every retry.
     ///
     /// # Security
     ///
@@ -1564,14 +1563,14 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready inventory advertiser, then the carried source, waiting for a busy carried
-    /// block source before using unrelated peers. For blocks, fallback prefers peers that
-    /// [serve full history](PeerServices::serves_full_history).
-    /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
-    /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
+    /// Transaction retries only use other connected advertisers; ordinary requests still fall
+    /// back to any eligible ready peer. A retry waits briefly for a busy advertiser.
     ///
-    /// Only block requests wait for busy peers: transaction downloads don't retry, so waiting
-    /// would only slow them down.
+    /// Block requests prefer a ready inventory advertiser, then the carried source, waiting for
+    /// a busy carried block source before using unrelated peers. For blocks, fallback prefers
+    /// peers that [serve full history](PeerServices::serves_full_history). Non-serving peers
+    /// usually answer `notfound` for historic blocks, so they only get a block if no connected
+    /// serving peer might have it, or if some peer advertised it (so it is recent).
     ///
     /// Peers that recently failed to return a block are skipped for that block, unless no other
     /// peer might have it.
@@ -1718,6 +1717,18 @@ where
             };
         }
 
+        if matches!(request, Request::TransactionsByIdFromAdvertisers(_)) {
+            return if advertising_peers.iter().any(|addr| {
+                self.has_peer_with_addr(*addr)
+                    && !has_failed(addr)
+                    && !missing_peer_list.contains(addr)
+            }) {
+                InvRoute::Wait
+            } else {
+                InvRoute::Refuse
+            };
+        }
+
         // A recovery carries the child's source, which need not have advertised the parent.
         // Prefer explicit parent inventory, but retain that source ahead of speculative peers.
         // Like an advertiser, it is skipped for repeats once it has returned the block.
@@ -1822,9 +1833,9 @@ where
     /// Sends the inventory request `req` for `hash` to the ready peer `key`, and returns its
     /// response future.
     ///
-    /// If a block request fails, reports the failure to the peer set. If `advertised` is true,
-    /// the peer was chosen because it advertised the block, so a returned block is reported too.
-    /// A repeat request is counted when it is sent, see [`Self::select_inv_route()`].
+    /// Completed failures are recorded for both blocks and transactions. If a block was returned
+    /// because it was advertised (or this is a repeat request), the peer is recorded as served.
+    /// Repeat block requests are counted when sent; see [`Self::select_inv_route()`].
     fn call_inv_peer(
         &mut self,
         key: D::Key,
@@ -1832,10 +1843,12 @@ where
         hash: InventoryHash,
         advertised: bool,
     ) -> <Self as tower::Service<Request>>::Future {
-        // Transaction requests don't wait for busy peers, so there is no preference to lose.
-        if !matches!(hash, InventoryHash::Block(_)) {
-            return self.call_ready_peer(key, req);
-        }
+        let req = match req {
+            Request::TransactionsByIdFromAdvertisers(id) => {
+                Request::TransactionsById(HashSet::from([id]))
+            }
+            req => req,
+        };
 
         let connection_info = self
             .ready_services
@@ -1843,7 +1856,8 @@ where
             .expect("inventory routing selected a ready connection")
             .connection_info()
             .clone();
-        let is_repeat = self.inventory_registry.served_peers(hash).next().is_some();
+        let is_repeat = matches!(hash, InventoryHash::Block(_))
+            && self.inventory_registry.served_peers(hash).next().is_some();
         if is_repeat {
             self.inventory_registry
                 .register_repeat_request(hash, advertised);
@@ -1867,6 +1881,11 @@ where
                         && blocks.iter().any(|block| block.available().is_some()) =>
                 {
                     Some(InvOutcome::Served)
+                }
+                Ok(Response::Transactions(txs))
+                    if !txs.iter().any(|tx| tx.available().is_some()) =>
+                {
+                    Some(InvOutcome::Failed)
                 }
                 Ok(_) => None,
             };
@@ -2626,6 +2645,7 @@ where
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
+            Request::TransactionsByIdFromAdvertisers(id) => self.route_inv(req, id.into()),
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),

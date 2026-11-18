@@ -906,8 +906,8 @@ impl Storage {
             TransactionDownloadVerifyError::InState |
             // An unknown error in the state service, better do nothing
             TransactionDownloadVerifyError::StateError(_) |
-            // If download failed, do nothing; the crawler will end up trying to
-            // download it again.
+            // A failed download is not proof that a transaction is invalid. Any gossip retries
+            // have finished, and the crawler can try again later.
             TransactionDownloadVerifyError::DownloadFailed(_) |
             // If it was cancelled then a block was mined, or there was a network
             // upgrade, etc. No reason to reject it.

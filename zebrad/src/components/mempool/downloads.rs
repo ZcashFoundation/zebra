@@ -80,6 +80,10 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// don't apply here (e.g. we can drop transactions hashes when the queue is full).
 pub(crate) const TRANSACTION_DOWNLOAD_TIMEOUT: Duration = BLOCK_DOWNLOAD_TIMEOUT;
 
+/// Extra attempts to retrieve a gossiped ID from other announcing peers.
+const GOSSIP_DOWNLOAD_RETRIES: usize = 2;
+const GOSSIP_DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(200);
+
 /// Controls how long we wait for a transaction verify request to complete.
 ///
 /// This is currently equal to [`BLOCK_VERIFY_TIMEOUT`] for
@@ -397,7 +401,8 @@ where
     ///
     /// `transaction_verified` wakes the queue checker after each result is queued.
     ///
-    /// Download retry and timeout limits should be applied to the `network` service.
+    /// The network service should bound each attempt; this downloader bounds retries and the
+    /// complete download-and-verify task.
     pub fn new(
         network: ZN,
         verifier: ZV,
@@ -538,21 +543,42 @@ where
 
             let (tx, advertiser_addr) = match gossiped_tx {
                 Gossip::Id(txid) => {
-                    let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
-
-                    let tx = match network
-                        .oneshot(req)
-                        .await
-                        .map_err(CloneError::from)
-                        .map_err(TransactionDownloadVerifyError::DownloadFailed)?
-                    {
-                        zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
-                            TransactionDownloadVerifyError::DownloadFailed(
-                                BoxError::from("no transactions returned").into(),
-                            )
-                        })?,
-                        _ => unreachable!("wrong response to transaction request"),
+                    let max_retries = if source.is_some() {
+                        GOSSIP_DOWNLOAD_RETRIES
+                    } else {
+                        0
                     };
+                    let mut response = None;
+                    for attempt in 0..=max_retries {
+                        if attempt > 0 {
+                            tokio::time::sleep(GOSSIP_DOWNLOAD_RETRY_DELAY).await;
+                        }
+                        let req = if attempt == 0 {
+                            zn::Request::TransactionsById(std::iter::once(txid).collect())
+                        } else {
+                            zn::Request::TransactionsByIdFromAdvertisers(txid)
+                        };
+                        match network.clone().oneshot(req).await {
+                            Ok(zn::Response::Transactions(mut txs)) => {
+                                if let Some(tx) = txs.pop() {
+                                    response = Some(tx);
+                                    break;
+                                }
+                            }
+                            Ok(_) => unreachable!("wrong response to transaction request"),
+                            Err(error) if attempt == max_retries => {
+                                return Err(TransactionDownloadVerifyError::DownloadFailed(
+                                    CloneError::from(error),
+                                ));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    let tx = response.ok_or_else(|| {
+                        TransactionDownloadVerifyError::DownloadFailed(
+                            BoxError::from("no transactions returned").into(),
+                        )
+                    })?;
 
                     let (tx, advertiser_addr) = tx.available().expect(
                         "unexpected missing tx status: single tx failures should be errors",

@@ -1387,3 +1387,171 @@ async fn repeat_turn_returns_to_the_group_that_had_no_ready_peer() {
     );
     let _ = download.await;
 }
+
+/// A retry must not fall back to a ready peer that never announced the transaction.
+#[tokio::test(start_paused = true)]
+async fn transaction_retry_uses_another_announcer_after_notfound() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::empty(); 3]);
+    let id = UnminedTxId::Legacy(transaction::Hash([77; 32]));
+    let hash = InventoryHash::from(id);
+    let request = Request::TransactionsById(HashSet::from([id]));
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[0]));
+    peer_set.ready().await.unwrap();
+
+    let first = peer_set.call(request.clone());
+    let received = handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("the first announcing peer gets the initial request");
+    assert_eq!(received.request, request);
+    received
+        .tx
+        .send(Err(PeerError::NotFoundResponse(vec![hash]).into()))
+        .unwrap();
+    assert!(first.await.is_err());
+    // The real connection registers this status when decoding the wire notfound response.
+    send_inventory(&mut guard, InventoryStatus::new_missing(hash, addrs[0]));
+    peer_set.ready().await.unwrap();
+
+    let no_announcer = peer_set.call(Request::TransactionsByIdFromAdvertisers(id));
+    assert_not_found_registry(no_announcer.await);
+    assert_eq!(received_request(&mut handles[1]), None);
+    assert_eq!(received_request(&mut handles[2]), None);
+
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[1]));
+    peer_set.ready().await.unwrap();
+    let retry = peer_set.call(Request::TransactionsByIdFromAdvertisers(id));
+    let received = handles[1]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("the second announcing peer gets the retry");
+    assert_eq!(received.request, request);
+    assert_eq!(received_request(&mut handles[0]), None);
+    assert_eq!(received_request(&mut handles[2]), None);
+    received
+        .tx
+        .send(Ok(Response::Transactions(Vec::new())))
+        .unwrap();
+    assert_eq!(retry.await.unwrap(), Response::Transactions(Vec::new()));
+}
+
+/// A peer that fails without notfound cannot refresh its own retry eligibility by advertising again.
+#[tokio::test(start_paused = true)]
+async fn transaction_retry_excludes_failed_announcers() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::empty(); 3]);
+    let id = UnminedTxId::Legacy(transaction::Hash([78; 32]));
+    let hash = InventoryHash::from(id);
+    let request = Request::TransactionsById(HashSet::from([id]));
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[0]));
+    peer_set.ready().await.unwrap();
+    let first = peer_set.call(request.clone());
+    handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap()
+        .tx
+        .send(Err(PeerError::ConnectionReceiveTimeout.into()))
+        .unwrap();
+    assert!(first.await.is_err());
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[0]));
+    peer_set.ready().await.unwrap();
+    assert_not_found_registry(
+        peer_set
+            .call(Request::TransactionsByIdFromAdvertisers(id))
+            .await,
+    );
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[1]));
+    peer_set.ready().await.unwrap();
+    let retry = peer_set.call(Request::TransactionsByIdFromAdvertisers(id));
+    let second = handles[1]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("another announcing peer must get the retry");
+    assert_eq!(second.request, request);
+    assert_eq!(received_request(&mut handles[0]), None);
+    assert_eq!(received_request(&mut handles[2]), None);
+    second
+        .tx
+        .send(Err(PeerError::ConnectionReceiveTimeout.into()))
+        .unwrap();
+    assert!(retry.await.is_err());
+}
+
+/// A busy announcing peer becomes eligible before the retry can fall back to unrelated peers.
+#[tokio::test(start_paused = true)]
+async fn transaction_retry_waits_briefly_for_busy_announcer() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::empty(); 3]);
+    peer_set.ready().await.unwrap();
+    let mut advertiser = peer_set.take_ready_service(&addrs[0]).unwrap();
+    let first_busy = advertiser.ready().await.unwrap().call(Request::Peers);
+    let second_busy = advertiser.ready().await.unwrap().call(Request::Peers);
+    peer_set.push_unready(addrs[0], advertiser);
+
+    let id = UnminedTxId::Legacy(transaction::Hash([79; 32]));
+    let hash = InventoryHash::from(id);
+    let request = Request::TransactionsById(HashSet::from([id]));
+    send_inventory(&mut guard, InventoryStatus::new_available(hash, addrs[0]));
+    peer_set.ready().await.unwrap();
+    let first = peer_set.call(request.clone());
+    let first_receiver = handles
+        .iter_mut()
+        .skip(1)
+        .enumerate()
+        .find_map(|(index, handle)| {
+            handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .map(|request| (index + 1, request))
+        })
+        .expect("the first download fell back to a free, non-announcing peer");
+    assert_eq!(first_receiver.1.request, request);
+    first_receiver
+        .1
+        .tx
+        .send(Err(PeerError::NotFoundResponse(vec![hash]).into()))
+        .unwrap();
+    assert!(first.await.is_err());
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_missing(hash, addrs[first_receiver.0]),
+    );
+    peer_set.ready().await.unwrap();
+
+    let mut retry = Box::pin(peer_set.call(Request::TransactionsByIdFromAdvertisers(id)));
+    assert!(
+        timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, &mut retry)
+            .await
+            .is_err(),
+        "the retry waits for its busy advertiser",
+    );
+    assert_eq!(received_request(&mut handles[1]), None);
+    assert_eq!(received_request(&mut handles[2]), None);
+
+    for _ in 0..2 {
+        handles[0]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .unwrap()
+            .tx
+            .send(Ok(Response::Peers(Vec::new())))
+            .unwrap();
+    }
+    first_busy.await.unwrap();
+    second_busy.await.unwrap();
+    peer_set.ready().await.unwrap();
+    let next = handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("the advertiser receives the queued retry");
+    assert_eq!(next.request, request);
+    next.tx
+        .send(Ok(Response::Transactions(Vec::new())))
+        .unwrap();
+    assert_eq!(retry.await.unwrap(), Response::Transactions(Vec::new()));
+}

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Retry failed gossiped transaction downloads from other announcing peers before waiting for the mempool crawler, improving mining and compact-block reconstruction latency.
+time: 2026-11-18T20:06:32.877391714+01:00
