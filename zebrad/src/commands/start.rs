@@ -273,20 +273,25 @@ impl StartCmd {
         false
     }
 
-    /// Disables archive service and sidecars as soon as pruning is enabled or history is missing.
+    /// Returns the services advertised to peers, and rejects sidecars, for the node's storage mode.
+    ///
+    /// As soon as pruning is enabled or history is missing, the node keeps advertising
+    /// `NODE_NETWORK`, so peers can still discover, reconnect to, and download recent blocks from
+    /// it, and also advertises the experimental `NODE_PRUNED` flag (bit 25, matching Zakura), so
+    /// updated peers don't ask it for historic blocks while they sync. Archive nodes never
+    /// advertise `NODE_PRUNED`.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
     ) -> Result<zebra_network::types::PeerServices, Report> {
         let mut services = config.network.local_services;
-        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
-            if config.zcashd_compat.enabled {
-                return Err(eyre!(
-                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
-                ));
-            }
-            services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+        let is_pruned = config.state.prune_blocks_older_than.is_some() || history.is_pruned();
+        if is_pruned && config.zcashd_compat.enabled {
+            return Err(eyre!(
+                "zcashd-compat requires an archive node; pruning is enabled or history is missing"
+            ));
         }
+        services.set(zebra_network::types::PeerServices::NODE_PRUNED, is_pruned);
         Ok(services)
     }
 

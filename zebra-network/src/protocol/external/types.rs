@@ -195,6 +195,19 @@ bitflags! {
         ///
         /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
         const NODE_COMPACT_BLOCKS = 1 << 16;
+
+        /// NODE_PRUNED means the node may have deleted historic block bodies.
+        ///
+        /// Zebra and Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental
+        /// bit 25). They don't answer `getblocks` for heights below what they keep.
+        const NODE_PRUNED = 1 << 25;
+    }
+}
+
+impl PeerServices {
+    /// Returns true if these services say the peer can serve every historic block.
+    pub fn serves_full_history(&self) -> bool {
+        self.contains(PeerServices::NODE_NETWORK) && !self.contains(PeerServices::NODE_PRUNED)
     }
 }
 

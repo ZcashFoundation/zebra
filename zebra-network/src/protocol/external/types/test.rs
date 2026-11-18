@@ -184,3 +184,11 @@ fn version_consistent(network: &Network) {
         }
     }
 }
+
+#[test]
+fn only_unpruned_node_network_serves_full_history() {
+    assert!(PeerServices::NODE_NETWORK.serves_full_history());
+    assert!(!(PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED).serves_full_history());
+    assert!(!PeerServices::NODE_PRUNED.serves_full_history());
+    assert!(!PeerServices::empty().serves_full_history());
+}

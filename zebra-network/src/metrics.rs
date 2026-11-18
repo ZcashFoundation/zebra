@@ -28,7 +28,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `kind`: `instant` or `waited`.
 /// - `remote_version` and `negotiated_version`: a protocol version Zebra knows, or `other`.
 /// - `min_version`: the minimum protocol version Zebra accepts for the current network upgrade.
-/// - `missing_service`: the required service a rejected peer doesn't advertise: `NODE_NETWORK`.
+/// - `missing_service`: the required service a rejected peer doesn't provide: `NODE_NETWORK`,
+///   meaning the peer doesn't serve full history because it doesn't advertise `NODE_NETWORK`, or
+///   advertises it with `NODE_PRUNED`.
 /// - `seed`: on the `zcash.net.peers.initial` series that count the peers from configured initial
 ///   peers, the configured entry when it is one of Zebra's default DNS seeders, or `custom` for any
 ///   other entry. The series without it counts the peers from the peer cache file.

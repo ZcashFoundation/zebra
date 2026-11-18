@@ -303,7 +303,8 @@ Metric labels use bounded values:
 - Handshake `remote_version` and `negotiated_version`: known protocol versions or
   `other`.
 - `zcash.net.peers.missing_services` `missing_service`: the required service the
-  rejected peer doesn't advertise, `NODE_NETWORK`. It replaces the
+  rejected peer doesn't provide, `NODE_NETWORK`. The peer doesn't serve full history:
+  it doesn't advertise `NODE_NETWORK`, or advertises it with `NODE_PRUNED`. It replaces the
   `remote_services` label, whose value was the service bits the peer sent.
 
 `zcash.net.peers.initial` and `zcash.net.peers.cache` no longer have a `cache`

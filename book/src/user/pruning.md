@@ -183,20 +183,30 @@ For historical queries:
 See the [RPC migration guide](zcashd-api-migration-guide.md#pruned-history) and
 [API history contract](../api.md#historical-data-availability) for compatibility details.
 
-Enabling pruning removes `NODE_NETWORK` from peer-service advertisements immediately, before any
-body is deleted. The node still syncs, relays, and serves retained data and historical headers, but
+Enabling pruning immediately adds the experimental `NODE_PRUNED` service bit (bit 25) to the
+`NODE_NETWORK` service the node advertises to peers, before any body is deleted. Zakura pruned
+nodes advertise the same `NODE_NETWORK | NODE_PRUNED` services. Keeping `NODE_NETWORK` lets
+peers discover, reconnect to, and download recent blocks from pruned nodes; `NODE_PRUNED`
+tells updated Zebra and Zakura peers not to rely on them for historic blocks. Bit 25 is in the
+range reserved for temporary experiments, so it may change before it is assigned by a ZIP.
+Older peers, such as Zebra 7.1.0 and earlier and zcashd, ignore the unknown bit and treat a pruned
+node as a full node, so they may ask it for deleted blocks. It answers `getdata` with `notfound`
+and leaves `getblocks` below its retained range unanswered, so those peers may disconnect it as
+stalled (they don't ban it), and their initial sync can be slower.
+The node still syncs, relays, and serves retained data and historical headers, but
 returns `notfound` for unavailable block bodies. Block inventory stops at missing history rather
 than skipping the gap. Do not use this node as an archive source for other peers or a
 zcashd sidecar.
-The `getnetworkinfo` response reports the same advertised service mask in `localservices`.
+The `getnetworkinfo` response reports the same storage and service bits in `localservices`,
+except `NODE_COMPACT_BLOCKS`, which only the handshake adds.
 Pruned listeners remain discoverable through address gossip; syncing outbound handshakes still
-require an archive peer.
-Outside sync, ordinary outbound peers without `NODE_NETWORK` (persistent peers excluded) may occupy
+require an archive peer, which advertises `NODE_NETWORK` without `NODE_PRUNED`.
+Outside sync, ordinary outbound non-archive peers (persistent peers excluded) may occupy
 at most `network.peerset_initial_target_size` connection slots (25 of the default 75 outbound slots).
 The remaining slots are reserved for serving peers; inbound and isolated connections are exempt.
 When reconnecting, Zebra prefers the first ready candidate that may serve blocks
-(`NODE_NETWORK` or unknown services), falling back to known non-serving candidates only when
-none are ready. Falling behind does not evict existing non-serving connections; reserved serving
+(`NODE_NETWORK` without `NODE_PRUNED`, or unknown services), falling back to known non-serving
+candidates only when none are ready. Falling behind does not evict existing non-serving connections; reserved serving
 capacity remains available, and new syncing outbound handshakes require serving peers.
 
 ## Watch pruning converge

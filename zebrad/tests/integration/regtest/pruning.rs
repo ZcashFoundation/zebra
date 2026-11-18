@@ -58,11 +58,9 @@ async fn connect_pruned_peer(network: &Network, address: std::net::SocketAddr) -
     .await
     .map_err(|_| eyre!("pruned-node handshake timed out"))?
     .map_err(|error| eyre!(error))?;
-    assert!(!peer
-        .connection_info
-        .remote
-        .services
-        .contains(PeerServices::NODE_NETWORK));
+    let services = peer.connection_info.remote.services;
+    assert!(services.contains(PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED));
+    assert!(!services.serves_full_history());
     Ok(peer)
 }
 
@@ -131,7 +129,12 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .map_err(|error| eyre!(error))?;
         assert_eq!(
             services["localservices"],
-            format!("{:016x}", PeerServices::NODE_TREE_ROOTS)
+            format!(
+                "{:016x}",
+                PeerServices::NODE_NETWORK
+                    | PeerServices::NODE_PRUNED
+                    | PeerServices::NODE_TREE_ROOTS
+            )
         );
 
         client.generate(1).await?;
@@ -173,7 +176,12 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .map_err(|error| eyre!(error))?;
         assert_eq!(
             services["localservices"],
-            format!("{:016x}", PeerServices::NODE_TREE_ROOTS)
+            format!(
+                "{:016x}",
+                PeerServices::NODE_NETWORK
+                    | PeerServices::NODE_PRUNED
+                    | PeerServices::NODE_TREE_ROOTS
+            )
         );
         let missing = peer_request(
             &mut peer,

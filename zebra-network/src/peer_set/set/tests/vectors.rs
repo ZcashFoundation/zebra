@@ -2809,6 +2809,13 @@ fn mock_peers_with_services(
 const SERVING_AND_NON_SERVING: [PeerServices; 2] =
     [PeerServices::NODE_NETWORK, PeerServices::empty()];
 
+/// The services of peers that don't serve full history: a peer without services, and a pruned
+/// peer that advertises `NODE_NETWORK` with `NODE_PRUNED`.
+const NON_SERVING_SERVICES: [PeerServices; 2] = [
+    PeerServices::empty(),
+    PeerServices::NODE_NETWORK.union(PeerServices::NODE_PRUNED),
+];
+
 /// Returns a peer set with mock peers that advertised `services`, their addresses and handles, and
 /// the chain tip sender for the peer set.
 ///
@@ -2946,22 +2953,28 @@ fn peer_set_routes_find_requests_to_ready_serving_peer() {
     tokio::time::pause();
 
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
-            peer_set_with_services(&SERVING_AND_NON_SERVING);
+        for non_serving_services in NON_SERVING_SERVICES {
+            let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+                peer_set_with_services(&[PeerServices::NODE_NETWORK, non_serving_services]);
 
-        for (request, response) in find_requests_and_responses() {
-            assert_eq!(
-                respond_to_request(
-                    &mut peer_set,
-                    &mut handles[0],
-                    request,
-                    Ok(response.clone()),
-                )
-                .await
-                .expect("the serving peer answers discovery"),
-                response,
-            );
-            assert_eq!(received_request(&mut handles[1]), None);
+            for (request, response) in find_requests_and_responses() {
+                assert_eq!(
+                    respond_to_request(
+                        &mut peer_set,
+                        &mut handles[0],
+                        request,
+                        Ok(response.clone()),
+                    )
+                    .await
+                    .expect("the serving peer answers discovery"),
+                    response,
+                );
+                assert_eq!(
+                    received_request(&mut handles[1]),
+                    None,
+                    "{non_serving_services:?}",
+                );
+            }
         }
     });
 }
@@ -3519,12 +3532,17 @@ fn peer_set_routes_queued_find_after_serving_peer_disconnects() {
 /// rather than a non-serving peer that is likely to answer `notfound`.
 #[test]
 fn peer_set_route_block_prefers_serving_peer() {
-    peer_set_route_block_prefers_serving_peer_order(true);
-    peer_set_route_block_prefers_serving_peer_order(false);
+    for non_serving_services in NON_SERVING_SERVICES {
+        peer_set_route_block_prefers_serving_peer_order(true, non_serving_services);
+        peer_set_route_block_prefers_serving_peer_order(false, non_serving_services);
+    }
 }
 
-fn peer_set_route_block_prefers_serving_peer_order(serving_first: bool) {
-    let mut services = SERVING_AND_NON_SERVING;
+fn peer_set_route_block_prefers_serving_peer_order(
+    serving_first: bool,
+    non_serving_services: PeerServices,
+) {
+    let mut services = [PeerServices::NODE_NETWORK, non_serving_services];
     if !serving_first {
         services.reverse();
     }

@@ -163,6 +163,31 @@ async fn outbound_direct_rejects_non_serving_peer_while_syncing() {
     );
 }
 
+/// While syncing, outbound handshakes must reject pruned peers, even though they advertise
+/// `NODE_NETWORK`.
+#[tokio::test]
+async fn outbound_direct_rejects_pruned_peer_while_syncing() {
+    let _init_guard = zebra_test::init();
+
+    let pruned = PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED;
+    let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        pruned,
+        NoChainTip,
+        &mut ActiveConnectionCounter::new_counter().track_connection(),
+    )
+    .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(HandshakeError::MissingRequiredServices { services }) if services == pruned
+        ),
+        "expected MissingRequiredServices, got: {result:?}",
+    );
+}
+
 /// While syncing, outbound proxy handshakes must reject peers that don't advertise
 /// `NODE_NETWORK`.
 #[tokio::test]
@@ -482,7 +507,7 @@ async fn local_version_advertises_configured_services() {
                 ..Config::default()
             };
             if !archive {
-                config.local_services.remove(PeerServices::NODE_NETWORK);
+                config.local_services.insert(PeerServices::NODE_PRUNED);
             }
             // Compact block relay is on by default and advertised beside the storage services.
             let expected = config.local_services | PeerServices::NODE_COMPACT_BLOCKS;
@@ -513,7 +538,9 @@ async fn local_version_advertises_configured_services() {
                         version.address_from,
                         AddrInVersion::new(listen_addr, expected),
                     );
+                    // The remote is an archive peer, so the syncing local node keeps it.
                     version.services.insert(PeerServices::NODE_NETWORK);
+                    version.services.remove(PeerServices::NODE_PRUNED);
                     version.nonce = Nonce::default();
                     remote.send(Message::Version(version)).await.unwrap();
                     remote.send(Message::Verack).await.unwrap();

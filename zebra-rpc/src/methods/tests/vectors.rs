@@ -8991,7 +8991,10 @@ async fn rpc_getnetworkinfo_reports_advertised_services() {
     let _init_guard = zebra_test::init();
     for (services, expected) in [
         (PeerServices::NODE_NETWORK, "0000000000000001"),
-        (PeerServices::empty(), "0000000000000000"),
+        (
+            PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED,
+            "0000000002000001",
+        ),
     ] {
         let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
             ([127, 0, 0, 1], Mainnet.default_port()).into(),

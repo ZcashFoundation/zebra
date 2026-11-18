@@ -23,7 +23,6 @@ use crate::{
     address_book::AddressMetrics,
     address_book_peers::AddressBookPeers,
     meta_addr::{MetaAddr, MetaAddrChange},
-    types::PeerServices,
     AddressBook, BanList, BoxError, Config,
 };
 
@@ -242,11 +241,12 @@ impl AddressBookHandler {
                 // Choose the next candidate, and mark it as `AttemptPending`,
                 // in a single atomic request.
                 //
-                // Prefer candidates that might serve historic blocks, so non-serving peers only
-                // fill outbound slots that serving peers leave. Handshakes check actual services.
+                // Prefer candidates that might serve historic blocks, so non-serving peers
+                // (including pruned peers) only fill outbound slots that serving peers leave.
+                // Handshakes check actual services.
                 let might_serve = |peer: &MetaAddr| {
                     peer.services()
-                        .is_none_or(|services| services.contains(PeerServices::NODE_NETWORK))
+                        .is_none_or(|services| services.serves_full_history())
                 };
                 let next_peer = {
                     let mut candidates =
