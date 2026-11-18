@@ -1,9 +1,8 @@
-//! Zebra script verification wrapping zcashd's zcash_script library
+//! Zebra transparent script verification with the Rust `zcash_script` interpreter.
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_script")]
-// We allow unsafe code, so we can call zcash_script
-#![allow(unsafe_code)]
+#![forbid(unsafe_code)]
 
 #[cfg(test)]
 mod tests;
@@ -13,9 +12,12 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use libzcash_script::ZcashScript;
-
-use zcash_script::{opcode::PossiblyBad, script, script::Evaluable as _, Opcode};
+use zcash_script::{
+    interpreter::{CallbackTransactionSignatureChecker, Flags},
+    opcode::{Operation, PossiblyBad},
+    script::{self, Evaluable as _},
+    Opcode,
+};
 use zcash_transparent::bundle as zp_transparent;
 use zebra_chain::{
     parameters::NetworkUpgrade,
@@ -23,7 +25,7 @@ use zebra_chain::{
     transparent,
 };
 
-/// An Error type representing the error codes returned from zcash_script.
+/// Errors from transaction preparation and script verification.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -33,8 +35,14 @@ pub enum Error {
     TxIndex,
     /// tx is a coinbase transaction and should not be verified
     TxCoinbase,
-    /// unknown error from zcash_script: {0}
-    Unknown(libzcash_script::Error),
+    /// The interpreter rejected a script component.
+    Interpreter {
+        /// The component that failed.
+        component: script::ComponentType,
+        /// The interpreter error.
+        #[source]
+        error: script::Error,
+    },
     /// transaction is invalid according to zebra_chain (not a zcash_script error)
     TxInvalid(#[from] zebra_chain::Error),
 }
@@ -47,32 +55,11 @@ impl fmt::Display for Error {
             Error::TxCoinbase => {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
-            Error::Unknown(e) => format!("unknown error from zcash_script: {e:?}"),
+            Error::Interpreter { component, error } => {
+                format!("{component:?} script failed: {error}")
+            }
             Error::TxInvalid(e) => format!("tx is invalid: {e}"),
         })
-    }
-}
-
-impl From<libzcash_script::Error> for Error {
-    #[allow(non_upper_case_globals)]
-    fn from(err_code: libzcash_script::Error) -> Error {
-        Error::Unknown(err_code)
-    }
-}
-
-/// Get the interpreter according to the feature flag
-fn get_interpreter(
-    sighash: zcash_script::interpreter::SighashCalculator<'_>,
-    lock_time: u32,
-    is_final: bool,
-) -> impl ZcashScript + use<'_> {
-    #[cfg(feature = "comparison-interpreter")]
-    return libzcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final);
-    #[cfg(not(feature = "comparison-interpreter"))]
-    libzcash_script::CxxInterpreter {
-        sighash,
-        lock_time,
-        is_final,
     }
 }
 
@@ -174,8 +161,7 @@ impl CachedFfiTransaction {
         } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
-        let flags = zcash_script::interpreter::Flags::P2SH
-            | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
+        let flags = Flags::P2SH | Flags::CHECKLOCKTIMEVERIFY;
 
         let lock_time = self.transaction.raw_lock_time();
         let txin = self.vin().get(input_index).ok_or(Error::TxIndex)?;
@@ -190,94 +176,70 @@ impl CachedFfiTransaction {
         let script =
             script::Raw::from_raw_parts(signature_script.to_vec(), script_pub_key.to_vec());
 
+        // Returning `None` fails only this signature check, like zcashd's `CheckSig`: the
+        // interpreter pushes false, which later opcodes such as `OP_NOT` may consume.
         let calculate_sighash =
             |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
-                // Inner helper: returns None when the hash type is invalid
-                // and the callback should signal failure.
-                let computed: Option<[u8; 32]> = (|| {
-                    // For v5+ transactions: reject undefined hash_type values,
-                    // matching zcashd's SighashType::parse behavior.
-                    // Valid values: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
-                    if self.transaction.version() >= 5 {
-                        let valid_v5_types: &[i32] = &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
-                        if !valid_v5_types.contains(&hash_type.raw_bits()) {
-                            return None;
-                        }
-                    }
-
-                    // For v5+ transactions: reject SIGHASH_SINGLE when there is
-                    // no corresponding output (an output at the same index as
-                    // the input being verified). ZIP-244 §S.2a marks this as a
-                    // consensus failure; zcashd throws in `SignatureHash` and
-                    // `CheckSig` catches the exception to fail the script.
-                    if self.transaction.version() >= 5
-                        && hash_type.signed_outputs()
-                            == zcash_script::signature::SignedOutputs::Single
-                        && input_index >= self.vout_len()
-                    {
+                // For v5+ transactions: reject undefined hash_type values,
+                // matching zcashd's SighashType::parse behavior.
+                // Valid values: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
+                if self.transaction.version() >= 5 {
+                    let valid_v5_types: &[i32] = &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
+                    if !valid_v5_types.contains(&hash_type.raw_bits()) {
                         return None;
                     }
-
-                    let script_code_vec = script_code.0.clone();
-
-                    // For pre-v5 (v4) transactions: zcashd serializes the raw
-                    // hash_type byte into the sighash preimage (only masking with
-                    // 0x1f for selection logic). Use the raw byte to match.
-                    if self.transaction.version() < 5 {
-                        let raw_byte = hash_type.raw_bits() as u8;
-                        return Some(
-                            self.sighasher()
-                                .sighash_v4_raw(raw_byte, Some((input_index, script_code_vec)))
-                                .0,
-                        );
-                    }
-
-                    let mut our_hash_type = match hash_type.signed_outputs() {
-                        zcash_script::signature::SignedOutputs::All => HashType::ALL,
-                        zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
-                        zcash_script::signature::SignedOutputs::None => HashType::NONE,
-                    };
-                    if hash_type.anyone_can_pay() {
-                        our_hash_type |= HashType::ANYONECANPAY;
-                    }
-                    Some(
-                        self.sighasher()
-                            .sighash(our_hash_type, Some((input_index, script_code_vec)))
-                            .0,
-                    )
-                })();
-
-                // Workaround for the libzcash_script callback API: returning
-                // `None` from this callback does not propagate failure to the
-                // C++ verifier.
-                //
-                // Instead of returning `None` to indicate an error, we return a
-                // per-call randomly-generated dummy sighash so any signature
-                // fails to verify with overwhelming probability. Note that a
-                // fixed sentinel value would be unsafe: an attacker who knows
-                // it can construct an ECDSA signature that verifies against any
-                // 32-byte value under a chosen pubkey.
-                //
-                // This shim can be removed once libzcash_script propagates
-                // callback failure to the C++ verifier.
-                Some(computed.unwrap_or_else(|| {
-                    use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
-                    let mut bytes = [0u8; 32];
-                    UnwrapErr(SysRng).fill_bytes(&mut bytes);
-                    bytes
-                }))
-            };
-        let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final);
-        interpreter
-            .verify_callback(&script, flags)
-            .map_err(|(_, e)| Error::from(e))
-            .and_then(|res| {
-                if res {
-                    Ok(())
-                } else {
-                    Err(Error::ScriptInvalid)
                 }
-            })
+
+                // For v5+ transactions: reject SIGHASH_SINGLE when there is
+                // no corresponding output (an output at the same index as
+                // the input being verified). ZIP-244 §S.2a marks this as a
+                // consensus failure; zcashd throws in `SignatureHash` and
+                // `CheckSig` catches the exception to fail the script.
+                if self.transaction.version() >= 5
+                    && hash_type.signed_outputs() == zcash_script::signature::SignedOutputs::Single
+                    && input_index >= self.vout_len()
+                {
+                    return None;
+                }
+
+                let script_code_vec = script_code.0.clone();
+
+                // For pre-v5 (v4) transactions: zcashd serializes the raw
+                // hash_type byte into the sighash preimage (only masking with
+                // 0x1f for selection logic). Use the raw byte to match.
+                if self.transaction.version() < 5 {
+                    let raw_byte = hash_type.raw_bits() as u8;
+                    return Some(
+                        self.sighasher()
+                            .sighash_v4_raw(raw_byte, Some((input_index, script_code_vec)))
+                            .0,
+                    );
+                }
+
+                let mut our_hash_type = match hash_type.signed_outputs() {
+                    zcash_script::signature::SignedOutputs::All => HashType::ALL,
+                    zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
+                    zcash_script::signature::SignedOutputs::None => HashType::NONE,
+                };
+                if hash_type.anyone_can_pay() {
+                    our_hash_type |= HashType::ANYONECANPAY;
+                }
+                Some(
+                    self.sighasher()
+                        .sighash(our_hash_type, Some((input_index, script_code_vec)))
+                        .0,
+                )
+            };
+        let checker = CallbackTransactionSignatureChecker {
+            sighash: &calculate_sighash,
+            lock_time: i64::from(lock_time),
+            is_final,
+        };
+        match script.eval(flags, &checker) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Error::ScriptInvalid),
+            Err((component, error)) => Err(Error::Interpreter { component, error }),
+        }
     }
 }
 
@@ -294,14 +256,11 @@ impl CachedFfiTransaction {
 pub trait Sigops {
     /// Returns the number of transparent signature operations in the
     /// transparent inputs and outputs of the given transaction.
-    fn sigops(&self) -> Result<u32, libzcash_script::Error> {
-        let interpreter = get_interpreter(&|_, _| None, 0, true);
-
-        Ok(self.scripts().into_iter().try_fold(0, |acc, s| {
-            interpreter
-                .legacy_sigop_count_script(&script::Code(s))
-                .map(|n| acc + n)
-        })?)
+    fn sigops(&self) -> u32 {
+        self.scripts()
+            .iter()
+            .map(|script| legacy_sigop_count(script))
+            .sum()
     }
 
     /// Returns the input and output scripts in the transaction as owned byte vectors.
@@ -370,6 +329,59 @@ impl Sigops for zcash_primitives::transaction::Transaction {
             })
             .collect()
     }
+}
+
+/// Counts the signature operations in `script` like zcashd's `CScript::GetSigOpCount(false)`.
+///
+/// zcashd reads opcodes with `GetOp` and applies no execution limits. This function therefore
+/// counts sigops after pushes larger than the 520-byte execution limit, which output scripts can
+/// contain because creating an output never executes its script. Every `CHECKMULTISIG` counts as
+/// the maximum key count. A truncated push ends the count, like a `GetOp` failure.
+pub fn legacy_sigop_count(mut script: &[u8]) -> u32 {
+    // `Operation` is `repr(u8)`, so each cast yields the opcode byte.
+    const CHECKSIG: u8 = Operation::OP_CHECKSIG as u8;
+    const CHECKSIGVERIFY: u8 = Operation::OP_CHECKSIGVERIFY as u8;
+    const CHECKMULTISIG: u8 = Operation::OP_CHECKMULTISIG as u8;
+    const CHECKMULTISIGVERIFY: u8 = Operation::OP_CHECKMULTISIGVERIFY as u8;
+    /// zcashd's `MAX_PUBKEYS_PER_MULTISIG`.
+    const MAX_PUBKEYS_PER_MULTISIG: u32 = 20;
+
+    let mut count: u32 = 0;
+    while let Some((&opcode, rest)) = script.split_first() {
+        let Some(rest) = skip_push_data(opcode, rest) else {
+            break;
+        };
+        script = rest;
+        count = count.saturating_add(match opcode {
+            CHECKSIG | CHECKSIGVERIFY => 1,
+            CHECKMULTISIG | CHECKMULTISIGVERIFY => MAX_PUBKEYS_PER_MULTISIG,
+            _ => 0,
+        });
+    }
+    count
+}
+
+/// Returns `script` after the push data of `opcode`, or `None` if the push data is truncated.
+///
+/// `script` starts after `opcode`. Opcodes that push no data return `script` unchanged.
+fn skip_push_data(opcode: u8, script: &[u8]) -> Option<&[u8]> {
+    /// Splits a little-endian length of `N` bytes off the front of `script`.
+    fn length<const N: usize>(script: &[u8]) -> Option<(usize, &[u8])> {
+        let (length, rest) = script.split_first_chunk::<N>()?;
+        let mut bytes = [0; 4];
+        bytes[..N].copy_from_slice(length);
+        Some((usize::try_from(u32::from_le_bytes(bytes)).ok()?, rest))
+    }
+
+    let (length, script) = match opcode {
+        // Direct pushes of 0 to 75 bytes, then OP_PUSHDATA1, OP_PUSHDATA2, and OP_PUSHDATA4.
+        0x00..=0x4b => (usize::from(opcode), script),
+        0x4c => length::<1>(script)?,
+        0x4d => length::<2>(script)?,
+        0x4e => length::<4>(script)?,
+        _ => (0, script),
+    };
+    script.get(length..)
 }
 
 /// Extract the redeem script bytes from a P2SH scriptSig.

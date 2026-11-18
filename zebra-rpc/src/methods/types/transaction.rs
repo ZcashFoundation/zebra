@@ -291,7 +291,7 @@ impl TransactionTemplate<NegativeOrZero> {
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
             fee: (-miner_fees).constrain()?,
-            sigops: tx.sigops()?,
+            sigops: tx.sigops(),
             required: true,
         })
     }

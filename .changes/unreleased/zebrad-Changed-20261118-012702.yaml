@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra now verifies transparent scripts with the Rust `zcash_script` interpreter instead of zcashd's C++ interpreter, and the `comparison-interpreter` feature is removed.
+time: 2026-11-18T01:27:02.000000Z

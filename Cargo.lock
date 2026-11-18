@@ -7390,7 +7390,6 @@ dependencies = [
  "howudoin",
  "jubjub",
  "lazy_static",
- "libzcash_script",
  "metrics",
  "nonempty",
  "once_cell",
@@ -7573,8 +7572,6 @@ version = "15.0.0"
 dependencies = [
  "hex",
  "lazy_static",
- "libzcash_script",
- "rand 0.10.2",
  "ripemd 0.1.3",
  "secp256k1",
  "sha2 0.10.9",

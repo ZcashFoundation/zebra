@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Removed `impl From<libzcash_script::Error> for TransactionError`, because transparent scripts are now verified with the Rust `zcash_script` interpreter.
+time: 2026-11-18T01:27:02.000000Z

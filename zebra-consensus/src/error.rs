@@ -342,12 +342,6 @@ impl From<BalanceError> for TransactionError {
     }
 }
 
-impl From<libzcash_script::Error> for TransactionError {
-    fn from(err: libzcash_script::Error) -> Self {
-        TransactionError::Script(zebra_script::Error::from(err))
-    }
-}
-
 impl From<std::io::Error> for TransactionError {
     fn from(err: std::io::Error) -> Self {
         TransactionError::Io(err.to_string())

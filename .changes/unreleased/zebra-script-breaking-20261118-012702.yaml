@@ -1,0 +1,4 @@
+project: zebra-script
+kind: breaking
+body: Replaced the C++ `libzcash_script` interpreter with the Rust `zcash_script` interpreter. `Error::Unknown` is replaced by `Error::Interpreter`, `Sigops::sigops` now returns `u32`, the `comparison-interpreter` feature is removed, and the new `legacy_sigop_count` counts sigops like zcashd's `GetSigOpCount(false)`.
+time: 2026-11-18T01:27:02.000000Z

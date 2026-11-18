@@ -352,7 +352,7 @@ where
             } else {
                 Some(miner_fee(tx.as_ref(), &spent_utxos)?)
             };
-            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+            let sigops = tx.sigops();
 
             Ok(BlockResponse {
                 tx_id,
@@ -532,7 +532,7 @@ where
             // Reject transactions above the standard sigop limit before script verification
             // checks every one of their signatures, in the same order as zcashd:
             // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1901-L1905
-            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+            let sigops = tx.sigops();
             let p2sh_sigops = zebra_script::p2sh_sigop_count(tx.as_ref(), &spent_outputs);
             let total_sigops = sigops.saturating_add(p2sh_sigops);
             if total_sigops > check::MAX_STANDARD_TX_SIGOPS {

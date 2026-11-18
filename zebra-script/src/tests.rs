@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 use zebra_test::prelude::*;
 
-use crate::{p2sh_sigop_count, Sigops};
+use crate::{legacy_sigop_count, p2sh_sigop_count, Sigops};
 
 lazy_static::lazy_static! {
     pub static ref SCRIPT_PUBKEY: Vec<u8> = <Vec<u8>>::from_hex("76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac")
@@ -54,7 +54,7 @@ fn count_legacy_sigops() -> Result<()> {
 
     let tx = SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-    assert_eq!(tx.sigops()?, 1);
+    assert_eq!(tx.sigops(), 1);
 
     Ok(())
 }
@@ -889,7 +889,7 @@ fn count_coinbase_legacy_sigops_includes_coinbase_script() -> Result<()> {
     // Before the fix, Zebra's `Sigops` impl skipped the coinbase input and returned 0 for a
     // coinbase with no OP_CHECKSIG in its outputs. After the fix, every OP_CHECKSIG in the coinbase
     // `scriptSig` must be counted.
-    let sigops = tx.sigops().expect("sigop count is finite");
+    let sigops = tx.sigops();
     assert_eq!(
         sigops, 80,
         "coinbase scriptSig OP_CHECKSIG bytes must be counted against \
@@ -1231,8 +1231,8 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
     const N_P2SH_TXS: u32 = 1334;
     let spent_outputs = std::slice::from_ref(&p2sh_spent_output);
 
-    let coinbase_legacy = coinbase_tx.sigops().expect("sigop count is finite");
-    let p2sh_legacy = p2sh_tx_template.sigops().expect("sigop count is finite");
+    let coinbase_legacy = coinbase_tx.sigops();
+    let p2sh_legacy = p2sh_tx_template.sigops();
     let p2sh_per_tx = p2sh_sigop_count(&p2sh_tx_template, spent_outputs);
     assert_eq!(coinbase_legacy, 80, "coinbase legacy sigops (Surface A)");
     assert_eq!(p2sh_per_tx, 15, "per-tx P2SH sigops (Surface B)");
@@ -1342,18 +1342,10 @@ fn is_valid_rejects_out_of_range_input_index() {
 ///    SIGHASH_ALL digest from step 1 — accepting a spend that `zcashd`
 ///    rejects and splitting Zebra nodes from `zcashd` nodes.
 ///
-/// With the defense-in-depth fix in `zebra-script::calculate_sighash`, the
-/// callback now returns a per-call CSPRNG-derived sighash when the hash
-/// type would have been rejected, so the second signature fails to verify
-/// and `is_valid` returns an error — matching `zcashd`.
-///
-/// The bypass requires release-grade C++ optimizations in `libzcash_script`
-/// (so the stack buffer is not zero-initialized and the prior digest
-/// lingers between callbacks). The workspace `Cargo.toml` forces
-/// `[profile.dev.package.libzcash_script]` to `opt-level = 3` in all
-/// profiles so that `cargo test` exercises the vulnerable code path and
-/// this regression test catches any re-introduction of the bug in both
-/// dev and release builds.
+/// Zebra now uses the Rust `zcash_script` interpreter, where a `None` sighash
+/// fails only that signature check, so the second signature fails to verify and
+/// `is_valid` returns an error, matching `zcashd`. This test keeps that spend
+/// rejected.
 #[test]
 fn stale_sighash_buffer_v5_two_checksig_rejected() {
     use secp256k1::{Message, SecretKey};
@@ -1648,4 +1640,58 @@ fn poc_p2sh_1001_accurate_multisigs_should_stay_below_block_sigop_limit() -> Res
     );
 
     Ok(())
+}
+
+/// Checks each `GetOp` rule that zcashd's `CScript::GetSigOpCount(false)` depends on.
+#[test]
+fn legacy_sigop_count_follows_zcashd_get_op() {
+    let push = |prefix: &[u8], len: usize| [prefix, &vec![0xac; len], &[0xac]].concat();
+    let cases: Vec<(&str, Vec<u8>, u32)> = vec![
+        ("empty", vec![], 0),
+        ("CHECKSIG", vec![0xac], 1),
+        ("CHECKSIGVERIFY", vec![0xad], 1),
+        ("CHECKMULTISIG", vec![0xae], 20),
+        ("CHECKMULTISIGVERIFY", vec![0xaf], 20),
+        ("legacy mode ignores OP_N", vec![0x52, 0xae], 20),
+        ("direct push payload", push(&[0x4b], 75), 1),
+        ("PUSHDATA1 payload", push(&[0x4c, 0xff], 255), 1),
+        (
+            "PUSHDATA2 520-byte payload",
+            push(&[0x4d, 0x08, 0x02], 520),
+            1,
+        ),
+        (
+            "PUSHDATA2 521-byte payload",
+            push(&[0x4d, 0x09, 0x02], 521),
+            1,
+        ),
+        (
+            "PUSHDATA4 payload",
+            push(&[0x4e, 0x00, 0x01, 0x00, 0x00], 256),
+            1,
+        ),
+        ("truncated direct push", vec![0xac, 0x02, 0xac], 1),
+        ("truncated PUSHDATA1 length", vec![0xac, 0x4c], 1),
+        ("truncated PUSHDATA2 length", vec![0xac, 0x4d, 0x01], 1),
+        (
+            "truncated PUSHDATA4 length",
+            vec![0xac, 0x4e, 0x00, 0x00, 0x00],
+            1,
+        ),
+        (
+            "PUSHDATA4 maximum length",
+            vec![0xac, 0x4e, 0xff, 0xff, 0xff, 0xff, 0xac],
+            1,
+        ),
+        ("disabled OP_CAT", vec![0x7e, 0xac], 1),
+        ("OP_CODESEPARATOR", vec![0xab, 0xac], 1),
+        (
+            "reserved and invalid opcodes",
+            vec![0x50, 0xba, 0xff, 0xac],
+            1,
+        ),
+    ];
+    for (name, script, expected) in cases {
+        assert_eq!(legacy_sigop_count(&script), expected, "{name}");
+    }
 }
