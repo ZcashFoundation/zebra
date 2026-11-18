@@ -1756,6 +1756,47 @@
       }
     },
     {
+      "name": "state.pruning.batch.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken by each successful pruning batch, including its safety checks but not compaction.",
+      "labels": [],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "state_pruning_batch_duration_seconds",
+          "state_pruning_batch_duration_seconds_sum",
+          "state_pruning_batch_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "state.pruning.deleted.height.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block heights whose bodies this process pruned.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_pruning_deleted_height_count"
+        ]
+      }
+    },
+    {
+      "name": "state.pruning.retained.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Lowest height whose block body is still stored, or zero if no block bodies were pruned.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_pruning_retained_height"
+        ]
+      }
+    },
+    {
       "name": "state.requests",
       "kind": "counter",
       "unit": "count",

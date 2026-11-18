@@ -301,6 +301,24 @@ pub fn describe() {
         "Time each phase of committing a checkpoint-verified block to the finalized state took."
     );
 
+    // Pruning
+    describe_gauge!(
+        "state.pruning.retained.height",
+        Unit::Count,
+        "Lowest height whose block body is still stored, or zero if no block bodies were pruned."
+    );
+    describe_counter!(
+        "state.pruning.deleted.height.count",
+        Unit::Count,
+        "Block heights whose bodies this process pruned."
+    );
+    describe_histogram!(
+        "state.pruning.batch.duration_seconds",
+        Unit::Seconds,
+        "Time taken by each successful pruning batch, including its safety checks but not \
+         compaction."
+    );
+
     // RocksDB
     describe_histogram!(
         "zebra.state.rocksdb.batch_commit.duration_seconds",
