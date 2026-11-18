@@ -18,27 +18,43 @@
 //! actions (via [`Throughput::Elements`]) so the dashboard shows
 //! time-per-action — the unit that actually matters for capacity planning.
 //!
-//! # Batching
+//! # Batched and CPU-cache comparisons
 //!
-//! `orchard::bundle::BatchValidator` supports cross-bundle batching, but
-//! [`Item`]'s internal fields are private, so this benchmark can only
-//! exercise `verify_single()` (a one-item batch).
+//! `halo2_cpu` keeps each Orchard bundle and sighash alongside the `Item`
+//! because `Item`'s fields are private. It uses `orchard::bundle::BatchValidator`
+//! directly for true one- and four-bundle batches with hot or cold CPU caches,
+//! plus four concurrent four-bundle batches.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
 
 mod common;
 
-use std::sync::Arc;
+use std::{
+    sync::{mpsc, Arc},
+    time::{Duration, Instant},
+};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
+use orchard::bundle::{Authorized, BatchValidator, Bundle};
+use zcash_protocol::value::ZatBalance;
+
 use zebra_chain::{
-    block::Block, parameters::NetworkUpgrade, serialization::ZcashDeserializeInto, transparent,
+    block::Block, parameters::NetworkUpgrade, serialization::ZcashDeserializeInto,
+    transaction::SigHash, transparent,
 };
 
 use tower_batch_control::RequestWeight;
 use zebra_consensus::halo2::{Item, VERIFYING_KEY_PRE_NU6_2};
+
+/// A bundle and its sighash, alongside the cheap-to-clone fallback item.
+#[derive(Clone)]
+struct Halo2BenchmarkItem {
+    bundle: Bundle<Authorized, ZatBalance>,
+    sighash: SigHash,
+    item: Item,
+}
 
 /// Extracts valid Halo2 items (Orchard bundles + sighashes) from NU5+ mainnet
 /// test blocks.
@@ -47,7 +63,7 @@ use zebra_consensus::halo2::{Item, VERIFYING_KEY_PRE_NU6_2};
 /// sighash requires the previous outputs they spend, which are not available
 /// in the test vectors. Orchard-only and Sapling-to-Orchard transactions
 /// work with an empty previous outputs set.
-fn extract_halo2_items_from_blocks() -> Vec<Item> {
+fn extract_halo2_items_from_blocks() -> Vec<Halo2BenchmarkItem> {
     let mut items = Vec::new();
 
     for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
@@ -77,7 +93,11 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
             // These mainnet test blocks are NU5-era Orchard history (mined before NU6.2),
             // so they verify under the pre-NU6.2 verifying key (see the `verify_single` calls
             // below, which pass `VERIFYING_KEY_PRE_NU6_2`).
-            items.push(Item::new(bundle, sighash));
+            items.push(Halo2BenchmarkItem {
+                item: Item::new(bundle.clone(), sighash),
+                bundle,
+                sighash,
+            });
         }
     }
 
@@ -90,7 +110,10 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
 }
 
 fn bench_halo2_verify(c: &mut Criterion) {
-    let source_items = extract_halo2_items_from_blocks();
+    let source_items: Vec<_> = extract_halo2_items_from_blocks()
+        .into_iter()
+        .map(|source| source.item)
+        .collect();
 
     let mut group = c.benchmark_group("halo2");
 
@@ -125,9 +148,109 @@ fn bench_halo2_verify(c: &mut Criterion) {
     group.finish();
 }
 
+fn verify_batch(items: &[Halo2BenchmarkItem]) {
+    let mut batch = BatchValidator::new(&VERIFYING_KEY_PRE_NU6_2);
+    for item in items {
+        batch
+            .add_bundle(&item.bundle, item.sighash.0)
+            .expect("test-vector Orchard bundle is valid for the pre-NU6.2 key");
+    }
+    assert!(
+        batch.validate(rand::rng()),
+        "test-vector Orchard proofs verify"
+    );
+}
+
+// Match the production verifier: validate on a Rayon worker, not the Criterion thread.
+fn verify_batch_on_pool(
+    items: Arc<Vec<Halo2BenchmarkItem>>,
+    mut eviction: Vec<u8>,
+) -> (Duration, Vec<u8>) {
+    let (tx, rx) = mpsc::sync_channel(1);
+    rayon::spawn_fifo(move || {
+        for byte in eviction.iter_mut().step_by(64) {
+            *byte = byte.wrapping_add(1);
+        }
+        std::hint::black_box(&eviction);
+        let start = Instant::now();
+        verify_batch(&items);
+        let _ = tx.send((start.elapsed(), eviction));
+    });
+    rx.recv().expect("Rayon worker completed verification")
+}
+
+fn bench_halo2_cpu(c: &mut Criterion) {
+    let source_items = extract_halo2_items_from_blocks();
+    let mut group = c.benchmark_group("halo2_cpu");
+
+    for n in [1, 4] {
+        let items = Arc::new(common::cycled(&source_items, n));
+        let actions = items
+            .iter()
+            .map(|item| item.bundle.actions().len() as u64)
+            .sum();
+        group.throughput(Throughput::Elements(actions));
+        group.bench_with_input(BenchmarkId::new("hot", n), &items, |b, items| {
+            b.iter_custom(|iterations| {
+                (0..iterations)
+                    .map(|_| verify_batch_on_pool(Arc::clone(items), Vec::new()).0)
+                    .sum()
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("cold", n), &items, |b, items| {
+            // Evict on the worker itself before timing, including its local V-Cache.
+            let mut eviction = vec![0u8; 128 * 1024 * 1024];
+            b.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    let (duration, cache) =
+                        verify_batch_on_pool(Arc::clone(items), std::mem::take(&mut eviction));
+                    eviction = cache;
+                    elapsed += duration;
+                }
+                elapsed
+            });
+        });
+    }
+
+    let items = Arc::new(common::cycled(&source_items, 4));
+    let actions: u64 = items
+        .iter()
+        .map(|item| item.bundle.actions().len() as u64)
+        .sum();
+    group.throughput(Throughput::Elements(actions * 4));
+    group.bench_function("concurrent_4x4", |b| {
+        b.iter(|| {
+            let (tx, rx) = mpsc::sync_channel(4);
+            for _ in 0..4 {
+                let tx = tx.clone();
+                let items = Arc::clone(&items);
+                rayon::spawn_fifo(move || {
+                    verify_batch(&items);
+                    let _ = tx.send(());
+                });
+            }
+            drop(tx);
+            for _ in 0..4 {
+                rx.recv().expect("Rayon worker completed verification");
+            }
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().noise_threshold(0.1).sample_size(50);
-    targets = bench_halo2_verify
+    targets = bench_halo2_verify, bench_halo2_cpu
 }
 criterion_main!(benches);
+
+/// Runs the same benchmarks after zebrad initializes its configured Rayon pool.
+#[allow(dead_code)]
+pub(crate) fn run_benchmarks() {
+    benches();
+    Criterion::default().configure_from_args().final_summary();
+}

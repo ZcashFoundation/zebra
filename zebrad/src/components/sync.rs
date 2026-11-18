@@ -319,6 +319,14 @@ pub struct Config {
     /// The state's block writer uses a separate pool with one extra thread for its writer loop,
     /// so committing blocks doesn't wait for other CPU-intensive work.
     pub parallel_cpu_threads: usize,
+
+    /// Pin Rayon verification workers to distinct physical CPU cores on Linux.
+    ///
+    /// When enabled, the CPU affinity of the process limits the available cores;
+    /// `parallel_cpu_threads` further limits the number of workers when nonzero.
+    /// Unsupported or unavailable CPU topology leaves Rayon unpinned. Disabled
+    /// by default because performance varies by host and concurrent workload.
+    pub pin_parallel_cpu_threads: bool,
 }
 
 impl Default for Config {
@@ -347,6 +355,7 @@ impl Default for Config {
             // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
+            pin_parallel_cpu_threads: false,
         }
     }
 }

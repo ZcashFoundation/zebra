@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: Added `sync::Config::pin_parallel_cpu_threads`; struct literals must specify this field or use `..Config::default()`.
+time: 2026-11-18T17:42:00.824038038+01:00

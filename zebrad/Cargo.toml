@@ -66,6 +66,10 @@ name = "telemetry"
 harness = false
 required-features = ["sentry", "prometheus"]
 
+[[bench]]
+name = "halo2_cpu"
+harness = false
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry", "pasta-asm"]
@@ -216,7 +220,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 flate2 = "1.1"
 tar = "0.4"
-nix = { workspace = true, features = ["fs", "signal", "process"] }
+nix = { workspace = true, features = ["fs", "signal", "process", "sched"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 
@@ -299,6 +303,9 @@ zeromq = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
+orchard = { workspace = true }
+tower-batch-control = { path = "../tower-batch-control/", version = "1.2.0" }
+zcash_protocol = { workspace = true }
 
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 tracing-test = { workspace = true, features = ["no-env-filter"] }

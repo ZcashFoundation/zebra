@@ -444,10 +444,28 @@ impl Application for ZebradApp {
         //   which forwards to sentry. If possible, use eyre's panic report for formatting.
         // - do we also need to call this code in `zebra_consensus::init()`,
         //   when that crate is being used by itself?
-        rayon::ThreadPoolBuilder::new()
+        let mut pool = rayon::ThreadPoolBuilder::new()
             .num_threads(config.sync.parallel_cpu_threads)
-            .thread_name(|thread_index| format!("rayon {thread_index}"))
-            .build_global()
+            .thread_name(|thread_index| format!("rayon {thread_index}"));
+
+        if config.sync.pin_parallel_cpu_threads {
+            if let Some(mut cpus) = crate::cpu_affinity::physical_cores() {
+                if config.sync.parallel_cpu_threads != 0 {
+                    cpus.truncate(config.sync.parallel_cpu_threads);
+                }
+                pool = pool
+                    .num_threads(cpus.len())
+                    .start_handler(move |thread_index| {
+                        if !crate::cpu_affinity::pin_current_thread(cpus[thread_index]) {
+                            eprintln!("unable to pin Rayon worker {thread_index} to a CPU");
+                        }
+                    });
+            } else {
+                eprintln!("unable to detect physical CPU cores; leaving Rayon workers unpinned");
+            }
+        }
+
+        pool.build_global()
             .expect("unable to initialize rayon thread pool");
 
         let default_filter = command.cmd().default_tracing_filter(command.verbose);

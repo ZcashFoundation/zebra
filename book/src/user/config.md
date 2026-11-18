@@ -369,6 +369,7 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | `checkpoint_verify_concurrency_limit` | `usize` | `1000` | Blocks submitted concurrently to checkpoint verification. Values below `400` are raised to `400` with a warning. The old key `lookahead_limit` is an accepted alias. |
 | `full_verify_concurrency_limit` | `usize` | `20` | Blocks submitted concurrently to full verification. Values below `1` are raised to `1` with a warning. |
 | `parallel_cpu_threads` | `usize` | `0` | Rayon worker threads for CPU-intensive verification. Zero delegates thread-count selection to Rayon; a positive value overrides its automatic selection. |
+| `pin_parallel_cpu_threads` | Boolean | `false` | On Linux, pin Rayon verification workers to distinct available physical cores, using one worker per core. A nonzero `parallel_cpu_threads` further limits the worker count. Off by default: this can improve latency on some hosts but worsen latency or concurrent throughput on others; measure on your host before enabling it. If physical topology cannot be detected, or on other systems, Rayon remains unpinned. |
 
 Do not supply both an alias and its current key: they deserialize as duplicate
 fields.
@@ -380,6 +381,9 @@ environment variable is absent or invalid, Rayon also checks the deprecated
 `RAYON_RS_NUM_CPUS` before detecting the CPU count. An explicit
 `RAYON_NUM_THREADS=0` selects CPU detection without checking the deprecated
 variable.
+
+When `pin_parallel_cpu_threads = true` and physical topology is available, the
+number of available physical cores takes precedence over `RAYON_NUM_THREADS`.
 
 ## `[mempool]`
 
