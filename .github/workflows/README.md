@@ -221,9 +221,10 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 ### Main Workflows
 
 - **Unit Tests** (`tests-unit.yml`): Linux unit tests via nextest
-  Source PRs targeting upstream `main` use workspace optimisation level 0; dependencies keep their
-  configured profiles. The merge queue validates level 3 before merge. Other contexts, including
-  `next` PRs and forks' own repositories, retain the unmodified release command.
+  Pull requests in the upstream repository, including `next` and stacked PRs, use workspace
+  optimisation level 0; dependencies keep their configured profiles. The `main` merge queue and
+  pushes to `main` run level 3, so `next` changes reach level 3 when `next` merges into `main`.
+  Forks' own repositories retain the unmodified release command.
 - **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image

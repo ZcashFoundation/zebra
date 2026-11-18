@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed `rpc.request.duration_seconds` and `zcash.net.peer.handshake.duration_seconds` to Prometheus histograms: the endpoint now exports `_bucket` series for them instead of `quantile` series, so they can be aggregated across nodes. The supplied dashboards and alert rules already query the `_bucket` series.'
+time: 2026-11-12T19:26:49.090704228Z

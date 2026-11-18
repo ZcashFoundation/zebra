@@ -93,21 +93,107 @@ front end that you can visualize:
 
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
 
+## Metric catalog
+
+[`docker/observability/metrics-catalog.json`](https://github.com/ZcashFoundation/zebra/blob/main/docker/observability/metrics-catalog.json)
+lists every metric Zebra records, with its kind, unit, description, label keys, and
+the series names the Prometheus endpoint exports it as. The endpoint also shows each
+description as a `# HELP` line. Prometheus names replace the dots in a metric's name
+with underscores, and don't add a unit suffix.
+
+Most histograms are exported as Prometheus summaries, with `quantile` series. These
+histograms are exported as Prometheus histograms, with `_bucket` series that can be
+aggregated across nodes:
+
+- `rpc.request.duration_seconds`
+- `zcash.net.peer.handshake.duration_seconds`
+- every histogram in [Performance timing](#performance-timing)
+
+The catalog file in a release lists that release's metrics, so you can check your own
+dashboards and alerts against the version you run.
+
+## Process metrics
+
+When the Prometheus endpoint is open, or [Sentry](tracing.md#sentry-production-monitoring)
+is active, Zebra samples its own process every 15 seconds and records the
+standard Prometheus process metrics. They use the usual names, without a prefix,
+so existing dashboards and alerts work unchanged. Zebra doesn't record them on
+Windows.
+
+| Metric | Unit | Description |
+|---|---|---|
+| `process_resident_memory_bytes` | bytes | Resident memory size. |
+| `process_virtual_memory_bytes` | bytes | Virtual memory size. |
+| `process_virtual_memory_max_bytes` | bytes | Maximum virtual memory available. |
+| `process_open_fds` | count | Open file descriptors. |
+| `process_max_fds` | count | Maximum open file descriptors. |
+| `process_threads` | count | OS threads in the process. |
+| `process_cpu_seconds_total` | seconds | Total user and system CPU time. |
+| `process_start_time_seconds` | seconds | Start time of the process since the Unix epoch. |
+
+Sentry receives all of them. It receives `process_cpu_seconds_total` as the CPU time
+used in each minute.
+
+`process_cpu_seconds_total` counts whole seconds, so use a window of a few
+minutes, such as `rate(process_cpu_seconds_total[5m])`, to see steady CPU usage
+on a lightly loaded node. The two maximums are left out when the limit is
+unlimited.
+
 ## Block timing
 
 These histograms show how quickly a node accepts new blocks. Official release builds
 also send them to [Sentry](tracing.md#sentry-production-monitoring) as distributions
 when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 
-| Metric | Unit | Description |
-|---|---|---|
-| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+| Metric | Unit | Labels | Description |
+|---|---|---|---|
+| `zcash.chain.tip.block_delay_seconds` | seconds | `chain.network_upgrade` | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+
+`chain.network_upgrade` is the network upgrade at the block's height, such as `Nu6`.
+The Prometheus endpoint exports it as the `chain_network_upgrade` label.
+Sentry also receives each value with the block's height as the number
+`chain.height`. The Prometheus endpoint doesn't export the height, because each
+height would become a new series.
 
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
-In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
-`chain.height`, so nodes can be compared block by block.
+In Sentry, `chain.height` lets you compare nodes block by block.
+
+## Performance timing
+
+These histograms and counters show where a node spends its time on each block, block
+template, and mempool update. Compare them between builds that run on the same
+network, hardware, and height range. `zebrad_build_info` has a `commit` label, so
+queries can group nodes by the commit they run.
+
+| Metric | Unit | Labels | Description |
+|---|---|---|---|
+| `zebra.consensus.block.phase.duration_seconds` | seconds | `phase` | Time each phase of full block verification took: `block_checks`, `transaction_verification`, or `state_commit`. Recorded for blocks from sync, gossip, and `submitblock`, but not for block proposals. `block_checks` and `transaction_verification` are recorded when they pass, even if a later phase rejects the block. `state_commit` is recorded only for committed blocks, and includes any wait for the parent block. |
+| `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a block took. Checkpoint-verified blocks record phases that start with `checkpoint_`, from loading the history tree to the RocksDB write. [Block writer metrics](#block-writer-metrics) describes the phases of other blocks. |
+| `zebra.net.block.decode.wait_seconds` | seconds | | Time a received block message waited for a rayon thread to start decoding it. |
+| `zebra.net.block.decode.duration_seconds` | seconds | | Time taken to decode a received block message, including that wait. |
+| `gossip.block.download.duration_seconds` | seconds | | Time taken to download a gossiped block from a peer. |
+| `gossip.block.verify_commit.duration_seconds` | seconds | | Time from sending a downloaded gossiped block to the verifier until it was committed. |
+| `rpc.getblocktemplate.build.duration_seconds` | seconds | | Time taken to select transactions and build a block template. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | seconds | | Time from a new best chain tip until the first block template on it was served. Miners keep working on the old tip for this long. |
+| `rpc.submitblock.outcomes.total` | count | `outcome` | Blocks submitted with `submitblock`, by result: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
+| `sync.mined.block.announcement.duration_seconds` | seconds | | Time from a mined block's acceptance until its announcement to peers finished. |
+| `sync.mined.block.announcement.outcomes.total` | count | `outcome` | Announcements of mined blocks, `completed` or `failed`. |
+| `mempool.tip_cleanup.duration_seconds` | seconds | | Time taken to remove a new tip block's transactions and their conflicts from the mempool. |
+| `mempool.expiry.duration_seconds` | seconds | | Time taken by each check of the mempool for expired transactions. |
+
+For example, this query shows the 95th percentile of each block verification phase
+for each commit:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, phase, commit) (
+    rate(zebra_consensus_block_phase_duration_seconds_bucket[1h])
+    * on (instance) group_left (commit) zebrad_build_info
+  )
+)
+```
 
 ## Sync stall metrics
 
@@ -115,9 +201,9 @@ These metrics show why the syncer stopped advancing the chain tip. Their labels 
 set of values. Block heights and hashes are in the matching log fields instead.
 
 Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
-when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter as
-one total per minute for each set of labels, and each gauge's latest value once a minute, along
-with `sync.downloads.in_flight`.
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter's
+increase once a minute for each set of labels, and each gauge's latest value in the minute it
+changes, and at least every 5 minutes.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
@@ -149,7 +235,7 @@ non-finalized state.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `state.block_writer.phase.duration_seconds` | Summary | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
+| `state.block_writer.phase.duration_seconds` | Histogram | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
 
 | `phase` | Measures |
 | --- | --- |
@@ -216,20 +302,34 @@ Metric labels use bounded values:
   `bad_transaction_balance`, `script`, `opcode`, or `num`.
 - Handshake `remote_version` and `negotiated_version`: known protocol versions or
   `other`.
+- `zcash.net.peers.missing_services` `missing_service`: the required service the
+  rejected peer doesn't advertise, `NODE_NETWORK`. It replaces the
+  `remote_services` label, whose value was the service bits the peer sent.
+
+`zcash.net.peers.initial` and `zcash.net.peers.cache` no longer have a `cache`
+label with the peer cache file path. The `zcash.net.peers.initial` series without
+a `seed` label counts the addresses from the peer cache.
+
+The `seed` label of `zcash.net.peers.initial` names an entry from
+`network.initial_mainnet_peers` or `network.initial_testnet_peers` only when it
+is one of the default DNS seeders that Zebra ships, such as
+`dnsseed.z.cash:8233`. Every other entry, including a custom host name or an IP
+address and port, has the value `custom`, so private peer addresses don't reach
+metrics in Prometheus or [Sentry](tracing.md#sentry-production-monitoring).
 
 ## Mining metrics
 
 Prometheus replaces dots in metric names with underscores. The RPC dashboard includes mining
 outcomes and mean build and announcement durations.
-Zebra exports duration metrics as Prometheus summaries, with quantiles plus `_sum` and `_count` series.
+Zebra exports these durations as Prometheus histograms, with `_bucket`, `_sum`, and `_count` series.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
 | `rpc.submitblock.outcomes.total` | Counter | `outcome` | Submission results: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
-| `rpc.getblocktemplate.build.duration_seconds` | Summary | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
-| `rpc.getblocktemplate.first_template.duration_seconds` | Summary | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
+| `rpc.getblocktemplate.build.duration_seconds` | Histogram | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | Histogram | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
 | `sync.mined.block.announcement.outcomes.total` | Counter | `outcome` | Mined-block announcement attempts: `completed` or `failed`. |
-| `sync.mined.block.announcement.duration_seconds` | Summary | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
+| `sync.mined.block.announcement.duration_seconds` | Histogram | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
 
 Submission labels follow the zcashd-compatible result, with `accepted` representing JSON `null`.
 Operational JSON-RPC errors remain in `rpc.errors.total`; they are not consensus rejections.

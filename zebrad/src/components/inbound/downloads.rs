@@ -22,7 +22,7 @@ use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
+    time::{timeout, Instant},
 };
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
@@ -554,6 +554,7 @@ where
             }
             .map_err(|e| (e, None))?;
 
+            let download_start = Instant::now();
             let response = timeout(
                 zn::constants::REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
                 network.oneshot(zn::Request::BlockDownload {
@@ -564,6 +565,8 @@ where
             .await
             .map_err(|e| (BoxError::from(e), None))?
             .map_err(|e| (e, None))?;
+            metrics::histogram!("gossip.block.download.duration_seconds")
+                .record(download_start.elapsed().as_secs_f64());
             let early_relay = matches!(
                 response,
                 zn::Response::EarlyBlocks(_) | zn::Response::ReconstructedBlock(..)
@@ -753,13 +756,16 @@ where
             } else {
                 zebra_consensus::Request::Commit(block)
             };
+            let verify_start = Instant::now();
             verifier
                 .oneshot(request)
                 .await
-                .map(|hash| (hash, block_height))
+                .map(|hash| (hash, block_height, verify_start.elapsed()))
                 .map_err(|e| (e, advertiser_addr))
         }
-        .map_ok(|(hash, height)| {
+        .map_ok(|(hash, height, verify_commit)| {
+            metrics::histogram!("gossip.block.verify_commit.duration_seconds")
+                .record(verify_commit.as_secs_f64());
             info!(?height, "downloaded and verified gossiped block");
             metrics::counter!("gossip.verified.block.count").increment(1);
             hash

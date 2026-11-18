@@ -741,6 +741,32 @@ async fn failing_dns_returns_cached_peers() {
     assert_eq!(peers, cached_peers);
 }
 
+#[test]
+fn initial_peer_metric_labels_only_name_default_seeders() {
+    use super::super::seed_metric_label;
+
+    assert_eq!(
+        seed_metric_label("dnsseed.z.cash:8233"),
+        "dnsseed.z.cash:8233"
+    );
+    assert_eq!(
+        seed_metric_label("testnet.seeder.zfnd.org:18233"),
+        "testnet.seeder.zfnd.org:18233"
+    );
+    assert_eq!(seed_metric_label("seed.example.internal:18233"), "custom");
+    assert_eq!(seed_metric_label("100.64.0.1:18233"), "custom");
+
+    // Near misses of a default seeder are custom entries too.
+    for near_miss in [
+        "DNSSEED.Z.CASH:8233",
+        "dnsseed.z.cash.:8233",
+        "dnsseed.z.cash:18233",
+        "dnsseed.z.cash:8233x",
+    ] {
+        assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
+    }
+}
+
 /// Persistent targets keep operator order, deduplicate entries, and survive both config conversions.
 #[test]
 fn persistent_peers_round_trip_preserves_order_and_uniqueness() {
