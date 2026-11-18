@@ -9168,7 +9168,7 @@ async fn rpc_treestate_reports_a_fast_synced_height_as_unavailable() {
 }
 
 /// `z_gettreestate` reports a missing block, not empty trees, when an active pool's tree lookup
-/// finds nothing after the header lookup succeeded.
+/// finds nothing after the header lookup succeeded and the height wasn't fast-synced.
 #[tokio::test(flavor = "multi_thread")]
 async fn z_get_treestate_reports_missing_block_when_tree_vanishes() {
     let _init_guard = zebra_test::init();
@@ -9234,6 +9234,10 @@ async fn z_get_treestate_reports_missing_block_when_tree_vanishes() {
         } else {
             sapling.respond(ReadResponse::SaplingTree(None));
         }
+        read_state
+            .expect_request(ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .respond(ReadResponse::FastSyncTreeRoots(None));
 
         let error = treestate
             .await

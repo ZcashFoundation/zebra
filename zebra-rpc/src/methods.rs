@@ -1177,6 +1177,19 @@ where
         Ok(roots)
     }
 
+    /// The error for an active pool's tree that wasn't found after the header lookup succeeded.
+    ///
+    /// Fast-synced heights have no stored trees. Otherwise the block was invalidated, or reorged
+    /// away and pruned, between the lookups, so answer as if it were missing.
+    async fn missing_treestate<T>(&self, hash: block::Hash) -> Result<T> {
+        if self.fast_sync_tree_roots(hash).await?.is_some() {
+            return Err("tree state unavailable: fast-synced height")
+                .map_error(server::error::LegacyCode::Database);
+        }
+
+        Err(BLOCK_NOT_IN_MAIN_CHAIN).map_error(server::error::LegacyCode::InvalidParameter)
+    }
+
     /// Builds off the async executor, retaining fallback ownership even if its caller cancels.
     async fn build_block_template(
         &self,
@@ -2707,12 +2720,6 @@ where
         let time = u32::try_from(header.time.timestamp())
             .expect("timestamps of valid blocks always fit into u32");
 
-        // The header and tree lookups are separate requests, so the block can be invalidated, or
-        // reorged away and pruned, between them. Answer as if the block were missing, rather than
-        // with empty trees.
-        let missing_tree =
-            || Err(BLOCK_NOT_IN_MAIN_CHAIN).map_error(server::error::LegacyCode::InvalidParameter);
-
         let sapling_active =
             network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into());
         let sapling = if sapling_active {
@@ -2733,17 +2740,10 @@ where
             None
         };
         if sapling_active && sapling.is_none() {
-            return missing_tree();
+            return self.missing_treestate(hash).await;
         }
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
-        if sapling_tree.is_none()
-            && network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into())
-            && self.fast_sync_tree_roots(hash).await?.is_some()
-        {
-            return Err("tree state unavailable: fast-synced height")
-                .map_error(server::error::LegacyCode::Database);
-        }
 
         let orchard_active = network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into());
         let orchard = if orchard_active {
@@ -2764,7 +2764,7 @@ where
             None
         };
         if orchard_active && orchard.is_none() {
-            return missing_tree();
+            return self.missing_treestate(hash).await;
         }
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
@@ -2788,7 +2788,7 @@ where
             None
         };
         if ironwood_active && ironwood.is_none() {
-            return missing_tree();
+            return self.missing_treestate(hash).await;
         }
         // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
         let ironwood = ironwood
