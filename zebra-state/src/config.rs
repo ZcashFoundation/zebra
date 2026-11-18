@@ -101,7 +101,8 @@ pub struct Config {
     /// Catch-up pruning compacts deleted bodies after clearing the backlog;
     /// normal RocksDB compaction handles ongoing deletion.
     ///
-    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
+    /// Enabling pruning adds the experimental `NODE_PRUNED` service bit to the advertised
+    /// `NODE_NETWORK` service, and is incompatible with zcashd sidecars.
     pub prune_blocks_older_than: Option<u32>,
 
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.

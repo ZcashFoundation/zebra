@@ -75,6 +75,9 @@ async fn halo2_key_preload_panic_exits_zebra() {
 }
 
 /// Startup policy, local advertisements, and RPC service reporting agree for every pruning state.
+///
+/// Archive nodes advertise `NODE_NETWORK` without `NODE_PRUNED`, and pruned nodes advertise
+/// `NODE_NETWORK | NODE_PRUNED`.
 #[tokio::test(flavor = "current_thread")]
 async fn pruned_network_services_preserve_independent_capabilities() {
     use std::sync::{Arc, Mutex};
@@ -106,19 +109,25 @@ async fn pruned_network_services_preserve_independent_capabilities() {
                 "pruned history",
                 None,
                 Height(10_000),
-                PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_NETWORK
+                    | PeerServices::NODE_PRUNED
+                    | PeerServices::NODE_TREE_ROOTS,
             ),
             (
                 "pruning configured before deletion",
                 Some(10_000),
                 Height(0),
-                PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_NETWORK
+                    | PeerServices::NODE_PRUNED
+                    | PeerServices::NODE_TREE_ROOTS,
             ),
             (
                 "pruning configured after deletion",
                 Some(10_000),
                 Height(10_000),
-                PeerServices::NODE_TREE_ROOTS,
+                PeerServices::NODE_NETWORK
+                    | PeerServices::NODE_PRUNED
+                    | PeerServices::NODE_TREE_ROOTS,
             ),
         ] {
             config.state.prune_blocks_older_than = retention;
@@ -177,6 +186,21 @@ async fn pruned_network_services_preserve_independent_capabilities() {
             rpc_tx_queue.abort();
         }
     }
+
+    // Archive nodes clear a configured `NODE_PRUNED`, so they never advertise it.
+    let mut config = crate::config::ZebradConfig::default();
+    config.network.local_services |= PeerServices::NODE_PRUNED;
+    let services = super::StartCmd::network_services(
+        &config,
+        HistoryCapabilities {
+            lowest_retained_height: Height(0),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        services,
+        PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
+    );
 }
 
 #[test]

@@ -198,8 +198,8 @@ bitflags! {
 
         /// NODE_PRUNED means the node may have deleted historic block bodies.
         ///
-        /// Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental bit 25).
-        /// They don't answer `getblocks` for heights below what they keep.
+        /// Zebra and Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental
+        /// bit 25). They don't answer `getblocks` for heights below what they keep.
         const NODE_PRUNED = 1 << 25;
     }
 }

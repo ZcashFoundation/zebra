@@ -38,8 +38,9 @@ replacement that does the same job.
 ### Pruned history
 
 Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
-retention, isolated database kinds, monitoring, and recovery. Enabling pruning immediately removes
-`NODE_NETWORK` from peer advertisements and rejects zcashd sidecars, even before deletion.
+retention, isolated database kinds, monitoring, and recovery. Enabling pruning immediately adds
+the experimental `NODE_PRUNED` service bit to the advertised `NODE_NETWORK` service and rejects
+zcashd sidecars, even before deletion.
 
 For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
 (`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.

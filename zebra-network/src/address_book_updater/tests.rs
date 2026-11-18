@@ -36,7 +36,7 @@ async fn local_address_advertises_configured_services() {
             ..Config::default()
         };
         if !archive {
-            config.local_services.remove(PeerServices::NODE_NETWORK);
+            config.local_services.insert(PeerServices::NODE_PRUNED);
         }
         let expected = config.local_services;
 
@@ -242,62 +242,69 @@ async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
 }
 
 /// `NextReconnectPeer` tries peers that might serve historic blocks before peers known not to,
-/// so non-serving peers only fill the outbound slots that serving peers leave.
+/// so non-serving peers, including pruned peers that advertise `NODE_NETWORK`, only fill the
+/// outbound slots that serving peers leave.
 #[tokio::test]
 async fn next_reconnect_peer_prefers_serving_peers() {
     let _init_guard = zebra_test::init();
 
-    let mut address_book = AddressBook::new(
-        SocketAddr::from_str("0.0.0.0:0").unwrap(),
-        PeerServices::NODE_NETWORK,
-        &Mainnet,
-        DEFAULT_MAX_CONNS_PER_IP,
-        Span::none(),
-    );
-
-    // The non-serving peer was gossiped more recently, so it comes first in reconnection order.
-    let serving: PeerSocketAddr = "127.1.1.1:1".parse().unwrap();
-    let non_serving: PeerSocketAddr = "127.1.1.2:1".parse().unwrap();
-    let an_hour_ago = DateTime32::now().saturating_sub(Duration32::from_hours(1));
-    for (addr, services, last_seen) in [
-        (serving, PeerServices::NODE_NETWORK, an_hour_ago),
-        (non_serving, PeerServices::empty(), DateTime32::now()),
+    for non_serving_services in [
+        PeerServices::empty(),
+        PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED,
     ] {
-        let change = MetaAddr::new_gossiped_meta_addr(addr, services, last_seen)
-            .new_gossiped_change()
-            .expect("gossiped peers always have services set");
-        address_book.update(change);
-    }
-    assert_eq!(
-        address_book
-            .reconnection_peers(Instant::now(), Utc::now())
-            .map(|peer| peer.addr)
-            .collect::<Vec<_>>(),
-        vec![non_serving, serving],
-    );
-
-    let (
-        _address_book,
-        _bans_receiver,
-        _change_sender,
-        address_book_service,
-        _address_metrics,
-        _updater_guard,
-    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
-
-    for expected in [serving, non_serving] {
-        let response = address_book_service
-            .clone()
-            .oneshot(AddressBookRequest::NextReconnectPeer)
-            .await
-            .expect("service should be running");
-        assert!(
-            matches!(
-                &response,
-                AddressBookResponse::NextReconnectPeer(Some(peer)) if peer.addr == expected
-            ),
-            "expected {expected} next, got: {response:?}",
+        let mut address_book = AddressBook::new(
+            SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            PeerServices::NODE_NETWORK,
+            &Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::none(),
         );
+
+        // The non-serving peer was gossiped more recently, so it comes first in reconnection order.
+        let serving: PeerSocketAddr = "127.1.1.1:1".parse().unwrap();
+        let non_serving: PeerSocketAddr = "127.1.1.2:1".parse().unwrap();
+        let an_hour_ago = DateTime32::now().saturating_sub(Duration32::from_hours(1));
+        for (addr, services, last_seen) in [
+            (serving, PeerServices::NODE_NETWORK, an_hour_ago),
+            (non_serving, non_serving_services, DateTime32::now()),
+        ] {
+            let change = MetaAddr::new_gossiped_meta_addr(addr, services, last_seen)
+                .new_gossiped_change()
+                .expect("gossiped peers always have services set");
+            address_book.update(change);
+        }
+        assert_eq!(
+            address_book
+                .reconnection_peers(Instant::now(), Utc::now())
+                .map(|peer| peer.addr)
+                .collect::<Vec<_>>(),
+            vec![non_serving, serving],
+            "{non_serving_services:?}",
+        );
+
+        let (
+            _address_book,
+            _bans_receiver,
+            _change_sender,
+            address_book_service,
+            _address_metrics,
+            _updater_guard,
+        ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+
+        for expected in [serving, non_serving] {
+            let response = address_book_service
+                .clone()
+                .oneshot(AddressBookRequest::NextReconnectPeer)
+                .await
+                .expect("service should be running");
+            assert!(
+                matches!(
+                    &response,
+                    AddressBookResponse::NextReconnectPeer(Some(peer)) if peer.addr == expected
+                ),
+                "{non_serving_services:?}: expected {expected} next, got: {response:?}",
+            );
+        }
     }
 }
 
