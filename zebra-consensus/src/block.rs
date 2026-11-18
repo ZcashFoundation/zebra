@@ -1074,14 +1074,14 @@ where
                     state_service.clone().oneshot(commit),
                     hold_mining_candidate
                 );
-                metrics::histogram!(
-                    "zebra.consensus.block.phase.duration_seconds",
-                    "phase" => "state_commit"
-                )
-                .record(phase_start.elapsed().as_secs_f64());
                 return match result {
                     Ok(zs::Response::Committed(committed_hash)) => {
                         assert_eq!(committed_hash, hash, "state must commit correct hash");
+                        metrics::histogram!(
+                            "zebra.consensus.block.phase.duration_seconds",
+                            "phase" => "state_commit"
+                        )
+                        .record(phase_start.elapsed().as_secs_f64());
                         Ok(hash)
                     }
                     Err(source) => Err(map_commit_error(source, hash)),
@@ -1300,15 +1300,14 @@ where
                 },
                 hold_mining_candidate
             );
-            metrics::histogram!(
-                "zebra.consensus.block.phase.duration_seconds",
-                "phase" => "state_commit"
-            )
-            .record(phase_start.elapsed().as_secs_f64());
-
             match result {
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
+                    metrics::histogram!(
+                        "zebra.consensus.block.phase.duration_seconds",
+                        "phase" => "state_commit"
+                    )
+                    .record(phase_start.elapsed().as_secs_f64());
                     Ok(hash)
                 }
 
