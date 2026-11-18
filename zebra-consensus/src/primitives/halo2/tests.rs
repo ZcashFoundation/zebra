@@ -176,6 +176,70 @@ fn orchard_binding_signature_is_verified() {
     assert!(!Item::new(invalid, sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2));
 }
 
+/// Returns `bundle` with a well-formed binding signature that does not verify.
+pub(crate) fn with_wrong_binding_signature(
+    bundle: Bundle<Authorized, ZatBalance>,
+) -> Bundle<Authorized, ZatBalance> {
+    let mut signature = <[u8; 64]>::from(bundle.authorization().binding_signature());
+    // Flip one bit of `s`.
+    signature[32] ^= 1;
+
+    bundle.map_authorization(
+        &mut (),
+        |_, _, spend_auth| spend_auth,
+        |_, authorization| {
+            Authorized::from_parts(
+                authorization.proof().clone(),
+                Signature::<Binding>::from(signature),
+            )
+        },
+    )
+}
+
+/// Returns `bundle` with one more zatoshi of value balance, so its binding validating key no longer
+/// matches its binding signature. The proof and spend authorization signatures stay valid.
+pub(crate) fn with_value_balance_plus_one(
+    bundle: Bundle<Authorized, ZatBalance>,
+) -> Bundle<Authorized, ZatBalance> {
+    bundle
+        .try_map_value_balance(|value_balance| ZatBalance::from_i64(i64::from(value_balance) + 1))
+        .expect("test value balances are far below the maximum")
+}
+
+/// A bundle whose binding signature does not match it fails alone in a batch of valid bundles:
+/// the failed batch falls back to single verification, which accepts the valid bundles and rejects
+/// the bad one like any other invalid Halo2 bundle.
+#[tokio::test(flavor = "multi_thread")]
+async fn binding_mismatch_fails_only_its_own_bundle_in_a_batch() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+        let verifier = super::batch_verifier(&VERIFYING_KEY_PRE_NU6_2);
+
+        for tamper in [with_wrong_binding_signature, with_value_balance_plus_one] {
+            let good = Item::new(bundle.clone(), sighash);
+            let bad = Item::new(tamper(bundle.clone()), sighash);
+            let [first, second, bad_result, last] = futures::future::join_all(
+                [good.clone(), good.clone(), bad, good].map(|item| verifier.clone().oneshot(item)),
+            )
+            .await
+            .try_into()
+            .expect("one result per item");
+
+            for result in [first, second, last] {
+                result.expect("valid bundles verify despite the bad one");
+            }
+            let error = bad_result.expect_err("the bad bundle is rejected");
+            let error = error
+                .downcast_ref::<TransactionError>()
+                .expect("the fallback reports a transaction error");
+            assert_eq!(error, &TransactionError::Halo2VerificationFailed);
+            assert_eq!(error.mempool_misbehavior_score(), 100);
+        }
+    })
+    .await
+    .expect("batch verification and its fallback finish");
+}
+
 /// The Orchard verifier routing selects the correct key by block era (network upgrade).
 ///
 /// We compare service identity by pointer: the routing functions return a borrow of one of the
