@@ -179,6 +179,19 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
+
+        /// NODE_PRUNED means the node may have deleted historic block bodies.
+        ///
+        /// Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental bit 25).
+        /// They don't answer `getblocks` for heights below what they keep.
+        const NODE_PRUNED = 1 << 25;
+    }
+}
+
+impl PeerServices {
+    /// Returns true if these services say the peer can serve every historic block.
+    pub fn serves_full_history(&self) -> bool {
+        self.contains(PeerServices::NODE_NETWORK) && !self.contains(PeerServices::NODE_PRUNED)
     }
 }
 

@@ -150,6 +150,25 @@ async fn outbound_direct_rejects_non_serving_peer_while_syncing() {
     );
 }
 
+/// While syncing, outbound handshakes must reject pruned peers, even though they advertise
+/// `NODE_NETWORK`.
+#[tokio::test]
+async fn outbound_direct_rejects_pruned_peer_while_syncing() {
+    let _init_guard = zebra_test::init();
+
+    let pruned = PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED;
+    let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
+    let result = negotiate_with_remote_services(connected_addr, pruned, NoChainTip).await;
+
+    assert!(
+        matches!(
+            result,
+            Err(HandshakeError::MissingRequiredServices { services }) if services == pruned
+        ),
+        "expected MissingRequiredServices, got: {result:?}",
+    );
+}
+
 /// While syncing, outbound proxy handshakes must reject peers that don't advertise
 /// `NODE_NETWORK`.
 #[tokio::test]

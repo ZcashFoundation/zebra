@@ -142,7 +142,7 @@ use crate::{
         InventoryChange, InventoryRegistry,
     },
     protocol::{
-        external::{connection_limit_key, types::PeerServices, InventoryHash},
+        external::{connection_limit_key, InventoryHash},
         internal::{Request, Response},
     },
     BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
@@ -380,8 +380,8 @@ where
     /// [`Self::prune_disconnected_sidecar_keys`].
     zcashd_compat_peer_keys: HashSet<D::Key>,
 
-    /// The keys of connected peers that advertised [`PeerServices::NODE_NETWORK`],
-    /// so they can serve historic blocks.
+    /// The keys of connected peers whose services
+    /// [serve full history](crate::types::PeerServices::serves_full_history).
     ///
     /// Busy peers' services are not otherwise accessible, but block and find routing need to
     /// know whether a busy peer can serve blocks. Stale keys of disconnected peers are pruned by
@@ -999,7 +999,7 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
-                    if svc.remote_services().contains(PeerServices::NODE_NETWORK) {
+                    if svc.remote_services().serves_full_history() {
                         self.serving_peer_keys.insert(key);
                     } else {
                         self.serving_peer_keys.remove(&key);
@@ -1491,7 +1491,7 @@ where
     /// Returns where to route an inventory request for `hash`.
     ///
     /// Prefers a ready peer that advertised the inventory, then a ready peer that isn't missing it.
-    /// For blocks, that fallback prefers peers that advertised [`PeerServices::NODE_NETWORK`].
+    /// For blocks, that fallback prefers peers that [serve full history](crate::types::PeerServices::serves_full_history).
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
