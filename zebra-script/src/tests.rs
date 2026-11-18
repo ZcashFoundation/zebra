@@ -1695,3 +1695,100 @@ fn legacy_sigop_count_follows_zcashd_get_op() {
         assert_eq!(legacy_sigop_count(&script), expected, "{name}");
     }
 }
+
+/// Checks how `is_valid` reports a script that passes, one that runs to completion and leaves a
+/// false value, and one that the interpreter aborts in each script component.
+#[test]
+fn is_valid_reports_the_failed_script_component() {
+    use std::error::Error as _;
+
+    use ripemd::{Digest as _, Ripemd160};
+    use sha2::Sha256;
+    use zcash_script::script::ComponentType;
+
+    use crate::Error;
+
+    let _init_guard = zebra_test::init();
+
+    let verify = |unlock_script: &[u8], lock_script: &[u8]| {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: transaction::Hash([0u8; 32]),
+                    index: 0,
+                },
+                unlock_script: transparent::Script::new(unlock_script),
+                sequence: u32::MAX,
+            }],
+            vec![Output {
+                value: 1u64.try_into().expect("valid amount"),
+                lock_script: transparent::Script::new(&[0x00]),
+            }],
+            LockTime::unlocked(),
+            block::Height(0),
+        );
+        let previous_output = Output {
+            value: 1u64.try_into().expect("valid amount"),
+            lock_script: transparent::Script::new(lock_script),
+        };
+
+        super::CachedFfiTransaction::new(
+            Arc::new(tx),
+            Arc::new(vec![previous_output]),
+            NetworkUpgrade::Nu5,
+        )
+        .expect("network upgrade should be valid for v5 tx")
+        .is_valid(0)
+    };
+
+    const OP_0: u8 = 0x00;
+    const OP_1: u8 = 0x51;
+    const OP_RETURN: u8 = 0x6a;
+
+    assert_eq!(verify(&[], &[OP_1]), Ok(()));
+    assert_eq!(verify(&[], &[OP_0]), Err(Error::ScriptInvalid));
+    assert!(matches!(
+        verify(&[], &[OP_RETURN]),
+        Err(Error::Interpreter {
+            component: ComponentType::PubKey,
+            ..
+        })
+    ));
+    assert!(matches!(
+        verify(&[OP_RETURN], &[OP_1]),
+        Err(Error::Interpreter {
+            component: ComponentType::Sig,
+            ..
+        })
+    ));
+
+    // A P2SH spend of `redeem_script`: the unlock script pushes the one-byte redeem script, and
+    // the lock script is `OP_HASH160 <script hash> OP_EQUAL`.
+    let verify_p2sh = |redeem_script: u8| {
+        let script_hash: [u8; 20] = Ripemd160::digest(Sha256::digest([redeem_script])).into();
+        let lock_script = [&[0xa9, 0x14][..], &script_hash, &[0x87]].concat();
+        verify(&[0x01, redeem_script], &lock_script)
+    };
+
+    assert_eq!(verify_p2sh(OP_1), Ok(()));
+    assert_eq!(verify_p2sh(OP_0), Err(Error::ScriptInvalid));
+    let redeem_error = verify_p2sh(OP_RETURN).expect_err("OP_RETURN aborts the redeem script");
+    assert!(matches!(
+        redeem_error,
+        Error::Interpreter {
+            component: ComponentType::Redeem,
+            ..
+        }
+    ));
+
+    // The interpreter error is both part of the message and the source of the error.
+    let Error::Interpreter { error, .. } = &redeem_error else {
+        unreachable!("checked above");
+    };
+    assert!(redeem_error.to_string().contains(&error.to_string()));
+    assert_eq!(
+        redeem_error.source().map(ToString::to_string),
+        Some(error.to_string())
+    );
+}
