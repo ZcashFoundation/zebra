@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Made `UnminedTx` cached serialized sizes constructor-controlled. Replace struct literals with `UnminedTx::from` and read encoded sizes with `UnminedTx::size()` ([#12290](https://github.com/ZcashFoundation/zebra/pull/12290)).
+time: 2026-11-14T00:18:51.167072994+01:00

@@ -2,7 +2,7 @@
 
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -16,7 +16,10 @@ use zebra_network as zn;
 use zebra_state as zs;
 use zebra_test::mock_service::MockService;
 
-use crate::{components::sync::ChainSync, config::ZebradConfig};
+use crate::{
+    components::sync::{ChainSync, FANOUT},
+    config::ZebradConfig,
+};
 
 /// Concurrent commits remove only completed downloads, preserving unknown-parent work and order.
 #[tokio::test]
@@ -28,23 +31,38 @@ async fn obtain_tips_tolerates_commits_during_fanout() {
         block::Hash([2; 32]),
         block::Hash([3; 32]),
         block::Hash([4; 32]),
+        block::Hash([5; 32]),
+        block::Hash([6; 32]),
     ];
-    let advanced = Arc::new(AtomicBool::new(false));
+    let batches = Arc::new(AtomicUsize::new(0));
+    let state_batches = batches.clone();
     let state = tower::service_fn(move |request| {
         let response = match request {
             zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent]),
-            zs::Request::KnownBlock(hash) => {
-                let before_commit = hash == hashes[0] && !advanced.swap(true, Ordering::SeqCst);
-                let known = if before_commit {
-                    None
-                } else if hashes[..2].contains(&hash) {
-                    Some(zs::KnownBlock::BestChain)
-                } else if hash == hashes[3] {
-                    Some(zs::KnownBlock::Queue)
+            zs::Request::KnownBlocks(requested) => {
+                let batch = state_batches.fetch_add(1, Ordering::SeqCst);
+                let known = if batch < FANOUT {
+                    assert_eq!(requested, hashes);
+                    vec![
+                        Some(zs::KnownBlock::WriteChannel),
+                        Some(zs::KnownBlock::Queue),
+                        Some(zs::KnownBlock::BestChain),
+                        None,
+                        Some(zs::KnownBlock::Queue),
+                        None,
+                    ]
                 } else {
-                    None
+                    assert_eq!(batch, FANOUT, "only one recheck batch is needed");
+                    assert_eq!(requested, hashes[1..]);
+                    vec![
+                        Some(zs::KnownBlock::BestChain),
+                        Some(zs::KnownBlock::WriteChannel),
+                        None,
+                        Some(zs::KnownBlock::Queue),
+                        None,
+                    ]
                 };
-                zs::Response::KnownBlock(known)
+                zs::Response::KnownBlocks(known)
             }
             request => panic!("unexpected state request: {request:?}"),
         };
@@ -85,15 +103,17 @@ async fn obtain_tips_tolerates_commits_during_fanout() {
         .await
         .expect("tip discovery is bounded")
         .expect("commits during fanout are progress, not a sync failure");
+    assert_eq!(batches.load(Ordering::SeqCst), FANOUT + 1);
     let requests = tokio::time::timeout(Duration::from_secs(5), async {
         [
+            requested.recv().await.unwrap(),
             requested.recv().await.unwrap(),
             requested.recv().await.unwrap(),
         ]
     })
     .await
-    .expect("both remaining downloads must be dispatched");
-    assert_eq!(requests, [hashes[2], hashes[3]]);
+    .expect("all remaining downloads must be dispatched");
+    assert_eq!(requests, [hashes[3], hashes[4], hashes[5]]);
     assert!(
         requested.try_recv().is_err(),
         "committed hashes must not consume download capacity"

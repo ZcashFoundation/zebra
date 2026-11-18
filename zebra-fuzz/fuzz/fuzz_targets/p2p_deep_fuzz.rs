@@ -228,6 +228,10 @@ fuzz_target!(|data: &[u8]| {
                             panic::catch_unwind(panic::AssertUnwindSafe(|| header.header.hash()));
                     }
                 }
+                // The codec never decodes raw blocks: Zebra only sends them.
+                Message::RawBlock(block) => {
+                    let _len = (**block).as_ref().len();
+                }
                 Message::Block(block) => {
                     // Deep fuzz the block — replicate block_deep_fuzz Layer 2
                     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.hash()));
@@ -242,6 +246,45 @@ fuzz_target!(|data: &[u8]| {
                     for tx in &block.transactions {
                         deep_fuzz_transaction(tx);
                     }
+                }
+                Message::SendCompact {
+                    high_bandwidth,
+                    version,
+                } => {
+                    let _high_bandwidth = *high_bandwidth;
+                    let _version = *version;
+                }
+                Message::CompactBlock(block) => {
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.header.hash()));
+                    let _nonce = block.nonce;
+                    let _count = block.short_ids.len();
+                    for _short_id in &block.short_ids {}
+                    for (index, tx) in &block.prefilled {
+                        let _index = *index;
+                        deep_fuzz_transaction(tx);
+                    }
+                }
+                Message::GetBlockTransactions(request) => {
+                    let _hash = &request.block_hash;
+                    let _count = request.indexes.len();
+                    for _index in &request.indexes {}
+                }
+                Message::BlockTransactions(response) => {
+                    let _hash = &response.block_hash;
+                    let _count = response.transactions.len();
+                    for tx in &response.transactions {
+                        deep_fuzz_transaction(tx);
+                    }
+                }
+                Message::GetTreeRoots {
+                    start_height,
+                    final_hash,
+                    count,
+                } => {
+                    let _range = (*start_height, *final_hash, *count);
+                }
+                Message::TreeRoots(roots) => {
+                    let _count = roots.as_ref().map(Vec::len);
                 }
                 Message::Tx(unmined_tx) => {
                     // Deep fuzz the transaction
@@ -333,8 +376,7 @@ fuzz_target!(|data: &[u8]| {
                 let mut out_buf = BytesMut::new();
                 let _ = codec_addr.encode(out_msg, &mut out_buf);
             }));
-            // Also exercise Testnet path — sanitize() branches on
-            // last_known_info_is_valid_for_outbound(network).
+            // Also exercise the Testnet path: sanitize() is network-dependent.
             let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 for a in addrs {
                     let _ = a.sanitize(default_testnet());
@@ -395,6 +437,13 @@ fuzz_target!(|data: &[u8]| {
                 | Message::GetData(_)
                 | Message::NotFound(_)
                 | Message::Block(_)
+                | Message::RawBlock(_)
+                | Message::SendCompact { .. }
+                | Message::CompactBlock(_)
+                | Message::GetBlockTransactions(_)
+                | Message::BlockTransactions(_)
+                | Message::GetTreeRoots { .. }
+                | Message::TreeRoots(_)
                 | Message::Headers(_)
                 | Message::GetHeaders { .. }
                 | Message::Tx(_)

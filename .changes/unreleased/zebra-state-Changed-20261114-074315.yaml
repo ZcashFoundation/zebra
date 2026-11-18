@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Avoid heap allocation in fixed-size database keys and unused state-writer diagnostic counters.
+time: 2026-11-14T07:43:15.556133659+01:00

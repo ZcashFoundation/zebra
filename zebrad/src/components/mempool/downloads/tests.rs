@@ -1,6 +1,8 @@
 //! Fixed test vectors for the mempool transaction downloader.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
+use tokio::sync::Notify;
 
 use futures::StreamExt as _;
 use tower::{service_fn, util::BoxCloneService};
@@ -9,6 +11,62 @@ use zebra_chain::parameters::Network;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::*;
+
+/// Already-mined or failed known-ID lookups reject the transaction without a tip lookup, so
+/// gossiping mined IDs costs one state read each.
+#[tokio::test]
+async fn known_id_rejections_skip_the_tip_lookup() {
+    let _init_guard = zebra_test::init();
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("mainnet vectors contain a transaction")
+        .transaction;
+    let txid = transaction.id;
+
+    for known in [Ok(true), Err("known transaction lookup failed")] {
+        let peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let mut state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let mut downloads = Downloads::new(
+            peer_set,
+            verifier,
+            state.clone(),
+            Network::Mainnet.fee_reduction_height(),
+            Arc::new(Notify::new()),
+        );
+        downloads
+            .download_if_needed_and_verify(Gossip::Tx(transaction.clone()), None, None)
+            .expect("the request can be queued");
+
+        state
+            .expect_request(zs::ReadRequest::KnownTransaction(txid.mined_id()))
+            .await
+            .respond(
+                known
+                    .map(zs::ReadResponse::KnownTransaction)
+                    .map_err(BoxError::from),
+            );
+
+        let (_txid, error, _) = *tokio::time::timeout(Duration::from_secs(1), downloads.next())
+            .await
+            .expect("the known-ID lookup has responded")
+            .expect("the download returns its result")
+            .expect("the task did not time out")
+            .expect_err("the known-ID lookup rejects the transaction");
+        match (known, error) {
+            (Ok(_), TransactionDownloadVerifyError::InState) => {}
+            (Err(message), TransactionDownloadVerifyError::StateError(error)) => {
+                assert_eq!(error.to_string(), message);
+            }
+            (_, error) => panic!("expected the known-ID result, got {error:?}"),
+        }
+        state.expect_no_requests().await;
+    }
+}
 
 #[test]
 fn download_verify_error_metric_labels_ignore_details() {
@@ -85,10 +143,16 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
         MockService::build().for_unit_tests();
     let verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
 
-    let mut downloads = Downloads::new(peer_set, verifier, state, network.fee_reduction_height());
+    let mut downloads = Downloads::new(
+        peer_set,
+        verifier,
+        state,
+        network.fee_reduction_height(),
+        Arc::new(Notify::new()),
+    );
 
     // The first `MAX_INBOUND_CONCURRENCY_PER_PEER` pushes from this peer are admitted.
     for gossip in pushed.iter().take(MAX_INBOUND_CONCURRENCY_PER_PEER) {
@@ -161,12 +225,15 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         })),
         BoxCloneService::new(service_fn(|request| async move {
             match request {
-                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
-                zs::Request::Tip => Ok(zs::Response::Tip(None)),
+                zs::ReadRequest::KnownTransaction(_) => {
+                    Ok(zs::ReadResponse::KnownTransaction(false))
+                }
+                zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(None)),
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
         })),
         network.fee_reduction_height(),
+        Arc::new(Notify::new()),
     );
 
     downloads
@@ -211,10 +278,11 @@ async fn mined_transaction_needs_no_body() {
         service_fn(|_| async { panic!("a mined transaction must not be downloaded") }),
         service_fn(|_| async { panic!("a mined transaction must not be verified") }),
         service_fn(move |request| async move {
-            assert_eq!(request, zs::Request::KnownTransaction(hash));
-            Ok::<_, BoxError>(zs::Response::KnownTransaction(true))
+            assert_eq!(request, zs::ReadRequest::KnownTransaction(hash));
+            Ok::<_, BoxError>(zs::ReadResponse::KnownTransaction(true))
         }),
         Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
     );
     downloads
         .download_if_needed_and_verify(Gossip::Id(transaction.id), None, None)
@@ -250,8 +318,10 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
         )));
         let state = BoxCloneService::new(service_fn(move |request| async move {
             match request {
-                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
-                zs::Request::Tip => Ok(zs::Response::Tip(Some((
+                zs::ReadRequest::KnownTransaction(_) => {
+                    Ok(zs::ReadResponse::KnownTransaction(false))
+                }
+                zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(Some((
                     activation.previous().unwrap(),
                     zebra_chain::block::Hash([1; 32]),
                 )))),
@@ -303,6 +373,7 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
             verifier,
             state,
             activation,
+            Arc::new(Notify::new()),
         );
         let (rsp_tx, rsp_rx) = oneshot::channel();
         downloads
@@ -310,11 +381,15 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
             .expect("the invalid transaction is admitted for verification");
 
         // Wait for the independent task, not Downloads::poll_next or Mempool::poll_ready.
-        let completed = tokio::time::timeout(Duration::from_secs(1), downloads.pending.next())
+        tokio::time::timeout(Duration::from_secs(1), downloads.pending.next())
             .await
             .expect("definite verification failures do not wait for a queue-checker tick")
             .expect("the download task exists")
-            .expect("the download task does not panic")
+            .expect("the download task does not panic");
+        let completed = downloads
+            .results
+            .try_recv()
+            .expect("the finished task queued its result")
             .expect("the download task does not time out");
         assert!(
             completed.is_err(),
@@ -338,4 +413,110 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
             "the caller must receive the original validation failure: {error}"
         );
     }
+}
+
+/// A coalesced wake must drain a batch larger than Tokio's cooperative budget.
+#[tokio::test(start_paused = true)]
+async fn completed_batch_keeps_queue_checker_awake() {
+    let notified = Arc::new(Notify::new());
+    let mut downloads = Downloads::new(
+        service_fn(|_| async { Ok(zn::Response::Transactions(Vec::new())) }),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|request| async move {
+            Ok(match request {
+                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
+                _ => unreachable!("downloads only query transactions and the tip"),
+            })
+        }),
+        Network::Mainnet.fee_reduction_height(),
+        notified.clone(),
+    );
+    for index in 0..MAX_INBOUND_CONCURRENCY {
+        let mut hash = [0; 32];
+        hash[..8].copy_from_slice(&u64::try_from(index).unwrap().to_le_bytes());
+        downloads
+            .download_if_needed_and_verify(
+                Gossip::Id(UnminedTxId::Legacy(transaction::Hash(hash))),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    // Paused time advances only after every runnable download has finished.
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    assert!(downloads.pending.iter().all(JoinHandle::is_finished));
+
+    let before_backstop = super::super::queue_checker::RATE_LIMIT_DELAY / 2;
+    tokio::time::timeout(before_backstop, async {
+        let mut completed = 0;
+        while completed < MAX_INBOUND_CONCURRENCY {
+            notified.notified().await;
+            // Like the mempool, drain ready results but return readiness on Pending.
+            futures::future::poll_fn(|cx| {
+                while let Poll::Ready(Some(_)) = Pin::new(&mut downloads).poll_next(cx) {
+                    completed += 1;
+                }
+                Poll::Ready(())
+            })
+            .await;
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("queued results must not wait for the five-second backstop");
+}
+
+/// Consuming a result frees admission even if its task has not exited.
+#[tokio::test(start_paused = true)]
+async fn full_queue_can_retry_before_completed_task_exits() {
+    let mut downloads = Downloads::new(
+        service_fn(|_| std::future::pending::<Result<zn::Response, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<zs::ReadResponse, BoxError>>()),
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
+    );
+    let tx = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("mainnet vectors contain a transaction");
+    downloads
+        .download_if_needed_and_verify(tx.transaction.clone().into(), None, None)
+        .unwrap();
+    for index in 1..MAX_INBOUND_CONCURRENCY {
+        let mut hash = [0; 32];
+        hash[..8].copy_from_slice(&u64::try_from(index).unwrap().to_le_bytes());
+        downloads
+            .download_if_needed_and_verify(
+                Gossip::Id(UnminedTxId::Legacy(transaction::Hash(hash))),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    // Reproduce the interval after sending a result but before its JoinHandle becomes ready.
+    let (response, mut receiver) = oneshot::channel();
+    downloads
+        .results_sender
+        .send(Ok(Ok((tx, Vec::new(), Some(Height(0)), Some(response)))))
+        .unwrap();
+    let (tx, _, _, response) = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(downloads.pending.len(), MAX_INBOUND_CONCURRENCY);
+    assert!(downloads.pending.iter().all(|task| !task.is_finished()));
+
+    // The mempool retries this transaction when its verified tip height is stale.
+    downloads
+        .download_if_needed_and_verify(tx.transaction.into(), None, response)
+        .expect("consuming a result must free its slot before a stale-tip retry");
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
 }

@@ -34,6 +34,7 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -101,6 +102,23 @@ pub struct Config {
 
     /// The network to connect to.
     pub network: Network,
+
+    /// Enable compact blocks and early relay with peers that also support them.
+    ///
+    /// Enabled by default. Negotiated peers can serve authenticated blocks before full
+    /// transaction validation; callers must still fully verify every block.
+    /// Ordinary committed relay is unchanged. See the [draft Compact Block Relay ZIP].
+    ///
+    /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+    pub compact_block_relay: bool,
+
+    /// Runtime service capabilities advertised to peers.
+    ///
+    /// Defaults to archive and tree-root service. At startup, zebrad sets this from the node's
+    /// storage mode.
+    /// This field is not serialized or read from configuration files.
+    #[serde(skip)]
+    pub local_services: PeerServices,
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
@@ -181,7 +199,8 @@ pub struct Config {
     /// The initial target size for the peer set.
     ///
     /// Also used to limit the number of inbound and outbound connections made by Zebra,
-    /// and the size of the cached peer list.
+    /// the ordinary outbound connections (persistent peers excluded) to peers that don't serve
+    /// historic blocks, and the size of the cached peer list.
     ///
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
@@ -634,6 +653,8 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
+            compact_block_relay: true,
+            local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             persistent_peers: IndexSet::new(),
@@ -720,6 +741,7 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
+    compact_block_relay: bool,
 
     /// Legacy testnet parameters, kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -742,6 +764,7 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
+            compact_block_relay: config.compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
@@ -804,6 +827,8 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
+            compact_block_relay,
+            local_services: _,
             initial_mainnet_peers,
             initial_testnet_peers,
             persistent_peers,
@@ -838,6 +863,7 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
+            compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -859,6 +885,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
+            compact_block_relay,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -942,6 +969,8 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
+            compact_block_relay,
+            local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
             initial_mainnet_peers,
             initial_testnet_peers,
             persistent_peers,

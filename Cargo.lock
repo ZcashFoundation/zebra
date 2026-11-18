@@ -85,7 +85,7 @@ checksum = "f8eb277bec05f56a0e0591f155a484cbd0f4f07ff2905051a48c72f004f7ed58"
 dependencies = [
  "cipher",
  "cpubits",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
 ]
 
 [[package]]
@@ -696,7 +696,7 @@ checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cipher",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "rand_core 0.10.1",
 ]
 
@@ -1029,9 +1029,9 @@ dependencies = [
 
 [[package]]
 name = "cpufeatures"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
+checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
 ]
@@ -1056,6 +1056,7 @@ dependencies = [
  "ciborium",
  "clap",
  "criterion-plot",
+ "futures",
  "is-terminal",
  "itertools 0.10.5",
  "num-traits",
@@ -1068,6 +1069,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -1165,7 +1167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "curve25519-dalek-derive",
  "digest 0.11.3",
  "fiat-crypto",
@@ -1502,14 +1504,14 @@ checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "equihash"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "306286e8dcc39ab3dfceb74c792ce8baffdab90591321d3ffaae64829734c37f"
+checksum = "49eac9289a160ac92d99537b3434a1a3696df0177fe2c66818bdb9a33b6d5770"
 dependencies = [
  "blake2b_simd",
- "cc",
  "corez",
  "document-features",
+ "libc",
 ]
 
 [[package]]
@@ -1942,8 +1944,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8862c7f2d99964760016516103fcc621352e77a505b22b0fc25140f09e4b8bb0"
+source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1967,8 +1968,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "800f76fa421515e2729192e3863bb0a58f30fe17a9a165ea5e778a157adeb579"
+source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
 dependencies = [
  "bitvec",
  "ff",
@@ -1979,8 +1979,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d886268046f1ceedd464c95382a64c7e86520b029b18e02ee92bf94f5120817d"
+source = "git+https://github.com/upbqdn/halo2?rev=49059f3e540f212d287e6e17f1ad04119cfbd7d5#49059f3e540f212d287e6e17f1ad04119cfbd7d5"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3655,14 +3654,15 @@ dependencies = [
 
 [[package]]
 name = "pasta_curves"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d3b42dfae151179bc4634291b570db39455a90ee3b309723e7c02ac80d909ee"
+version = "0.6.3"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=95df6839da3dd8e5588bb547f63ac26575f1037e#95df6839da3dd8e5588bb547f63ac26575f1037e"
 dependencies = [
  "blake2b_simd",
+ "cpufeatures 0.3.1",
  "ff",
  "group",
  "lazy_static",
+ "maybe-rayon",
  "rand 0.10.2",
  "static_assertions",
  "subtle",
@@ -3863,7 +3863,7 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
 dependencies = [
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "universal-hash",
 ]
 
@@ -4320,7 +4320,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "git+https://github.com/ZcashFoundation/reddsa?rev=7e610c3f8a63294975932bca901da95893aa895a#7e610c3f8a63294975932bca901da95893aa895a"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=8be350c737225b2f3c6e0f34e2a118cecec1768b#8be350c737225b2f3c6e0f34e2a118cecec1768b"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -4743,8 +4743,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2cbdcfeef20006adf72699cd466f21fe349674277cc05d3fc9b7302db7b182"
+source = "git+https://github.com/zcash/sapling-crypto?rev=752298d32f9c97f8487becf6ead88c198dfe4762#752298d32f9c97f8487becf6ead88c198dfe4762"
 dependencies = [
  "aes",
  "bellman",
@@ -4766,6 +4765,7 @@ dependencies = [
  "memuse",
  "rand 0.10.2",
  "rand_core 0.10.1",
+ "rayon",
  "redjubjub",
  "subtle",
  "tracing",
@@ -5162,7 +5162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "digest 0.11.3",
 ]
 
@@ -5228,8 +5228,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 [[package]]
 name = "sinsemilla"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72744738b764bb3bb7bb5dcf71b62d19c2de8a09f850a7388f6088f244037299"
+source = "git+https://github.com/upbqdn/sinsemilla?rev=3e175751a626e99a449b7ffe44631a44e6875dd4#3e175751a626e99a449b7ffe44631a44e6875dd4"
 dependencies = [
  "group",
  "pasta_curves",
@@ -7068,9 +7067,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_encoding"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2871fd3c37eaeb635c815a9c97495553bf8237a481b9f8b37eba661764bf937"
+checksum = "d5296e1755890ada7684e80cd75963b55f361aa895ebe1a0763eb534dc504bc9"
 dependencies = [
  "corez",
  "hex",
@@ -7132,9 +7131,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.31.0"
+version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50ad9ffda3d83c35e401b2f914980762f201ab40525cb0aab67b8d91e180e7df"
+checksum = "94ea929da9f67bbfc75ae719f8a302ae45827bc040a8e44086838a6ce1ff2371"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -7223,9 +7222,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb804d0179500e9543502dd6dfa178826617107897e6fe171241e5b767b7a0dd"
+checksum = "eccd0d4a493ea01190eddf834f9ebb8a2009fc6f5ea9364cc10f22a480146530"
 dependencies = [
  "bip32",
  "bs58",
@@ -7338,19 +7337,24 @@ dependencies = [
  "nonempty",
  "once_cell",
  "orchard",
+ "parking_lot",
  "proptest",
  "proptest-derive",
  "rand 0.10.2",
  "rayon",
  "sapling-crypto",
  "serde",
+ "sinsemilla",
  "spandoc",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tower-batch-control",
  "tower-fallback",
  "tracing",
+ "wagyu-zcash-parameters",
+ "wagyu-zcash-parameters-6",
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
@@ -7420,6 +7424,8 @@ dependencies = [
  "regex",
  "schemars 1.2.1",
  "serde",
+ "sha2 0.10.9",
+ "siphasher",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -7430,6 +7436,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "zebra-chain",
+ "zebra-node-services",
  "zebra-test",
 ]
 
@@ -7444,6 +7451,7 @@ dependencies = [
  "tokio",
  "tower 0.4.13",
  "zebra-chain",
+ "zebra-test",
 ]
 
 [[package]]
@@ -7491,6 +7499,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -7553,6 +7562,7 @@ dependencies = [
  "indexmap 2.14.0",
  "insta",
  "itertools 0.14.0",
+ "jubjub",
  "lazy_static",
  "metrics",
  "mset",
@@ -7617,14 +7627,17 @@ dependencies = [
  "itertools 0.14.0",
  "regex",
  "reqwest 0.12.28",
+ "sapling-crypto",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tower 0.4.13",
  "tracing-error",
  "tracing-subscriber",
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
+ "zebra-state",
  "zebra-test",
 ]
 
@@ -7664,6 +7677,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pasta_curves",
  "pin-project",
  "proptest",
  "proptest-derive",

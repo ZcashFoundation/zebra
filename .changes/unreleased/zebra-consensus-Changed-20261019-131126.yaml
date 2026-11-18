@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Rejected Sapling bundle requests wait for their batch work to finish, and single-bundle fallback no longer launches verification from `Verifier::drop`.
+time: 2026-10-19T13:11:26.184553848+02:00

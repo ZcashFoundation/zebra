@@ -26,17 +26,39 @@ impl DiskDb {
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
 #[test]
 fn read_only_reuse_rejects_an_interrupted_older_major_upgrade() {
-    read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0));
+    read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0), 28, false);
 }
 
 #[test]
 fn read_only_reuse_rejects_a_compatible_major_mismatch() {
-    read_only_reuse_rejects_recorded_version(semver::Version::new(29, 0, 0));
+    read_only_reuse_rejects_recorded_version(semver::Version::new(29, 0, 0), 28, false);
 }
 
-fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
+#[test]
+fn read_only_current_directory_rejects_an_interrupted_upgrade() {
+    read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0), 29, false);
+}
+
+#[test]
+fn read_only_current_directory_rejects_an_unfinished_directory_transition() {
+    read_only_reuse_rejects_recorded_version(semver::Version::new(28, 0, 0), 29, false);
+}
+
+#[test]
+fn writable_reuse_preserves_interrupted_upgrade_version() {
+    read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0), 28, true);
+}
+
+fn read_only_reuse_rejects_recorded_version(
+    recorded_version: semver::Version,
+    directory_major: u64,
+    reuse_first: bool,
+) {
     use std::{collections::BTreeMap, fs};
 
     use semver::Version;
@@ -51,12 +73,12 @@ fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
         ..Config::default()
     };
     let network = Network::Mainnet;
-    let old_path = config.db_path("state", 28, &network);
+    let old_path = config.db_path("state", directory_major, &network);
     let new_path = config.db_path("state", 29, &network);
     let db = DiskDb::new(
         &config,
         "state",
-        &Version::new(28, 0, 0),
+        &Version::new(directory_major, 0, 0),
         &network,
         ["utxo_loc_by_transparent_addr_loc".to_owned()],
         false,
@@ -65,10 +87,33 @@ fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
     drop(db);
 
     // A directory's recorded version can still describe an unfinished format transition.
-    write_database_format_version_to_disk(&config, "state", 28, &recorded_version, &network)
-        .unwrap();
+    write_database_format_version_to_disk(
+        &config,
+        "state",
+        directory_major,
+        &recorded_version,
+        &network,
+    )
+    .unwrap();
+    let selected_path = if reuse_first {
+        assert_eq!(
+            DiskDb::try_reusing_previous_db_after_major_upgrade(
+                &[29],
+                &Version::new(29, 0, 0),
+                &config,
+                "state",
+                &network,
+                false,
+            ),
+            Some(recorded_version),
+        );
+        assert!(!old_path.exists());
+        &new_path
+    } else {
+        &old_path
+    };
     let files = || {
-        fs::read_dir(&old_path)
+        fs::read_dir(selected_path)
             .unwrap()
             .map(|entry| {
                 let path = entry.unwrap().path();
@@ -91,12 +136,135 @@ fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
     assert!(
         matches!(
             error,
-            StateInitError::ReadOnlyDatabaseNeedsUpgrade { ref path } if path == &old_path
+            StateInitError::ReadOnlyDatabaseNeedsUpgrade { ref path } if path == selected_path
         ),
         "read-only reuse must distinguish an unfinished transition from a missing database: {error}"
     );
     assert_eq!(files(), before, "the old directory must remain unmodified");
-    assert!(!new_path.parent().unwrap().exists());
+    if directory_major == 28 && !reuse_first {
+        assert!(!new_path.parent().unwrap().exists());
+    }
+}
+
+#[test]
+fn cached_disk_size_is_initialized_shared_and_refreshed() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = || {
+        DiskDb::new(
+            &config,
+            "cached-size-test",
+            &Version::new(1, 0, 0),
+            &Network::Mainnet,
+            ["cached_size".to_owned()],
+            false,
+        )
+        .expect("the persistent database configuration is valid")
+    };
+    let db = open();
+    let clone = db.clone();
+    let initial_size = db.size();
+    assert_eq!(db.cached_size(), initial_size);
+
+    let cf = db
+        .cf_handle("cached_size")
+        .expect("the test column family was configured");
+    db.put_cf(cf, b"key", [0xa5; 4096])
+        .expect("the test column family is writable");
+    db.flush_cf(cf)
+        .expect("the test column family can be flushed");
+
+    let expected_size = db.size();
+    assert!(
+        expected_size > initial_size,
+        "the live measurement must include the new SST file"
+    );
+    assert_eq!(
+        db.cached_size(),
+        initial_size,
+        "a live size measurement must not refresh the cache"
+    );
+    assert_eq!(clone.cached_size(), initial_size);
+
+    clone.export_metrics();
+    assert_eq!(clone.cached_size(), expected_size);
+    assert_eq!(
+        db.cached_size(),
+        expected_size,
+        "metrics exported by a clone must refresh the shared cache"
+    );
+
+    drop(clone);
+    drop(db);
+    let db = open();
+    assert!(db.cached_size() > 0);
+    assert_eq!(
+        db.cached_size(),
+        db.size(),
+        "opening a populated database must initialize its cached size"
+    );
+}
+
+#[test]
+fn secondary_disk_usage_tracks_primary_growth() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = |read_only| {
+        DiskDb::new(
+            &config,
+            "secondary-size-test",
+            &Version::new(1, 0, 0),
+            &Network::Mainnet,
+            ["usage_size".to_owned()],
+            read_only,
+        )
+        .expect("the persistent database configuration is valid")
+    };
+    let primary = open(false);
+    let secondary = open(true);
+    let initial_size = secondary.cached_size();
+
+    let cf = primary
+        .cf_handle("usage_size")
+        .expect("the test column family was configured");
+    primary
+        .put_cf(cf, b"key", [0xa5; 4096])
+        .expect("the primary test column family is writable");
+    primary
+        .flush_cf(cf)
+        .expect("the primary test column family can be flushed");
+    secondary
+        .try_catch_up_with_primary()
+        .expect("the secondary can read the primary's flushed data");
+
+    let live_size = secondary.size();
+    assert!(
+        live_size > initial_size,
+        "catch-up must include the new SST file"
+    );
+    assert_eq!(
+        secondary.cached_size(),
+        live_size,
+        "secondary usage queries must not retain the startup estimate"
+    );
 }
 
 /// Check that zs_iter_opts returns an upper bound one greater than provided inclusive end bounds.
@@ -295,4 +463,53 @@ fn read_only_secondary_removes_its_directory_on_drop() {
         primary.path().exists(),
         "dropping a secondary must keep the primary database"
     );
+}
+
+#[test]
+fn future_major_reuse_keeps_archive_and_pruned_sources_in_their_own_kind() {
+    use crate::{
+        constants::{PRUNED_STATE_DATABASE_KIND, STATE_DATABASE_KIND},
+        state_database_format_version_in_code, write_database_format_version_to_disk, Config,
+    };
+    use zebra_chain::parameters::Network;
+
+    let _guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let version = state_database_format_version_in_code();
+    let mut future = version.clone();
+    future.major += 1;
+    for kind in [STATE_DATABASE_KIND, PRUNED_STATE_DATABASE_KIND] {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        };
+        let db = DiskDb::new(&config, kind, &version, &network, [], false).unwrap();
+        drop(db);
+        write_database_format_version_to_disk(&config, kind, version.major, &version, &network)
+            .unwrap();
+        let old_path = config.db_path(kind, version.major, &network);
+        let new_path = config.db_path(kind, future.major, &network);
+        assert_eq!(
+            config
+                .state_database_kind_for_version(future.major, &network)
+                .unwrap(),
+            kind
+        );
+        for read_only in [true, false] {
+            assert_eq!(
+                DiskDb::try_reusing_previous_db_after_major_upgrade(
+                    &[future.major],
+                    &future,
+                    &config,
+                    kind,
+                    &network,
+                    read_only,
+                ),
+                Some(version.clone())
+            );
+            assert_eq!(old_path.exists(), read_only);
+            assert_eq!(new_path.exists(), !read_only);
+        }
+    }
 }

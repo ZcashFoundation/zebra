@@ -5,13 +5,19 @@ use std::{error::Error, fmt, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SerializedBlock},
+    parallel::tree::TreeRootsProof,
     transaction::UnminedTx,
 };
 
 use crate::{meta_addr::MetaAddr, BoxError};
 
-use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
+use super::{
+    addr::AddrInVersion,
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
+    inv::InventoryHash,
+    types::*,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -199,6 +205,59 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
     Block(Arc<Block>),
+
+    /// Provisional compact relay opt-in; requires bilateral early-block-relay consent.
+    SendCompact {
+        /// Whether to push high-bandwidth announcements.
+        high_bandwidth: bool,
+        /// Encoding version; currently only provisional version 1 is supported.
+        version: u64,
+    },
+
+    /// An ordered compact block announcement, including its complete coinbase.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CompactBlock(Arc<CompactBlock>),
+
+    /// One recovery request for missing transactions from an advertised block.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    GetBlockTransactions(BlockTransactionsRequest),
+
+    /// Complete transactions in the order requested by compact recovery.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    BlockTransactions(BlockTransactions),
+
+    /// A `gettreeroots` request for the note commitment tree roots after each block from
+    /// `start_height` to the block at height `start_height + count - 1`, whose hash is
+    /// `final_hash`.
+    ///
+    /// Only sent to peers that advertise [`PeerServices::NODE_TREE_ROOTS`]. The count is between
+    /// 1 and [`MAX_TREE_ROOTS_PER_REQUEST`] inclusive.
+    ///
+    /// [`MAX_TREE_ROOTS_PER_REQUEST`]: zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST
+    GetTreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+    },
+
+    /// A `treeroots` response to [`Message::GetTreeRoots`], or `None` if the peer refused it.
+    ///
+    /// Entry `k` proves the roots after `start_height + k` on the requested chain. Each proof
+    /// includes the successor's authorizing-data root when its header uses ZIP-244, independently
+    /// of any separately served successor body. The response can be a prefix of the requested
+    /// proofs, but never has more entries than requested. This capability remains draft.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TreeRoots(Option<Vec<TreeRootsProof>>),
+
+    /// A `block` message, sent from a block's stored serialized bytes.
+    ///
+    /// Encodes exactly like [`Message::Block`]. Zebra only sends it, peers' `block` messages
+    /// are always decoded as [`Message::Block`].
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlock(Arc<SerializedBlock>),
 
     /// A `tx` message.
     ///
@@ -516,7 +575,22 @@ impl fmt::Display for Message {
                     .unwrap_or_else(|| "None".into()),
                 block.hash(),
             ),
+            Message::RawBlock(block) => format!("block {{ bytes: {} }}", (**block).as_ref().len()),
             Message::Tx(_) => "tx".to_string(),
+            Message::SendCompact { .. }
+            | Message::CompactBlock(_)
+            | Message::GetBlockTransactions(_)
+            | Message::BlockTransactions(_) => self.command().to_string(),
+            Message::GetTreeRoots {
+                start_height,
+                count,
+                ..
+            } => format!(
+                "gettreeroots {{ start_height: {}, count: {count} }}",
+                start_height.0
+            ),
+            Message::TreeRoots(Some(roots)) => format!("treeroots {{ roots: {} }}", roots.len()),
+            Message::TreeRoots(None) => "treeroots { refused }".to_string(),
             Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
 
             Message::Mempool => "mempool".to_string(),
@@ -544,7 +618,13 @@ impl Message {
             Message::GetHeaders { .. } => "getheaders",
             Message::Headers(_) => "headers",
             Message::GetData(_) => "getdata",
-            Message::Block(_) => "block",
+            Message::Block(_) | Message::RawBlock(_) => "block",
+            Message::SendCompact { .. } => "sendcmpct",
+            Message::CompactBlock(_) => "cmpctblock",
+            Message::GetBlockTransactions(_) => "getblocktxn",
+            Message::BlockTransactions(_) => "blocktxn",
+            Message::GetTreeRoots { .. } => "gettreeroots",
+            Message::TreeRoots(_) => "treeroots",
             Message::Tx(_) => "tx",
             Message::NotFound(_) => "notfound",
             Message::Mempool => "mempool",

@@ -55,7 +55,7 @@ async fn block_transaction_dispatch_interleaves_verification() {
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
-            .oneshot(Request::Commit(block)),
+            .oneshot(Request::CheckProposal(block)),
     )
     .await
     .expect("a ready transaction error must finish block verification");

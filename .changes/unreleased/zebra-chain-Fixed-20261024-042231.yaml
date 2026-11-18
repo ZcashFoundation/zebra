@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: Avoid cloning transaction bundles twice when preparing signature hashes ([#11990](https://github.com/ZcashFoundation/zebra/issues/11990)).
+time: 2026-10-24T04:22:31.234015642+02:00

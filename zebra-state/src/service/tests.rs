@@ -34,16 +34,25 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
+        arbitrary::{
+            populated_state, populated_state_with_debug,
+            populated_state_with_mining_candidate_lifetime, PreparedChain,
+        },
         chain_tip::TipAction,
         StateService,
     },
-    tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
-    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
+    tests::{
+        setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
+        FakeChainHelper,
+    },
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, MinedBlockNotifications,
+    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod header;
+mod mining_candidate;
+pub(super) mod mining_rejection;
+mod tree_roots_admission;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
@@ -452,6 +461,10 @@ async fn test_populated_state_responds_correctly(
                         from_coinbase,
                     };
 
+                    transcript.push((
+                        Request::AwaitUtxos(vec![outpoint, outpoint]),
+                        Ok(Response::Utxos(vec![utxo.clone(), utxo.clone()])),
+                    ));
                     transcript.push((Request::AwaitUtxo(outpoint), Ok(Response::Utxo(utxo))));
                 }
             }
@@ -600,6 +613,399 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     transcript.check(state).await?;
 
     Ok(())
+}
+
+/// Without a commit, rejection, or tip change, a valid candidate lives until its lifetime ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn mining_candidate_expires_after_its_lifetime() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let lifetime = Duration::from_millis(200);
+        let (state, read_state, _, _) =
+            populated_state_with_mining_candidate_lifetime([genesis], &network, lifetime).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let ReadResponse::MiningCandidateChanges(changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let admitted = tokio::time::Instant::now();
+        let Response::MiningCandidate(Some(mut guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(Arc::new(block)))
+            .await
+            .unwrap()
+        else {
+            panic!("the subscription enables candidate publication");
+        };
+        // Publication ends at the deadline whether or not the computation finished first.
+        while guard.0.changed().await.is_ok() {}
+        assert!(
+            admitted.elapsed() >= lifetime,
+            "a valid candidate must stay live until its lifetime ends"
+        );
+        assert!(changes.0.borrow().is_none());
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+    })
+    .await
+    .expect("an expired candidate must be withdrawn without a commit or failure");
+}
+
+/// A block that doesn't extend the best tip can't take the single candidate slot.
+#[tokio::test]
+async fn mining_candidate_rejects_orphans_before_reserving_the_slot() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &Network::Mainnet).await;
+        let ReadResponse::MiningCandidateChanges(_changes) = read_state
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let child = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let mut orphan = child.clone();
+        Arc::make_mut(&mut orphan.header).previous_block_hash = child.hash();
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(Arc::new(orphan)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(Arc::new(child)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
+    })
+    .await
+    .expect("orphan candidates must be rejected without waiting");
+}
+
+/// Cancelling admission must not free capacity while the blocking computation is still queued.
+#[test]
+fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
+    let _init_guard = zebra_test::init();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("the single-threaded test runtime should initialize");
+
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let (state, read_state, _, _) = crate::init_test_services(&Network::Mainnet).await;
+            let ReadResponse::MiningCandidateChanges(subscription) = read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidateChanges)
+                .await
+                .expect("the state should accept a mining subscription")
+            else {
+                panic!("expected a persistent mining subscription");
+            };
+            let block = zebra_test::vectors::BLOCK_MAINNET_419200_BYTES
+                .zcash_deserialize_into::<Arc<Block>>()
+                .expect("the test vector is a valid block");
+
+            let (release_blocker, blocker_released) = tokio::sync::oneshot::channel::<()>();
+            let (blocker_started, started) = tokio::sync::oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                let _ = blocker_started.send(());
+                // Dropping the sender also releases this task if an assertion or timeout fails.
+                let _ = blocker_released.blocking_recv();
+            });
+            started
+                .await
+                .expect("the blocking-pool occupant should start");
+
+            let Response::MiningCandidate(Some(guard)) = state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .expect("candidate admission should not wait for the blocking pool")
+            else {
+                panic!("the first candidate should reserve the available computation slot");
+            };
+
+            let permit = Arc::downgrade(
+                guard
+                    .0
+                    .borrow()
+                    .as_ref()
+                    .expect("the admitted candidate reserves its slot"),
+            );
+            while permit.strong_count() < 2 {
+                tokio::task::yield_now().await;
+            }
+            drop(guard);
+            // The publication task has exited when only the queued computation owns the permit.
+            while permit.strong_count() != 1 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                Arc::strong_count(&block),
+                2,
+                "the cancelled candidate's blocking closure must still be queued"
+            );
+
+            assert!(
+                matches!(
+                    state
+                        .oneshot(Request::MiningCandidate(block.clone()))
+                        .await
+                        .expect("a busy computation slot should reject admission immediately"),
+                    Response::MiningCandidate(None)
+                ),
+                "cancelling the outer task must not admit another blocking computation"
+            );
+
+            release_blocker
+                .send(())
+                .expect("the blocking-pool occupant is still waiting");
+            blocker
+                .await
+                .expect("the blocking-pool occupant should exit");
+            // This read queues behind the cancelled computation on the single blocking thread.
+            assert!(matches!(
+                read_state
+                    .oneshot(ReadRequest::MiningCandidate)
+                    .await
+                    .expect("the blocking queue should drain after release"),
+                ReadResponse::MiningCandidate(None)
+            ));
+            assert_eq!(
+                Arc::strong_count(&block),
+                1,
+                "the cancelled computation must release its block after the queue drains"
+            );
+            drop(subscription);
+        })
+        .await
+        .expect("candidate admission and cancellation should finish within the timeout");
+    });
+}
+
+/// A live or expired candidate reserves its slot until its verifier drops the guard.
+#[tokio::test]
+async fn mining_candidate_slot_is_held_until_verification_finishes() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        // Short enough for the paused advance below to expire the candidate.
+        let (state, read_state, _, _) = populated_state_with_mining_candidate_lifetime(
+            [genesis],
+            &network,
+            Duration::from_secs(30),
+        )
+        .await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let block = Arc::new(block);
+        let ReadResponse::MiningCandidateChanges(mut changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return a candidate subscription");
+        };
+        let Response::MiningCandidate(Some(mut guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(block.clone()))
+            .await
+            .unwrap()
+        else {
+            panic!("the first candidate must reserve the available slot");
+        };
+        changes.changed().await;
+        assert!(Arc::ptr_eq(&changes.block(block.hash()).unwrap(), &block));
+        assert!(changes.block(block::Hash([0xff; 32])).is_none());
+
+        let mut replacement = (*block).clone();
+        Arc::make_mut(&mut replacement.header).nonce = [1; 32].into();
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(Arc::new(replacement)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == block.hash()
+        ));
+
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
+        changes.changed().await;
+        assert!(changes.block(block.hash()).is_none());
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+        guard
+            .0
+            .changed()
+            .await
+            .expect_err("expiry closes publication without releasing the verifier's slot");
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+
+        drop(guard);
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(block))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
+    })
+    .await
+    .expect("candidate expiry must not release the slot before verification finishes");
+}
+
+/// A live verifier cannot authorize a candidate after its sibling becomes the committed tip.
+#[tokio::test]
+async fn mining_candidate_is_withdrawn_when_a_sibling_commits() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested chain info");
+        };
+        let sibling = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let mut candidate = (*sibling).clone();
+        let header = Arc::make_mut(&mut candidate.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        header.nonce = [1; 32].into();
+        let candidate = Arc::new(candidate);
+        let hash = candidate.hash();
+        let ReadResponse::MiningCandidateChanges(mut changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let Response::MiningCandidate(Some(guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(candidate))
+            .await
+            .unwrap()
+        else {
+            panic!("the subscription enables candidate publication");
+        };
+        changes.changed().await;
+        assert!(changes.is_current(hash));
+        // Hold the publication independently of the withdrawal task to exercise final authorization.
+        let (_publication, receiver) = tokio::sync::watch::channel(changes.0.borrow().clone());
+        let mut detached = changes.clone();
+        detached.0 = receiver;
+        state
+            .clone()
+            .oneshot(Request::CommitCheckpointVerifiedBlock(sibling.into()))
+            .await
+            .unwrap();
+        assert!(
+            !detached.is_current(hash),
+            "authorization must consult committed state even before withdrawal is observed"
+        );
+        changes.changed().await;
+        assert!(
+            changes.0.borrow().is_none(),
+            "the obsolete publication must be withdrawn"
+        );
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+        drop(guard);
+    })
+    .await
+    .expect("sibling commitment must withdraw the candidate before its verifier finishes");
 }
 
 #[test]
@@ -772,7 +1178,7 @@ proptest! {
                 expected_finalized_value_pool += *block_value_pool;
             }
 
-            let result_receiver = state_service.queue_and_commit_to_finalized_state(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_finalized_state(block.clone(), None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
@@ -798,7 +1204,7 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone(), None, None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -865,7 +1271,7 @@ proptest! {
                 TipAction::grow_with(expected_block.clone().into())
             };
 
-            let result_receiver = state_service.queue_and_commit_to_finalized_state(block);
+            let result_receiver = state_service.queue_and_commit_to_finalized_state(block, None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
@@ -893,7 +1299,7 @@ proptest! {
             // reset: they all grow.
             let expected_action = TipAction::grow_with(expected_block.clone().into());
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block, None, None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -951,8 +1357,10 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
         })
         .prop_map(|(network, mut blocks, finalized_blocks_count)| {
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
-            let finalized_blocks: Vec<_> =
-                blocks.into_iter().map(CheckpointVerifiedBlock).collect();
+            let finalized_blocks: Vec<_> = blocks
+                .into_iter()
+                .map(CheckpointVerifiedBlock::from)
+                .collect();
 
             (
                 network,
@@ -1037,6 +1445,51 @@ fn read_only_open_with_ephemeral_config_returns_error() {
             panic!("expected an error when opening a read-only state with an ephemeral config")
         }
     }
+}
+
+/// Opening a read-only state against a database without a column family in the code, like a
+/// database last opened by an older Zebra version, must succeed: a read-only secondary can't
+/// create column families, so it opens the ones on disk.
+#[test]
+fn read_only_open_without_a_newer_column_family() {
+    use crate::{
+        constants::STATE_DATABASE_KIND,
+        service::finalized_state::{ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        state_database_format_version_in_code, write_state_database_format_version_to_disk,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let version = state_database_format_version_in_code();
+    let (newer, older) = STATE_COLUMN_FAMILIES_IN_CODE
+        .split_last()
+        .expect("the state has column families");
+
+    let _primary = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &version,
+        &network,
+        true,
+        older.iter().map(ToString::to_string),
+        false,
+    )
+    .expect("creating a database should succeed");
+    // Format upgrades are skipped, so they don't write the version that marks the database as
+    // existing.
+    write_state_database_format_version_to_disk(&config, &version, &network)
+        .expect("writing the version file should succeed");
+
+    let (_, secondary, _) = super::init_read_only(config, &network)
+        .expect("a read-only state opens without newer column families");
+    assert!(secondary.db().cf_handle(newer).is_none());
 }
 
 /// Returns a copy of `block` with one byte of its coinbase miner data flipped.
@@ -1129,7 +1582,7 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 
             for block in chain.iter().take(honest_index) {
                 state
-                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
+                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()), None)
                     .blocking_recv()
                     .expect("write task responds")
                     .expect("valid prefix commits");
@@ -1144,9 +1597,9 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 
             // The first child is sent right behind the twin, and the third one waits in the queue
             // for its parent when the twin fails.
-            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
-            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
-            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
+            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin), None);
+            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1), None);
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3), None);
 
             let twin_error = twin_rx.blocking_recv().expect("write task responds").expect_err("twin is rejected");
             prop_assert!(
@@ -1168,7 +1621,7 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
             prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
 
             // The second child reaches the state after the reset, ahead of the reset height.
-            let late_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(2));
+            let late_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(2), None);
 
             // The reset fails the queued block, and the late block is failed instead of queued.
             for rx in [queued_rx, late_rx] {
@@ -1190,18 +1643,18 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
             // and it isn't reported as known until it is sent.
             for index in [0, 1] {
                 state
-                    .queue_and_commit_to_finalized_state(checkpoint_verified(index))
+                    .queue_and_commit_to_finalized_state(checkpoint_verified(index), None)
                     .blocking_recv()
                     .expect("write task responds")
                     .expect("honest block commits");
             }
-            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3), None);
             for index in [2, 3] {
                 prop_assert_eq!(known_block(&mut state, index), Response::KnownBlock(None));
             }
 
             state
-                .queue_and_commit_to_finalized_state(checkpoint_verified(2))
+                .queue_and_commit_to_finalized_state(checkpoint_verified(2), None)
                 .blocking_recv()
                 .expect("write task responds")
                 .expect("honest block commits");
@@ -1241,9 +1694,10 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
 
     let commit_checkpoint = |state: &mut StateService, height: usize| {
         state
-            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(
-                blocks[height].clone(),
-            ))
+            .queue_and_commit_to_finalized_state(
+                CheckpointVerifiedBlock::from(blocks[height].clone()),
+                None,
+            )
             .blocking_recv()
             .expect("write task responds")
             .expect("checkpoint verified block commits");
@@ -1273,7 +1727,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
 
     // A child of the committed tip is rejected before it's queued.
     let rejected = state
-        .queue_and_commit_to_non_finalized_state(forged_child(5))
+        .queue_and_commit_to_non_finalized_state(forged_child(5), None, None)
         .try_recv()
         .expect("forged child is answered before it's queued")
         .expect_err("forged child is rejected");
@@ -1281,7 +1735,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
     assert!(state.block_write_sender.finalized.is_some());
 
     // A child of a checkpoint block that hasn't arrived yet is rejected when its parent is sent.
-    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7));
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7), None, None);
     assert!(state.block_write_sender.finalized.is_some());
     commit_checkpoint(&mut state, 6);
     commit_checkpoint(&mut state, 7);
@@ -1295,7 +1749,8 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
     // The honest switch still happens at the final checkpoint.
     commit_checkpoint(&mut state, 8);
     assert!(state.checkpoint_handoff_is_ready());
-    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
     assert!(state.block_write_sender.finalized.is_none());
 
     Ok(())
@@ -1324,9 +1779,10 @@ fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
 
     let commit_checkpoint = |state: &mut StateService, height: usize| {
         state
-            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(
-                blocks[height].clone(),
-            ))
+            .queue_and_commit_to_finalized_state(
+                CheckpointVerifiedBlock::from(blocks[height].clone()),
+                None,
+            )
             .blocking_recv()
             .expect("write task responds")
             .expect("checkpoint verified block commits");
@@ -1343,14 +1799,17 @@ fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
         .finalized
         .replace(held_tx)
         .expect("checkpoint sync is running");
-    let parent_rx =
-        state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[6].clone()));
+    let parent_rx = state.queue_and_commit_to_finalized_state(
+        CheckpointVerifiedBlock::from(blocks[6].clone()),
+        None,
+    );
     let held_parent = held_rx.try_recv().expect("block 6 is sent");
     assert_eq!(state.read_service.db.height(blocks[6].hash()), None);
 
     let mut forged = Arc::unwrap_or_clone(blocks[9].clone());
     Arc::make_mut(&mut forged.header).previous_block_hash = blocks[6].hash();
-    let mut forged_rx = state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare());
+    let mut forged_rx =
+        state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare(), None, None);
     assert!(matches!(
         forged_rx.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1368,7 +1827,8 @@ fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
         .expect("block 6 commits");
     commit_checkpoint(&mut state, 7);
     commit_checkpoint(&mut state, 8);
-    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
     assert!(state.block_write_sender.finalized.is_none());
 
     let rejected = forged_rx
@@ -1406,21 +1866,22 @@ fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
 
     for block in &blocks[..=7] {
         state
-            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.clone()))
+            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.clone()), None)
             .blocking_recv()
             .expect("write task responds")
             .expect("checkpoint verified block commits");
     }
 
     // The first block above the final checkpoint arrives before the final checkpoint.
-    let mut child_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let mut child_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None, None);
     assert!(matches!(
         child_rx.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
     ));
 
     state
-        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[8].clone()))
+        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[8].clone()), None)
         .blocking_recv()
         .expect("write task responds")
         .expect("final checkpoint commits");
@@ -1430,7 +1891,8 @@ fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
     ));
 
     // The next block triggers the switch, and both commit.
-    let grandchild_rx = state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare());
+    let grandchild_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare(), None, None);
     assert!(state.block_write_sender.finalized.is_none());
     assert_eq!(
         child_rx.blocking_recv().expect("child is answered")?,
@@ -1479,6 +1941,7 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                         state
                             .queue_and_commit_to_finalized_state(
                                 CheckpointVerifiedBlock::from(block.block.clone()),
+                                None,
                             )
                             .await
                             .expect("write task responds")
@@ -1537,8 +2000,9 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                     forged.received_time = Some(forged_received);
                     let mut honest = honest;
                     honest.received_time = Some(forged_received + Duration::from_secs(1));
-                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged);
-                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged, None, None);
+                    let honest_rx =
+                        state.queue_and_commit_to_non_finalized_state(honest.clone(), None, None);
                     assert!(state.non_finalized_state_queued_blocks.has(honest.hash));
 
                     let replaced = forged_rx
@@ -1554,7 +2018,7 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                     );
 
                     state
-                        .queue_and_commit_to_non_finalized_state(parent)
+                        .queue_and_commit_to_non_finalized_state(parent, None, None)
                         .await
                         .expect("write task responds")
                         .expect("valid parent commits");
@@ -1619,6 +2083,7 @@ fn queued_forged_replacement_fails_and_scores_only_forger() -> Result<()> {
                         state
                             .queue_and_commit_to_finalized_state(
                                 CheckpointVerifiedBlock::from(block.block.clone()),
+                                None,
                             )
                             .await
                             .expect("write task responds")
@@ -1672,15 +2137,17 @@ fn queued_forged_replacement_fails_and_scores_only_forger() -> Result<()> {
                     assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
 
                     // The honest body is queued first, the forged one replaces it.
-                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
-                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged.prepare());
+                    let honest_rx =
+                        state.queue_and_commit_to_non_finalized_state(honest.clone(), None, None);
+                    let forged_rx =
+                        state.queue_and_commit_to_non_finalized_state(forged.prepare(), None, None);
 
                     let replaced = honest_rx.await.expect("state responds").expect_err("replaced");
                     assert!(replaced.inner().is_duplicate_request());
                     assert_eq!(replaced.inner().misbehavior_score(), 0);
 
                     state
-                        .queue_and_commit_to_non_finalized_state(parent)
+                        .queue_and_commit_to_non_finalized_state(parent, None, None)
                         .await
                         .expect("write task responds")
                         .expect("valid parent commits");
@@ -1718,11 +2185,12 @@ async fn write_channel_duplicate_keeps_its_own_channel() {
         .collect();
 
     // Block 3 is queued behind block 2, which has been sent to the write task.
-    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(blocks[1].clone());
+    let mut queued_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[1].clone(), None, None);
     state.non_finalized_block_write_sent_hashes.add(&blocks[0]);
 
     let duplicate = state
-        .queue_and_commit_to_non_finalized_state(blocks[0].clone())
+        .queue_and_commit_to_non_finalized_state(blocks[0].clone(), None, None)
         .await
         .expect("state responds")
         .expect_err("the hash was already sent to the write task");
@@ -1772,8 +2240,8 @@ async fn queued_identical_replacement_keeps_earliest_receipt_time() {
         let mut second_copy = block.clone().prepare();
         second_copy.received_time = second;
 
-        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy);
-        let mut second_rx = state.queue_and_commit_to_non_finalized_state(second_copy);
+        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy, None, None);
+        let mut second_rx = state.queue_and_commit_to_non_finalized_state(second_copy, None, None);
 
         assert!(first_rx
             .await
@@ -1789,10 +2257,463 @@ async fn queued_identical_replacement_keeps_earliest_receipt_time() {
             "the newer caller keeps waiting on its own channel"
         );
 
-        let (queued, _rsp_tx) = state
+        let (queued, _rsp_tx, _, _) = state
             .non_finalized_state_queued_blocks
             .remove_queued(&block.hash())
             .expect("the second copy is queued");
         assert_eq!(queued.received_time, expected);
     }
+}
+
+#[tokio::test]
+async fn known_blocks_preserves_order_and_queue_locations() {
+    let _init_guard = zebra_test::init();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+    let blocks: Vec<SemanticallyVerifiedBlock> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(1..=3)
+        .map(|(_, bytes)| {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            block.prepare()
+        })
+        .collect();
+    let (sender, _receiver) = tokio::sync::oneshot::channel();
+    state
+        .non_finalized_state_queued_blocks
+        .queue((blocks[0].clone(), sender, None, None));
+    state.non_finalized_block_write_sent_hashes.add(&blocks[1]);
+    let hashes = vec![
+        blocks[1].hash,
+        blocks[2].hash,
+        blocks[0].hash,
+        blocks[1].hash,
+    ];
+    let mut expected = Vec::new();
+    for hash in &hashes {
+        let Response::KnownBlock(location) = state.call(Request::KnownBlock(*hash)).await.unwrap()
+        else {
+            unreachable!("KnownBlock returns its matching response");
+        };
+        expected.push(location);
+    }
+    assert_eq!(
+        expected,
+        vec![
+            Some(crate::KnownBlock::WriteChannel),
+            None,
+            Some(crate::KnownBlock::Queue),
+            Some(crate::KnownBlock::WriteChannel),
+        ]
+    );
+    assert_eq!(
+        state.call(Request::KnownBlocks(hashes)).await.unwrap(),
+        Response::KnownBlocks(expected)
+    );
+    assert_eq!(
+        state.call(Request::KnownBlocks(Vec::new())).await.unwrap(),
+        Response::KnownBlocks(Vec::new())
+    );
+}
+
+/// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
+async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    state
+        .queue_and_commit_to_finalized_state(genesis.into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let parent = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    (state, parent)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_queued_commit_survives_cancellation_and_network_replacement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = mined_notification_test_state().await;
+        let child = parent.make_fake_child();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, bodies) = tokio::sync::watch::channel(None);
+        let response = state.queue_and_commit_to_non_finalized_state(
+            child.clone().prepare(),
+            None,
+            Some(MinedBlockNotifications::new(committed.clone(), validated)),
+        );
+        assert_eq!(
+            committed.capacity(),
+            1,
+            "orphans must not reserve relay capacity"
+        );
+        drop(response);
+        // A network replacement must not discard the accepted mined notification.
+        drop(state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None));
+        assert!(commits.try_recv().is_err());
+        state
+            .queue_and_commit_to_non_finalized_state(parent.prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(commits.recv().await, Some((child.hash(), Height(2))));
+        assert!(state
+            .read_service
+            .latest_non_finalized_state()
+            .any_chain_contains(&child.hash()));
+        assert!(
+            bodies.borrow().is_none(),
+            "semantic misses must not relay early"
+        );
+    })
+    .await
+    .expect("queued mined commit must finish after its parent arrives");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_notifications_bound_admission_without_stalling_ordinary_commits() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = mined_notification_test_state().await;
+        let best = parent.make_fake_child().set_work(100);
+        let best_tip = best.make_fake_child();
+        for block in [&parent, &best, &best_tip] {
+            state
+                .queue_and_commit_to_non_finalized_state(block.clone().prepare(), None, None)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let side = parent.make_fake_child().set_work(50);
+        let mut proposal_state = state.read_service.latest_non_finalized_state();
+        proposal_state.disable_metrics();
+        proposal_state
+            .commit_block(side.clone().prepare(), &state.read_service.db)
+            .unwrap();
+        let contextual = proposal_state
+            .find_chain(|chain| chain.non_finalized_tip_hash() == side.hash())
+            .unwrap()
+            .tip_block()
+            .unwrap()
+            .clone();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, mut bodies) = tokio::sync::watch::channel(None);
+        let response = state.queue_and_commit_to_non_finalized_state(
+            side.clone().prepare(),
+            Some(Box::new(contextual)),
+            Some(MinedBlockNotifications::new(
+                committed.clone(),
+                validated.clone(),
+            )),
+        );
+        bodies.changed().await.unwrap();
+        assert_eq!(*bodies.borrow_and_update(), Some(side.clone()));
+        assert_eq!(response.await.unwrap().unwrap(), side.hash());
+        assert_eq!(commits.try_recv().unwrap(), (side.hash(), Height(2)));
+        assert_eq!(state.best_tip(), Some((Height(3), best_tip.hash())));
+
+        let next = best_tip.make_fake_child();
+        let mut proposal_state = state.read_service.latest_non_finalized_state();
+        proposal_state.disable_metrics();
+        proposal_state
+            .commit_block(next.clone().prepare(), &state.read_service.db)
+            .unwrap();
+        let contextual = proposal_state.best_tip_block().unwrap().clone();
+        committed.try_send((parent.hash(), Height(1))).unwrap();
+        let error = state
+            .queue_and_commit_to_non_finalized_state(
+                next.clone().prepare(),
+                Some(Box::new(contextual.clone())),
+                Some(MinedBlockNotifications::new(
+                    committed.clone(),
+                    validated.clone(),
+                )),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            error.inner(),
+            &crate::CommitBlockError::MinedBlockNotificationFull
+        );
+        assert_eq!(error.inner().misbehavior_score(), 0);
+        assert!(!state
+            .read_service
+            .latest_non_finalized_state()
+            .any_chain_contains(&next.hash()));
+        assert!(
+            !bodies.has_changed().unwrap(),
+            "full channels must reject before early relay"
+        );
+        assert_eq!(commits.try_recv().unwrap(), (parent.hash(), Height(1)));
+
+        drop(commits);
+        let error = state
+            .queue_and_commit_to_non_finalized_state(
+                next.clone().prepare(),
+                Some(Box::new(contextual)),
+                Some(MinedBlockNotifications::new(committed, validated.clone())),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            error.inner(),
+            &crate::CommitBlockError::MinedBlockNotificationClosed
+        );
+        assert_eq!(error.inner().misbehavior_score(), 0);
+        assert!(!state
+            .read_service
+            .latest_non_finalized_state()
+            .any_chain_contains(&next.hash()));
+        assert!(
+            !bodies.has_changed().unwrap(),
+            "closed channels must reject before early relay"
+        );
+        assert_eq!(
+            state
+                .queue_and_commit_to_non_finalized_state(next.clone().prepare(), None, None)
+                .await
+                .unwrap()
+                .unwrap(),
+            next.hash(),
+        );
+    })
+    .await
+    .expect("full or closed notification channels must not stall ordinary commits");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_rejections_and_stale_parent_publish_no_notifications() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, root) = mined_notification_test_state().await;
+        let parent = root.make_fake_child();
+        for block in [&root, &parent] {
+            state
+                .queue_and_commit_to_non_finalized_state(block.clone().prepare(), None, None)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let child = parent.make_fake_child();
+        let mut proposal_state = state.read_service.latest_non_finalized_state();
+        proposal_state.disable_metrics();
+        proposal_state
+            .commit_block(child.clone().prepare(), &state.read_service.db)
+            .unwrap();
+        let contextual = proposal_state.best_tip_block().unwrap().clone();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, bodies) = tokio::sync::watch::channel(None);
+        let notifications = MinedBlockNotifications::new(committed, validated);
+        state
+            .queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        state
+            .send_invalidate_block(child.hash())
+            .await
+            .unwrap()
+            .unwrap();
+        // Exercise the actual writer after admission, bypassing only the duplicate sent-hash guard.
+        let (response_sender, response) = tokio::sync::oneshot::channel();
+        state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::NonFinalizedWriteMessage::Commit(
+                (
+                    child.clone().prepare(),
+                    response_sender,
+                    Some(Box::new(contextual.clone())),
+                    Some(notifications.clone()),
+                ),
+                std::time::Instant::now(),
+            ))
+            .unwrap_or_else(|_| panic!("the state writer is still running"));
+        assert!(response.await.unwrap().is_err());
+        assert!(bodies.borrow().is_none());
+        assert!(commits.try_recv().is_err());
+        state
+            .send_invalidate_block(parent.hash())
+            .await
+            .unwrap()
+            .unwrap();
+        // The queue still knows the sent parent, but the live writer must resolve it again.
+        assert!(state
+            .queue_and_commit_to_non_finalized_state(
+                child.clone().prepare(),
+                Some(Box::new(contextual)),
+                Some(notifications.clone()),
+            )
+            .await
+            .unwrap()
+            .is_err());
+        assert!(bodies.borrow().is_none());
+        assert!(commits.try_recv().is_err());
+
+        let mut rejected = root.make_fake_child().set_work(50).prepare();
+        rejected.height = Height(3);
+        assert!(state
+            .queue_and_commit_to_non_finalized_state(rejected, None, Some(notifications),)
+            .await
+            .unwrap()
+            .is_err());
+        assert!(bodies.borrow().is_none());
+        assert!(commits.try_recv().is_err());
+    })
+    .await
+    .expect("rejected mined blocks must not wait for relay capacity");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_checkpoint_notification_survives_cancellation_and_replacement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let child = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, bodies) = tokio::sync::watch::channel(None);
+        drop(state.call(Request::CommitMinedCheckpointVerifiedBlock {
+            block: child.clone().into(),
+            notifications: MinedBlockNotifications::new(committed.clone(), validated),
+        }));
+        assert_eq!(committed.capacity(), 1);
+        drop(state.call(Request::CommitCheckpointVerifiedBlock(child.clone().into())));
+        state
+            .call(Request::CommitCheckpointVerifiedBlock(genesis.into()))
+            .await
+            .unwrap();
+        assert_eq!(commits.recv().await, Some((child.hash(), Height(1))));
+        assert_eq!(state.read_service.db.finalized_tip_hash(), child.hash());
+        assert!(bodies.borrow().is_none());
+    })
+    .await
+    .expect("checkpoint notifications must survive caller cancellation");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_checkpoint_admission_errors_reset_before_reply() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, bodies) = tokio::sync::watch::channel(None);
+        committed.try_send((genesis.hash(), Height(0))).unwrap();
+        let error = state
+            .call(Request::CommitMinedCheckpointVerifiedBlock {
+                block: genesis.clone().into(),
+                notifications: MinedBlockNotifications::new(committed.clone(), validated.clone()),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::CommitCheckpointVerifiedError>()
+                .unwrap()
+                .inner(),
+            &crate::CommitBlockError::MinedBlockNotificationFull,
+        );
+        assert_eq!(state.read_service.db.finalized_tip_height(), None);
+        assert_eq!(commits.try_recv().unwrap(), (genesis.hash(), Height(0)));
+        drop(commits);
+        let error = state
+            .call(Request::CommitMinedCheckpointVerifiedBlock {
+                block: genesis.clone().into(),
+                notifications: MinedBlockNotifications::new(committed, validated),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::CommitCheckpointVerifiedError>()
+                .unwrap()
+                .inner(),
+            &crate::CommitBlockError::MinedBlockNotificationClosed,
+        );
+        assert_eq!(state.read_service.db.finalized_tip_height(), None);
+        assert!(bodies.borrow().is_none());
+        // Both failure responses must leave the checkpoint queue ready for an immediate retry.
+        state
+            .call(Request::CommitCheckpointVerifiedBlock(genesis.into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(0))
+        );
+    })
+    .await
+    .expect("checkpoint admission failures must not strand subsequent ordinary commits");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_cached_future_time_suppresses_early_body_but_preserves_commit() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = mined_notification_test_state().await;
+        state
+            .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        // Model a solve checked with an ahead-of-current wall clock, without changing global time.
+        let checked_at = chrono::Utc::now() + chrono::Duration::days(1);
+        let mut child = parent.make_fake_child();
+        Arc::make_mut(&mut Arc::make_mut(&mut child).header).time = checked_at;
+        let height = child.coinbase_height().unwrap();
+        let hash = child.hash();
+        child
+            .header
+            .time_is_valid_at(checked_at, &height, &hash)
+            .unwrap();
+        assert!(child
+            .header
+            .time_is_valid_at(chrono::Utc::now(), &height, &hash)
+            .is_err());
+        let mut proposal_state = state.read_service.latest_non_finalized_state();
+        proposal_state.disable_metrics();
+        proposal_state
+            .commit_block(child.clone().prepare(), &state.read_service.db)
+            .unwrap();
+        let contextual = proposal_state.best_tip_block().unwrap().clone();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, bodies) = tokio::sync::watch::channel(None);
+        assert_eq!(
+            state
+                .queue_and_commit_to_non_finalized_state(
+                    child.prepare(),
+                    Some(Box::new(contextual)),
+                    Some(MinedBlockNotifications::new(committed, validated)),
+                )
+                .await
+                .unwrap()
+                .unwrap(),
+            hash,
+        );
+        assert!(
+            bodies.borrow().is_none(),
+            "the writer must recheck time before early relay"
+        );
+        assert_eq!(commits.try_recv().unwrap(), (hash, height));
+        assert_eq!(state.best_tip(), Some((height, hash)));
+    })
+    .await
+    .expect("a live time check must not change normal cached commit handling");
 }

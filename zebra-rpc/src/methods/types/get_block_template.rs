@@ -20,7 +20,7 @@ use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{mpsc, watch};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
@@ -34,15 +34,17 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, SerializationError},
     transaction::VerifiedUnminedTx,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{
+    router::service_trait::BlockVerifierService, DecodedBlock, PreparedBlockCache, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -55,7 +57,6 @@ use crate::{
         default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::{MapError, OkOrError},
-    SubmitBlockChannel,
 };
 
 use constants::{
@@ -262,6 +263,75 @@ impl fmt::Debug for BlockTemplateResponse {
 }
 
 impl BlockTemplateResponse {
+    /// Returns the current and maximum times narrowed to the local-clock bound, or `None` if
+    /// no valid time remains. The minimum stays fixed to preserve Testnet's difficulty boundary.
+    ///
+    /// Keep the original long-poll ID: narrowing unchanged work must not cancel miners' work
+    /// each time the local-clock bound advances.
+    pub(crate) fn clamped_time_range(&self, now: DateTime32) -> Option<(DateTime32, DateTime32)> {
+        let max_time = self
+            .max_time
+            .min(now.saturating_add(Duration32::from_hours(2)));
+        (self.min_time <= max_time)
+            .then(|| (self.cur_time.clamp(self.min_time, max_time), max_time))
+    }
+
+    /// Whether elapsed wall time requires fresh Testnet difficulty context.
+    ///
+    /// Historical timestamps remain usable on Mainnet, Regtest, at minimum difficulty, and
+    /// when the full median-time cap prevents a newly built template from becoming easier.
+    pub(crate) fn needs_difficulty_refresh(&self, network: &Network, now: DateTime32) -> bool {
+        now > self.max_time
+            && !network.is_regtest()
+            && zebra_chain::parameters::NetworkUpgrade::minimum_difficulty_spacing_for_height(
+                network,
+                block::Height(self.height),
+            )
+            .is_some()
+            && self.bits != network.target_difficulty_limit().to_compact()
+            && (!network.is_max_block_time_enforced(block::Height(self.height))
+                || self
+                    .max_time
+                    .saturating_duration_since(self.min_time)
+                    .seconds()
+                    < Duration32::from_minutes(90).seconds() - 1)
+    }
+
+    /// Performs the CPU-bound selection and construction shared by updater and fallback builds.
+    pub(crate) fn from_mempool(
+        network: &Network,
+        coinbase_cache: &CoinbaseCache,
+        miner_params: &MinerParams,
+        chain_info: &GetBlockTemplateChainInfo,
+        long_poll_id: LongPollId,
+        transactions: Vec<VerifiedUnminedTx>,
+        dependencies: TransactionDependencies,
+    ) -> RpcResult<Self> {
+        let height = chain_info.tip_height.next().map_misc_error()?;
+        let started = std::time::Instant::now();
+        let parent_nsm_value_balance = nsm_value_balance_for_next_block(network, chain_info);
+        let transactions = zip317::select_mempool_transactions(
+            network,
+            height,
+            miner_params,
+            transactions,
+            dependencies,
+            parent_nsm_value_balance,
+        );
+        let template = Self::new_internal(
+            network,
+            coinbase_cache,
+            miner_params,
+            chain_info,
+            long_poll_id,
+            transactions,
+            None,
+        );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(started.elapsed().as_secs_f64());
+        Ok(template)
+    }
+
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
     pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
@@ -356,31 +426,13 @@ impl BlockTemplateResponse {
             .expect("mempool tx fees must be non-negative");
 
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(net, chain_info);
-
-        // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
-        // shielded address) as a last resort — caching the result so subsequent requests for the
-        // same height and fees reuse it.
-        let coinbase_txn = coinbase_cache
-            .get(height, txs_fee, parent_nsm_value_balance)
-            .unwrap_or_else(|| {
-                let coinbase_txn = TransactionTemplate::new_coinbase_with_parent_pools(
-                    net,
-                    height,
-                    miner_params,
-                    txs_fee,
-                    parent_nsm_value_balance,
-                )
-                .expect("valid coinbase tx");
-
-                coinbase_cache.store(
-                    height,
-                    txs_fee,
-                    parent_nsm_value_balance,
-                    coinbase_txn.clone(),
-                );
-
-                coinbase_txn
-            });
+        let coinbase_txn = coinbase_cache.get_or_build(
+            net,
+            height,
+            miner_params,
+            txs_fee,
+            parent_nsm_value_balance,
+        );
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
@@ -618,29 +670,77 @@ pub(crate) fn nsm_value_balance_for_next_block(
 
 /// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
-/// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
-/// the selected context, discarding old proof completions rather than evicting newer work.
+/// Shielded coinbases require expensive proofs. Keep coinbase-only and fee-bearing coinbases for
+/// the selected and previously selected contexts, discarding old proof completions rather than
+/// evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
-pub(crate) struct CoinbaseCache(Arc<Mutex<CachedCoinbases>>);
+pub(crate) struct CoinbaseCache {
+    entries: Arc<Mutex<CachedCoinbases>>,
+    /// Serializes updater and fallback snapshots, including unfinished blocking construction.
+    pub(crate) build: Arc<tokio::sync::Mutex<()>>,
+}
 
 /// The context selected by the latest request and its bounded fee variants.
+///
+/// The previously selected context keeps its variants, so early work for a candidate's child
+/// doesn't discard the committed tip's proofs when that candidate is withdrawn.
 #[derive(Default)]
 struct CachedCoinbases {
     context: Option<(block::Height, Option<Amount<NonNegative>>)>,
     transactions: HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    previous: (
+        Option<(block::Height, Option<Amount<NonNegative>>)>,
+        HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    ),
+    /// The last speculative parent, retained when rejection restores an older cache context.
+    speculative_parent: Option<block::Hash>,
 }
 
 impl CoinbaseCache {
-    /// Selects the context before a template starts constructing either coinbase.
+    /// Reuses an exact fee variant, or builds it under the caller's shared build permit.
+    ///
+    /// Each cache belongs to one immutable network and miner configuration. Overriding the miner
+    /// parameters creates a new cache rather than sharing proofs with the old configuration.
+    fn get_or_build(
+        &self,
+        network: &Network,
+        height: block::Height,
+        miner_params: &MinerParams,
+        fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> TransactionTemplate<amount::NegativeOrZero> {
+        self.select(height, parent_nsm_value_balance);
+        self.get(height, fee, parent_nsm_value_balance)
+            .unwrap_or_else(|| {
+                let coinbase = TransactionTemplate::new_coinbase_with_parent_pools(
+                    network,
+                    height,
+                    miner_params,
+                    fee,
+                    parent_nsm_value_balance,
+                )
+                .expect("validated miner parameters and parent context determine a valid coinbase");
+                self.store(height, fee, parent_nsm_value_balance, coinbase.clone());
+                coinbase
+            })
+    }
+
+    /// Selects the context before a template starts constructing its coinbase.
     fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
         let mut cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if cache.context != Some((height, parent_nsm_value_balance)) {
-            cache.context = Some((height, parent_nsm_value_balance));
-            cache.transactions.clear();
+        let context = Some((height, parent_nsm_value_balance));
+        if cache.context != context {
+            let cache = &mut *cache;
+            std::mem::swap(&mut cache.context, &mut cache.previous.0);
+            std::mem::swap(&mut cache.transactions, &mut cache.previous.1);
+            if cache.context != context {
+                cache.context = context;
+                cache.transactions.clear();
+            }
         }
     }
 
@@ -652,7 +752,7 @@ impl CoinbaseCache {
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
         let cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.context != Some((height, parent_nsm_value_balance)) {
@@ -670,7 +770,7 @@ impl CoinbaseCache {
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
         let mut cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *cache
@@ -681,7 +781,7 @@ impl CoinbaseCache {
             return;
         }
         let map = &mut cache.transactions;
-        // Fee churn must not evict the zero-fee sizing coinbase or grow the cache without bound.
+        // Fee churn must not evict the coinbase-only entry or grow the cache without bound.
         if !map.contains_key(&fee) && map.len() >= 4 {
             let evict_key = map
                 .keys()
@@ -694,6 +794,16 @@ impl CoinbaseCache {
         map.insert(fee, coinbase);
     }
 }
+
+/// How many block proposal checks the `getblocktemplate` RPC runs at once. Proposal checks skip
+/// proof of work and can wait for missing transparent inputs, so callers past this limit are
+/// told to retry rather than queued.
+pub(crate) const MAX_CONCURRENT_PROPOSAL_CHECKS: usize = 2;
+
+/// How long callers wait for a proposal check, in the RPC and in the template updater.
+///
+/// RPC admission remains held until the verifier finishes, even after this response deadline.
+pub(crate) const PROPOSAL_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Handler for the `getblocktemplate` RPC.
 #[derive(Clone)]
@@ -711,9 +821,8 @@ where
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
 
-    /// A channel to send successful block submissions to the block gossip task,
-    /// so they can be advertised to peers.
-    mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+    /// Optional committed-notification channel passed into state-owned submission metadata.
+    mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
 
     /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
     /// the shielded-coinbase proof on every request within a block.
@@ -726,6 +835,12 @@ where
     /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
     /// precomputed template pays the configured miner address.
     template_cache: Option<precompute::TemplateCache>,
+
+    /// Pending bodies shared with inbound peers.
+    pub(crate) submitted_blocks: crate::SubmittedBlockCache,
+
+    /// Admits block proposal checks from the `getblocktemplate` RPC, which skip proof of work.
+    proposal_checks: Arc<tokio::sync::Semaphore>,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -745,11 +860,17 @@ where
             miner_params: MinerParams::new(net, conf).ok(),
             block_verifier_router,
             sync_status,
-            mined_block_sender: mined_block_sender
-                .unwrap_or(SubmitBlockChannel::default().sender()),
+            mined_block_sender,
             coinbase_cache: CoinbaseCache::default(),
             template_cache: Some(precompute::TemplateCache::default()),
+            submitted_blocks: Default::default(),
+            proposal_checks: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROPOSAL_CHECKS)),
         }
+    }
+
+    /// Returns the admission limit for proposal checks requested over the RPC.
+    pub(crate) fn proposal_checks(&self) -> Arc<tokio::sync::Semaphore> {
+        self.proposal_checks.clone()
     }
 
     /// Returns the miner parameters, including the address, data, and memo.
@@ -793,13 +914,19 @@ where
         self.block_verifier_router.clone()
     }
 
-    /// Advertises the mined block.
-    pub fn advertise_mined_block(
+    /// Transfers notification ownership to consensus/state, rather than the RPC response future.
+    pub(crate) fn mined_block_notifications(
         &self,
-        block: block::Hash,
-        height: block::Height,
-    ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
-        self.mined_block_sender.try_send((block, height))
+    ) -> Option<(
+        zebra_state::MinedBlockNotifications,
+        watch::Receiver<Option<Arc<Block>>>,
+    )> {
+        let committed = self.mined_block_sender.clone()?;
+        let (validated, receiver) = watch::channel(None);
+        Some((
+            zebra_state::MinedBlockNotifications::new(committed, validated),
+            receiver,
+        ))
     }
 
     /// Randomizes the coinbase data, if miner parameters are set.
@@ -876,16 +1003,53 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
     }
 }
 
+const BLOCK_DECODE_LIMIT: usize = 8;
+
+/// Bounds large RPC decodes independently of verifier readiness and response cancellation.
+static BLOCK_DECODES: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(BLOCK_DECODE_LIMIT);
+
+pub(crate) async fn decode_block(
+    bytes: Vec<u8>,
+    prepared: Option<PreparedBlockCache>,
+) -> RpcResult<Result<DecodedBlock, SerializationError>> {
+    // Preserve the solved-template fast path: a hit needs only a header and byte comparison.
+    if let Some(decoded) = prepared.as_ref().and_then(|cache| cache.reuse(&bytes)) {
+        return Ok(Ok(decoded));
+    }
+    let inline = bytes.len() <= 4 * 1024;
+    let decode = move || DecodedBlock::deserialize(&bytes);
+    if inline {
+        return Ok(decode());
+    }
+    let admitted =
+        tokio::time::timeout(std::time::Duration::from_secs(10), BLOCK_DECODES.acquire())
+            .await
+            .map_misc_error()?
+            .map_misc_error()?;
+    Ok(tokio::task::spawn_blocking(move || {
+        let _admitted = admitted;
+        decode()
+    })
+    .await
+    .expect("malformed block bytes return a deserialization error rather than panicking"))
+}
+
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a [`GetBlockTemplateResponse`], rejecting invalid proposals before verification
-/// when their mandatory payouts do not match the current parent's contextual subsidy.
+/// Returns a [`GetBlockTemplateResponse`], rejecting proposals before verification when they do not
+/// extend the current tip or their mandatory payouts do not match its contextual subsidy.
+///
+/// Miners modifying templates should submit a proposal before mining. Successful results are
+/// cached for submissions differing only in nonce and Equihash solution; other changes, including
+/// coinbase data and timestamp changes, require full verification.
 ///
 /// # Errors
 ///
-/// Returns an RPC error if Zebra is not synced, the contextual state query fails or times out,
-/// or the verifier cannot accept the request.
+/// Returns an RPC error if Zebra is not synced, admission is full, the contextual state query fails,
+/// or service readiness or the verifier response exceeds the deadline. A timed-out or cancelled
+/// caller does not release admission for verification that is still running.
 pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     read_state: ReadState,
@@ -893,6 +1057,7 @@ pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncSt
     net: &Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
+    admission: Arc<tokio::sync::Semaphore>,
 ) -> RpcResult<GetBlockTemplateResponse>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -900,7 +1065,7 @@ where
         + Send
         + Sync
         + 'static,
-    BlockVerifierRouter::Future: Send,
+    BlockVerifierRouter::Future: Send + 'static,
     ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -915,8 +1080,18 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
-        Ok(block) => block,
+    // Proposal checks skip proof of work, so bound both admitted work and caller wait time.
+    let Ok(admitted) = admission.try_acquire_owned() else {
+        return Err(ErrorObject::owned(
+            0,
+            "too many block proposals are being checked, retry later",
+            None::<()>,
+        ));
+    };
+    let deadline = tokio::time::Instant::now() + PROPOSAL_CHECK_TIMEOUT;
+
+    let block = match decode_block(block_proposal_bytes, None).await? {
+        Ok(decoded) => decoded.block().clone(),
         Err(parse_error) => {
             tracing::info!(
                 ?parse_error,
@@ -931,29 +1106,29 @@ where
         }
     };
 
-    let height = block.coinbase_height();
-    // A caller-controlled pre-reissuance height must not bypass the parent/height preflight.
-    if net.nsm_reissuance_height().is_some() {
-        let chain_info = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            fetch_chain_info(read_state),
+    let chain_info = tokio::time::timeout_at(
+        deadline.min(tokio::time::Instant::now() + std::time::Duration::from_secs(10)),
+        fetch_chain_info(read_state),
+    )
+    .await
+    .map_misc_error()??;
+
+    // Every network needs the exact live height before height-gated verification work limits.
+    let height = chain_info.tip_height.next().map_misc_error()?;
+    if block.header.previous_block_hash != chain_info.tip_hash
+        || block.coinbase_height() != Some(height)
+    {
+        return Ok(BlockProposalResponse::rejected(
+            "invalid proposal",
+            "proposal does not extend the current chain tip".into(),
         )
-        .await
-        .map_misc_error()??;
+        .into());
+    }
 
+    if net.nsm_reissuance_height().is_some() {
         // The reserve and scheduled subsidy both belong to this exact parent and next height.
-        if block.header.previous_block_hash != chain_info.tip_hash
-            || chain_info.tip_height.next().ok() != height
-        {
-            return Ok(BlockProposalResponse::rejected(
-                "invalid proposal",
-                "proposal does not extend the current chain tip".into(),
-            )
-            .into());
-        }
-
         let subsidy = zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
-            chain_info.tip_height.next().map_misc_error()?,
+            height,
             net,
             chain_info.chain_value_pools,
         )
@@ -965,12 +1140,24 @@ where
         // verification, including when the chain reorganizes after this snapshot.
     }
 
-    let block_verifier_router_response = block_verifier_router
-        .ready()
+    let timed_out = |_| ErrorObject::owned(0, "block proposal check timed out", None::<()>);
+    tokio::time::timeout_at(deadline, block_verifier_router.ready())
         .await
-        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
-        .await;
+        .map_err(timed_out)?
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+    // Keep polling the real response after the RPC is dropped: buffered verification and its
+    // dispatched CPU work can continue even when their response future is cancelled.
+    let checking = tokio::spawn(async move {
+        let _admitted = admitted;
+        block_verifier_router
+            .call(zebra_consensus::Request::CheckProposal(block))
+            .await
+    });
+    let block_verifier_router_response = tokio::time::timeout_at(deadline, checking)
+        .await
+        .map_err(timed_out)?
+        .map_misc_error()?;
 
     Ok(block_verifier_router_response
         .map(|_hash| BlockProposalResponse::Valid)

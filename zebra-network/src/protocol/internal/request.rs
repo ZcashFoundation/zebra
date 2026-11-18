@@ -6,7 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::{ConnectionInfo, PeerSocketAddr};
+use crate::{compact::CompactBlock, ConnectionInfo, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -73,8 +73,92 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks).
+    /// Returns [`Response::Blocks`](super::Response::Blocks),
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source,
+    /// or [`Response::ReconstructedBlock`](super::Response::ReconstructedBlock) with exact size
+    /// evidence when a single-block download uses compact reconstruction.
     BlocksByHash(HashSet<block::Hash>),
+
+    /// Serve stored blocks to a legacy peer, by hash, as their serialized bytes.
+    ///
+    /// This inbound-only request is what a legacy connection decodes a block `getdata` into, so
+    /// the inbound service can send the stored block bytes without deserializing and
+    /// reserializing every block. It is never sent to peers or routed by the peer set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks), or
+    /// [`Response::Blocks`](super::Response::Blocks) when a requested body is still a validated
+    /// submission that hasn't been committed.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlocksByHash(HashSet<block::Hash>),
+
+    /// Serve stored blocks by hash as their serialized bytes, on a connection that negotiated
+    /// experimental early relay.
+    ///
+    /// This inbound-only request is what a negotiated connection decodes a block `getdata` into.
+    /// It is never sent to peers or routed by the peer set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks), or answers like
+    /// [`Request::EarlyBlocksByHash`] when a requested body is still a validated submission or in
+    /// the early-relay cache, so uncommitted bodies keep their revocable authorization.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    EarlyRawBlocksByHash(HashSet<block::Hash>),
+
+    /// Request blocks from this node on a connection that negotiated experimental early relay.
+    ///
+    /// Only the inbound connection creates this request, based on both peers' service bits.
+    /// The inbound service may consult its bounded early-relay cache before committed state.
+    /// Ordinary [`Request::BlocksByHash`] requests must not consult that cache.
+    /// Outbound callers must use [`Request::BlocksByHash`] or [`Request::BlockDownload`] instead.
+    ///
+    /// # Returns
+    ///
+    /// The inbound service returns [`Response::Blocks`](super::Response::Blocks) or
+    /// [`Response::AuthorizedBlocks`](super::Response::AuthorizedBlocks).
+    EarlyBlocksByHash(HashSet<block::Hash>),
+
+    /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
+    ///
+    /// The second field is the advertising connection's metadata, as in
+    /// [`Request::AdvertiseBlock`].
+    ///
+    /// Returns [`super::Response::Nil`] only when a new download was queued. Duplicate hashes,
+    /// exhausted global capacity, and the per-IP cap return errors; no compact body may be retained.
+    AdvertiseCompactBlock(
+        block::Hash,
+        #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        Option<Arc<ConnectionInfo>>,
+    ),
+
+    /// Screens a compact header before retaining its body, without querying the mempool.
+    ///
+    /// Returns [`super::Response::Nil`] only for a valid next-tip candidate. Errors require
+    /// ordinary full-block fallback, not peer punishment.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CheckCompactHeader(Arc<CompactBlock>),
+
+    /// Finds verified mempool candidates for a negotiated compact block.
+    ///
+    /// The inbound service screens the compact shape, proof of work, and current committed-tip
+    /// header context before consulting the mempool.
+    /// Returns [`super::Response::CompactBlockTransactions`].
+    /// Errors mean full-block fallback, not peer punishment or block rejection.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CompactBlockTransactions(Arc<CompactBlock>),
+
+    /// Authenticates a reconstructed body against the current committed tip without caching it.
+    ///
+    /// Returns [`super::Response::Nil`] on success. Errors require full-block fallback and must
+    /// not enter the block rejection cache. Success does not replace normal block verification.
+    /// Optional reconstruction evidence applies only to the same immutable block allocation.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CheckCompactBlock(
+        Arc<block::Block>,
+        Option<zebra_node_services::compact::ReconstructedBlock>,
+    ),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
@@ -83,24 +167,29 @@ pub enum Request {
     /// Callers must bound the entire readiness and response operation with a deadline.
     /// The peer's response timeout starts only when the request is dispatched.
     ///
-    /// A known advertiser is preferred even if its advertisement was lost from the inventory
-    /// registry, but only while its shared [`ConnectionInfo`] still identifies the current connection.
-    /// A busy current advertiser is awaited for up to one second before trying unrelated peers.
+    /// Inventory advertisers take priority over the carried source, which remains preferred when
+    /// its advertisement was lost or when recovering the parent of a block it supplied, but only
+    /// while its shared [`ConnectionInfo`] still identifies the current connection.
+    /// A busy current source is awaited for up to one second before trying unrelated peers.
     /// This preference does not shorten connection readiness or the caller's operation deadline.
     /// Missing-inventory reports, prior failures, and connection eligibility still apply.
-    /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
+    /// Without an eligible source, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
-    /// Inbound `getdata` messages are always decoded as [`Request::BlocksByHash`], never this variant.
+    /// Inbound `getdata` messages decode as [`Request::RawBlocksByHash`] or, on negotiated
+    /// connections, [`Request::EarlyRawBlocksByHash`], never this variant.
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks) containing the requested block,
-    /// or an error if the download fails.
+    /// Returns [`Response::Blocks`](super::Response::Blocks),
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source,
+    /// or [`Response::ReconstructedBlock`](super::Response::ReconstructedBlock) with exact size
+    /// evidence after compact reconstruction, or an error if the download fails.
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
-        /// Shared metadata identifying the connection that advertised this block, if any.
+        /// Shared metadata identifying the connection that supplied this block, or the child's
+        /// source for a parent recovery, if known.
         #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
         advertiser: Option<Arc<ConnectionInfo>>,
     },
@@ -141,10 +230,13 @@ pub enum Request {
     /// subsequent blocks. However, Bitcoin nodes *also* send `inv` messages
     /// unsolicited in order to gossip new blocks to their peers. These gossip
     /// messages can race with the response to a `getblocks` request, and there
-    /// is no way for the network layer to distinguish them. For this reason, the
-    /// response may occasionally contain a single hash of a new chain tip rather
-    /// than a list of hashes of subsequent blocks. We believe that unsolicited
-    /// `inv` messages will always have exactly one block hash.
+    /// is no way for the network layer to distinguish them. Singleton inventories
+    /// are therefore returned and also forwarded to inbound gossip, so the block is
+    /// still fetched if inbound drops the advert.
+    ///
+    /// A screened compact extending the first locator with no stop can answer discovery once,
+    /// allowing reconstruction before commitment. Later requests query the peer again rather than
+    /// repeatedly returning the retained compact and hiding newer blocks.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         //
@@ -221,8 +313,8 @@ pub enum Request {
     /// This is implemented by sending an `inv` message containing the
     /// block hash, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the block will generate a
-    /// [`Request::BlocksByHash`] against the "inbound" service passed to
-    /// [`init`](crate::init).
+    /// [`Request::RawBlocksByHash`] or negotiated [`Request::EarlyRawBlocksByHash`] against the
+    /// "inbound" service passed to [`init`](crate::init).
     ///
     /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
     /// includes configured sidecars independently of ordinary request readiness.
@@ -254,12 +346,49 @@ pub enum Request {
     /// Other queued writes continue; timeouts leave delivery unknown.
     AdvertiseBlockToAll(block::Hash),
 
+    /// Advertise an authenticated next-tip block only to peers that negotiated early relay.
+    ///
+    /// Use [`crate::BlockAdvertiser`]. Sampling and sidecar selection follow ordinary
+    /// [`Request::AdvertiseBlock`] fanout, restricted to bilaterally opted-in connections.
+    /// The block must already be available in the bounded early-relay serving cache.
+    /// The second field is the actual supplying peer, excluded from this early fanout.
+    /// Use `None` for locally submitted blocks.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
+    AdvertiseEarlyBlock(block::Hash, Option<PeerSocketAddr>),
+
     /// Request the contents of this node's mempool.
     ///
     /// # Returns
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+
+    /// Request the note commitment tree roots after each block from `start_height` to the block
+    /// at height `start_height + count - 1`, whose hash is `final_hash`.
+    ///
+    /// The peer set sends this only to a ready peer that advertised
+    /// [`PeerServices::NODE_TREE_ROOTS`](crate::types::PeerServices::NODE_TREE_ROOTS), and fails
+    /// immediately if there is none. Inbound requests always have a count between 1 and
+    /// [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
+    ///
+    /// # Returns
+    ///
+    /// Returns attributed [`Response::TreeRootsFromPeer`](super::Response::TreeRootsFromPeer)
+    /// on outbound success, or [`Response::TreeRoots`](super::Response::TreeRoots) on refusal.
+    /// Inbound services return `Response::TreeRoots`, with at most `count` complete root proofs.
+    TreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+        /// A source whose roots failed header authentication; never route this retry to it.
+        excluded_peer: Option<PeerSocketAddr>,
+    },
 
     /// Drive local peer-set maintenance without sending a request to a remote peer.
     ///
@@ -281,7 +410,20 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::EarlyBlocksByHash(hashes) => {
+                format!("EarlyBlocksByHash({})", hashes.len())
+            }
+            Request::RawBlocksByHash(hashes) => {
+                format!("RawBlocksByHash({})", hashes.len())
+            }
+            Request::EarlyRawBlocksByHash(hashes) => {
+                format!("EarlyRawBlocksByHash({})", hashes.len())
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
+            Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
+            Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
+            Request::CheckCompactBlock(..) => "CheckCompactBlock".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -302,7 +444,16 @@ impl fmt::Display for Request {
 
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
+            Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::TreeRoots {
+                start_height,
+                count,
+                ..
+            } => format!(
+                "TreeRoots {{ start_height: {}, count: {count} }}",
+                start_height.0
+            ),
             Request::PollPeerSet => "PollPeerSet".to_string(),
         })
     }
@@ -316,7 +467,14 @@ impl Request {
             Request::Ping(_) => "Ping",
 
             Request::BlocksByHash(_) => "BlocksByHash",
+            Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
+            Request::RawBlocksByHash(_) => "RawBlocksByHash",
+            Request::EarlyRawBlocksByHash(_) => "EarlyRawBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
+            Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
+            Request::CheckCompactHeader(_) => "CheckCompactHeader",
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
+            Request::CheckCompactBlock(..) => "CheckCompactBlock",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
@@ -326,7 +484,9 @@ impl Request {
             Request::AdvertiseTransactionIds(_, _) => "AdvertiseTransactionIds",
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
+            Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::TreeRoots { .. } => "TreeRoots",
             Request::PollPeerSet => "PollPeerSet",
         }
     }
@@ -335,7 +495,10 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlockDownload { .. } | Request::BlocksByHash(_) | Request::TransactionsById(_)
+            Request::BlockDownload { .. }
+                | Request::BlocksByHash(_)
+                | Request::EarlyBlocksByHash(_)
+                | Request::TransactionsById(_)
         )
     }
 
@@ -343,7 +506,9 @@ impl Request {
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
         match self {
             Request::BlockDownload { hash, .. } => HashSet::from([*hash]),
-            Request::BlocksByHash(block_hashes) => block_hashes.clone(),
+            Request::BlocksByHash(block_hashes) | Request::EarlyBlocksByHash(block_hashes) => {
+                block_hashes.clone()
+            }
             _ => HashSet::new(),
         }
     }

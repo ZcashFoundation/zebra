@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Use constructor-controlled transaction sizes for mempool responses and mining transaction selection ([#12290](https://github.com/ZcashFoundation/zebra/pull/12290)).
+time: 2026-11-14T00:18:51.167072994+01:00

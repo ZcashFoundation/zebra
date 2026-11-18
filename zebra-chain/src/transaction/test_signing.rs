@@ -170,6 +170,6 @@ impl Transaction {
         )
         .freeze()?;
 
-        Ok(Self(signed_tx))
+        Ok(Self::from_inner(signed_tx))
     }
 }

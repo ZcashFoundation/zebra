@@ -276,6 +276,10 @@ pub struct Storage {
 
     /// Maximum allowed size of OP_RETURN scripts, in bytes.
     max_datacarrier_bytes: u32,
+
+    /// Number of expiration scans, for detecting repeated work at the same tip height.
+    #[cfg(test)]
+    pub(super) expiry_scan_count: usize,
 }
 
 impl Drop for Storage {
@@ -298,6 +302,8 @@ impl Storage {
             tip_rejected_exact: Default::default(),
             tip_rejected_same_effects: Default::default(),
             chain_rejected_same_effects: Default::default(),
+            #[cfg(test)]
+            expiry_scan_count: 0,
         }
     }
 
@@ -412,14 +418,18 @@ impl Storage {
     /// prevent this transaction from being inserted.
     /// These errors should not be propagated to peers, because the transactions are valid.
     ///
-    /// If inserting this transaction evicts other transactions, they will be tracked
-    /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
+    /// The selected eviction victim is tracked as
+    /// [`SameEffectsChainRejectionError::RandomlyEvicted`], but its dependents can be resubmitted.
+    ///
+    /// Adds every evicted transaction ID, including collateral dependents, to `evicted_ids` so the
+    /// caller can publish complete verified-membership invalidations.
     #[allow(clippy::unwrap_in_result)]
     pub fn insert(
         &mut self,
         tx: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         height: Option<Height>,
+        evicted_ids: &mut HashSet<UnminedTxId>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -492,27 +502,37 @@ impl Storage {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
-            let victim_tx = self
-                .verified
-                .evict_one()
-                .expect("mempool is empty, but was expected to be full");
-
+            let evicted = self.verified.evict_one();
+            // VerifiedSet::remove returns the selected victim after its dependents.
+            let victim_id = evicted
+                .last()
+                .expect("the pool exceeds its cost limit, so eviction removes a transaction")
+                .transaction
+                .id;
             // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
             // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
-                victim_tx.transaction.id,
+                victim_id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
-            // If this transaction gets evicted, set its result to the same error
-            if victim_tx.transaction.id == unmined_tx_id {
-                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+            evicted_ids.reserve(evicted.len());
+            for evicted_tx in evicted {
+                let evicted_id = evicted_tx.transaction.id;
+                evicted_ids.insert(evicted_id);
+                // An incoming transaction can be evicted directly or through an ancestor.
+                if evicted_id == unmined_tx_id {
+                    result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                }
             }
         }
 
         result
     }
 
+    // Copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
     /// Remove transactions from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
@@ -529,9 +549,16 @@ impl Storage {
     /// Does not add or remove from the 'rejected' tracking set.
     #[allow(dead_code)]
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
-        self.verified
-            .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
-            .len()
+        let tx_ids: Vec<_> = exact_wtxids
+            .iter()
+            .filter(|id| {
+                self.transactions()
+                    .get(&id.mined_id())
+                    .is_some_and(|tx| tx.transaction.id == **id)
+            })
+            .map(UnminedTxId::mined_id)
+            .collect();
+        self.verified.remove_all(tx_ids).len()
     }
 
     /// Clears a list of mined transaction ids from the verified set's tracked transaction dependencies.
@@ -558,9 +585,8 @@ impl Storage {
         mined_ids: &HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
     ) -> RemovedTransactionIds {
-        let removed_mined = self
-            .verified
-            .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()));
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
+        let removed_mined = self.verified.remove_all(mined_ids.iter().copied());
 
         let spent_outpoints: HashSet<_> = transactions
             .iter()
@@ -568,15 +594,15 @@ impl Storage {
             .collect();
         let sprout_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.sprout_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.sprout_nullifiers())
             .collect();
         let sapling_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.sapling_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.sapling_nullifiers())
             .collect();
         let orchard_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.orchard_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.orchard_nullifiers())
             .collect();
         let ironwood_nullifiers: HashSet<_> = transactions
             .iter()
@@ -607,9 +633,10 @@ impl Storage {
             })
             .collect();
 
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         let removed_duplicate_spend = self
             .verified
-            .remove_all_that(|tx| duplicate_spend_ids.contains(&tx.transaction.id));
+            .remove_all(duplicate_spend_ids.iter().map(UnminedTxId::mined_id));
 
         for &mined_id in mined_ids {
             self.reject(
@@ -910,6 +937,11 @@ impl Storage {
         &mut self,
         tip_height: zebra_chain::block::Height,
     ) -> HashSet<UnminedTxId> {
+        #[cfg(test)]
+        {
+            self.expiry_scan_count += 1;
+        }
+
         let mut tx_ids = HashSet::new();
         let mut unmined_tx_ids = HashSet::new();
 
@@ -922,9 +954,13 @@ impl Storage {
             }
         }
 
+        if tx_ids.is_empty() {
+            return unmined_tx_ids;
+        }
+
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         // expiry height is effecting data, so we match by non-malleable TXID
-        self.verified
-            .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id.mined_id()));
+        self.verified.remove_all(tx_ids.iter().copied());
 
         // also reject it
         for id in tx_ids {

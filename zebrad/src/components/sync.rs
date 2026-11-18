@@ -12,8 +12,8 @@ use std::{
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{
-    future::{self, FutureExt as _},
-    stream::{self, FuturesUnordered, StreamExt as _, TryStreamExt as _},
+    future::FutureExt as _,
+    stream::{FuturesUnordered, StreamExt as _},
 };
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
@@ -49,19 +49,25 @@ mod hedge;
 pub(crate) mod progress;
 mod recent_sync_lengths;
 mod status;
+mod tree_roots;
 
 #[cfg(test)]
 mod tests;
 
-use downloads::Downloads;
+pub(crate) use downloads::Downloads;
 use hedge::SuccessHedge;
 
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
+pub(crate) use downloads::InFlightDownloads;
+#[cfg(test)]
+pub(crate) use downloads::INBOUND_COMMIT_TIMEOUT;
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
+pub(crate) use gossip::gossip_early_blocks;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
+pub(crate) use tree_roots::fetch_tree_roots;
 
 /// Match the missing-block errors used by both hedging and sync recovery.
 fn is_not_found(error: &dyn std::error::Error) -> bool {
@@ -89,9 +95,6 @@ fn interleave_peer_hashes(
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
-
-/// Limits concurrent discovery membership checks against the shared state service.
-const KNOWN_BLOCK_CHECK_CONCURRENCY: usize = 16;
 
 /// Controls how many times we will retry each block download.
 ///
@@ -166,21 +169,6 @@ pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
 pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
-
-/// Controls how long we wait between gossiping successive blocks or transactions.
-///
-/// ## Correctness
-///
-/// If this timeout is set too high, blocks and transactions won't propagate through
-/// the network efficiently.
-///
-/// If this timeout is set too low, the peer set and remote peers can get overloaded.
-#[cfg(not(test))]
-pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
-
-/// Keep gossip throttled in unit tests without waiting for real peer-network delays.
-#[cfg(test)]
-pub const PEER_GOSSIP_DELAY: Duration = Duration::from_millis(10);
 
 /// The per-peer wire-response budget used to derive complete download deadlines.
 ///
@@ -327,6 +315,9 @@ pub struct Config {
     /// If the number of threads is not configured or zero, Zebra uses the number of logical cores.
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    ///
+    /// The state's block writer uses a separate pool with one extra thread for its writer loop,
+    /// so committing blocks doesn't wait for other CPU-intensive work.
     pub parallel_cpu_threads: usize,
 }
 
@@ -641,6 +632,11 @@ where
         };
 
         (new_syncer, sync_status)
+    }
+
+    /// Share block download ownership with inbound gossip and parent recovery.
+    pub(crate) fn in_flight_downloads(&self) -> InFlightDownloads {
+        self.downloads.in_flight_hashes()
     }
 
     /// Runs the syncer to synchronize the chain and keep it synchronized.
@@ -997,13 +993,10 @@ where
                         continue;
                     }
 
-                    let mut first_unknown = None;
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        if !self.state_contains(hash).await? {
-                            first_unknown = Some(i);
-                            break;
-                        }
-                    }
+                    let known_blocks = self.known_blocks(hashes.clone()).await?;
+                    let first_unknown = known_blocks
+                        .iter()
+                        .position(|loc| matches!(loc, None | Some(zs::KnownBlock::Queue)));
 
                     debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
@@ -1047,32 +1040,17 @@ where
         interleave_peer_hashes(&mut download_set, peer_hashes);
 
         // Filter after deduplication without discarding other peers' useful work.
-        let state = self.state.clone();
-        let download_set = stream::iter(download_set)
-            .map(move |hash| {
-                let state = state.clone();
-
-                async move {
-                    let response = state
-                        .oneshot(zs::Request::KnownBlock(hash))
-                        .await
-                        .map_err(|error| eyre!(error))?;
-                    let zs::Response::KnownBlock(location) = response else {
-                        unreachable!("wrong response to known block request");
-                    };
-
-                    // As in `state_contains`, queued blocks still need their parents downloaded.
-                    let is_known =
-                        location.is_some_and(|location| location != zs::KnownBlock::Queue);
-
-                    Ok::<_, Report>((!is_known).then_some(hash))
-                }
-            })
-            // Keep discovery order when splitting immediate and deferred downloads.
-            .buffered(KNOWN_BLOCK_CHECK_CONCURRENCY)
-            .try_filter_map(future::ok)
-            .try_collect::<IndexSet<_>>()
+        let known_blocks = self
+            .known_blocks(download_set.iter().copied().collect())
             .await?;
+        // As in `state_contains`, queued blocks still need their parents downloaded.
+        let download_set: IndexSet<_> = download_set
+            .into_iter()
+            .zip(known_blocks)
+            .filter_map(|(hash, location)| {
+                matches!(location, None | Some(zs::KnownBlock::Queue)).then_some(hash)
+            })
+            .collect();
 
         // Only eligible responses may supersede another response's candidate.
         // The download set also contains useful work from ineligible responses,
@@ -1805,6 +1783,29 @@ where
         }
     }
 
+    /// Returns each block's state location in request order, including queued blocks.
+    async fn known_blocks(
+        &mut self,
+        hashes: Vec<block::Hash>,
+    ) -> Result<Vec<Option<zs::KnownBlock>>, Report> {
+        if hashes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zs::Request::KnownBlocks(hashes))
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::KnownBlocks(locations) => Ok(locations),
+            _ => unreachable!("wrong response to known blocks request"),
+        }
+    }
+
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
     ///
@@ -1860,7 +1861,7 @@ where
                     | zs::ValidateContextError::HistoryTreeError(_)
             )
         };
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1878,6 +1879,12 @@ where
                 _ => return false,
             },
         };
+        // Early-relay wrappers keep the verifier's own failure.
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block {
                 source: BlockError::Other(_),
@@ -1897,7 +1904,10 @@ where
             VerifyBlockError::Block { .. }
             | VerifyBlockError::Equihash { .. }
             | VerifyBlockError::Time(_)
-            | VerifyBlockError::Subsidy(_) => true,
+            | VerifyBlockError::Subsidy(_)
+            // Failed early-relay authentication, or a hash that already failed verification.
+            | VerifyBlockError::EarlyRelayAdmission(_)
+            | VerifyBlockError::EarlyRelayRejected => true,
             VerifyBlockError::Commit(error) => invalid_commit(error),
             _ => false,
         }
@@ -1908,7 +1918,7 @@ where
         if !Self::is_block_validation_error(error) {
             return false;
         }
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1916,6 +1926,11 @@ where
                 _ => return false,
             },
         };
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block { source } => !matches!(
                 source,

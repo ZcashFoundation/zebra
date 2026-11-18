@@ -1,0 +1,9 @@
+project: zebrad
+kind: Changed
+body: >-
+  Serve ordinary block downloads from stored bytes on legacy and negotiated connections,
+  avoiding transaction decoding on the serving node. Cached early bodies retain revocable
+  serving authorization. The request/response metric command labels now include
+  `RawBlocksByHash`, `EarlyRawBlocksByHash` and `RawBlocks`; finalized state reads use
+  `raw_block`.
+time: 2026-11-09T20:00:00.000000000Z

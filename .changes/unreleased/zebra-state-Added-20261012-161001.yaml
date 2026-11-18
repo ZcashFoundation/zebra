@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Added
+body: >-
+  Added `CheckpointVerifiedBlock::with_precomputed_auth_data_root` and
+  `From<SemanticallyVerifiedBlock>` for sealing an immutable checkpoint block with its
+  authorizing-data root, and `IntoDisk` for `&[u8]`.
+time: 2026-10-12T16:10:01.000000000+02:00

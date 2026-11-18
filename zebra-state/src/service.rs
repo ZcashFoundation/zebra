@@ -23,8 +23,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::future::FutureExt;
-use tokio::sync::oneshot;
+use futures::{future::FutureExt, stream::FuturesUnordered, StreamExt};
+use tokio::sync::{oneshot, watch, OwnedSemaphorePermit, Semaphore};
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -33,10 +33,13 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
+    chain_tip::ChainTip,
     diagnostic::CodeTimer,
+    parallel::tree::MAX_TREE_ROOTS_PER_REQUEST,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
+    transparent,
 };
 
 use crate::{
@@ -52,6 +55,7 @@ use crate::{
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
+        fast_tree_sync::{TreeRootsCache, TreeRootsMessage, WantedTreeRoots},
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
@@ -60,9 +64,16 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
-    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
-    StateInitError,
+    KnownBlock, MinedBlockNotifications, ReadRequest, ReadResponse, Request, Response,
+    SemanticallyVerifiedBlock, StateInitError,
 };
+
+pub(crate) type MiningCandidate = (
+    Arc<block::Block>,
+    Arc<crate::GetBlockTemplateChainInfo>,
+    watch::Sender<Option<Arc<OwnedSemaphorePermit>>>,
+    tokio::time::Instant,
+);
 
 pub mod block_iter;
 pub mod chain_tip;
@@ -70,9 +81,13 @@ pub mod watch_receiver;
 
 pub mod check;
 
+pub(crate) mod early_relay;
+pub(crate) mod fast_tree_sync;
+
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod pruning;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -165,12 +180,15 @@ pub(crate) struct StateService {
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     non_finalized_block_write_sent_hashes: SentHashes,
 
-    /// If an invalid block is sent on `finalized_block_write_sender`,
-    /// this channel gets the height and [`block::Hash`] of the valid finalized tip.
-    //
-    // TODO: add tests for non-finalized resets (#2654)
+    /// Receives full finalized-queue resets or targeted malformed-body replacement requests.
     invalid_block_write_reset_receiver:
-        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
+        tokio::sync::mpsc::UnboundedReceiver<write::FinalizedWriteFeedback>,
+
+    /// An exact replacement requested by the writer, without disturbing queued descendants.
+    finalized_body_replacement: Option<(
+        block::Hash,
+        std::sync::mpsc::SyncSender<queued_blocks::QueuedCheckpointVerified>,
+    )>,
 
     /// Receives the hash of every non-finalized block that the write task
     /// rejected, so the corresponding entry can be removed from
@@ -197,6 +215,24 @@ pub(crate) struct StateService {
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 
+    /// Wakes candidate withdrawal when the committed best tip changes.
+    latest_chain_tip: LatestChainTip,
+
+    /// Bounds early-work computations and keeps a live candidate from being replaced.
+    mining_candidate_slot: Arc<Semaphore>,
+
+    /// How long a mining candidate may compute and stay published, [`MINING_CANDIDATE_LIFETIME`]
+    /// outside tests.
+    mining_candidate_lifetime: Duration,
+
+    /// Bounded input to the writer-owned roots cache, and its published progress.
+    tree_roots_sender: std::sync::mpsc::SyncSender<TreeRootsMessage>,
+    wanted_tree_roots: watch::Receiver<WantedTreeRoots>,
+    rejected_tree_roots: std::sync::mpsc::Receiver<std::net::SocketAddr>,
+    pending_rejected_tree_roots: Option<std::net::SocketAddr>,
+    /// Owns the pruning worker, which must stop before the database shuts down.
+    pruning_task: Option<pruning::PruningTask>,
+
     // Metrics
     //
     /// Shutdown sender and thread owning the metrics database handle.
@@ -210,6 +246,9 @@ pub(crate) struct StateService {
     /// as a break in the graph.
     max_finalized_queue_height: f64,
 }
+
+/// How long a mining candidate may compute and stay published before the state gives up on it.
+const MINING_CANDIDATE_LIFETIME: Duration = Duration::from_secs(1);
 
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
@@ -238,6 +277,12 @@ pub struct ReadStateService {
     /// so it might include some block data that is also on `disk`.
     non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
 
+    /// At most one early mining parent, separate from committed state.
+    mining_candidate: watch::Sender<Option<MiningCandidate>>,
+
+    /// Independently enabled, authenticated early block retention.
+    early_relay: Arc<early_relay::EarlyRelayState>,
+
     /// The shared inner on-disk database for the finalized state.
     ///
     /// RocksDB allows reads and writes via a shared reference,
@@ -258,6 +303,9 @@ impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some(task) = &mut self.pruning_task {
+            task.stop();
+        }
         if let Some((shutdown_sender, metrics_thread)) = self.metrics_exporter.take() {
             drop(shutdown_sender);
             if let Err(thread_panic) = metrics_thread.join() {
@@ -292,7 +340,6 @@ impl Drop for ReadStateService {
     fn drop(&mut self) {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
-
         // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
@@ -371,12 +418,7 @@ impl StateService {
                     &network,
                     debug_skip_format_upgrades,
                     false,
-                )
-                .expect(
-                    "opening the read-write finalized state database failed; check that the \
-                     state cache directory is writable and not locked by another Zebra instance, \
-                     and that there is free disk space",
-                );
+                )?;
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -385,10 +427,11 @@ impl StateService {
                     .tip_block()
                     .expect("the finalized tip must have a complete stored body");
 
-                (finalized_state, finalized_tip, timer)
+                Ok((finalized_state, finalized_tip, timer))
             })
             .await
             .expect("failed to join blocking task")
+            .unwrap_or_else(|error: StateInitError| panic!("{error}"))
         };
 
         // # Correctness
@@ -445,6 +488,29 @@ impl StateService {
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
+        // Before Sapling, there are no Sapling, Orchard, or Ironwood trees to skip.
+        let mut tree_roots_cache = TreeRootsCache::new(
+            fast_tree_sync::embedded_trees_for_state(
+                fast_tree_sync::EmbeddedTrees::for_network(network),
+                &finalized_state.db,
+                config.fast_tree_sync,
+                max_checkpoint_height,
+            ),
+            finalized_tip_height.map_or(block::Height(0), |height| {
+                (height + 1).expect("finalized heights are below the maximum height")
+            }),
+        )
+        .with_first_height(
+            NetworkUpgrade::Sapling
+                .activation_height(network)
+                .unwrap_or(block::Height(0)),
+        );
+        let (tree_roots_sender, wanted_tree_roots, rejected_tree_roots) =
+            tree_roots_cache.channels();
+        let (pruning_wake, pruning_receiver) = config
+            .prune_blocks_older_than
+            .map(|_| crossbeam_channel::bounded(1))
+            .unzip();
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -457,6 +523,8 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            tree_roots_cache,
+            pruning_wake,
         );
 
         let read_service = ReadStateService::new(
@@ -489,11 +557,20 @@ impl StateService {
             finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
+            finalized_body_replacement: None,
             non_finalized_rejected_receiver,
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
+            pruning_task: None,
             metrics_exporter: None,
+            latest_chain_tip: latest_chain_tip.clone(),
+            mining_candidate_slot: Arc::new(Semaphore::new(1)),
+            mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
+            tree_roots_sender,
+            wanted_tree_roots,
+            rejected_tree_roots,
+            pending_rejected_tree_roots: None,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -535,6 +612,14 @@ impl StateService {
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
 
+        if let (Some(retention), Some(wake)) = (config.prune_blocks_older_than, pruning_receiver) {
+            state.pruning_task = Some(pruning::PruningTask::spawn(
+                read_service.db.clone(),
+                retention,
+                wake,
+            ));
+        }
+
         // RocksDB property reads are blocking, so export metrics on a dedicated thread.
         let (shutdown_sender, shutdown_receiver) = mpsc::channel();
         let db_for_metrics = state.read_service.db.clone();
@@ -566,6 +651,7 @@ impl StateService {
     fn queue_and_commit_to_finalized_state(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
+        notifications: Option<MinedBlockNotifications>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitCheckpointVerifiedError>> {
         // # Correctness & Performance
         //
@@ -577,12 +663,33 @@ impl StateService {
 
         // Apply pending resets first, so they can't fail the block queued below.
         self.drain_finalized_resets();
+        if self
+            .finalized_body_replacement
+            .as_ref()
+            .is_some_and(|(hash, _)| *hash == checkpoint_verified.hash)
+        {
+            let (_, replacement) = self
+                .finalized_body_replacement
+                .take()
+                .expect("the matching replacement request exists");
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            if let Err(error) = replacement.try_send((checkpoint_verified, rsp_tx, notifications)) {
+                Self::send_checkpoint_verified_block_error(
+                    match error {
+                        std::sync::mpsc::TrySendError::Full(queued)
+                        | std::sync::mpsc::TrySendError::Disconnected(queued) => queued,
+                    },
+                    CommitBlockError::WriteTaskExited,
+                );
+            }
+            return rsp_rx;
+        }
 
         if let Some(next_height) = self.finalized_reset_next_height {
             if queued_height > next_height {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
                 Self::send_checkpoint_verified_block_error(
-                    (checkpoint_verified, rsp_tx),
+                    (checkpoint_verified, rsp_tx, notifications),
                     CommitBlockError::WriteTaskExited,
                 );
                 return rsp_rx;
@@ -592,9 +699,20 @@ impl StateService {
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (checkpoint_verified, rsp_tx);
+        let mut queued = (checkpoint_verified, rsp_tx, notifications);
 
         if self.block_write_sender.finalized.is_some() {
+            if let Some(previous) = self
+                .finalized_state_queued_blocks
+                .get_mut(&queued_prev_hash)
+            {
+                if queued.0.hash == previous.0.hash && queued.2.is_none() {
+                    queued.2 = previous.2.take();
+                    if let Some(observer) = &mut queued.2 {
+                        observer.allow_ordinary_commit();
+                    }
+                }
+            }
             // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
@@ -713,9 +831,8 @@ impl StateService {
         }
     }
 
-    /// Applies every reset queued on `invalid_block_write_reset_receiver`: rewinds the last
-    /// sent hash to the finalized tip, forgets the sent hashes, and fails the queued blocks, so
-    /// the rejected block and every block above it can be downloaded again.
+    /// Applies writer recovery requests. Full resets fail the queue; exact body replacements
+    /// retain every queued descendant and bypass ordinary last-sent ordering once.
     ///
     /// Returns `false` if the write task closed the reset channel.
     fn drain_finalized_resets(&mut self) -> bool {
@@ -723,8 +840,9 @@ impl StateService {
 
         loop {
             match self.invalid_block_write_reset_receiver.try_recv() {
-                Ok((reset_tip_height, reset_tip_hash)) => {
+                Ok(write::FinalizedWriteFeedback::Reset(reset_tip_height, reset_tip_hash)) => {
                     self.finalized_block_write_last_sent_hash = reset_tip_hash;
+                    self.finalized_body_replacement = None;
                     self.finalized_reset_next_height = Some(
                         reset_tip_height
                             .map(|height| (height + 1).expect("committed heights are valid"))
@@ -736,8 +854,14 @@ impl StateService {
                     // the syncer from downloading them again.
                     self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 }
+                Ok(write::FinalizedWriteFeedback::InvalidBody { hash, replacement }) => {
+                    self.non_finalized_block_write_sent_hashes
+                        .remove_all([hash]);
+                    self.finalized_body_replacement = Some((hash, replacement));
+                }
                 Err(TryRecvError::Empty) => return true,
                 Err(TryRecvError::Disconnected) => {
+                    self.finalized_body_replacement = None;
                     info!(
                         "Block commit task closed the block reset channel. Is Zebra shutting down?"
                     );
@@ -802,7 +926,7 @@ impl StateService {
         queued: QueuedCheckpointVerified,
         error: impl Into<CommitCheckpointVerifiedError>,
     ) {
-        let (finalized, rsp_tx) = queued;
+        let (finalized, rsp_tx, _) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
@@ -825,7 +949,7 @@ impl StateService {
         queued: QueuedSemanticallyVerified,
         error: impl Into<CommitSemanticallyVerifiedError>,
     ) {
-        let (finalized, rsp_tx) = queued;
+        let (finalized, rsp_tx, _, _) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
@@ -840,10 +964,12 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(level = "debug", skip(self, semantically_verified))]
+    #[instrument(level = "debug", skip(self, semantically_verified, contextual))]
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
         mut semantically_verified: SemanticallyVerifiedBlock,
+        mut contextual: Option<Box<crate::ContextuallyVerifiedBlock>>,
+        mut notifications: Option<MinedBlockNotifications>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
@@ -895,11 +1021,13 @@ impl StateService {
             }
         }
 
+        let mut ready = None;
+
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
         // it with the newer request. A block hash does not identify its authorizing data, so
         // replace the body together with its response channel.
-        if let Some(old_request) = self
+        if let Some(mut old_request) = self
             .non_finalized_state_queued_blocks
             .remove_queued(&semantically_verified.hash)
         {
@@ -914,6 +1042,19 @@ impl StateService {
                     .received_time
                     .min(semantically_verified.received_time);
             }
+            // A mined request's cached verdict validated its own body, so a replacement keeps
+            // both, as [`Request::CommitMinedBlock`] documents.
+            if let Some(verdict) = old_request.2.take() {
+                std::mem::swap(&mut semantically_verified, &mut old_request.0);
+                contextual = Some(verdict);
+            }
+            // Ordinary supersession keeps a mined observer without requiring its capacity.
+            if notifications.is_none() {
+                notifications = old_request.3.take().map(|mut observer| {
+                    observer.allow_ordinary_commit();
+                    observer
+                });
+            }
             Self::send_semantically_verified_block_error(
                 old_request,
                 CommitBlockError::new_duplicate(
@@ -924,8 +1065,16 @@ impl StateService {
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        self.non_finalized_state_queued_blocks
-            .queue((semantically_verified, rsp_tx));
+        let queued = (semantically_verified, rsp_tx, contextual, notifications);
+        if self.block_write_sender.finalized.is_none()
+            && self.block_write_sender.non_finalized.is_some()
+            && self.can_fork_chain_at(&parent_hash)
+        {
+            // Immediately dispatched blocks need only the sent-hash indexes.
+            ready = Some(queued);
+        } else {
+            self.non_finalized_state_queued_blocks.queue(queued);
+        }
 
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and
@@ -946,17 +1095,16 @@ impl StateService {
                 }
             }
             // Send blocks from non-finalized queue
-            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
+            self.send_ready_non_finalized(self.finalized_block_write_last_sent_hash, None);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if !self.can_fork_chain_at(&parent_hash) {
-            tracing::trace!("unready to verify, returning early");
-        } else if self.block_write_sender.finalized.is_none() {
-            // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
-            self.send_ready_non_finalized_queued(parent_hash);
+        } else if self.block_write_sender.finalized.is_none()
+            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
+        {
+            self.send_ready_non_finalized(parent_hash, ready);
 
             let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
                 "Finalized state must have at least one block before committing non-finalized state",
@@ -967,6 +1115,8 @@ impl StateService {
 
             self.non_finalized_block_write_sent_hashes
                 .prune_by_height(finalized_tip_height);
+        } else {
+            tracing::trace!("unready to verify, returning early");
         }
 
         // Limit the queue after sending the blocks that are ready, so it can't fail them.
@@ -1046,10 +1196,16 @@ impl StateService {
         queued_height >= self.full_verifier_utxo_lookahead
     }
 
-    /// Sends queued blocks starting from `new_parent` in parent-before-child order
-    /// to the block write task for validation and commit.
-    #[tracing::instrument(level = "debug", skip(self, new_parent))]
-    fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
+    /// Sends an optional ready child and queued descendants of `new_parent` to the writer, in
+    /// parent-before-child order.
+    ///
+    /// Both admission paths share sent-hash accounting and writer shutdown handling.
+    #[tracing::instrument(level = "debug", skip(self, new_parent, ready))]
+    fn send_ready_non_finalized(
+        &mut self,
+        new_parent: block::Hash,
+        mut ready: Option<QueuedSemanticallyVerified>,
+    ) {
         use tokio::sync::mpsc::error::SendError;
         if let Some(non_finalized_block_write_sender) = &self.block_write_sender.non_finalized {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
@@ -1059,14 +1215,17 @@ impl StateService {
                     .non_finalized_state_queued_blocks
                     .dequeue_children(parent_hash);
 
-                for queued_child in queued_children {
-                    let (SemanticallyVerifiedBlock { hash, .. }, _) = queued_child;
+                for queued_child in ready.take().into_iter().chain(queued_children) {
+                    let (SemanticallyVerifiedBlock { hash, .. }, _, _, _) = queued_child;
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
-                    let send_result = non_finalized_block_write_sender.send(queued_child.into());
+                    let send_result = non_finalized_block_write_sender.send(
+                        NonFinalizedWriteMessage::Commit(queued_child, Instant::now()),
+                    );
 
-                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued))) = send_result {
+                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued, _))) = send_result
+                    {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
@@ -1202,6 +1361,55 @@ impl StateService {
             .contains(hash)
             .then_some(KnownBlock::WriteChannel)
     }
+
+    /// Registers a wait before checking queued, in-flight, and committed outputs.
+    fn await_utxo(
+        &mut self,
+        outpoint: transparent::OutPoint,
+    ) -> impl Future<Output = Result<transparent::Utxo, BoxError>> + Send + 'static {
+        let timer = CodeTimer::start();
+        let response_fut = self.pending_utxos.queue(outpoint);
+        let queued = self.non_finalized_state_queued_blocks.utxo(&outpoint);
+        let (known, description) = if queued.is_some() {
+            (queued, "AwaitUtxo/queued-non-finalized")
+        } else {
+            self.drain_finalized_resets();
+            self.drain_non_finalized_rejected_hashes();
+            (
+                self.non_finalized_block_write_sent_hashes.utxo(&outpoint),
+                "AwaitUtxo/sent-non-finalized",
+            )
+        };
+        let read_service = if let Some(utxo) = known {
+            self.pending_utxos.respond(&outpoint, || utxo);
+            None
+        } else {
+            Some(self.read_service.clone())
+        };
+
+        async move {
+            if let Some(read_service) = read_service {
+                // Match AwaitUtxo's checkpoint-queue exclusion; see #5126.
+                let response = read_service
+                    .oneshot(ReadRequest::AnyChainUtxo(outpoint))
+                    .await
+                    .map_err(AwaitUtxoError::ReadStateFailed)?;
+                if let ReadResponse::AnyChainUtxo(Some(utxo)) = response {
+                    timer.finish_desc("AwaitUtxo/any-chain");
+                    return Ok(utxo);
+                }
+                timer.finish_desc("AwaitUtxo/waiting");
+            } else {
+                timer.finish_desc(description);
+            }
+
+            let Response::Utxo(utxo) = response_fut.await? else {
+                unreachable!("pending UTXO requests return Utxo responses")
+            };
+            Ok(utxo)
+        }
+        .instrument(Span::current())
+    }
 }
 
 impl ReadStateService {
@@ -1218,8 +1426,10 @@ impl ReadStateService {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
+            early_relay: early_relay::EarlyRelayState::new(non_finalized_state_receiver.clone()),
             non_finalized_state_receiver,
             block_write_task,
+            mining_candidate: watch::Sender::new(None),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1229,7 +1439,12 @@ impl ReadStateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        read::best_tip(&self.latest_non_finalized_state(), &self.db)
+        read::tip(self.latest_best_chain(), &self.db)
+    }
+
+    /// Returns whether rejection tracking permits speculative work on this block.
+    pub(crate) fn mining_candidate_is_allowed(&self, hash: block::Hash) -> bool {
+        self.early_relay.allows_early_relay(hash)
     }
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
@@ -1265,6 +1480,9 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+        if let Some(task) = &mut self.pruning_task {
+            task.check_for_panics();
+        }
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -1300,8 +1518,174 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
         let span = Span::current();
+        let (req, contextual, notifications) = match req {
+            Request::CommitContextuallyVerifiedBlock(contextual) => {
+                // The queue's semantic metadata needs its own copy of the shared output map.
+                let prepared = SemanticallyVerifiedBlock::from((*contextual).clone());
+                (
+                    Request::CommitSemanticallyVerifiedBlock(prepared),
+                    Some(contextual),
+                    None,
+                )
+            }
+            Request::CommitMinedBlock {
+                block,
+                contextual,
+                notifications,
+            } => (
+                Request::CommitSemanticallyVerifiedBlock(block),
+                contextual,
+                Some(notifications),
+            ),
+            Request::CommitMinedCheckpointVerifiedBlock {
+                block,
+                notifications,
+            } => (
+                Request::CommitCheckpointVerifiedBlock(block),
+                None,
+                Some(notifications),
+            ),
+            req => (req, None, None),
+        };
 
         match req {
+            Request::EarlyRelay {
+                block,
+                require_authentication,
+                origin,
+            } => {
+                let state = self.read_service.clone();
+                async move {
+                    state
+                        .early_relay(block, require_authentication, true, origin)
+                        .await
+                        .map(Response::EarlyRelay)
+                }
+                .boxed()
+            }
+            Request::AuthenticateEarlyRelay(block) => {
+                let state = self.read_service.clone();
+                async move {
+                    state
+                        .early_relay(block, true, false, crate::EarlyRelayOrigin::Peer)
+                        .await
+                        .map(Response::EarlyRelay)
+                }
+                .boxed()
+            }
+            Request::RejectBlock(block) => {
+                let state = self.read_service.clone();
+                async move { Ok(Response::Rejected(state.reject_block(block).await)) }.boxed()
+            }
+            Request::MiningCandidate(block) => {
+                if self.read_service.mining_candidate.receiver_count() == 0 {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                // Only a child of the best tip can be mined on next. Checking before taking the
+                // single slot stops a gossiped orphan from holding it until its verification ends.
+                let parent = block.header.previous_block_hash;
+                if self
+                    .read_service
+                    .best_tip()
+                    .is_some_and(|(_, tip)| tip != parent)
+                {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                let hash = block.hash();
+                if !self.read_service.mining_candidate_is_allowed(hash) {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                };
+                let state = self.read_service.clone();
+                let mut tip_change = self.latest_chain_tip.clone();
+                // Published work reserves the slot until verification ends, even after expiry.
+                let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
+                let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
+                tokio::spawn(async move {
+                    let compute_state = state.clone();
+                    let candidate_block = block.clone();
+                    let parent = block.header.previous_block_hash;
+                    // Queued or running blocking work keeps its own permit through cancellation
+                    // or timeout.
+                    let compute_permit = cancelled
+                        .borrow()
+                        .as_ref()
+                        .expect("the newly admitted candidate owns its slot")
+                        .clone();
+                    let compute = tokio::task::spawn_blocking(move || {
+                        let _permit = compute_permit;
+                        if !compute_state.mining_candidate_is_allowed(hash) {
+                            return None;
+                        }
+                        read::difficulty::mining_candidate_chain_info(
+                            &compute_state.latest_non_finalized_state(),
+                            &compute_state.db,
+                            &compute_state.network,
+                            block,
+                        )
+                    });
+                    // Drop the guard's permit reference before notifying waiting receivers.
+                    let info = tokio::select! {
+                        biased;
+                        _ = cancelled.closed() => return,
+                        _ = tokio::time::sleep_until(deadline) => {
+                            cancelled.send_modify(|permit| *permit = None);
+                            return;
+                        },
+                        result = compute => match result {
+                            Ok(Some(info)) => Arc::new(info),
+                            _ => {
+                                cancelled.send_modify(|permit| *permit = None);
+                                return;
+                            },
+                        },
+                    };
+                    if cancelled.is_closed()
+                        || tokio::time::Instant::now() >= deadline
+                        || state.best_tip().map(|(_, hash)| hash) != Some(parent)
+                        || !state.mining_candidate_is_allowed(hash)
+                    {
+                        cancelled.send_modify(|permit| *permit = None);
+                        return;
+                    }
+                    state.mining_candidate.send_replace(Some((
+                        candidate_block,
+                        info.clone(),
+                        cancelled.clone(),
+                        deadline,
+                    )));
+                    tokio::select! {
+                        _ = cancelled.closed() => {}
+                        _ = tokio::time::sleep_until(deadline) => {}
+                        _ = async {
+                            while state.best_tip().map(|(_, hash)| hash) == Some(parent) {
+                                if tip_change.best_tip_changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        } => {}
+                    }
+                    state.mining_candidate.send_if_modified(|candidate| {
+                        if candidate
+                            .as_ref()
+                            .is_some_and(|(_, current, _, _)| Arc::ptr_eq(current, &info))
+                        {
+                            *candidate = None;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                });
+                async move {
+                    Ok(Response::MiningCandidate(Some(
+                        crate::MiningCandidateGuard(guard),
+                    )))
+                }
+                .boxed()
+            }
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             //
@@ -1326,7 +1710,11 @@ impl Service<Request> for StateService {
 
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| {
-                        self.queue_and_commit_to_non_finalized_state(semantically_verified)
+                        self.queue_and_commit_to_non_finalized_state(
+                            semantically_verified,
+                            contextual,
+                            notifications,
+                        )
                     })
                 });
 
@@ -1351,6 +1739,11 @@ impl Service<Request> for StateService {
                 }
                 .instrument(span)
                 .boxed()
+            }
+            Request::CommitContextuallyVerifiedBlock(_)
+            | Request::CommitMinedBlock { .. }
+            | Request::CommitMinedCheckpointVerifiedBlock { .. } => {
+                unreachable!("normalized above")
             }
 
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
@@ -1379,7 +1772,7 @@ impl Service<Request> for StateService {
                 //
                 // This method doesn't block, access the database, or perform CPU-intensive tasks,
                 // so we can run it directly in the tokio executor's Future threads.
-                let rsp_rx = self.queue_and_commit_to_finalized_state(finalized);
+                let rsp_rx = self.queue_and_commit_to_finalized_state(finalized, notifications);
 
                 // TODO:
                 //   - check for panics in the block write task here,
@@ -1403,90 +1796,77 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Uses pending_utxos and non_finalized_state_queued_blocks in the StateService.
-            // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
-            //
-            // The expected error type for this request is `AwaitUtxoError`.
-            Request::AwaitUtxo(outpoint) => {
-                let timer = CodeTimer::start();
-                // Prepare the AwaitUtxo future from PendingUtxos.
-                let response_fut = self.pending_utxos.queue(outpoint);
-                // Only instrument `response_fut`, the ReadStateService already
-                // instruments its requests with the same span.
+            Request::AwaitUtxo(outpoint) => self
+                .await_utxo(outpoint)
+                .map(|result| result.map(Response::Utxo))
+                .boxed(),
 
-                let response_fut = response_fut
-                    .map(|result| result.map_err(BoxError::from))
-                    .instrument(span)
-                    .boxed();
-
-                // Check the non-finalized block queue outside the returned future,
-                // so we can access mutable state fields.
-                if let Some(utxo) = self.non_finalized_state_queued_blocks.utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-
-                    // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish_desc("AwaitUtxo/queued-non-finalized");
-
-                    return response_fut;
+            Request::AwaitUtxos(outpoints) => {
+                if let [outpoint] = outpoints.as_slice() {
+                    return self
+                        .await_utxo(*outpoint)
+                        .map(|result| result.map(|utxo| Response::Utxos(vec![utxo])))
+                        .boxed();
                 }
 
-                // Check the sent non-finalized blocks
-                self.drain_finalized_resets();
-                self.drain_non_finalized_rejected_hashes();
-
-                if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-
-                    // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish_desc("AwaitUtxo/sent-non-finalized");
-
-                    return response_fut;
-                }
-
-                // We ignore any UTXOs in FinalizedState.finalized_state_queued_blocks,
-                // because it is only used during checkpoint verification.
-                //
-                // This creates a rare race condition, but it doesn't seem to happen much in practice.
-                // See #5126 for details.
-
-                // Manually send a request to the ReadStateService,
-                // to get UTXOs from any non-finalized chain or the finalized chain.
-                let read_service = self.read_service.clone();
-
-                // Run the request in an async block, so we can await the response.
+                // Ordered polling can hide a later error behind an earlier missing output.
+                // Keep completion unordered and restore input order only after all lookups succeed.
+                let mut lookups: FuturesUnordered<_> = outpoints
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, outpoint)| {
+                        let lookup = self.await_utxo(outpoint);
+                        async move { lookup.await.map(|utxo| (index, utxo)) }
+                    })
+                    .collect();
+                let mut utxos = vec![None; lookups.len()];
                 async move {
-                    let req = ReadRequest::AnyChainUtxo(outpoint);
-
-                    let rsp = read_service
-                        .oneshot(req)
-                        .await
-                        .map_err(AwaitUtxoError::ReadStateFailed)?;
-
-                    // Optional TODO:
-                    //  - make pending_utxos.respond() async using a channel,
-                    //    so we can respond to all waiting requests here
-                    //
-                    // This change is not required for correctness, because:
-                    // - any waiting requests should have returned when the block was sent to the state
-                    // - otherwise, the request returns immediately if:
-                    //   - the block is in the non-finalized queue, or
-                    //   - the block is in any non-finalized chain or the finalized state
-                    //
-                    // And if the block is in the finalized queue,
-                    // that's rare enough that a retry is ok.
-                    if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
-                        // We got a UTXO, so we replace the response future with the result own.
-                        timer.finish_desc("AwaitUtxo/any-chain");
-
-                        return Ok(Response::Utxo(utxo));
+                    while let Some(result) = lookups.next().await {
+                        let (index, utxo) = result?;
+                        utxos[index] = Some(utxo);
                     }
-
-                    // We're finished, but the returned future is waiting on the respond() channel.
-                    timer.finish_desc("AwaitUtxo/waiting");
-
-                    response_fut.await
+                    Ok(Response::Utxos(
+                        utxos
+                            .into_iter()
+                            .map(|utxo| {
+                                utxo.expect("every lookup succeeded before collecting outputs")
+                            })
+                            .collect(),
+                    ))
                 }
                 .boxed()
+            }
+
+            Request::SupplyTreeRoots {
+                start_height,
+                roots,
+                source,
+            } => {
+                let result = if roots.len()
+                    <= usize::try_from(MAX_TREE_ROOTS_PER_REQUEST)
+                        .expect("the wire roots limit fits in usize")
+                {
+                    self.tree_roots_sender
+                        .try_send((start_height, roots, source))
+                        .map(|()| Response::TreeRootsSupplied)
+                        .map_err(|error| format!("tree roots writer unavailable: {error}").into())
+                } else {
+                    Err("tree roots batch exceeds the request limit".into())
+                };
+                if result.is_ok() {
+                    self.pending_rejected_tree_roots = None;
+                }
+                async move { result }.boxed()
+            }
+
+            Request::WantedTreeRoots => {
+                if self.pending_rejected_tree_roots.is_none() {
+                    self.pending_rejected_tree_roots = self.rejected_tree_roots.try_recv().ok();
+                }
+                let rejected = self.pending_rejected_tree_roots;
+                // Rejection publication follows the writer's replacement-range update.
+                let wanted = self.wanted_tree_roots.borrow().clone();
+                async move { Ok(Response::WantedTreeRoots(wanted, rejected)) }.boxed()
             }
 
             // Used by sync, inbound, and block verifier to check if a block is already in the state
@@ -1520,6 +1900,44 @@ impl Service<Request> for StateService {
                     timer.finish_desc("Request::KnownBlock");
 
                     Ok(Response::KnownBlock(response))
+                }
+                .boxed()
+            }
+
+            Request::KnownBlocks(hashes) => {
+                self.drain_finalized_resets();
+                self.drain_non_finalized_rejected_hashes();
+                let hashes: Vec<_> = hashes
+                    .into_iter()
+                    .map(|hash| {
+                        let known = self.known_sent_hash(&hash).or_else(|| {
+                            self.non_finalized_state_queued_blocks
+                                .has(hash)
+                                .then_some(KnownBlock::Queue)
+                        });
+                        (hash, known)
+                    })
+                    .collect();
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let state = read_service.latest_non_finalized_state();
+                    let locations = hashes
+                        .into_iter()
+                        .map(|(hash, known)| {
+                            known.or_else(|| {
+                                read::non_finalized_state_contains_block_hash(&state, hash).or_else(
+                                    || {
+                                        read::finalized_state_contains_block_hash(
+                                            &read_service.db,
+                                            hash,
+                                        )
+                                    },
+                                )
+                            })
+                        })
+                        .collect();
+                    Ok(Response::KnownBlocks(locations))
                 }
                 .boxed()
             }
@@ -1601,6 +2019,7 @@ impl Service<Request> for StateService {
             | Request::Block(_)
             | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
+            | Request::RawBlock(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
@@ -1664,6 +2083,17 @@ impl Service<ReadRequest> for ReadStateService {
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
 
+        if let ReadRequest::EarlyRelayCache = req {
+            let cache = self.early_relay.cache();
+            return async move { Ok(ReadResponse::EarlyRelayCache(cache)) }.boxed();
+        }
+
+        if let ReadRequest::MiningCandidateChanges = req {
+            let changes =
+                crate::MiningCandidateChanges(self.mining_candidate.subscribe(), Some(state));
+            return async move { Ok(ReadResponse::MiningCandidateChanges(changes)) }.boxed();
+        }
+
         if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
@@ -1680,9 +2110,86 @@ impl Service<ReadRequest> for ReadStateService {
             .boxed();
         };
 
+        // Cancellation cannot release admission while a detached expensive read is still running.
+        static EXPENSIVE_READS: Semaphore = Semaphore::const_new(3);
+        let read_permit = if matches!(
+            req,
+            ReadRequest::CheckBestTipHeader { .. }
+                | ReadRequest::CheckBestTipBlockCommitments(_)
+                | ReadRequest::TreeRoots { .. }
+        ) {
+            match EXPENSIVE_READS.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) if matches!(req, ReadRequest::TreeRoots { .. }) => {
+                    return async { Ok(ReadResponse::TreeRoots(None)) }.boxed();
+                }
+                Err(_) => return async { Err("expensive state reads are busy".into()) }.boxed(),
+            }
+        } else {
+            None
+        };
+
         let request_handler = move || match req {
+            ReadRequest::CheckBestTipHeader { header, height } => {
+                if !state.early_relay.allows_early_relay(header.hash()) {
+                    return Err("compact header early relay is unavailable".into());
+                }
+                read::difficulty::candidate_header_context(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    &header,
+                    height,
+                    true,
+                )?
+                .filter(|_| {
+                    state.early_relay.best_tip_hash() == Some(header.previous_block_hash)
+                        && state.early_relay.allows_early_relay(header.hash())
+                })
+                .ok_or("compact header does not extend the committed best tip")?;
+                Ok(ReadResponse::ValidBestTipHeader)
+            }
+            ReadRequest::CheckBestTipBlockCommitments(block) => {
+                if !state.early_relay.allows_early_relay(block.hash()) {
+                    return Err("compact block early relay is unavailable".into());
+                }
+                let height = block
+                    .coinbase_height()
+                    .ok_or("compact body has no height")?;
+                if NetworkUpgrade::current(&state.network, height) < NetworkUpgrade::Nu5 {
+                    return Err("compact authentication requires NU5 commitments".into());
+                }
+                let parent = block.header.previous_block_hash;
+                let hash = block.hash();
+                read::difficulty::authenticated_candidate_header(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    block,
+                    true,
+                )?
+                .filter(|_| {
+                    state.early_relay.best_tip_hash() == Some(parent)
+                        && state.early_relay.allows_early_relay(hash)
+                })
+                .ok_or("compact body does not extend the committed best tip")?;
+                Ok(ReadResponse::ValidBestTipBlockCommitments)
+            }
+            ReadRequest::MiningCandidate => {
+                let candidate = state.mining_candidate.borrow().clone();
+                Ok(ReadResponse::MiningCandidate(candidate.and_then(
+                    |(parent, info, cancelled, deadline)| {
+                        (!cancelled.is_closed()
+                            && tokio::time::Instant::now() < deadline
+                            && state.mining_candidate_is_allowed(info.tip_hash)
+                            && state.best_tip().map(|(_, hash)| hash)
+                                == Some(parent.header.previous_block_hash))
+                        .then_some(info)
+                    },
+                )))
+            }
             // Used by the `getblockchaininfo` RPC.
-            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
+            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.cached_size())),
 
             ReadRequest::HistoryCapabilities => Ok(ReadResponse::HistoryCapabilities(
                 state.db.history_capabilities()?,
@@ -1875,7 +2382,7 @@ impl Service<ReadRequest> for ReadStateService {
                     known_blocks,
                     stop,
                     MAX_FIND_BLOCK_HASHES_RESULTS,
-                )))
+                )?))
             }
 
             // Used by the StateService.
@@ -1949,6 +2456,26 @@ impl Service<ReadRequest> for ReadStateService {
                     hash,
                 )))
             }
+
+            ReadRequest::TreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => {
+                // Finalized blocks can't be reorganized, so peers get roots for one chain only.
+                let roots = (1..=MAX_TREE_ROOTS_PER_REQUEST)
+                    .contains(&count)
+                    .then(|| start_height + HeightDiff::from(count - 1))
+                    .flatten()
+                    .filter(|&end| state.db.hash(end) == Some(final_hash))
+                    .and_then(|end| read::tree::tree_roots(&state.db, start_height, end));
+
+                Ok(ReadResponse::TreeRoots(roots))
+            }
+
+            ReadRequest::FastSyncTreeRoots(hash_or_height) => Ok(ReadResponse::FastSyncTreeRoots(
+                read::fast_sync_tree_roots(&state.db, hash_or_height),
+            )),
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
@@ -2159,13 +2686,20 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                let hash = semantically_verified.hash;
                 write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
                 )?;
 
-                Ok(ReadResponse::ValidBlockProposal)
+                let contextual = latest_non_finalized_state
+                    .find_chain(|chain| chain.contains_block_hash(hash))
+                    .expect("successful proposal validation inserted its block")
+                    .block(hash.into())
+                    .expect("the selected chain contains the proposal")
+                    .clone();
+                Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 
             ReadRequest::TipBlockSize => {
@@ -2183,7 +2717,9 @@ impl Service<ReadRequest> for ReadStateService {
                 Ok(ReadResponse::TipBlockSize(size))
             }
 
-            ReadRequest::NonFinalizedBlocksListener { .. } => {
+            ReadRequest::NonFinalizedBlocksListener { .. }
+            | ReadRequest::EarlyRelayCache
+            | ReadRequest::MiningCandidateChanges => {
                 unreachable!("should return early");
             }
 
@@ -2193,7 +2729,10 @@ impl Service<ReadRequest> for ReadStateService {
             )),
         };
 
-        timed_span.spawn_blocking(request_handler)
+        timed_span.spawn_blocking(move || {
+            let _read_permit = read_permit;
+            request_handler()
+        })
     }
 }
 
@@ -2307,8 +2846,9 @@ pub async fn init_test(
 ) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
-    let (state_service, _, _, _) =
+    let (mut state_service, _, _, _) =
         StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
+    state_service.mining_candidate_lifetime = arbitrary::TEST_MINING_CANDIDATE_LIFETIME;
 
     Buffer::new(BoxService::new(state_service), 1)
 }
@@ -2328,8 +2868,9 @@ pub async fn init_test_services(
 ) {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
-    let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
+    let (mut state_service, read_state_service, latest_chain_tip, chain_tip_change) =
         StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
+    state_service.mining_candidate_lifetime = arbitrary::TEST_MINING_CANDIDATE_LIFETIME;
 
     let state_service = Buffer::new(BoxService::new(state_service), 1);
 

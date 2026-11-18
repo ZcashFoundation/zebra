@@ -40,8 +40,7 @@
 //!  * Old State Version Cleanup Task
 //!    * deletes outdated state versions
 //!  * Block Gossip Task
-//!    * runs in the background and continuously queries the state for
-//!      newly committed blocks to be gossiped to peers
+//!    * gossips committed tips and authenticated pending submissions to peers
 //!  * Block Notify Task
 //!    * if the user has configured a `notify.block_notify_command`, runs that command
 //!      whenever the best chain tip changes (Zebra's equivalent of zcashd's `-blocknotify`)
@@ -96,7 +95,7 @@ use tracing::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -264,13 +263,40 @@ impl StartCmd {
         false
     }
 
-    async fn start(&self) -> Result<(), Report> {
+    /// Keeps Zebra running after key preload succeeds, but propagates a failed startup task.
+    pub(super) fn halo2_key_preload_should_exit(
+        result: Result<(), tokio::task::JoinError>,
+    ) -> bool {
+        result.expect("Halo2 verifying key construction must succeed");
+        info!("finished Halo2 verifying key preload");
+        false
+    }
+
+    /// Disables archive service and sidecars as soon as pruning is enabled or history is missing.
+    pub(super) fn network_services(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Result<zebra_network::types::PeerServices, Report> {
+        let mut services = config.network.local_services;
+        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
+            if config.zcashd_compat.enabled {
+                return Err(eyre!(
+                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
+                ));
+            }
+            services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+        }
+        Ok(services)
+    }
+
+    /// Starts the node, rejecting incompatible pruning settings before opening writable state.
+    pub(super) async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         let (initialized_tx, initialized_rx) = oneshot::channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         // Runtime shutdown cancels any tasks spawned by incomplete startup.
         run_until_shutdown(
-            self.start_with_shutdown(initialized_tx, shutdown_rx),
+            self.start_with_shutdown(config, initialized_tx, shutdown_rx),
             shutdown(),
             initialized_rx,
             shutdown_tx,
@@ -281,12 +307,15 @@ impl StartCmd {
     /// Initializes the node and runs it until a task exits or shutdown is requested.
     async fn start_with_shutdown(
         &self,
+        config: Arc<ZebradConfig>,
         initialized: oneshot::Sender<()>,
         mut shutdown: oneshot::Receiver<()>,
     ) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
-        let config = APPLICATION.config();
+        // State initialization can prune immediately. Check the pruning config before starting
+        // services; check persisted history separately once the state is open.
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
         config.notify.validate()?;
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
@@ -387,11 +416,36 @@ impl StartCmd {
             )
             .await;
 
+        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .map_err(|error| eyre!(error))?
+        else {
+            unreachable!("state returns history capabilities for its capabilities request");
+        };
+        let mut network_config = config.network.clone();
+        network_config.local_services = Self::network_services(&config, history)?;
+
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
+        let early_blocks = if config.network.compact_block_relay {
+            match read_only_state_service
+                .clone()
+                .oneshot(zebra_state::ReadRequest::EarlyRelayCache)
+                .await
+                .map_err(|error| eyre!(error))?
+            {
+                zebra_state::ReadResponse::EarlyRelayCache(cache) => Some(cache),
+                _ => unreachable!("state returns the early-relay cache for its cache request"),
+            }
+        } else {
+            None
+        };
+
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(&config))
             .service(state_service);
 
         info!("initializing network");
@@ -406,18 +460,24 @@ impl StartCmd {
         //
         // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
+        let submitted_blocks = SubmittedBlockCache::default();
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
-            ));
+            .service(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
+                    .with_submitted_blocks(submitted_blocks.clone())
+                    .with_early_blocks(early_blocks.clone())
+                    .with_compact_relay(
+                        config.network.network.clone(),
+                        read_only_state_service.clone(),
+                    ),
+            );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
-                config.network.clone(),
+                network_config,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),
@@ -425,18 +485,28 @@ impl StartCmd {
             )
             .await;
 
+        if let Some(cache) = &early_blocks {
+            cache.set_recipients(block_advertiser.early_relay_recipients());
+        }
+
         // Start health server if configured (after sync_status is available)
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
-        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::router::init(
-                config.consensus.clone(),
-                &config.network.network,
-                state.clone(),
-                tx_verifier_setup_rx,
-            )
-            .await;
+        let (
+            block_verifier_router,
+            tx_verifier,
+            consensus_task_handles,
+            max_checkpoint_height,
+            prepared_blocks,
+        ) = zebra_consensus::router::init(
+            config.consensus.clone(),
+            &config.network.network,
+            state.clone(),
+            read_only_state_service.clone(),
+            tx_verifier_setup_rx,
+        )
+        .await;
 
         info!("initializing syncer");
         let (mut syncer, sync_status) = ChainSync::new(
@@ -451,11 +521,12 @@ impl StartCmd {
         );
 
         info!("initializing mempool");
-        let (mempool, mempool_transaction_subscriber) = Mempool::new(
+        let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
             &config.network.network,
             &config.mempool,
             peer_set.background_service(),
             state.clone(),
+            tower::util::BoxCloneService::new(read_only_state_service.clone()),
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip.clone(),
@@ -478,13 +549,15 @@ impl StartCmd {
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
+            network: config.network.network.clone(),
+            sync_downloads: syncer.in_flight_downloads(),
             address_book: address_book.clone(),
             block_download_peer_set: peer_set.background_service(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
-            misbehavior_sender,
+            misbehavior_sender: misbehavior_sender.clone(),
         };
         setup_tx
             .send(setup_data)
@@ -512,6 +585,9 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
+        let rpc_impl = rpc_impl
+            .with_submitted_blocks(submitted_blocks.clone())
+            .with_prepared_blocks(prepared_blocks);
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
@@ -528,7 +604,7 @@ impl StartCmd {
         let block_template_task_handle =
             if config.rpc.listen_addr.is_some() || is_internal_miner_enabled {
                 rpc_impl
-                    .spawn_block_template_updater()
+                    .spawn_block_template_updater(&mempool_transaction_subscriber)
                     .inspect(|_| info!("spawned block template updater task"))
             } else {
                 None
@@ -593,13 +669,20 @@ impl StartCmd {
 
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
+        let committed_gossip = sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            block_advertiser.clone(),
+            Some(submit_block_channel.receiver()),
+            submitted_blocks,
+        );
+        let early_gossip =
+            sync::gossip_early_blocks(early_blocks, block_advertiser, syncer.in_flight_downloads());
         let block_gossip_task_handle = tokio::spawn(
-            sync::gossip_best_tip_block_hashes(
-                sync_status.clone(),
-                chain_tip_change.clone(),
-                block_advertiser,
-                Some(submit_block_channel.receiver()),
-            )
+            async move {
+                tokio::try_join!(committed_gossip, early_gossip)?;
+                Ok::<_, sync::BlockGossipError>(())
+            }
             .in_current_span(),
         );
 
@@ -635,7 +718,8 @@ impl StartCmd {
         };
 
         info!("spawning mempool queue checker task");
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
+        let mempool_queue_checker_task_handle =
+            mempool::QueueChecker::spawn(mempool.clone(), mempool_transaction_verified);
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
@@ -694,6 +778,19 @@ impl StartCmd {
         // then start concurrent tasks that can add load to the inbound service
         // (by opening more peer connections, so those peers send us requests)
         tokio::task::yield_now().await;
+
+        // The state decides whether to fast sync: a state in the middle of fast sync needs roots
+        // even if `state.fast_tree_sync` was turned off.
+        info!("spawning fast tree sync roots fetcher task");
+        let tree_roots_task_handle = tokio::spawn(
+            sync::fetch_tree_roots(
+                config.network.network.clone(),
+                peer_set.clone(),
+                state.clone(),
+                misbehavior_sender.clone(),
+            )
+            .in_current_span(),
+        );
 
         // The crawler only activates immediately in tests that use mempool debug mode
         info!("spawning mempool crawler task");
@@ -800,16 +897,25 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
+        pin!(tree_roots_task_handle);
         pin!(miner_task_handle);
         pin!(block_template_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
             mut state_checkpoint_verify_handle,
+            mut checkpoint_commit_handle,
+            mut halo2_key_preload_handle,
         } = consensus_task_handles;
+
+        let checkpoint_commit_handle_fused = (&mut checkpoint_commit_handle).fuse();
+        pin!(checkpoint_commit_handle_fused);
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
+
+        let halo2_key_preload_handle_fused = (&mut halo2_key_preload_handle).fuse();
+        pin!(halo2_key_preload_handle_fused);
 
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
@@ -902,13 +1008,31 @@ impl StartCmd {
                     .expect("unexpected panic in the end of support task")
                     .map(|_| info!("end of support task exited")),
 
+                checkpoint_commit_result = &mut checkpoint_commit_handle_fused => {
+                    checkpoint_commit_result
+                        .expect("unexpected panic committing checkpoint-verified blocks");
+                    info!("checkpoint commit supervision exited");
+                    Ok(())
+                }
+
+                tree_roots_result = &mut tree_roots_task_handle => tree_roots_result
+                    .expect("unexpected panic in the tree roots task")
+                    .map(|_| info!("tree roots task exited"))
+                    .map_err(|e| eyre!(e)),
+
                 // We also expect the state checkpoint verify task to finish.
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
                         .unwrap_or_else(|_| panic!(
-                            "unexpected panic checking previous state followed the best chain"));
+                            "unexpected panic in checkpoint validation or Orchard tree precomputation"));
 
                     exit_when_task_finishes = false;
+                    Ok(())
+                }
+
+                halo2_key_preload_result = &mut halo2_key_preload_handle_fused => {
+                    exit_when_task_finishes =
+                        Self::halo2_key_preload_should_exit(halo2_key_preload_result);
                     Ok(())
                 }
 
@@ -973,7 +1097,9 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
+        tree_roots_task_handle.abort();
         miner_task_handle.abort();
+        checkpoint_commit_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {
@@ -1008,6 +1134,8 @@ impl StartCmd {
 
         // startup tasks
         state_checkpoint_verify_handle.abort();
+        // This only cancels queued work; an already running blocking task finishes at shutdown.
+        halo2_key_preload_handle.abort();
         old_databases_task_handle.abort();
 
         info!(
@@ -1019,10 +1147,9 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: &ZebradConfig) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
+        // Mempool reads bypass the state writer's buffer.
         //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
@@ -1030,7 +1157,6 @@ impl StartCmd {
             config.sync.download_concurrency_limit,
             config.sync.full_verify_concurrency_limit,
             inbound::downloads::MAX_INBOUND_CONCURRENCY,
-            mempool::downloads::MAX_INBOUND_CONCURRENCY,
         ]
         .into_iter()
         .max()
@@ -1051,7 +1177,7 @@ impl Runnable for StartCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(APPLICATION.config()));
 
         info!("stopping zebrad");
     }

@@ -990,7 +990,7 @@ pub fn transaction_to_fake_v5(
                 None,
             );
 
-            Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+            Transaction::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
         }
     }
 }

@@ -10,13 +10,22 @@ use crate::{
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
 
+mod roots;
 #[cfg(test)]
 mod tests;
+
+pub use roots::{TreeRoots, TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST};
 
 /// Counts note commitment tree update attempts in tests that enable `proptest-impl`.
 #[cfg(any(test, feature = "proptest-impl"))]
 pub static NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+
+/// The most note commitments a cancellable update appends between cancellation checks.
+///
+/// Each batch still hashes its independent subtrees in parallel, and a cancelled update stops
+/// after at most one more batch per pool.
+const CANCELLABLE_APPEND_BATCH: usize = 256;
 
 /// An argument wrapper struct for note commitment trees.
 ///
@@ -84,6 +93,15 @@ pub enum NoteCommitmentTreeError {
 }
 
 impl NoteCommitmentTrees {
+    /// Returns the Sapling, Orchard, and Ironwood roots of these trees.
+    pub fn roots(&self) -> TreeRoots {
+        TreeRoots {
+            sapling: self.sapling.root(),
+            orchard: self.orchard.root(),
+            ironwood: self.ironwood.root(),
+        }
+    }
+
     /// Updates the note commitment trees using the transactions in `block`,
     /// then re-calculates the cached tree roots, using parallel `rayon` threads.
     ///
@@ -248,9 +266,25 @@ impl NoteCommitmentTrees {
         Ok(completed)
     }
 
+    /// Updates only the Sprout note commitment tree, using the transactions in `block`.
+    ///
+    /// Fast checkpoint sync takes the other pools' roots from peers instead, but no block header
+    /// commits to Sprout roots.
+    pub fn update_sprout_tree(&mut self, block: &Block) -> Result<(), NoteCommitmentTreeError> {
+        let sprout_note_commitments: Vec<_> = block.sprout_note_commitments().collect();
+
+        if !sprout_note_commitments.is_empty() {
+            self.sprout = Self::update_sprout_note_commitment_tree(
+                self.sprout.clone(),
+                sprout_note_commitments,
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Update the sprout note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
-    #[cfg(test)]
     #[allow(clippy::unwrap_in_result)]
     fn update_sprout_note_commitment_tree(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
@@ -348,16 +382,14 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
         let mut subtree_root = None;
 
-        for sapling_note_commitment in sapling_note_commitments {
+        for batch in sapling_note_commitments.chunks(CANCELLABLE_APPEND_BATCH) {
             if is_cancelled() {
                 return Ok(None);
             }
-            sapling_nct.append(sapling_note_commitment)?;
 
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = sapling_nct.completed_subtree_index_and_root() {
+            // Subtrees end heights come from the blocks they are completed in, so a batch reports
+            // the last subtree its commitments completed.
+            if let Some(index_and_node) = sapling_nct.append_batch(batch)? {
                 subtree_root = Some(index_and_node);
             }
         }
@@ -419,16 +451,14 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let mut subtree_root = None;
 
-        for orchard_note_commitment in orchard_note_commitments {
+        for batch in orchard_note_commitments.chunks(CANCELLABLE_APPEND_BATCH) {
             if is_cancelled() {
                 return Ok(None);
             }
-            orchard_nct.append(orchard_note_commitment)?;
 
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = orchard_nct.completed_subtree_index_and_root() {
+            // Subtrees end heights come from the blocks they are completed in, so a batch reports
+            // the last subtree its commitments completed.
+            if let Some(index_and_node) = orchard_nct.append_batch(batch)? {
                 subtree_root = Some(index_and_node);
             }
         }

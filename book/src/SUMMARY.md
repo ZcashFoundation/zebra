@@ -11,6 +11,7 @@
   - [Running Zebra](user/run.md)
     - [Startup and sync](user/startup.md)
     - [Syncing from a state snapshot](user/snapshots.md)
+    - [Pruned mining nodes](user/pruning.md)
   - [Upgrading Zebra](user/upgrading.md)
   - [Zebra with Docker](user/docker.md)
   - [Tracing and logging](user/tracing.md)

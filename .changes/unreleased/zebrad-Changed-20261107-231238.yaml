@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Batch Orchard and Ironwood commitment-tree hashes by level using checked upstream Sinsemilla evaluation ([#11846](https://github.com/ZcashFoundation/zebra/pull/11846)).
+time: 2026-11-07T23:12:38.049491946+01:00

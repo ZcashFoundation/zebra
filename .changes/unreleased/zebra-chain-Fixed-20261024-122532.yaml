@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: Reuse the authorizing-data digest for each immutable transaction body ([#12011](https://github.com/ZcashFoundation/zebra/issues/12011)).
+time: 2026-10-24T12:25:32.375906737+02:00

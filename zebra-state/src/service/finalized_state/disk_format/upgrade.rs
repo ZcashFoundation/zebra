@@ -127,7 +127,12 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // Existing databases have no fast-synced heights, so the new column family starts empty.
+        Box::new(no_migration::NoMigration::new(
+            "add fast sync tree roots",
+            Version::new(29, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -145,13 +150,8 @@ pub fn restorable_db_versions() -> Vec<u64> {
 }
 
 /// Whether the existing records can be read without applying any intervening migrations.
-pub(crate) fn can_read_without_migration(
-    disk_version: &Version,
-    running_version: &Version,
-) -> bool {
-    !format_upgrades(Some(disk_version.clone()))
-        .take_while(|upgrade| upgrade.version() <= *running_version)
-        .any(|upgrade| upgrade.needs_migration())
+pub(crate) fn can_read_without_migration(disk_version: &Version) -> bool {
+    !format_upgrades(Some(disk_version.clone())).any(|upgrade| upgrade.needs_migration())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -304,7 +304,6 @@ impl DbFormatChange {
     }
 
     /// Returns true if this format change/check happens at startup.
-    #[allow(dead_code)]
     pub fn is_run_at_startup(&self) -> bool {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
@@ -578,7 +577,10 @@ impl DbFormatChange {
                 db.path()
             )
         });
-        db.mark_ready_for_pruning();
+        // Runtime and shutdown checks do not finish cancelled spending-index conversions.
+        if self.is_run_at_startup() {
+            db.mark_ready_for_pruning();
+        }
 
         let initial_disk_version = self
             .initial_disk_version()

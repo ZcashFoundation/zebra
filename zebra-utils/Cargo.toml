@@ -37,6 +37,10 @@ name = "miner-poll"
 path = "src/bin/miner-poll/main.rs"
 required-features = ["miner-poll"]
 
+[[bin]]
+name = "zebra-embedded-trees"
+path = "src/bin/zebra-embedded-trees/main.rs"
+
 [features]
 default = ["miner-poll"]
 
@@ -76,6 +80,9 @@ zebra-chain = { path = "../zebra-chain", version = "16.0.0" }
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "20.0.0" }
 
+# These crates are needed for the zebra-embedded-trees binary
+zebra-state = { path = "../zebra-state", version = "17.0.0" }
+
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
 
@@ -90,6 +97,11 @@ reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"], optional = true }
 
 [dev-dependencies]
+sapling-crypto = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true }
+
+zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test" }
 
 [lints]

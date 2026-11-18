@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Add stored-byte block and transaction reads, serialized database accessors and raw byte extraction.
+time: 2026-11-14T09:11:15.420203923+01:00

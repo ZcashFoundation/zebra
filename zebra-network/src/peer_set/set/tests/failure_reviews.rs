@@ -225,6 +225,95 @@ async fn stale_busy_block_advertiser_allows_serving_fallback() {
     }
 }
 
+/// A source-less sync download prefers the negotiated compact sender over another ready upstream.
+#[tokio::test(start_paused = true)]
+async fn compact_advertisement_routes_sourceless_sync_to_its_sender() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let Response::Blocks(blocks) = &response else {
+        unreachable!("the fixture contains a block response");
+    };
+    let InventoryResponse::Available((block, _)) = &blocks[0] else {
+        unreachable!("the fixture contains an available block");
+    };
+    let message = Message::CompactBlock(Arc::new(
+        crate::compact::CompactBlock::from_block(block, 7).unwrap(),
+    ));
+    let source = ConnectedAddr::new_outbound_direct(addrs[1]);
+    let collector = guard.inventory_sender().as_ref().unwrap().clone();
+
+    crate::peer::register_inventory_status(Ok(message.clone()), source, false, collector.clone())
+        .await
+        .unwrap();
+    peer_set.ready().await.unwrap();
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .advertising_peers(inventory)
+            .count(),
+        0
+    );
+
+    assert_eq!(
+        crate::peer::register_inventory_status(Ok(message.clone()), source, true, collector)
+            .await
+            .unwrap(),
+        message,
+    );
+    let request = Request::BlockDownload {
+        hash: block.hash(),
+        advertiser: None,
+    };
+    let download = peer_set.ready().await.unwrap().call(request.clone());
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .advertising_peers(inventory)
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![addrs[1]],
+    );
+    assert_eq!(received_request(&mut handles[0]), None);
+    finish_download(&mut handles[1], request, response, download).await;
+}
+
+/// Explicit parent inventory outranks a recovery's carried child source.
+#[tokio::test(start_paused = true)]
+async fn parent_advertiser_precedes_carried_child_source() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the fixture contains block inventory");
+    };
+    peer_set.ready().await.unwrap();
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: Some(peer_set.ready_services[&addrs[1]].connection_info().clone()),
+    };
+    // Make the real advertiser busier, so treating both sources as one P2C tier chooses wrongly.
+    let service = peer_set.ready_services.get_mut(&addrs[0]).unwrap();
+    let busy_request = service.call(Request::Peers);
+    service.ready().await.unwrap();
+    let held_request = handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap();
+    assert!(peer_set.query_load(&addrs[0]).unwrap() > peer_set.query_load(&addrs[1]).unwrap());
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    let download = peer_set.ready().await.unwrap().call(request.clone());
+    assert_eq!(received_request(&mut handles[1]), None);
+    finish_download(&mut handles[0], request, response, download).await;
+    drop(busy_request);
+    drop(held_request);
+}
+
 /// Carried provenance cannot override explicit missing inventory or a completed peer failure.
 #[tokio::test(start_paused = true)]
 async fn carried_advertiser_respects_missing_and_failed_candidates() {
@@ -471,6 +560,7 @@ async fn connection_block_error_attribution(not_found: bool) {
         (
             client_rx,
             advert_rx,
+            tokio::sync::watch::channel(None).1,
             peer_set.minimum_peer_version.clone(),
             peer_set.bans_receiver.clone(),
         ),
@@ -485,8 +575,9 @@ async fn connection_block_error_attribution(not_found: bool) {
         connection_info,
         Vec::new(),
     );
-    let remote_rx = remote_rx
-        .then(move |msg| register_inventory_status(msg, connected_addr, inv_collector.clone()));
+    let remote_rx = remote_rx.then(move |msg| {
+        register_inventory_status(msg, connected_addr, false, inv_collector.clone())
+    });
     let connection_task = tokio::spawn(connection.run(remote_rx.boxed()));
     client_tx
         .try_send(client_request)
@@ -1049,6 +1140,46 @@ async fn served_block_without_advertisement_keeps_advertiser_preference() {
         .call(request.clone());
     assert_eq!(received_request(&mut handles[0]), None);
     finish_download(&mut handles[1], request, response, download).await;
+}
+
+/// An early-relay connection answers block downloads with early blocks, which are recorded like
+/// ordinary blocks from an advertiser.
+#[tokio::test(start_paused = true)]
+async fn early_block_response_from_advertiser_is_recorded() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let (InventoryHash::Block(hash), Response::Blocks(blocks)) = (inventory, response) else {
+        unreachable!("the helper constructs a block download");
+    };
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    peer_set.ready().await.expect("the peer is ready");
+
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peer is ready")
+        .call(request);
+    answer_request(&mut handles, Ok(Response::EarlyBlocks(blocks)))
+        .expect("the advertiser received the request");
+    download.await.expect("the advertiser returned the block");
+    peer_set.ready().await.expect("the peer is ready");
+
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .served_peers(inventory)
+            .collect::<Vec<_>>(),
+        vec![&addrs[0]],
+    );
 }
 
 /// Regression test for GHSA-g9rc-89v4-hhvf: repeat requests that are in flight at the same time

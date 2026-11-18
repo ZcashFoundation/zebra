@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Block verification starts shielded transaction checks before transparent ones, shortening mixed-block verification.
+time: 2026-10-18T04:23:27.725810605+02:00

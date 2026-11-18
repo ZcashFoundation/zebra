@@ -1,6 +1,9 @@
 //! Transactions and transaction-related structures.
 
-use std::fmt;
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 pub use zcash_primitives::transaction::TxVersion;
 
@@ -55,8 +58,19 @@ use crate::{
 };
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
-#[derive(Debug)]
-pub struct Transaction(pub(crate) zp_tx::Transaction);
+#[derive(Clone)]
+pub struct Transaction(zp_tx::Transaction, Derived);
+
+/// Values derived from an immutable transaction body, computed at most once.
+#[derive(Clone, Default)]
+struct Derived {
+    auth_digest: OnceLock<AuthDigest>,
+    /// The serialized body: the decoded bytes, or the first serialization of a built body.
+    ///
+    /// Serializing recompresses every Sapling and Orchard curve point, so reusing these bytes
+    /// avoids that work when a block is sized, stored and relayed.
+    bytes: OnceLock<Arc<[u8]>>,
+}
 
 impl std::ops::Deref for Transaction {
     type Target = zp_tx::TransactionData<zp_tx::Authorized>;
@@ -67,6 +81,25 @@ impl std::ops::Deref for Transaction {
 }
 
 impl Transaction {
+    /// Starts with empty caches whenever a transaction body is built or decoded.
+    /// The inner value is private and only exposed immutably, so every body mutation must
+    /// replace the transaction through this helper.
+    fn from_inner(inner: zp_tx::Transaction) -> Self {
+        Self(inner, Derived::default())
+    }
+
+    /// Returns the serialized transaction, serializing it on first use.
+    fn serialized(&self) -> std::io::Result<&[u8]> {
+        if let Some(bytes) = self.1.bytes.get() {
+            return Ok(bytes);
+        }
+
+        let mut bytes = Vec::new();
+        self.0.write(&mut bytes)?;
+
+        Ok(self.1.bytes.get_or_init(|| bytes.into()))
+    }
+
     /// Access the inner `zcash_primitives::transaction::Transaction`.
     pub(crate) fn inner(&self) -> &zp_tx::Transaction {
         &self.0
@@ -265,9 +298,15 @@ impl Transaction {
 
     /// Returns the outpoints spent by this transaction's transparent inputs.
     pub fn spent_outpoints(&self) -> impl Iterator<Item = transparent::OutPoint> + '_ {
-        self.inputs()
+        self.transparent_bundle()
             .into_iter()
-            .filter_map(|input| input.outpoint())
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| input.prevout())
+            .filter(|outpoint| **outpoint != zcash_transparent::bundle::OutPoint::NULL)
+            .map(|outpoint| transparent::OutPoint {
+                hash: Hash(*outpoint.hash()),
+                index: outpoint.n(),
+            })
     }
 
     /// Compute the hash (txid) of this transaction.
@@ -276,18 +315,20 @@ impl Transaction {
         Hash(txid_bytes)
     }
 
-    /// Compute the authorizing data commitment for this transaction.
+    /// Return the authorizing data commitment, computing it once per immutable transaction body.
     ///
     /// Returns `None` for pre-V5 transactions (which don't have auth digests).
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self.tx_version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
-            _ => {
+            _ => Some(*self.1.auth_digest.get_or_init(|| {
                 let hash = self.0.auth_commitment();
-                let bytes: &[u8] = hash.as_ref();
-                let digest_bytes: [u8; 32] = bytes.try_into().ok()?;
-                Some(AuthDigest(digest_bytes))
-            }
+                AuthDigest(
+                    hash.as_ref()
+                        .try_into()
+                        .expect("authorizing data commitments are 32 bytes"),
+                )
+            })),
         }
     }
 
@@ -682,30 +723,56 @@ impl Transaction {
         &self,
         outputs: &std::collections::HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        self.transparent_value_balance_with(|input| input.value_from_outputs(outputs))
+        self.transparent_value_balance_with(|outpoint| {
+            outputs
+                .get(outpoint)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "provided Outputs (length {:?}) don't have spent {:?}",
+                        outputs.len(),
+                        outpoint
+                    )
+                })
+                .value()
+        })
     }
 
-    /// Computes the transparent balance using borrowed input values.
+    /// Computes the transparent balance from borrowed prevouts and output amounts.
     #[allow(clippy::unwrap_in_result)]
     fn transparent_value_balance_with(
         &self,
-        input_value: impl Fn(&transparent::Input) -> Amount<NonNegative>,
+        input_value: impl Fn(&transparent::OutPoint) -> Amount<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
         use crate::amount::Error as AmountError;
 
         let input_value = self
-            .inputs()
-            .iter()
-            .map(input_value)
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| {
+                let outpoint = input.prevout();
+                if *outpoint == zcash_transparent::bundle::OutPoint::NULL {
+                    Amount::zero()
+                } else {
+                    input_value(&transparent::OutPoint {
+                        hash: Hash(*outpoint.hash()),
+                        index: outpoint.n(),
+                    })
+                }
+            })
             .sum::<Result<Amount<NonNegative>, AmountError>>()
             .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
         let output_value = self
-            .outputs()
-            .iter()
-            .map(|o| o.value())
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vout)
+            .map(|output| {
+                Amount::try_from(u64::from(output.value()))
+                    .expect("librustzcash Zatoshis is always a valid non-negative Amount")
+            })
             .sum::<Result<Amount<NonNegative>, AmountError>>()
             .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
@@ -748,7 +815,14 @@ impl Transaction {
         &self,
         utxos: &std::collections::HashMap<transparent::OutPoint, U>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        let transparent = self.transparent_value_balance_with(|input| input.value(utxos))?;
+        let transparent = self.transparent_value_balance_with(|outpoint| {
+            utxos
+                .get(outpoint)
+                .unwrap_or_else(|| panic!("provided Utxos don't have spent {outpoint:?}"))
+                .as_ref()
+                .output
+                .value()
+        })?;
         let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();
@@ -779,6 +853,12 @@ impl PartialEq for Transaction {
 }
 
 impl Eq for Transaction {}
+
+impl fmt::Debug for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Transaction").field(&self.0).finish()
+    }
+}
 
 impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -850,8 +930,14 @@ impl TryFrom<&Transaction> for AuthDigest {
 }
 
 impl crate::serialization::ZcashSerialize for Transaction {
-    fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
-        self.0.write(writer)
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_all(self.serialized()?)
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        self.serialized()
+            .expect("transactions accepted by decoding or construction can be serialized")
+            .len()
     }
 }
 
@@ -903,34 +989,14 @@ fn deserialize_and_check<R: std::io::Read>(
     reader: R,
     branch_id: zcash_protocol::consensus::BranchId,
 ) -> Result<Transaction, crate::serialization::SerializationError> {
-    use std::io::Read as _;
-
     // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
-    let mut limited = reader.take(crate::block::MAX_BLOCK_BYTES);
+    let limited = reader.take(crate::block::MAX_BLOCK_BYTES);
 
-    // Only V4 transactions need their bytes recorded, for the `valueBalanceSapling` check
-    // below. Reading the 4-byte header up front and putting it back lets every other
-    // version parse without copying the transaction a second time, which matters during
-    // the initial block download.
-    let mut header = [0u8; 4];
-    limited.read_exact(&mut header)?;
-    let is_v4 = {
-        let header = u32::from_le_bytes(header);
-        let overwintered = header & 0x8000_0000 != 0;
-        overwintered && (header & 0x7FFF_FFFF) == 4
-    };
-    let with_header = std::io::Read::chain(&header[..], limited);
-
-    let (inner, raw_bytes) = if is_v4 {
-        let mut recording = RecordingReader::new(with_header);
-        let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
-        (inner, recording.into_recorded())
-    } else {
-        (
-            zp_tx::Transaction::read(with_header, branch_id)?,
-            Vec::new(),
-        )
-    };
+    // The decoded bytes are kept, so later serializations don't recompress curve points.
+    // V4 transactions also need them for the `valueBalanceSapling` check below.
+    let mut recording = RecordingReader::new(limited);
+    let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
+    let raw_bytes = recording.into_recorded();
 
     // # Consensus
     //
@@ -1019,7 +1085,13 @@ fn deserialize_and_check<R: std::io::Read>(
         }
     }
 
-    Ok(Transaction(inner))
+    // CompactSize decoding rejects nonminimal lengths; fixed-width fields and retained vectors
+    // serialize to their consumed lengths, including empty bundles. The V4 discarded balance is
+    // checked above. Thus successful decoding supplies the canonical serialized bytes and size.
+    let transaction = Transaction::from_inner(inner);
+    let _ = transaction.1.bytes.set(raw_bytes.into());
+
+    Ok(transaction)
 }
 
 /// Reads the `valueBalanceSapling` field of a V4 transaction that has no Sapling spends or
@@ -1084,7 +1156,7 @@ fn v4_empty_sapling_value_balance(raw_bytes: &[u8], inner: &zp_tx::Transaction) 
     Some(i64::from_le_bytes(field))
 }
 
-/// An `io::Read` wrapper that records every byte consumed, for post-parse validation.
+/// An `io::Read` wrapper that records every byte consumed, to keep a decoded body's bytes.
 struct RecordingReader<R> {
     inner: R,
     recorded: Vec<u8>,
@@ -1094,7 +1166,7 @@ impl<R: std::io::Read> RecordingReader<R> {
     fn new(inner: R) -> Self {
         Self {
             inner,
-            recorded: Vec::new(),
+            recorded: Vec::with_capacity(256),
         }
     }
 
@@ -1108,12 +1180,6 @@ impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
         let n = self.inner.read(buf)?;
         self.recorded.extend_from_slice(&buf[..n]);
         Ok(n)
-    }
-}
-
-impl Clone for Transaction {
-    fn clone(&self) -> Self {
-        Transaction(self.0.clone())
     }
 }
 
@@ -1341,7 +1407,7 @@ impl Transaction {
             None,
             None,
         );
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V5 transaction with an Orchard bundle, for tests.
@@ -1373,7 +1439,7 @@ impl Transaction {
             orchard_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V6 transaction with Orchard and Ironwood bundles, for tests.
@@ -1406,7 +1472,7 @@ impl Transaction {
             ironwood_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Converts Zebra transparent inputs and outputs into a librustzcash bundle,
@@ -1492,7 +1558,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Rebuild this transaction with a different expiry height (recomputes txid).
@@ -1509,7 +1575,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Rebuild this transaction with a different network upgrade / branch ID (recomputes txid).
@@ -1530,7 +1596,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Replace all transparent outputs (recomputes txid).
@@ -1560,7 +1626,7 @@ impl Transaction {
             bundle,
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.

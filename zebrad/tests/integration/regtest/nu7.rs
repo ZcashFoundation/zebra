@@ -43,7 +43,7 @@ use crate::common::{
 
 // A standard P2SH output whose redeem script is OP_TRUE. These spends still pass through the
 // real UTXO, maturity, standardness, script, fee, and transaction-version checks.
-fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
+pub(super) fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
     spend_expiring(previous, nu7, fee, Height(if nu7 { 105 } else { 200 }))
 }
 
@@ -76,7 +76,7 @@ fn spend_expiring(
     })
 }
 
-async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
+pub(super) async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
     let data = hex::encode(tx.zcash_serialize_to_vec()?);
     let response: SendRawTransactionResponse = client
         .json_result_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
@@ -86,7 +86,10 @@ async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
-async fn mempool(client: &RpcRequestClient, expected: &[transaction::Hash]) -> Result<()> {
+pub(super) async fn mempool(
+    client: &RpcRequestClient,
+    expected: &[transaction::Hash],
+) -> Result<()> {
     let expected: HashSet<_> = expected.iter().map(ToString::to_string).collect();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -493,8 +496,9 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .map_err(|err| eyre!(err))?
             .expect("persistent node must create a database version");
         assert_eq!(
-            version.major, 29,
-            "the ordinary node must use the v29 database"
+            version.major,
+            zebra_state::state_database_format_version_in_code().major,
+            "the ordinary node must use the current database format"
         );
 
         // Reopen the actual node's state, including its synchronous non-finalized backup.
@@ -567,7 +571,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
 }
 
 /// The kebab-cased reason a block proposal was rejected for.
-async fn rejected(client: &RpcRequestClient, block: &Block) -> Result<String> {
+pub(super) async fn rejected(client: &RpcRequestClient, block: &Block) -> Result<String> {
     match proposal(client, block).await? {
         BlockProposalResponse::Rejected(reason) => Ok(reason),
         BlockProposalResponse::Valid => Err(eyre!("the proposal was accepted")),

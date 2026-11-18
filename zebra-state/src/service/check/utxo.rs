@@ -51,8 +51,7 @@ pub fn transparent_spend(
     {
         // Coinbase inputs represent new coins,
         // so there are no UTXOs to mark as spent.
-        let inputs = transaction.inputs();
-        let spends = inputs.iter().filter_map(transparent::Input::outpoint);
+        let spends = transaction.spent_outpoints();
 
         // The restriction depends only on the transaction, network and height, so compute it
         // once per transaction rather than once per spend: it inspects the transaction's
@@ -221,6 +220,9 @@ pub fn transparent_coinbase_spend(
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Reject negative remaining transaction value.
 ///
 /// "As in Bitcoin, the remaining value in the transparent transaction value pool

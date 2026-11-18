@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Added
+body: Added the `zebra-embedded-trees` tool, which writes the note commitment trees and subtrees at a height from a Zebra state, for fast checkpoint sync.
+time: 2026-11-12T02:01:39.909410901+01:00

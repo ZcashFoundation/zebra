@@ -12,8 +12,40 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    types::PeerServices,
     Config,
 };
+
+#[test]
+fn compact_block_relay_configuration() {
+    assert!(Config::default().compact_block_relay);
+    let omitted: Config = toml::from_str("").unwrap();
+    assert!(omitted.compact_block_relay);
+    for enabled in [false, true] {
+        let config: Config = toml::from_str(&format!("compact_block_relay = {enabled}")).unwrap();
+        assert_eq!(config.compact_block_relay, enabled);
+        let serialized = toml::to_string(&config).unwrap();
+        let fields: toml::Value = toml::from_str(&serialized).unwrap();
+        assert_eq!(fields["compact_block_relay"].as_bool(), Some(enabled));
+        let restored: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.compact_block_relay, enabled);
+    }
+    assert!(toml::from_str::<Config>("experimental_early_block_relay = true").is_err());
+}
+
+#[test]
+fn local_services_are_runtime_only() {
+    let defaults = PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS;
+    let mut config = Config::default();
+    assert_eq!(config.local_services, defaults);
+    config.local_services.remove(PeerServices::NODE_NETWORK);
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(!serialized.contains("local_services"));
+    let restored: Config = toml::from_str(&serialized).unwrap();
+    assert_eq!(restored.local_services, defaults);
+    assert!(toml::from_str::<Config>("local_services = 0").is_err());
+}
 
 #[test]
 fn parse_config_listen_addr() {

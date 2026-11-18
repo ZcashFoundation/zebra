@@ -37,33 +37,55 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 
         prop_assert_eq![&tx, &tx2];
 
-        let data2 = tx2
-            .zcash_serialize_to_vec()
+        // Encode the parsed body, not the kept decoded bytes, which serialization would return.
+        let mut data2 = Vec::new();
+        tx2.inner()
+            .write(&mut data2)
             .expect("vec serialization is infallible");
 
-        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+        prop_assert_eq![data, data2, "decoded bytes must be the canonical encoding"];
     }
 
     Ok(())
 }
 
 proptest! {
+    /// Borrowed prevouts preserve input order and omit coinbase inputs in every transaction version.
+    #[test]
+    fn spent_outpoints_match_converted_inputs(
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with)
+    ) {
+        let expected: Vec<_> = tx.inputs().iter().filter_map(transparent::Input::outpoint).collect();
+        prop_assert_eq!(tx.spent_outpoints().collect::<Vec<_>>(), expected);
+        let empty = tx.with_transparent_inputs(Vec::new()).with_transparent_outputs(Vec::new());
+        prop_assert_eq!(empty.spent_outpoints().next(), None);
+    }
+
     /// Borrowed plain and ordered lookups preserve the old output-map accounting and errors.
     #[test]
     fn borrowed_value_balances_match_owned_outputs(
-        tx in any::<Transaction>(),
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with),
         value in any::<Amount<NonNegative>>(),
     ) {
         let output = transparent::Output::new(value, transparent::Script::new(&[0; 1024]));
-        let outputs: std::collections::HashMap<_, _> =
-            tx.spent_outpoints().map(|outpoint| (outpoint, output.clone())).collect();
+        let outputs: std::collections::HashMap<_, _> = tx.inputs().iter()
+            .filter_map(transparent::Input::outpoint)
+            .map(|outpoint| (outpoint, output.clone())).collect();
         let plain: std::collections::HashMap<_, _> = outputs.iter().map(|(outpoint, output)| {
             (*outpoint, transparent::Utxo::new(output.clone(), block::Height(1), false))
         }).collect();
         let ordered: std::collections::HashMap<_, _> = plain.iter().map(|(outpoint, utxo)| {
             (*outpoint, transparent::OrderedUtxo::from_utxo(utxo.clone(), 0))
         }).collect();
-        let expected = tx.transparent_value_balance_from_outputs(&outputs).and_then(|transparent| {
+        let transparent = super::allocating_transparent_value_balance(&tx, &outputs);
+        prop_assert_eq!(tx.transparent_value_balance_from_outputs(&outputs), transparent.clone());
+        let expected = transparent.and_then(|transparent| {
             transparent + tx.sprout_value_balance()? + tx.sapling_value_balance()
                 + tx.orchard_value_balance() + tx.ironwood_value_balance()
         });

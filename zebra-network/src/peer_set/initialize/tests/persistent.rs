@@ -130,7 +130,12 @@ impl Harness {
         self.connected.send_modify(|peers| {
             peers.insert(
                 addr,
-                (constants::CURRENT_NETWORK_PROTOCOL_VERSION, false, sender),
+                (
+                    constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+                    false,
+                    false,
+                    sender,
+                ),
             );
         });
     }

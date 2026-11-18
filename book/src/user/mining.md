@@ -2,15 +2,23 @@
 
 Zebra's RPC methods support miners and mining pools.
 
+For a mining backend that does not need full historical bodies, consider
+[pruned mining nodes](pruning.md). Pruning is irreversible. Choose retention for the oldest
+block and transaction bodies used by payout and accounting queries, including outage recovery.
+The minimum 10,000-block window is about 8.7 days at 75-second spacing but only 2.9 days at
+25-second spacing. Use a separate archive when those queries need older history.
+
 Contents:
 
 - [Download Zebra](#download-and-build-zebra)
+  - [Pasta assembly](#pasta-assembly)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
   - [Extra coinbase data](#extra-coinbase-data)
   - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
   - [ZMQ block notifications](#zmq-block-notifications)
+  - [Compact block relay](#compact-block-relay)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
 - [Run a mining pool](#run-a-mining-pool)
@@ -24,6 +32,30 @@ The easiest way to run Zebra for mining is with [our docker images](https://zebr
 
 If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.html), follow the
 instructions below to start mining:
+
+### Pasta assembly
+
+Official releases and builds with `default-release-binaries` enable faster Pasta field arithmetic
+through the `pasta-asm` feature:
+
+```sh
+cargo build --release -p zebrad --features default-release-binaries
+```
+
+On non-Apple x86_64 targets with 64-bit pointers, runtime CPU detection selects assembly when both
+**BMI2** and **ADX** are available (Intel Broadwell / AMD Zen or newer). CPUs missing either feature
+automatically use portable arithmetic; they do not need a separate build.
+AArch64 targets use base-ISA assembly without extra CPU requirements. Other targets, including
+Apple x86_64 and x32, use portable arithmetic.
+The selected backend is logged during node startup.
+
+Cargo unifies dependency features across the whole build: selecting `zebrad/pasta-asm` also enables
+the backend for other workspace packages built alongside it. Runtime fallback applies to those
+packages and test harnesses too.
+
+In measurements before runtime dispatch was added, cold Orchard submissions were 6.1 ms faster for a
+1.9 MB block (observed improvement: 4.8–6.5 ms) and 1.4 ms faster for a 250 kB block (1.0–2.1 ms).
+Warm submissions showed no change; these measurements are not a throughput guarantee.
 
 ## Configure zebra for mining
 
@@ -105,6 +137,19 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 listen_addr = "127.0.0.1:8232"
 ```
 
+Submitted blocks are advertised early only when they exactly match a successful local proposal
+verdict, except for the nonce and Equihash solution. Solved proof of work, size, current time, live
+parent eligibility and local invalidation are checked before the body becomes available to peers.
+Changed or uncached proposals undergo normal full validation; checkpoint-era blocks wait for commit.
+Early advertisements use ordinary block gossip; all-peer advertisements are reserved for committed
+submissions. The RPC response still waits for verification and commit.
+
+Committed notifications belong to the state writer, so cancelling an RPC does not discard a later
+successful commit notification. The default notification channel holds at most 10,000 messages.
+A full or closed channel produces an operational error before committing a mined block, without
+blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
+Restrict RPC access to trusted miners.
+
 ### ZMQ block notifications
 
 Pools using zcashd's `hashblock` subscription can receive the same multipart messages from Zebra.
@@ -160,6 +205,36 @@ a misbehaving trusted client can still occupy all slots by subscribing, even to 
 or subsequently cancelling, or repeatedly reconnect to obtain fresh inbound budgets. Restrict
 access to well-behaved clients; the endpoint is not a defense against hostile clients.
 
+### Compact block relay
+
+Compact block relay is enabled by default. Keep it enabled on every mining node in
+your fleet to reduce propagation delay between participating nodes:
+
+```toml
+[network]
+compact_block_relay = true
+```
+
+Set `compact_block_relay = false` to disable it. It only helps between nodes that
+both keep it enabled.
+After NU5, a block extending the best tip can be announced once its proof of work
+and transaction commitments have been checked, before full validation. Selected
+peers receive a compact block when it is smaller than the full block. The receiver
+rebuilds it from its mempool, requests missing transactions once, and falls back to
+the full block if reconstruction fails or times out. It still validates the block
+fully. Other peers retain ordinary full-block relay.
+Without a connected peer that negotiated compact relay, Zebra skips optional
+pre-commit relay authentication and retention. A peer that negotiates after that
+decision can receive the block through ordinary relay once it is committed.
+Required authentication of incoming early-relay blocks is unchanged.
+No more than three peers are selected to send high-bandwidth compact announcements.
+A demoted source retains its slot until the disabling write finishes; a failed
+connection releases its slot without waiting for transport shutdown.
+
+End-to-end Mainnet propagation benefits have not been measured. Negotiation uses
+service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
+[draft Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429).
+
 ## Running zebra
 
 [#running-zebra]: #running-zebra
@@ -177,6 +252,40 @@ Wait until Zebra is in sync. You will see the sync at 100% when this happens:
 ```console
 INFO zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(...) network_upgrade=Nu6 remaining_sync_blocks=1 time_since_last_state_block=0s
 ```
+
+## Reusing proposal validation
+
+Zebra serves every template as soon as it is built and validates transaction-bearing work as a block
+proposal in the background. When the chain tip changes, it serves coinbase-only work first rather
+than waiting for mempool selection. A failed check restores the last valid template for that parent.
+A solved block that changes only the nonce and Equihash solution reuses the cached verdict in
+`submitblock`, as long as the check finished before the solve. It then checks proof of work and
+commits without repeating transaction and contextual validation.
+If you change the coinbase, transactions, timestamp or another header
+field, submit the modified block with `getblocktemplate` parameters
+`{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it. A successful proposal lets a
+later `submitblock` reuse verification when only the nonce and Equihash solution differ. Proof of
+work, current time, size and state application are still checked.
+The cache holds up to eight recent successful proposals within a 576 MiB retained-content budget,
+including spent-output scripts. This uses a conservative retention charge, not measured heap usage.
+It keeps eight representative full-size proposals with 19,215 transactions using 104-byte
+one-input/one-P2PKH-output payments, charged at about 66.2 MB per proposal. Proposals packed with
+smaller consensus-valid transactions or large spent-output scripts can retain fewer entries.
+An evicted or changed proposal is verified normally: eviction loses cache hits, not correctness.
+
+Template requests share the updater's work during startup and refreshes, rather than starting a
+separate coinbase proof for each waiting miner. On-demand construction runs off the async executor
+and rechecks the committed parent, synchronization, timestamp range and difficulty before returning.
+Long polls also recheck synchronization after waking. Expanding a clock-capped timestamp range does
+not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
+Ordinary requests return eligible cached work without waiting for fresher mempool contents.
+Mempool changes and periodic refreshes update that work in the background.
+New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
+If the updater stops, cached work is refreshed at the normal mempool polling interval, and a
+transaction-bearing template is validated in the background after the RPC returns it.
+Long polls continue observing shared template publications after switching to on-demand refresh.
+When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
+behind an indefinite cache wait.
 
 ## Testing the setup
 

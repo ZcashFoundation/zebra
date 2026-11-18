@@ -101,6 +101,17 @@ fn coinbase_authorization_twin(block: &Arc<Block>) -> Arc<Block> {
 /// Regression test for GHSA-9hq5-pfgc-cx5h.
 #[tokio::test(flavor = "multi_thread")]
 async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::BoxError> {
+    checkpoint_twin_recovery(false).await
+}
+
+/// A forged same-hash body holds shared ownership until it is rejected, then releases it, so
+/// gossip can download the honest block and commit it without a sync restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn rejected_checkpoint_twin_releases_shared_ownership() -> Result<(), crate::BoxError> {
+    checkpoint_twin_recovery(true).await
+}
+
+async fn checkpoint_twin_recovery(shared_ownership: bool) -> Result<(), crate::BoxError> {
     let _init_guard = zebra_test::init();
 
     // Keep this early-upgrade schedule within the monetary cap.
@@ -154,20 +165,22 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     assert_eq!(twin.hash(), honest.hash());
     assert_eq!(twin.transactions[0].hash(), honest.transactions[0].hash());
     assert_ne!(twin.auth_data_root(), honest.auth_data_root());
+    let final_checkpoint = if shared_ownership { &honest } else { &child };
+    let checkpoint_height = final_checkpoint.coinbase_height().unwrap();
 
     let network = network_builder
         .with_genesis_hash(chain[0].hash())
         .expect("generated genesis hash is valid")
         .with_checkpoints(ConfiguredCheckpoints::HeightsAndHashes(vec![
             (Height(0), chain[0].hash()),
-            (Height(8), child.hash()),
+            (checkpoint_height, final_checkpoint.hash()),
         ]))
         .expect("valid generated checkpoint list")
         .to_network()
         .expect("valid final test network");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init(StateConfig::ephemeral(), &network, Height(8), 1_000).await;
+        zebra_state::init(StateConfig::ephemeral(), &network, checkpoint_height, 1_000).await;
     let mut state_service = ServiceBuilder::new().buffer(100).service(state);
     for prefix in chain.iter().take(target_index) {
         state_service
@@ -179,14 +192,15 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .expect("valid prefix checkpoint commits");
     }
 
-    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height) =
+    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height, _prepared_blocks) =
         zebra_consensus::router::init_test(
             zebra_consensus::Config::default(),
             &network,
             state_service.clone(),
+            read_state.clone(),
         )
         .await;
-    assert_eq!(max_checkpoint_height, Height(8));
+    assert_eq!(max_checkpoint_height, checkpoint_height);
 
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
@@ -202,7 +216,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         latest_chain_tip.clone(),
         past_lookahead_limit_sender,
         1_000,
-        Height(8),
+        checkpoint_height,
     );
 
     let mempool_service: MockService<mempool::Request, mempool::Response, PanicAssertion> =
@@ -210,6 +224,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
     let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -219,6 +234,14 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     let mut inbound = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
     setup_tx
         .send(InboundSetupData {
+            network: network.clone(),
+            // Separate registries let inbound deliver the twin while the sync copy is queued, which
+            // keeps the checkpoint verifier's replacement recovery covered.
+            sync_downloads: if shared_ownership {
+                sync_downloads.in_flight_hashes()
+            } else {
+                Default::default()
+            },
             address_book,
             block_download_peer_set: buffered_peer_set,
             block_verifier,
@@ -230,8 +253,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         .map_err(|_| "inbound setup receiver remains open")?;
     inbound.ready().await?;
 
-    // The production sync downloader owns the first request and keeps it pending in the shared
-    // checkpoint verifier after the canonical body is downloaded.
+    // The production sync downloader owns the first request through checkpoint verification.
     sync_downloads
         .download_and_verify(honest.hash())
         .await
@@ -244,10 +266,78 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         .await;
     let attacker_h: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
     let attacker_h_info = zn::test_support::connection_info(attacker_h);
+    assert!(sync_downloads.in_flight_hashes().contains(&honest.hash()));
+    if shared_ownership {
+        // Gossip skips the hash while sync owns it.
+        inbound
+            .ready()
+            .await?
+            .call(zn::Request::AdvertiseBlock(
+                honest.hash(),
+                Some(attacker_h_info.clone()),
+            ))
+            .await?;
+        peer_set_handle.expect_no_requests().await;
+    }
     sync_request.respond(zn::Response::Blocks(vec![Available((
-        honest.clone(),
+        if shared_ownership {
+            twin.clone()
+        } else {
+            honest.clone()
+        },
         Some(attacker_h),
     ))]));
+    if shared_ownership {
+        let error = timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next())
+            .await
+            .expect("the invalid body is rejected promptly")
+            .expect("the forged block was queued")
+            .expect_err("the authorizing data commitment rejects the forged body");
+        let BlockDownloadVerifyError::Invalid {
+            error,
+            advertiser_addr,
+            ..
+        } = error
+        else {
+            panic!("the forged body must fail consensus verification");
+        };
+        assert_eq!(advertiser_addr, Some(attacker_h));
+        assert_eq!(error.misbehavior_score(), 100);
+        assert!(!sync_downloads.in_flight_hashes().contains(&honest.hash()));
+
+        inbound
+            .ready()
+            .await?
+            .call(zn::Request::AdvertiseBlock(
+                honest.hash(),
+                Some(attacker_h_info.clone()),
+            ))
+            .await?;
+        peer_set_handle
+            .expect_request(zn::Request::BlockDownload {
+                hash: honest.hash(),
+                advertiser: Some(attacker_h_info),
+            })
+            .await
+            .respond(zn::Response::Blocks(vec![Available((
+                honest.clone(),
+                None,
+            ))]));
+        timeout(MAX_STATE_COMMIT_DELAY, async {
+            while latest_chain_tip.best_tip_height() != Some(checkpoint_height)
+                || sync_downloads.in_flight_hashes().contains(&honest.hash())
+            {
+                inbound.ready().await?;
+                tokio::task::yield_now().await;
+            }
+            Ok::<_, crate::BoxError>(())
+        })
+        .await
+        .expect("the honest body commits without a discovery restart")?;
+        assert!(misbehavior_rx.try_recv().is_err());
+        consensus_handles.state_checkpoint_verify_handle.abort();
+        return Ok(());
+    }
     // The honest body must reach the checkpoint verifier before the twin, so the twin is the
     // newer request that replaces it. Give the spawned download task time to run.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -446,6 +536,510 @@ fn mock_downloads(
     );
 
     (downloads, network, verifier, state)
+}
+
+/// Ordinary gossip and sync share ownership through cancellation, failure, and result collection.
+/// Sync downloads hashes that gossip claimed, and gossip skips them until sync finishes.
+#[tokio::test(start_paused = true)]
+async fn gossip_and_sync_share_download_ownership() {
+    use crate::components::inbound::downloads::{DownloadAction, Downloads as GossipDownloads};
+    use zebra_chain::parameters::Network;
+
+    let _init_guard = zebra_test::init();
+    let (mut sync, mut network, verifier, mut read_state) = mock_downloads(Height(0));
+    let hash = block_1().hash();
+    let state = tower::service_fn(move |request| {
+        assert_eq!(request, zs::Request::KnownBlock(hash));
+        std::future::ready(Ok::<_, crate::BoxError>(zs::Response::KnownBlock(None)))
+    });
+    let (tip, _sender) = MockChainTip::new();
+    let ownership = sync.in_flight_hashes();
+    let mut gossip =
+        GossipDownloads::new(1, network.clone(), verifier, state, tip, Network::Mainnet)
+            .with_sync_downloads(ownership.clone());
+
+    sync.download_and_verify(hash).await.unwrap();
+    let sync_response = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await;
+    assert!(matches!(
+        gossip.download_and_verify(hash, None),
+        DownloadAction::AlreadyQueued
+    ));
+    sync.cancel_all();
+    timeout(MAX_SERVICE_REQUEST_DELAY, async {
+        while ownership.contains(&hash) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled tasks release ownership without result collection");
+    drop(sync_response);
+
+    assert!(matches!(
+        gossip.download_and_verify(hash, None),
+        DownloadAction::AddedToQueue
+    ));
+    let gossip_response = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await;
+    sync.cancel_all();
+    assert!(
+        ownership.contains(&hash),
+        "sync cancellation must not cancel gossip"
+    );
+    // Gossip hasn't downloaded a body yet, so sync downloads independently without waiting.
+    sync.download_and_verify(hash).await.unwrap();
+    let sync_response = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await;
+    gossip_response.respond_error("synthetic download failure".into());
+    assert!(gossip.next().await.unwrap().is_err());
+    assert!(
+        matches!(
+            gossip.download_and_verify(hash, None),
+            DownloadAction::AlreadyQueued
+        ),
+        "gossip skips the hash while sync still downloads it"
+    );
+    sync.cancel_all();
+    timeout(MAX_SERVICE_REQUEST_DELAY, async {
+        while ownership.contains(&hash) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the last holder releases the hash");
+    drop(sync_response);
+    network.expect_no_requests().await;
+    read_state.expect_no_requests().await;
+}
+
+/// A failed or stalled state read never extends the normal independent download deadline.
+#[tokio::test(start_paused = true)]
+async fn inbound_commit_wait_errors_keep_download_deadline() {
+    use tokio::time::Instant;
+
+    #[derive(Clone, Copy)]
+    enum ReadOutcome {
+        Error,
+        Timeout,
+        ClosedTip,
+    }
+
+    let _init_guard = zebra_test::init();
+    for outcome in [
+        ReadOutcome::Error,
+        ReadOutcome::Timeout,
+        ReadOutcome::ClosedTip,
+    ] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(Height(0));
+        downloads.latest_chain_tip = tip;
+        let _tip_sender = if matches!(outcome, ReadOutcome::ClosedTip) {
+            drop(tip_sender);
+            None
+        } else {
+            Some(tip_sender)
+        };
+        let body = block_1();
+        let hash = body.hash();
+        let ownership = downloads.in_flight_hashes();
+        let mut inbound = ownership.claim(hash).unwrap();
+        inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
+        let started = Instant::now();
+        let pending_read = {
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            let read = state
+                .try_next_request()
+                .await
+                .expect("sync queries committed presence");
+            let pending_read = match outcome {
+                ReadOutcome::Error => {
+                    read.respond_error("state lookup failed".into());
+                    None
+                }
+                ReadOutcome::ClosedTip => {
+                    read.respond(zs::ReadResponse::BlockInfo(None));
+                    None
+                }
+                ReadOutcome::Timeout => Some(read),
+            };
+            enqueue.await.unwrap();
+            pending_read
+        };
+        let expected_wait = if matches!(outcome, ReadOutcome::Timeout) {
+            super::INBOUND_COMMIT_TIMEOUT
+        } else {
+            Duration::ZERO
+        };
+        assert_eq!(Instant::now() - started, expected_wait);
+        let response = network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await;
+        assert!(matches!(
+            downloads.next().await.unwrap(),
+            Err(BlockDownloadVerifyError::DownloadTimedOut { hash: timed_out }) if timed_out == hash
+        ));
+        assert_eq!(
+            Instant::now() - started,
+            super::BLOCK_DOWNLOAD_ROUND_TIMEOUT
+        );
+        response.respond_error("independent download timed out".into());
+        if let Some(read) = pending_read {
+            read.respond(zs::ReadResponse::BlockInfo(None));
+        }
+        drop(inbound);
+        assert!(!ownership.contains(&hash));
+        verifier.expect_no_requests().await;
+        state.expect_no_requests().await;
+    }
+}
+
+/// Cancelling the pre-download wait releases only sync's hold and never dispatches delayed work.
+#[tokio::test(start_paused = true)]
+async fn cancelled_inbound_commit_wait_releases_ownership() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let (tip, _tip_sender) = MockChainTip::new();
+    downloads.latest_chain_tip = tip;
+    let body = block_1();
+    let hash = body.hash();
+    let ownership = downloads.in_flight_hashes();
+    let mut inbound = ownership.claim(hash).unwrap();
+    inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
+    {
+        let enqueue = downloads.download_and_verify(hash);
+        tokio::pin!(enqueue);
+        assert!(futures::poll!(&mut enqueue).is_pending());
+        state
+            .try_next_request()
+            .await
+            .expect("sync queries committed presence")
+            .respond(zs::ReadResponse::BlockInfo(None));
+        assert!(futures::poll!(&mut enqueue).is_pending());
+    }
+    assert!(
+        ownership.contains(&hash),
+        "sync cancellation must not cancel inbound"
+    );
+    drop(inbound);
+    assert!(!ownership.contains(&hash));
+    assert!(downloads.cancel_handles.is_empty());
+    network.expect_no_requests().await;
+    verifier.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
+/// An advertisement alone claims a hash, so sync must not wait for an owner without a body, and
+/// stops waiting when the owner drops its body.
+#[tokio::test(start_paused = true)]
+async fn inbound_commit_wait_needs_a_downloaded_body() {
+    use tokio::time::Instant;
+
+    let _init_guard = zebra_test::init();
+    for served in [false, true] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let (tip, _tip_sender) = MockChainTip::new();
+        downloads.latest_chain_tip = tip;
+        let body = block_1();
+        let hash = body.hash();
+        let ownership = downloads.in_flight_hashes();
+        let mut inbound = ownership.claim(hash).unwrap();
+        let started = Instant::now();
+        let pending_read = if served {
+            inbound.set_source(&body, Some(ADVERTISER.parse().unwrap()));
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            // The lookup stays outstanding, so only the dropped body can end the wait.
+            let read = state
+                .try_next_request()
+                .await
+                .expect("sync queries committed presence");
+            drop(inbound);
+            enqueue.await.unwrap();
+            assert!(Instant::now() - started < super::INBOUND_COMMIT_TIMEOUT);
+            Some(read)
+        } else {
+            // The advertiser never serves the block.
+            downloads.download_and_verify(hash).await.unwrap();
+            assert_eq!(Instant::now() - started, Duration::ZERO);
+            drop(inbound);
+            None
+        };
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await
+            .respond_error("independent download failed".into());
+        downloads.next().await.unwrap().unwrap_err();
+        verifier.expect_no_requests().await;
+        if let Some(read) = pending_read {
+            read.respond(zs::ReadResponse::BlockInfo(None));
+        }
+        state.expect_no_requests().await;
+    }
+}
+
+/// A rejected body releases its hash before a slow parent lookup can outlive cancellation.
+#[tokio::test(start_paused = true)]
+async fn rejected_block_releases_ownership_before_parent_lookup() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, mut state) =
+        mock_downloads(Height(2 * MAX_BLOCK_REORG_HEIGHT));
+    let block = block_1();
+    let hash = block.hash();
+    let advertiser = ADVERTISER.parse().expect("hard-coded address is valid");
+    let ownership = downloads.in_flight_hashes();
+
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block.clone(),
+            Some(advertiser),
+        ))]));
+    let parent_lookup = state
+        .expect_request(zs::ReadRequest::BlockHeader(
+            block.header.previous_block_hash.into(),
+        ))
+        .await;
+
+    downloads.cancel_all();
+    let claim = ownership
+        .claim(hash)
+        .expect("a pending attribution lookup must not suppress an honest advertisement");
+    parent_lookup.respond_error("block not found in any chain".into());
+    drop(claim);
+    verifier.expect_no_requests().await;
+}
+
+/// Gossip waits on a parent already being downloaded by sync instead of requesting it again.
+#[tokio::test(start_paused = true)]
+async fn gossip_reuses_in_flight_sync_parent() {
+    gossip_parent_ownership(false).await;
+}
+
+/// An uncollected sync failure must not suppress the child's one parent recovery.
+#[tokio::test(start_paused = true)]
+async fn gossip_recovers_parent_after_uncollected_sync_failure() {
+    gossip_parent_ownership(true).await;
+}
+
+async fn gossip_parent_ownership(fail_before_gossip: bool) {
+    use std::collections::HashSet;
+
+    use crate::components::inbound::downloads::{DownloadAction, Downloads as GossipDownloads};
+    use zebra_chain::parameters::Network;
+
+    let _init_guard = zebra_test::init();
+    let (mut sync, mut network, mut verifier, _) = mock_downloads(Height(0));
+    let parent = block_1();
+    let child: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let parent_hash = parent.hash();
+    let child_hash = child.hash();
+    let state = tower::service_fn(move |request| {
+        let zs::Request::KnownBlock(hash) = request else {
+            panic!("gossip only queries block presence");
+        };
+        assert!(hash == parent_hash || hash == child_hash);
+        std::future::ready(Ok::<_, crate::BoxError>(zs::Response::KnownBlock(None)))
+    });
+    let (tip, sender) = MockChainTip::new();
+    sender.send_best_tip_height(Height(0));
+    let in_flight = sync.in_flight_hashes();
+    let mut gossip = GossipDownloads::new(
+        4,
+        network.clone(),
+        verifier.clone(),
+        state,
+        tip,
+        Network::Mainnet,
+    )
+    .with_sync_downloads(in_flight.clone());
+    sync.download_and_verify(parent_hash).await.unwrap();
+    let parent_response = network
+        .expect_request(zn::Request::BlockDownload {
+            hash: parent_hash,
+            advertiser: None,
+        })
+        .await;
+    assert!(in_flight.contains(&parent_hash));
+    let parent_response = if fail_before_gossip {
+        parent_response.respond_error("parent download failed".into());
+        timeout(MAX_SERVICE_REQUEST_DELAY, async {
+            while !sync.pending.iter().all(|task| task.is_finished()) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the failed download task finishes without polling its result stream");
+        assert_eq!(sync.pending.len(), 1);
+        assert!(sync.cancel_handles.contains_key(&parent_hash));
+        assert!(!in_flight.contains(&parent_hash));
+        None
+    } else {
+        Some(parent_response)
+    };
+    let peer: PeerSocketAddr = ADVERTISER.parse().unwrap();
+    let peer_info = zn::test_support::connection_info(peer);
+    assert!(matches!(
+        gossip.download_and_verify(child_hash, Some(peer_info.clone())),
+        DownloadAction::AddedToQueue,
+    ));
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash: child_hash,
+            advertiser: Some(peer_info.clone()),
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            child.clone(),
+            Some(peer),
+        ))]));
+    let child_commit = verifier
+        .expect_request(zebra_consensus::Request::Commit(child))
+        .await;
+    let parent_response = if let Some(parent_response) = parent_response {
+        // The parent response is still held, and unknown-block lookups answer immediately.
+        // A duplicate recovery would therefore reach the shared network service here.
+        network.expect_no_requests().await;
+        parent_response
+    } else {
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash: parent_hash,
+                advertiser: Some(peer_info),
+            })
+            .await
+    };
+    parent_response.respond(zn::Response::Blocks(vec![Available((
+        parent.clone(),
+        Some(peer),
+    ))]));
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(parent))
+        .await
+        .respond(parent_hash);
+    child_commit.respond(child_hash);
+    if fail_before_gossip {
+        let committed = HashSet::from([
+            gossip.next().await.unwrap().unwrap(),
+            gossip.next().await.unwrap().unwrap(),
+        ]);
+        assert_eq!(committed, HashSet::from([parent_hash, child_hash]));
+        network.expect_no_requests().await;
+        assert!(matches!(
+            sync.next().await.unwrap().unwrap_err(),
+            BlockDownloadVerifyError::DownloadFailed { hash, .. } if hash == parent_hash
+        ));
+    } else {
+        assert_eq!(
+            sync.next().await.unwrap().unwrap(),
+            (Height(1), parent_hash)
+        );
+        assert_eq!(gossip.next().await.unwrap().unwrap(), child_hash);
+    }
+    assert!(!in_flight.contains(&parent_hash));
+}
+
+/// Negotiated sync downloads select authenticated validation without losing serving attribution.
+#[tokio::test]
+async fn early_relay_download_preserves_validation_and_source() {
+    let _init_guard = zebra_test::init();
+    for (early, compact, admitted) in [
+        (false, false, false),
+        (true, false, false),
+        (true, false, true),
+        (true, true, false),
+        (true, true, true),
+    ] {
+        let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+        let block = block_1();
+        let hash = block.hash();
+        let peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        downloads.download_and_verify(hash).await.unwrap();
+        let blocks = vec![Available((block.clone(), Some(peer)))];
+        let reconstructed = compact.then(|| {
+            Arc::new(zn::compact::CompactBlock::from_block(&block, 42).unwrap())
+                .reconstruct(Vec::new())
+                .unwrap()
+                .finish(zn::compact::BlockTransactions {
+                    block_hash: hash,
+                    transactions: Vec::new(),
+                })
+                .unwrap()
+        });
+        let decoded = reconstructed
+            .clone()
+            .map(zebra_consensus::DecodedBlock::from_reconstructed);
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await
+            .respond(if let Some(block) = reconstructed {
+                zn::Response::ReconstructedBlock(block, Some(peer))
+            } else if early {
+                zn::Response::EarlyBlocks(blocks)
+            } else {
+                zn::Response::Blocks(blocks)
+            });
+        let request = if early {
+            zebra_consensus::Request::CommitEarlyRelay(decoded.unwrap_or_else(|| block.into()))
+        } else {
+            zebra_consensus::Request::Commit(block)
+        };
+        let error = zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::Groth16("invalid proof".into()),
+        );
+        let error = if admitted {
+            zebra_consensus::VerifyBlockError::EarlyRelay(Box::new(error))
+        } else {
+            error
+        };
+        verifier
+            .expect_request(request)
+            .await
+            .respond_error(zebra_consensus::RouterError::from(error).into());
+        let error = downloads.next().await.unwrap().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                BlockDownloadVerifyError::Invalid {
+                    error,
+                    advertiser_addr: Some(source),
+                    ..
+                } if source == peer && error.misbehavior_score() == if admitted { 0 } else { 100 }
+            ),
+            "only authenticated early-relay transaction failures are non-punitive"
+        );
+    }
 }
 
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
@@ -1258,4 +1852,54 @@ async fn download_deadline_includes_readiness_and_response() {
         }
         assert_eq!(Instant::now() - started, budget);
     }
+}
+
+/// Sync owns a hash while it waits for network readiness, and releases it if that wait ends early.
+#[tokio::test(start_paused = true)]
+async fn readiness_wait_owns_hash() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+    let network: MockNetwork = MockService::build().for_unit_tests();
+    let limited = ConcurrencyLimit::new(network, 1);
+    let mut reservation = limited.clone();
+    reservation.ready().await.unwrap();
+    let verifier: MockVerifier = MockService::build().for_unit_tests();
+    let state: MockState = MockService::build().for_unit_tests();
+    let (tip, _sender) = MockChainTip::new();
+    let mut downloads = Downloads::new(
+        limited,
+        verifier,
+        state,
+        tip,
+        watch::channel(false).0,
+        MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+        Height(1_000_000),
+    );
+    let in_flight = downloads.in_flight_hashes();
+    let hash = block_1().hash();
+    {
+        let enqueue = downloads.download_and_verify(hash);
+        tokio::pin!(enqueue);
+        assert!(futures::poll!(&mut enqueue).is_pending());
+        assert!(
+            in_flight.contains(&hash),
+            "gossip and parent recovery skip a hash waiting for readiness"
+        );
+    }
+    assert!(
+        !in_flight.contains(&hash),
+        "a dropped readiness wait releases the hash"
+    );
+    assert!(downloads.cancel_handles.is_empty());
+    // A stale cancel handle would report a duplicate instead of the readiness timeout.
+    assert!(matches!(
+        downloads.download_and_verify(hash).await,
+        Err(BlockDownloadVerifyError::Timeout)
+    ));
+    assert!(
+        !in_flight.contains(&hash),
+        "a failed readiness wait releases the hash"
+    );
+    assert!(downloads.cancel_handles.is_empty());
 }

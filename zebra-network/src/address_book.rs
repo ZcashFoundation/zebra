@@ -127,6 +127,9 @@ pub struct AddressBook {
     /// The local listener address.
     local_listener: SocketAddr,
 
+    /// The services advertised by the local listener.
+    local_services: PeerServices,
+
     /// The configured Zcash network.
     network: Network,
 
@@ -176,11 +179,12 @@ pub struct AddressMetrics {
 
 #[allow(clippy::len_without_is_empty)]
 impl AddressBook {
-    /// Construct an [`AddressBook`] with the given `local_listener` on `network`.
+    /// Construct an [`AddressBook`] with the given listener address and services on `network`.
     ///
     /// Uses the supplied [`tracing::Span`] for address book operations.
     pub fn new(
         local_listener: SocketAddr,
+        local_services: PeerServices,
         network: &Network,
         max_connections_per_ip: usize,
         span: Span,
@@ -203,6 +207,7 @@ impl AddressBook {
             by_priority: BTreeSet::new(),
             by_group: HashMap::new(),
             local_listener: canonical_socket_addr(local_listener),
+            local_services,
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             span,
@@ -302,7 +307,13 @@ impl AddressBook {
         // The maximum number of addresses should be always greater than 0
         assert!(addr_limit > 0);
 
-        let mut new_book = AddressBook::new(local_listener, network, max_connections_per_ip, span);
+        let mut new_book = AddressBook::new(
+            local_listener,
+            PeerServices::NODE_NETWORK,
+            network,
+            max_connections_per_ip,
+            span,
+        );
         new_book.addr_limit = addr_limit;
 
         let addrs = addrs
@@ -361,7 +372,7 @@ impl AddressBook {
     pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
         let now: DateTime32 = now.try_into().expect("will succeed until 2038");
 
-        MetaAddr::new_local_listener_change(self.local_listener)
+        MetaAddr::new_local_listener_change(self.local_listener, self.local_services)
             .local_listener_into_new_meta_addr(now)
     }
 
@@ -620,17 +631,6 @@ impl AddressBook {
             // Ignore invalid outbound addresses.
             // (Inbound connections can be monitored via Zebra's metrics.)
             if !updated.address_is_valid_for_outbound(&self.network) {
-                return None;
-            }
-
-            // Ignore invalid outbound services and other info,
-            // but only if the peer has never been attempted.
-            //
-            // Otherwise, if we got the info directly from the peer,
-            // store it in the address book, so we know not to reconnect.
-            if !updated.last_known_info_is_valid_for_outbound(&self.network)
-                && updated.last_connection_state.is_never_attempted()
-            {
                 return None;
             }
 
@@ -1002,6 +1002,10 @@ impl AddressBookPeers for AddressBook {
     fn misbehavior_score(&self, addr: PeerSocketAddr) -> u32 {
         AddressBook::misbehavior_score(self, addr)
     }
+
+    fn local_services(&self) -> PeerServices {
+        self.local_services
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -1021,6 +1025,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .misbehavior_score(addr)
+    }
+
+    fn local_services(&self) -> PeerServices {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .local_services
     }
 }
 
@@ -1059,6 +1069,7 @@ impl Clone for AddressBook {
             by_priority: self.by_priority.clone(),
             by_group: self.by_group.clone(),
             local_listener: self.local_listener,
+            local_services: self.local_services,
             network: self.network.clone(),
             addr_limit: self.addr_limit,
             span: self.span.clone(),

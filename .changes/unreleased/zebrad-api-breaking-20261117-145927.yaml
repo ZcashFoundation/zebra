@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: '`components::inbound::InboundSetupData` has a public `network` field and a crate-private field that shares sync download ownership, so it can no longer be built outside `zebrad` ([#12191](https://github.com/ZcashFoundation/zebra/pull/12191)).'
+time: 2026-11-17T14:59:27.911655685+01:00

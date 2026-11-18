@@ -36,7 +36,7 @@ use crate::{
         finalized_state::{calculate_deferred_pool_balance_change, ZebraDb},
         InvalidateError,
     },
-    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    MinedBlockNotifications, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -141,6 +141,56 @@ impl CommitPhases {
     }
 }
 
+/// Each rejection requires an authenticated block with valid proof of work at its contextual
+/// difficulty, unless the network disables proof of work. The hard cap is defense in depth:
+/// capacity disables early relay and speculative mining until the covered heights are finalized,
+/// rather than forgetting a recorded hash. Later rejections are not recorded, so their replays
+/// are verified again.
+pub(super) const MAX_EARLY_RELAY_REJECTIONS: usize = 4096;
+
+#[derive(Debug, Default)]
+pub(super) struct RejectedBlocks {
+    hashes: HashMap<Hash, Height>,
+    finalized_height: Option<Height>,
+    full_until: Option<Height>,
+}
+
+impl RejectedBlocks {
+    pub(super) fn contains(&self, hash: Hash) -> bool {
+        self.hashes.contains_key(&hash)
+    }
+
+    pub(super) fn is_full(&self) -> bool {
+        self.hashes.len() == MAX_EARLY_RELAY_REJECTIONS || self.full_until.is_some()
+    }
+
+    /// Returns whether overflow requires withdrawing every early-relay candidate.
+    pub(super) fn reject(&mut self, hash: Hash, height: Height) -> bool {
+        if self
+            .finalized_height
+            .is_some_and(|finalized| height <= finalized)
+        {
+            return self.is_full();
+        }
+        if self.hashes.len() < MAX_EARLY_RELAY_REJECTIONS {
+            self.hashes.entry(hash).or_insert(height);
+        } else if !self.hashes.contains_key(&hash) {
+            self.full_until = Some(self.full_until.map_or(height, |old| old.max(height)));
+        }
+        self.is_full()
+    }
+
+    fn prune(&mut self, finalized: Height) -> bool {
+        let was_full = self.is_full();
+        self.hashes.retain(|_, height| *height > finalized);
+        self.finalized_height = Some(finalized);
+        if self.full_until.is_some_and(|height| height <= finalized) {
+            self.full_until = None;
+        }
+        was_full && !self.is_full()
+    }
+}
+
 /// The state of the chains in memory, including queued blocks.
 ///
 /// Clones of the non-finalized state contain independent copies of the chains.
@@ -164,6 +214,14 @@ pub struct NonFinalizedState {
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
+
+    /// Authenticated rejections, shared so concurrent verifiers immediately stop early relay.
+    ///
+    /// This is the only mutable part of otherwise immutable published chain snapshots. Entries
+    /// are add-only between finalizations; only the writer prunes them when finalizing a height.
+    /// Watch mutations publish immediately to live and detached readers. Kept only in memory:
+    /// after a restart, a replay is verified once before it is recorded again.
+    pub(super) rejected_blocks: watch::Sender<RejectedBlocks>,
 
     // Configuration
     //
@@ -222,6 +280,7 @@ impl Clone for NonFinalizedState {
             // Only the write task reports evicted blocks.
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            rejected_blocks: self.rejected_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -246,6 +305,7 @@ impl NonFinalizedState {
             }),
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
+            rejected_blocks: watch::Sender::new(RejectedBlocks::default()),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -579,6 +639,16 @@ impl NonFinalizedState {
         // Remove all invalidated_blocks at or below the finalized height
         self.invalidated_blocks
             .retain(|height, _blocks| *height >= best_chain_root.height);
+        let mut rejection_capacity_cleared = false;
+        self.rejected_blocks.send_modify(|rejected| {
+            rejection_capacity_cleared = rejected.prune(best_chain_root.height);
+        });
+        if rejection_capacity_cleared {
+            tracing::info!(
+                finalized_height = ?best_chain_root.height,
+                "early relay and speculative mining enabled after finalization freed rejection capacity"
+            );
+        }
 
         self.update_metrics_for_chains();
 
@@ -659,6 +729,56 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
         self.update_metrics_bars();
         Ok(block_hash)
+    }
+
+    /// Apply an exact proposal verdict to its solved block and original parent.
+    ///
+    /// Normal chain application rebuilds indexes and the history leaf using the solved hash.
+    /// Mined bodies are published only after checking current invalidation and resolving the parent.
+    /// A changed wall clock can suppress early relay without changing the normal commit policy.
+    pub(super) fn commit_prevalidated_contextual(
+        &mut self,
+        contextual: ContextuallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+        notifications: Option<&MinedBlockNotifications>,
+    ) -> Result<(), ValidateContextError> {
+        // Local invalidation refers to solved hashes, which proposals do not bind.
+        if self.is_block_invalidated(contextual.hash) {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: contextual.hash,
+            });
+        }
+        let parent_hash = contextual.block.header.previous_block_hash;
+        let (height, hash) = (contextual.height, contextual.hash);
+        let parent_chain = if parent_hash == finalized_state.finalized_tip_hash() {
+            Arc::new(Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .expect("a successful proposal has a finalized parent"),
+                finalized_state.note_commitment_trees_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            ))
+        } else {
+            self.parent_chain(parent_hash)?
+        };
+        if let Some(notifications) = notifications {
+            if contextual
+                .block
+                .header
+                .time_is_valid_at(chrono::Utc::now(), &height, &hash)
+                .is_ok()
+            {
+                let _ = notifications.validated.send(Some(contextual.block.clone()));
+            }
+        }
+        let chain = Arc::unwrap_or_clone(parent_chain).push(contextual)?;
+        self.insert_with(Arc::new(chain), |chains| {
+            chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
+        self.update_metrics_for_committed_block(height, hash);
+        Ok(())
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
@@ -863,11 +983,7 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self
-            .invalidated_blocks
-            .values()
-            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
-        {
+        if self.is_block_invalidated(prepared.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });
@@ -897,6 +1013,7 @@ impl NonFinalizedState {
                     block.clone(),
                     network,
                     &parent_history_tree,
+                    None,
                 );
                 if result.is_err() {
                     cancel_tree_update.store(true, Ordering::Release);
@@ -1336,6 +1453,13 @@ impl NonFinalizedState {
     /// Returns true if this [`NonFinalizedState`] contains no chains.
     pub fn is_chain_set_empty(&self) -> bool {
         self.chain_count() == 0
+    }
+
+    /// Returns whether local invalidation excludes this block or one of its retained descendants.
+    pub(super) fn is_block_invalidated(&self, hash: block::Hash) -> bool {
+        self.invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == hash))
     }
 
     /// Return the invalidated blocks.

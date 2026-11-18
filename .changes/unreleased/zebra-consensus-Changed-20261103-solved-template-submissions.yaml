@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'A submission that matches a validated proposal skips the known-block and early-relay state round trips before its commit, which reports duplicates itself and relays the committed block. The proposal cache keeps each proposal''s wire bytes, counted in its retention budget, so a submission is compared against them instead of serializing the cached transactions again, and it evicts proposals for superseded parents when a proposal for a new parent is cached.'
+time: 2026-11-03T00:00:00Z

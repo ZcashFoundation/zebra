@@ -14,6 +14,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{self, Block},
+    parallel::tree::{TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST},
     parameters::{Magic, Network},
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
@@ -28,6 +29,7 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
     message::{
         Message, RejectReason, VersionMessage, MAX_REJECT_MESSAGE_LENGTH, MAX_REJECT_REASON_LENGTH,
         MAX_USER_AGENT_LENGTH,
@@ -51,6 +53,11 @@ const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 pub struct Codec {
     builder: Builder,
     state: DecodeState,
+    early_block_relay: bool,
+    compact_sent: bool,
+    compact_receive: bool,
+    compact_recovery:
+        Option<tokio::sync::watch::Receiver<Option<(block::Hash, tokio::time::Instant)>>>,
 }
 
 /// A builder for specifying [`Codec`] options.
@@ -85,6 +92,19 @@ impl Codec {
     pub fn reconfigure_full_body_len(&mut self) {
         self.builder.max_len = MAX_PROTOCOL_MESSAGE_LEN;
     }
+
+    /// Enables compact negotiation only after bilateral experimental service-bit consent.
+    pub(crate) fn reconfigure_early_block_relay(&mut self, enabled: bool) {
+        self.early_block_relay = enabled;
+    }
+
+    /// Track the connection's live recovery request independently of announcement preferences.
+    pub(crate) fn reconfigure_compact_recovery(
+        &mut self,
+        recovery: tokio::sync::watch::Receiver<Option<(block::Hash, tokio::time::Instant)>>,
+    ) {
+        self.compact_recovery = Some(recovery);
+    }
 }
 
 impl Builder {
@@ -93,6 +113,10 @@ impl Builder {
         Codec {
             builder: self,
             state: DecodeState::Head,
+            early_block_relay: false,
+            compact_sent: false,
+            compact_receive: false,
+            compact_recovery: None,
         }
     }
 
@@ -125,10 +149,20 @@ impl Encoder<Message> for Codec {
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         use Error::Parse;
 
-        let body_length = self.body_length(&item);
+        let body_length = self.body_length(&item)?;
 
         if body_length > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
+        }
+        match &item {
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                self.compact_receive = self.early_block_relay && *high_bandwidth && *version == 1;
+            }
+            Message::CompactBlock(_) => self.compact_sent = true,
+            _ => {}
         }
 
         // The bounded message length plus its header fits in u64.
@@ -148,7 +182,13 @@ impl Encoder<Message> for Codec {
             Reject { .. } => b"reject\0\0\0\0\0\0",
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
             GetAddr => b"getaddr\0\0\0\0\0",
-            Block { .. } => b"block\0\0\0\0\0\0\0",
+            Block { .. } | RawBlock { .. } => b"block\0\0\0\0\0\0\0",
+            SendCompact { .. } => b"sendcmpct\0\0\0",
+            CompactBlock { .. } => b"cmpctblock\0\0",
+            GetBlockTransactions { .. } => b"getblocktxn\0",
+            BlockTransactions { .. } => b"blocktxn\0\0\0\0",
+            GetTreeRoots { .. } => b"gettreeroots",
+            TreeRoots { .. } => b"treeroots\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
             GetHeaders { .. } => b"getheaders\0\0",
@@ -185,6 +225,11 @@ impl Encoder<Message> for Codec {
 }
 
 impl Codec {
+    /// Return the encoded message size, including its wire header, without allocating a buffer.
+    pub(crate) fn wire_length(&self, msg: &Message) -> Result<usize, Error> {
+        self.body_length(msg).map(|length| HEADER_LEN + length)
+    }
+
     /// Obtain the size of the body of a given message. This will match the
     /// number of bytes written to the writer provided to `write_body` for the
     /// same message.
@@ -192,12 +237,10 @@ impl Codec {
     //
     // If this code shows up in profiles, replace with a size estimate or cached size,
     // to avoid multiple serializations for large data structures like lists, blocks, and transactions.
-    fn body_length(&self, msg: &Message) -> usize {
+    fn body_length(&self, msg: &Message) -> Result<usize, Error> {
         let mut writer = FakeWriter(0);
-
-        self.write_body(msg, &mut writer)
-            .expect("writer should never fail");
-        writer.0
+        self.write_body(msg, &mut writer)?;
+        Ok(writer.0)
     }
 
     /// Write the body of the message into the given writer. This allows writing
@@ -290,6 +333,31 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
+            Message::RawBlock(block) => writer.write_all((**block).as_ref())?,
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                writer.write_u8(u8::from(*high_bandwidth))?;
+                writer.write_u64::<LittleEndian>(*version)?;
+            }
+            Message::CompactBlock(block) => block.zcash_serialize(&mut writer)?,
+            Message::GetBlockTransactions(request) => request.zcash_serialize(&mut writer)?,
+            Message::BlockTransactions(response) => response.zcash_serialize(&mut writer)?,
+            Message::GetTreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => {
+                writer.write_u32::<LittleEndian>(start_height.0)?;
+                final_hash.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(*count)?;
+            }
+            Message::TreeRoots(Some(roots)) => {
+                writer.write_u8(0)?;
+                roots.zcash_serialize(&mut writer)?;
+            }
+            Message::TreeRoots(None) => writer.write_u8(1)?,
             Message::GetBlocks { known_blocks, stop } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 known_blocks.zcash_serialize(&mut writer)?;
@@ -436,6 +504,28 @@ impl Decoder for Codec {
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
+                // Ignore unnegotiated extensions before hashing or deserializing their bodies.
+                let negotiated = match &command {
+                    b"sendcmpct\0\0\0" => self.early_block_relay,
+                    b"cmpctblock\0\0" => self.early_block_relay && self.compact_receive,
+                    // The connection checks the retained block and its serving deadline.
+                    b"getblocktxn\0" => self.early_block_relay && self.compact_sent,
+                    b"blocktxn\0\0\0\0" => {
+                        self.early_block_relay
+                            && self.compact_recovery.as_ref().is_some_and(|recovery| {
+                                recovery.has_changed().is_ok()
+                                    && recovery.borrow().is_some_and(|(hash, deadline)| {
+                                        tokio::time::Instant::now() < deadline
+                                            && body.get(..32) == Some(hash.0.as_slice())
+                                    })
+                            })
+                    }
+                    _ => true,
+                };
+                if !negotiated {
+                    return Ok(None);
+                }
+
                 if checksum != sha256d::Checksum::from(&body[..]) {
                     return Err(Parse(
                         "supplied message checksum does not match computed checksum",
@@ -453,6 +543,32 @@ impl Decoder for Codec {
                     b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
                     b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
+                    b"sendcmpct\0\0\0" => {
+                        let high_bandwidth = match body_reader.read_u8()? {
+                            0 => false,
+                            1 => true,
+                            _ => return Err(Parse("invalid sendcmpct boolean")),
+                        };
+                        let version = body_reader.read_u64::<LittleEndian>()?;
+                        Ok(Message::SendCompact {
+                            high_bandwidth,
+                            version,
+                        })
+                    }
+                    b"cmpctblock\0\0" => {
+                        Self::deserialize_spawning::<CompactBlock, _>(&mut body_reader)
+                            .map(|block| Message::CompactBlock(Arc::new(block)))
+                    }
+                    b"getblocktxn\0" => {
+                        BlockTransactionsRequest::zcash_deserialize(&mut body_reader)
+                            .map(Message::GetBlockTransactions)
+                    }
+                    b"blocktxn\0\0\0\0" => {
+                        Self::deserialize_spawning::<BlockTransactions, _>(&mut body_reader)
+                            .map(Message::BlockTransactions)
+                    }
+                    b"gettreeroots" => self.read_gettreeroots(&mut body_reader),
+                    b"treeroots\0\0\0" => self.read_treeroots(&mut body_reader),
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
                     b"headers\0\0\0\0\0" => self.read_headers(&mut body_reader),
                     b"getheaders\0\0" => self.read_getheaders(&mut body_reader),
@@ -659,7 +775,7 @@ impl Codec {
     }
 
     fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_block_spawning(reader);
+        let result = Self::deserialize_spawning::<Block, _>(reader);
         Ok(Message::Block(result?.into()))
     }
 
@@ -727,7 +843,7 @@ impl Codec {
     }
 
     fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_transaction_spawning(reader);
+        let result = Self::deserialize_spawning::<Transaction, _>(reader);
         Ok(Message::Tx(Arc::new(result?).into()))
     }
 
@@ -777,33 +893,53 @@ impl Codec {
         Ok(Message::FilterClear)
     }
 
-    /// Given the reader, deserialize the transaction in the rayon thread pool.
-    #[allow(clippy::unwrap_in_result)]
-    fn deserialize_transaction_spawning<R: Read + std::marker::Send>(
-        reader: R,
-    ) -> Result<Transaction, Error> {
-        let mut result = None;
+    fn read_gettreeroots<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let start_height = block::Height(reader.read_u32::<LittleEndian>()?);
+        let final_hash = block::Hash::zcash_deserialize(&mut reader)?;
+        let count = reader.read_u32::<LittleEndian>()?;
+        if !(1..=MAX_TREE_ROOTS_PER_REQUEST).contains(&count) {
+            return Err(Error::Parse(
+                "gettreeroots count is zero or above the limit",
+            ));
+        }
 
-        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
-        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
-        //
-        // We can't use `spawn_blocking()` because:
-        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
-        // - There is no way to check the blocking task's future for panics
-        tokio::task::block_in_place(|| {
-            rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Transaction::zcash_deserialize(reader)))
-            })
-        });
-
-        result.expect("scope has already finished")
+        Ok(Message::GetTreeRoots {
+            start_height,
+            final_hash,
+            count,
+        })
     }
 
-    /// Given the reader, deserialize the block in the rayon thread pool.
+    fn read_treeroots<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        match reader.read_u8()? {
+            0 => {}
+            1 => return Ok(Message::TreeRoots(None)),
+            _ => return Err(Error::Parse("invalid treeroots result")),
+        }
+
+        let count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        let count: usize = count.into();
+        // # Security
+        //
+        // Limit the allocation before reading untrusted entries.
+        // The u32 limit fits in usize on all supported platforms.
+        if count > MAX_TREE_ROOTS_PER_REQUEST as usize {
+            return Err(Error::Parse("treeroots message has too many entries"));
+        }
+
+        let mut roots = Vec::with_capacity(count);
+        for _ in 0..count {
+            roots.push(TreeRootsProof::zcash_deserialize(&mut reader)?);
+        }
+
+        Ok(Message::TreeRoots(Some(roots)))
+    }
+
+    /// Deserializes transaction-bearing messages on the existing blocking Rayon path.
     #[allow(clippy::unwrap_in_result)]
-    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
+    fn deserialize_spawning<T: ZcashDeserialize + Send, R: Read + Send>(
+        reader: R,
+    ) -> Result<T, Error> {
         let mut result = None;
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
@@ -816,7 +952,7 @@ impl Codec {
         // - There is no way to check the blocking task's future for panics
         tokio::task::block_in_place(|| {
             rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
+                s.spawn_fifo(|_s| result = Some(T::zcash_deserialize(reader)))
             })
         });
 

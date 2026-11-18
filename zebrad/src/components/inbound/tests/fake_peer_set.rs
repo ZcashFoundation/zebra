@@ -61,8 +61,9 @@ use InventoryResponse::*;
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
+/// Pruned bodies are missing on the parsed and raw block paths; other read errors propagate.
 #[tokio::test(flavor = "multi_thread")]
-async fn inbound_propagates_incomplete_block_body_errors() {
+async fn inbound_pruned_blocks_are_missing_without_hiding_corruption() {
     use zebra_state::BlockReadError;
 
     let _init_guard = zebra_test::init();
@@ -80,44 +81,393 @@ async fn inbound_propagates_incomplete_block_body_errors() {
         let (mut inbound, _peers, mut misbehavior) =
             setup_gossiped_block_misbehavior_with_state(verifier, state_service, tip).await;
 
-        for (state_response, expected) in [
+        for (request, state_request, missing) in [
             (
-                Ok(zebra_state::Response::Block(Some(block.clone()))),
-                Ok(Response::Blocks(vec![Available((block.clone(), None))])),
+                Request::BlocksByHash([hash].into()),
+                zebra_state::Request::Block(hash.into()),
+                Response::Blocks(vec![Missing(hash)]),
             ),
             (
-                Ok(zebra_state::Response::Block(None)),
-                Ok(Response::Blocks(vec![Missing(hash)])),
-            ),
-            (
-                Err(BoxError::from(BlockReadError::CorruptBlock { height })),
-                Err(BlockReadError::CorruptBlock { height }),
+                Request::RawBlocksByHash([hash].into()),
+                zebra_state::Request::RawBlock(hash.into()),
+                Response::RawBlocks(vec![Missing(hash)]),
             ),
         ] {
-            let request = Request::BlocksByHash([hash].into());
-            let query = async { inbound.ready().await.unwrap().call(request).await };
-            let respond = async {
-                state
-                    .expect_request(zebra_state::Request::Block(hash.into()))
-                    .await
-                    .respond(state_response);
-            };
-            let (response, ()) = tokio::join!(query, respond);
-            match expected {
-                Ok(expected) => assert_eq!(response.unwrap(), expected),
-                Err(expected) => assert_eq!(
-                    response.unwrap_err().downcast_ref::<BlockReadError>(),
-                    Some(&expected),
+            for (error, expected) in [
+                (
+                    BlockReadError::BlockBodyUnavailable { height },
+                    Ok(missing.clone()),
                 ),
+                (
+                    BlockReadError::CorruptBlock { height },
+                    Err(BlockReadError::CorruptBlock { height }),
+                ),
+            ] {
+                let request = request.clone();
+                let query = async { inbound.ready().await.unwrap().call(request).await };
+                let respond = async {
+                    state
+                        .expect_request(state_request.clone())
+                        .await
+                        .respond_error(error.into());
+                };
+                let (response, ()) = tokio::join!(query, respond);
+                match expected {
+                    Ok(expected) => assert_eq!(response.unwrap(), expected),
+                    Err(expected) => assert_eq!(
+                        response.unwrap_err().downcast_ref::<BlockReadError>(),
+                        Some(&expected),
+                    ),
+                }
+                assert!(matches!(
+                    misbehavior.try_recv(),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+                ));
             }
-            assert!(matches!(
-                misbehavior.try_recv(),
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-            ));
         }
     })
     .await
     .unwrap();
+}
+
+/// Raw block requests serve each committed block as exactly its serialized bytes, report unknown
+/// blocks as missing, and agree with the parsed block responses.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_raw_blocks_match_serialized_blocks() {
+    use zebra_chain::{
+        block::{Hash as BlockHash, SerializedBlock},
+        serialization::ZcashSerialize,
+    };
+
+    let (
+        inbound_service,
+        _mempool_guard,
+        committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+    assert!(!committed_blocks.is_empty(), "setup commits test blocks");
+
+    let missing_hash = BlockHash([0x11; 32]);
+
+    for block in &committed_blocks {
+        let response = inbound_service
+            .clone()
+            .oneshot(Request::RawBlocksByHash(HashSet::from([
+                block.hash(),
+                missing_hash,
+            ])))
+            .await
+            .expect("raw block requests succeed");
+        let Response::RawBlocks(items) = response else {
+            panic!("unexpected response to a raw block request: {response:?}");
+        };
+
+        // The connection clones each response before sending it, so the clone must share the
+        // block bytes instead of copying them.
+        let cloned = items.clone();
+        for (item, clone) in items.iter().zip(&cloned) {
+            if let (Some(block), Some(clone)) = (item.available(), clone.available()) {
+                assert!(
+                    Arc::ptr_eq(&block, &clone),
+                    "cloned raw block responses share the block bytes"
+                );
+            }
+        }
+
+        let available: Vec<SerializedBlock> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|block| SerializedBlock::clone(&block))
+            .collect();
+        let missing: Vec<BlockHash> = items.iter().filter_map(|item| item.missing()).collect();
+        assert_eq!(
+            available,
+            vec![SerializedBlock::from(
+                block.zcash_serialize_to_vec().expect("blocks serialize")
+            )],
+            "a committed block is served as its exact serialized bytes"
+        );
+        assert_eq!(missing, vec![missing_hash], "unknown blocks are missing");
+
+        let parsed = inbound_service
+            .clone()
+            .oneshot(Request::BlocksByHash(HashSet::from([block.hash()])))
+            .await
+            .expect("block requests succeed");
+        assert_eq!(
+            parsed,
+            Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))]),
+            "parsed block requests are unchanged"
+        );
+    }
+
+    peer_set.expect_no_requests().await;
+    sync_gossip_task_handle.abort();
+    tx_gossip_task_handle.abort();
+}
+
+/// Negotiated block requests serve committed blocks as stored bytes, but keep an uncommitted
+/// early-relay body on the authorized path, so it stays revocable until its local write, and
+/// ordinary connections never receive it.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_raw_block_requests_keep_early_bodies_revocable() -> Result<(), BoxError> {
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash, SerializedBlock},
+        chain_tip::ChainTip,
+        parameters::{
+            subsidy::block_subsidy, testnet::ConfiguredActivationHeights, NetworkUpgrade,
+        },
+        transaction::{LockTime, Transaction},
+        transparent,
+        work::equihash::Solution,
+    };
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(30), async {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        let (state, read, mut latest_chain_tip, _tip_changes) =
+            zebra_state::init(StateConfig::ephemeral(), &network, Height(0), 0).await;
+        let state = Buffer::new(state, 10);
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .clone()
+            .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                genesis.clone().into(),
+            ))
+            .await?;
+        while latest_chain_tip.best_tip_height() != Some(Height(0)) {
+            latest_chain_tip.best_tip_changed().await?;
+        }
+
+        // Commit a mined child of genesis, then mine an uncommitted child of that block.
+        let mut blocks = Vec::new();
+        for height in [Height(1), Height(2)] {
+            let ReadResponse::ChainInfo(info) =
+                read.clone().oneshot(ReadRequest::ChainInfo).await?
+            else {
+                panic!("chain-info request must return chain info");
+            };
+            let transactions = vec![Arc::new(Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    block_subsidy(height, &network).expect("regtest subsidies are valid"),
+                    transparent::Script::new(&[0x51]),
+                )],
+                LockTime::unlocked(),
+                height,
+            ))];
+            let mut block = Block {
+                header: Arc::new(block::Header {
+                    version: 4,
+                    previous_block_hash: info.tip_hash,
+                    merkle_root: transactions.iter().map(|tx| tx.hash()).collect(),
+                    commitment_bytes: [0; 32].into(),
+                    time: info.cur_time.into(),
+                    difficulty_threshold: info.expected_difficulty,
+                    nonce: [0; 32].into(),
+                    solution: Solution::Regtest([0; 36]),
+                }),
+                transactions,
+            };
+            Arc::make_mut(&mut block.header).commitment_bytes =
+                <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    &info
+                        .chain_history_root
+                        .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+                    &block.auth_data_root(),
+                ))
+                .into();
+            (0u32..100_000)
+                .find(|nonce| {
+                    let mut bytes = [0; 32];
+                    bytes[..4].copy_from_slice(&nonce.to_le_bytes());
+                    Arc::make_mut(&mut block.header).nonce = bytes.into();
+                    zebra_consensus::difficulty_is_valid(
+                        &block.header,
+                        &network,
+                        &height,
+                        &block.hash(),
+                    )
+                    .is_ok()
+                })
+                .expect("the regtest target is reached within the bounded nonce search");
+            let block = Arc::new(block);
+            if height == Height(1) {
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                        CheckpointVerifiedBlock::from(block.clone()).into(),
+                    ))
+                    .await?;
+                while latest_chain_tip.best_tip_height() != Some(height) {
+                    latest_chain_tip.best_tip_changed().await?;
+                }
+            }
+            blocks.push(block);
+        }
+        let (committed, early) = (blocks[0].clone(), blocks[1].clone());
+
+        let ReadResponse::EarlyRelayCache(cache) =
+            read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
+        else {
+            panic!("cache request must return the early-relay cache");
+        };
+        let zebra_state::Response::EarlyRelay(Some(guard)) = state
+            .clone()
+            .oneshot(zebra_state::Request::EarlyRelay {
+                block: early.clone(),
+                require_authentication: true,
+                origin: zebra_state::EarlyRelayOrigin::Peer,
+            })
+            .await?
+        else {
+            panic!("the authenticated next-tip candidate must receive a guard");
+        };
+        assert!(
+            cache
+                .get(&early.hash())
+                .is_some_and(|cached| Arc::ptr_eq(&cached, &early)),
+            "the authenticated body is published to the early-relay cache"
+        );
+
+        let (setup_tx, setup_rx) = oneshot::channel();
+        let mut inbound = Inbound::new(1, setup_rx).with_early_blocks(Some(cache.clone()));
+        let mut mempool = MockService::build().for_unit_tests();
+        let mut peer_set = MockService::build().for_unit_tests();
+        let (block_verifier, _verifier_called) = recording_block_verifier();
+        let (misbehavior_sender, _misbehavior) = tokio::sync::mpsc::channel(1);
+        assert!(setup_tx
+            .send(InboundSetupData {
+                network: network.clone(),
+                sync_downloads: Default::default(),
+                address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                    SocketAddr::from(([0, 0, 0, 0], 0)),
+                    PeerServices::NODE_NETWORK,
+                    &network,
+                    DEFAULT_MAX_CONNS_PER_IP,
+                    Span::none(),
+                ))),
+                block_download_peer_set: Buffer::new(BoxService::new(peer_set.clone()), 1),
+                block_verifier,
+                mempool: Buffer::new(BoxService::new(mempool.clone()), 1),
+                state: state.clone(),
+                latest_chain_tip,
+                misbehavior_sender,
+            })
+            .is_ok());
+
+        // Without cached bodies, finalized and non-finalized blocks are served as their exact
+        // serialized bytes, and unknown blocks are missing.
+        let missing = block::Hash([0x11; 32]);
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::EarlyRawBlocksByHash(HashSet::from([
+                genesis.hash(),
+                committed.hash(),
+                missing,
+            ])))
+            .await?;
+        let Response::RawBlocks(items) = response else {
+            panic!("committed blocks are served as stored bytes: {response:?}");
+        };
+        let available: HashSet<SerializedBlock> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|bytes| SerializedBlock::clone(&bytes))
+            .collect();
+        assert_eq!(
+            available,
+            HashSet::from([
+                SerializedBlock::from(genesis.clone()),
+                SerializedBlock::from(committed.clone()),
+            ]),
+        );
+        let missing_items: Vec<block::Hash> =
+            items.iter().filter_map(|item| item.missing()).collect();
+        assert_eq!(missing_items, vec![missing]);
+
+        // Ordinary connections can't read the early-relay cache.
+        assert_eq!(
+            inbound
+                .ready()
+                .await?
+                .call(Request::RawBlocksByHash(HashSet::from([early.hash()])))
+                .await?,
+            Response::RawBlocks(vec![Missing(early.hash())]),
+        );
+
+        // A batch with an early body uses the authorized path, for every body in the batch.
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::EarlyRawBlocksByHash(HashSet::from([
+                early.hash(),
+                committed.hash(),
+            ])))
+            .await?;
+        let Response::AuthorizedBlocks {
+            blocks: items,
+            authorization,
+        } = response
+        else {
+            panic!("early bodies keep revocable authorization: {response:?}");
+        };
+        let served: Vec<Arc<Block>> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|(block, _)| block)
+            .collect();
+        assert_eq!(served.len(), 2);
+        let served_early = served
+            .iter()
+            .find(|block| Arc::ptr_eq(block, &early))
+            .expect("the exact cached early body is served");
+        let served_committed = served
+            .iter()
+            .find(|block| block.hash() == committed.hash())
+            .expect("the committed body is served");
+        assert!(authorization.is_authorized(served_early));
+        assert!(authorization.is_authorized(served_committed));
+
+        // Dropping the verifier's guard withdraws the body before any later local write.
+        drop(guard);
+        assert!(!authorization.is_authorized(served_early));
+        assert!(authorization.is_authorized(served_committed));
+        assert_eq!(
+            inbound
+                .ready()
+                .await?
+                .call(Request::EarlyRawBlocksByHash(HashSet::from([early.hash()])))
+                .await?,
+            Response::RawBlocks(vec![Missing(early.hash())]),
+            "withdrawn early bodies are never served",
+        );
+
+        mempool.expect_no_requests().await;
+        peer_set.expect_no_requests().await;
+        Ok::<_, BoxError>(())
+    })
+    .await?
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -403,6 +753,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -411,12 +762,23 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     // The push path only touches the mempool; the state and block verifier are
     // wired up because `Inbound` requires them, but are never driven here.
-    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
-    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(consensus_config, &network, state_service.clone()).await;
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _groth16_download_handle,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        consensus_config,
+        &network,
+        state_service.clone(),
+        read_only_state_service,
+    )
+    .await;
 
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -440,6 +802,8 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
+        network: network.clone(),
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -744,7 +1108,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Wait for the block gossip request.
+    // Test the block is gossiped without a batch delay.
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
@@ -844,7 +1208,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Wait for the block gossip request.
+        // Test the block is gossiped without a batch delay.
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
@@ -1019,7 +1383,7 @@ async fn caches_getaddr_response() {
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         // UTXO verification doesn't matter for these tests.
-        let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
             zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -1030,10 +1394,12 @@ async fn caches_getaddr_response() {
             _transaction_verifier,
             _groth16_download_handle,
             _max_checkpoint_height,
+            _prepared_blocks,
         ) = zebra_consensus::router::init_test(
             consensus_config.clone(),
             &network,
             state_service.clone(),
+            read_only_state_service,
         )
         .await;
 
@@ -1054,6 +1420,8 @@ async fn caches_getaddr_response() {
         let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
 
         let setup_data = InboundSetupData {
+            network: network.clone(),
+            sync_downloads: Default::default(),
             address_book: address_book.clone(),
             block_download_peer_set: buffered_peer_set,
             block_verifier,
@@ -1151,6 +1519,7 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1159,19 +1528,25 @@ async fn setup(
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
     // UTXO verification doesn't matter for these tests.
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(
-            consensus_config.clone(),
-            &network,
-            state_service.clone(),
-        )
-        .await;
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _groth16_download_handle,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        consensus_config.clone(),
+        &network,
+        state_service.clone(),
+        read_only_state_service.clone(),
+    )
+    .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -1234,11 +1609,12 @@ async fn setup(
     // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mut mempool_service, transaction_subscriber) = Mempool::new(
+    let (mut mempool_service, transaction_subscriber, _transaction_verified) = Mempool::new(
         &network,
         &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip.clone(),
@@ -1256,6 +1632,7 @@ async fn setup(
             chain_tip_change.clone(),
             peer_set.clone(),
             Some(submitblock_channel.receiver()),
+            Default::default(),
         )
         .in_current_span(),
     );
@@ -1286,7 +1663,10 @@ async fn setup(
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
     if add_transactions {
-        added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
+        added_transactions.extend(add_some_stuff_to_mempool(
+            &mut mempool_service,
+            network.clone(),
+        ));
     }
 
     let mempool_service = BoxService::new(mempool_service);
@@ -1302,6 +1682,8 @@ async fn setup(
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
+        network,
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -1344,7 +1726,12 @@ fn add_some_stuff_to_mempool(
     // Insert the last transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .unwrap();
 
     vec![last_transaction]
@@ -1377,11 +1764,20 @@ async fn setup_gossiped_block_misbehavior(
     let network = Mainnet;
     let state_config = StateConfig::ephemeral();
 
-    // An empty state, so gossiped blocks are always unknown, and the lookahead limit is
-    // measured from the genesis height.
+    // Keep the parent of the gossiped block known, so these tests isolate verifier attribution.
     let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.into(),
+        ))
+        .await
+        .unwrap();
 
     setup_gossiped_block_misbehavior_with_state(block_verifier, state_service, latest_chain_tip)
         .await
@@ -1406,6 +1802,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1431,6 +1828,8 @@ async fn setup_gossiped_block_misbehavior_with_state(
     let (misbehavior_sender, misbehavior_rx) = tokio::sync::mpsc::channel(10);
 
     let setup_data = InboundSetupData {
+        network,
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -1992,6 +2391,694 @@ async fn gossiped_block_genuinely_behind_tip_does_not_score_serving_peer() -> Re
         verifier_called_rx.try_recv().is_err(),
         "a block behind the finalized tip must be dropped before consensus validation",
     );
+
+    Ok(())
+}
+
+/// Sync reuses only an actual inbound commit, with independent recovery from untrusted gossip.
+#[tokio::test]
+async fn compact_and_sync_share_committed_success_and_recover_owner() -> Result<(), BoxError> {
+    use futures::StreamExt;
+
+    use crate::components::sync::{Downloads, INBOUND_COMMIT_TIMEOUT};
+
+    async fn observed_lookup(
+        read: zebra_state::ReadStateService,
+        request: zebra_state::ReadRequest,
+        read_observed: tokio::sync::mpsc::Sender<()>,
+        mut committed_receiver: tokio::sync::watch::Receiver<bool>,
+        hold_response: bool,
+    ) -> Result<zebra_state::ReadResponse, BoxError> {
+        let response = read.oneshot(request);
+        tokio::pin!(response);
+        let immediate = response.as_mut().now_or_never();
+        let _ = read_observed.try_send(());
+        if hold_response {
+            committed_receiver
+                .wait_for(|committed| *committed)
+                .await
+                .expect("the real commit releases pending state lookups");
+        }
+        match immediate {
+            Some(response) => response,
+            None => response.await,
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Owner {
+        Successful,
+        UncommittedSuccess,
+        Stalled,
+        Failed,
+        Cancelled,
+        Unserved,
+        ForgedBody,
+    }
+
+    let _init_guard = zebra_test::init();
+    for owner in [
+        Owner::Successful,
+        Owner::UncommittedSuccess,
+        Owner::Stalled,
+        Owner::Failed,
+        Owner::Cancelled,
+        Owner::Unserved,
+        Owner::ForgedBody,
+    ] {
+        timeout(Duration::from_secs(10), async {
+            let (state, read, tip, _tip_changes) =
+                zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height::MAX, 0).await;
+            let state = Buffer::new(state, 10);
+            let (read_observed, mut read_queries) = tokio::sync::mpsc::channel(1);
+            let (lookup_committed, committed_receiver) = tokio::sync::watch::channel(false);
+            let read = tower::service_fn(move |request: zebra_state::ReadRequest| {
+                observed_lookup(
+                    read.clone(),
+                    request,
+                    read_observed.clone(),
+                    committed_receiver.clone(),
+                    matches!(owner, Owner::Successful),
+                )
+            });
+            let prefix: [&[u8]; 2] = [
+                &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES,
+                &zebra_test::vectors::BLOCK_MAINNET_1_BYTES,
+            ];
+            for bytes in prefix {
+                let block: Arc<Block> = bytes.zcash_deserialize_into()?;
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                        block.into(),
+                    ))
+                    .await?;
+            }
+            // Separate connections deserialize independently; neither response echoes the other's Arc.
+            let block: Arc<Block> =
+                zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+            let mut inbound_body: Arc<Block> =
+                zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+            assert!(!Arc::ptr_eq(&block, &inbound_body));
+            let hash = block.hash();
+            if matches!(owner, Owner::ForgedBody) {
+                let donor: Block =
+                    zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.zcash_deserialize_into()?;
+                Arc::make_mut(&mut inbound_body).transactions.push(
+                    donor
+                        .transactions
+                        .iter()
+                        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+                        .unwrap()
+                        .clone(),
+                );
+                assert_eq!(inbound_body.hash(), hash);
+                assert_ne!(inbound_body.auth_data_root(), block.auth_data_root());
+            }
+            let mut peers = MockService::build().for_unit_tests();
+            let network = Buffer::new(BoxService::new(peers.clone()), 10);
+            let mut verifier = MockService::build().for_unit_tests();
+            let buffered_verifier: SemanticBlockVerifierStub =
+                Buffer::new(BoxService::new(verifier.clone()), 10);
+            let (past_limit, _past_limit_rx) = tokio::sync::watch::channel(false);
+            let mut sync = Downloads::new(
+                network.clone(),
+                buffered_verifier.clone(),
+                read,
+                tip.clone(),
+                past_limit,
+                MAX_INBOUND_CONCURRENCY,
+                Height(1),
+            );
+            let mempool: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+                MockService::build().for_unit_tests();
+            let (setup_tx, setup_rx) = oneshot::channel();
+            let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(10);
+            setup_tx
+                .send(InboundSetupData {
+                    network: Mainnet,
+                    sync_downloads: sync.in_flight_hashes(),
+                    address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                        "0.0.0.0:0".parse().unwrap(),
+                        PeerServices::NODE_NETWORK,
+                        &Mainnet,
+                        DEFAULT_MAX_CONNS_PER_IP,
+                        Span::none(),
+                    ))),
+                    block_download_peer_set: network,
+                    block_verifier: buffered_verifier,
+                    mempool: Buffer::new(BoxService::new(mempool), 1),
+                    state: state.clone(),
+                    latest_chain_tip: tip,
+                    misbehavior_sender,
+                })
+                .map_err(|_| "inbound setup receiver remains open")?;
+            let mut inbound = Some(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
+            let advertiser: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
+            let advertiser_info = zebra_network::test_support::connection_info(advertiser);
+            assert_eq!(
+                inbound
+                    .as_mut()
+                    .unwrap()
+                    .ready()
+                    .await?
+                    .call(Request::AdvertiseCompactBlock(
+                        hash,
+                        Some(advertiser_info.clone())
+                    ))
+                    .await?,
+                Response::Nil,
+            );
+            let mut compact_download = Some(
+                peers
+                    .expect_request(Request::BlockDownload {
+                        hash,
+                        advertiser: Some(advertiser_info),
+                    })
+                    .await,
+            );
+            let mut first = if matches!(owner, Owner::Unserved) {
+                None
+            } else {
+                compact_download
+                    .take()
+                    .unwrap()
+                    .respond(Response::Blocks(vec![Available((
+                        inbound_body.clone(),
+                        Some(advertiser),
+                    ))]));
+                Some(
+                    verifier
+                        .expect_request(zebra_consensus::Request::Commit(inbound_body))
+                        .await,
+                )
+            };
+
+            let sync_wait = tokio::spawn(async move {
+                sync.download_and_verify(hash).await?;
+                Ok::<_, BoxError>(sync)
+            });
+            if matches!(owner, Owner::Successful) {
+                read_queries
+                    .recv()
+                    .await
+                    .expect("sync has started its committed-presence lookup");
+                // Commit while the real lookup is outstanding, before its result reaches sync.
+                // Either read outcome must lead to success without another download or verifier.
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                        block.clone().into(),
+                    ))
+                    .await?;
+                lookup_committed.send_replace(true);
+            } else if matches!(owner, Owner::UncommittedSuccess) {
+                first.take().unwrap().respond(hash);
+            } else if matches!(owner, Owner::Failed | Owner::ForgedBody) {
+                first.take().unwrap().respond_error(RouterError::Block {
+                    source: Box::new(VerifyBlockError::ValidateProposal(
+                        "inbound failure must not prevent independent sync".into(),
+                    )),
+                });
+            } else if matches!(owner, Owner::Cancelled) {
+                drop(inbound.take());
+            }
+            let mut sync = timeout(INBOUND_COMMIT_TIMEOUT + Duration::from_secs(2), sync_wait)
+                .await
+                .expect("inbound ownership must not hold up sync indefinitely")??;
+            if !matches!(owner, Owner::Successful) {
+                peers
+                    .expect_request(Request::BlockDownload {
+                        hash,
+                        advertiser: None,
+                    })
+                    .await
+                    .respond(Response::Blocks(vec![Available((
+                        block.clone(),
+                        Some(advertiser),
+                    ))]));
+                let second = verifier
+                    .expect_request(zebra_consensus::Request::Commit(block.clone()))
+                    .await;
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                        block.clone().into(),
+                    ))
+                    .await?;
+                second.respond(hash);
+            }
+            assert_eq!(sync.next().await.unwrap()?, (Height(2), hash));
+            // Consume cancelled/stalled mock senders, without turning their outcomes into shared
+            // results or leaving deferred verifier calls behind.
+            if let Some(first) = first {
+                first.respond(hash);
+            }
+            if let Some(download) = compact_download {
+                download.respond_error("the compact advertiser never supplied its body".into());
+            }
+            verifier.expect_no_requests().await;
+            peers.expect_no_requests().await;
+            Ok::<_, BoxError>(())
+        })
+        .await
+        .unwrap_or_else(|_| panic!("compact/sync owner scenario timed out: {owner:?}"))?;
+    }
+    Ok(())
+}
+
+/// Compact reconstruction screens before a single witnessed-ID snapshot and never publishes bodies.
+#[tokio::test(flavor = "multi_thread")]
+async fn compact_reconstruction_screening_and_authentication() -> Result<(), BoxError> {
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash},
+        parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
+        serialization::ZcashSerialize,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+    use zebra_network::compact::{BlockTransactions, CompactBlock};
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let (state, read, latest_chain_tip, _tip_changes) =
+        zebra_state::init(StateConfig::ephemeral(), &network, Height(0), 0).await;
+    let state = Buffer::new(state, 10);
+    let genesis = block::genesis::regtest_genesis_block();
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.clone().into(),
+        ))
+        .await?;
+    let coinbase = |height| {
+        Arc::new(Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(
+                Amount::try_from(1).unwrap(),
+                transparent::Script::new(&[0x51]),
+            )],
+            LockTime::unlocked(),
+            height,
+        ))
+    };
+    let mut block =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.zcash_deserialize_into::<Block>()?;
+    let transaction = block
+        .transactions
+        .iter()
+        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+        .unwrap()
+        .clone();
+    // Commit a coinbase-only parent before admitting a child above the published non-finalized tip.
+    for height in [Height(1), Height(2)] {
+        let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await?
+        else {
+            panic!("chain-info request must return chain info");
+        };
+        block.transactions = vec![coinbase(height)];
+        if height == Height(2) {
+            block.transactions.push(transaction.clone());
+        }
+        let header = Arc::make_mut(&mut block.header);
+        header.previous_block_hash = info.tip_hash;
+        header.difficulty_threshold = info.expected_difficulty;
+        header.time = info.cur_time.into();
+        header.merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block.header).commitment_bytes =
+            <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &info
+                    .chain_history_root
+                    .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+                &block.auth_data_root(),
+            ))
+            .into();
+        if height == Height(1) {
+            state
+                .clone()
+                .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                    CheckpointVerifiedBlock::from(Arc::new(block.clone())).into(),
+                ))
+                .await?;
+        }
+    }
+    let block = Arc::new(block);
+    let compact = Arc::new(CompactBlock::from_block(&block, 7)?);
+
+    let mut bytes = transaction.zcash_serialize_to_vec()?;
+    let signature_byte = bytes.len() - 1 - usize::from(transaction.orchard_bundle().is_none());
+    bytes[signature_byte] ^= 1;
+    let wrong: UnminedTx = bytes.zcash_deserialize_into::<Arc<Transaction>>()?.into();
+    let correct: UnminedTx = transaction.into();
+    assert_eq!(correct.id.mined_id(), wrong.id.mined_id());
+    assert_ne!(correct.id, wrong.id);
+
+    let (setup_tx, setup_rx) = oneshot::channel();
+    let mut inbound = Inbound::new(1, setup_rx).with_compact_relay(network.clone(), read.clone());
+    let mut mempool = MockService::build().for_unit_tests();
+    let mut peer_set = MockService::build().for_unit_tests();
+    let (block_verifier, mut verifier_called) = recording_block_verifier();
+    let (misbehavior_sender, mut misbehavior) = tokio::sync::mpsc::channel(1);
+    assert!(setup_tx
+        .send(InboundSetupData {
+            network: network.clone(),
+            sync_downloads: Default::default(),
+            address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                SocketAddr::from(([0, 0, 0, 0], 0)),
+                PeerServices::NODE_NETWORK,
+                &network,
+                DEFAULT_MAX_CONNS_PER_IP,
+                Span::none(),
+            ))),
+            block_download_peer_set: Buffer::new(BoxService::new(peer_set.clone()), 1),
+            block_verifier,
+            mempool: Buffer::new(BoxService::new(mempool.clone()), 1),
+            state: state.clone(),
+            latest_chain_tip,
+            misbehavior_sender,
+        })
+        .is_ok());
+
+    let mut malformed = (*compact).clone();
+    malformed.prefilled.clear();
+    let mut wrong_height = (*compact).clone();
+    wrong_height.prefilled[0].1 = coinbase(Height(3));
+    let mut wrong_parent = (*compact).clone();
+    Arc::make_mut(&mut wrong_parent.header).previous_block_hash = block::Hash([0; 32]);
+    let mut wrong_time = (*compact).clone();
+    Arc::make_mut(&mut wrong_time.header).time = genesis.header.time;
+    let mut wrong_difficulty = (*compact).clone();
+    Arc::make_mut(&mut wrong_difficulty.header).difficulty_threshold =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+            .zcash_deserialize_into::<Block>()?
+            .header
+            .difficulty_threshold;
+    for compact in [
+        malformed,
+        wrong_height,
+        wrong_parent,
+        wrong_time,
+        wrong_difficulty,
+    ] {
+        assert!(timeout(
+            Duration::from_secs(5),
+            inbound
+                .ready()
+                .await?
+                .call(Request::CompactBlockTransactions(Arc::new(compact)),)
+        )
+        .await?
+        .is_err());
+    }
+    mempool.expect_no_requests().await;
+    assert_eq!(
+        timeout(
+            Duration::from_secs(5),
+            inbound
+                .ready()
+                .await?
+                .call(Request::CheckCompactHeader(compact.clone()))
+        )
+        .await??,
+        Response::Nil,
+    );
+    mempool.expect_no_requests().await;
+
+    let query = inbound
+        .ready()
+        .await?
+        .call(Request::CompactBlockTransactions(compact.clone()));
+    let serve = async {
+        mempool
+            .expect_request(mempool::Request::TransactionIds)
+            .await
+            .respond(mempool::Response::TransactionIds(HashSet::from([
+                correct.id, wrong.id,
+            ])));
+        mempool
+            .expect_request(mempool::Request::TransactionsById(HashSet::from([
+                correct.id
+            ])))
+            .await
+            .respond(mempool::Response::Transactions(vec![correct]));
+    };
+    let (response, ()) = timeout(Duration::from_secs(5), async {
+        futures::join!(query, serve)
+    })
+    .await?;
+    let Response::CompactBlockTransactions(candidates) = response? else {
+        panic!("compact lookup must return candidates");
+    };
+    let reconstruction = compact.clone().reconstruct(candidates)?;
+    assert!(reconstruction.missing_indexes().is_empty());
+    let reconstructed = reconstruction.finish(BlockTransactions {
+        block_hash: block.hash(),
+        transactions: Vec::new(),
+    })?;
+    assert_eq!(reconstructed.block(), &block);
+
+    let mut wrong_branch = (*block).clone();
+    wrong_branch.transactions[0] = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu6,
+        block.transactions[0].inputs(),
+        block.transactions[0].outputs(),
+        LockTime::unlocked(),
+        Height(2),
+    ));
+    Arc::make_mut(&mut wrong_branch.header).merkle_root = wrong_branch
+        .transactions
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+    let wrong_branch = Arc::new(CompactBlock::from_block(&wrong_branch, 0)?)
+        .reconstruct(
+            wrong_branch
+                .transactions
+                .iter()
+                .skip(1)
+                .cloned()
+                .map(Into::into)
+                .collect(),
+        )?
+        .finish(BlockTransactions {
+            block_hash: wrong_branch.hash(),
+            transactions: Vec::new(),
+        })?;
+    let error = timeout(
+        Duration::from_secs(5),
+        inbound.ready().await?.call(Request::CheckCompactBlock(
+            wrong_branch.block().clone(),
+            Some(wrong_branch),
+        )),
+    )
+    .await?
+    .expect_err("Merkle evidence must not bypass the network's consensus branch ID");
+    assert_eq!(
+        error.to_string(),
+        "transaction has wrong consensus branch id for block network upgrade"
+    );
+
+    let ReadResponse::EarlyRelayCache(cache) =
+        read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
+    else {
+        panic!("cache request must return the early-relay cache");
+    };
+    let mut forged = (*block).clone();
+    forged.transactions[1] = wrong.transaction;
+    for evidence in [None, Some(reconstructed.clone())] {
+        assert!(timeout(
+            Duration::from_secs(5),
+            inbound.ready().await?.call(Request::CheckCompactBlock(
+                Arc::new(forged.clone()),
+                evidence
+            ))
+        )
+        .await?
+        .is_err());
+    }
+    for (checked, evidence) in [
+        (block.clone(), None),
+        (reconstructed.block().clone(), Some(reconstructed.clone())),
+        (block.clone(), Some(reconstructed.clone())),
+    ] {
+        assert_eq!(
+            timeout(
+                Duration::from_secs(5),
+                inbound
+                    .ready()
+                    .await?
+                    .call(Request::CheckCompactBlock(checked, evidence))
+            )
+            .await??,
+            Response::Nil
+        );
+    }
+    assert!(cache.get(&block.hash()).is_none());
+    let zebra_state::Response::EarlyRelay(Some(guard)) = state
+        .clone()
+        .oneshot(zebra_state::Request::EarlyRelay {
+            block: block.clone(),
+            require_authentication: true,
+            origin: zebra_state::EarlyRelayOrigin::Peer,
+        })
+        .await?
+    else {
+        panic!("the authenticated next-tip candidate must receive a guard");
+    };
+    guard.reject();
+    for request in [
+        Request::CheckCompactHeader(compact.clone()),
+        Request::CompactBlockTransactions(compact),
+        Request::CheckCompactBlock(block.clone(), Some(reconstructed)),
+    ] {
+        assert!(
+            timeout(Duration::from_secs(5), inbound.ready().await?.call(request),)
+                .await?
+                .is_err()
+        );
+    }
+    assert!(matches!(
+        read.oneshot(ReadRequest::Block(block.hash().into()))
+            .await?,
+        ReadResponse::Block(None)
+    ));
+    assert!(verifier_called.try_recv().is_err());
+    assert!(misbehavior.try_recv().is_err());
+    mempool.expect_no_requests().await;
+    peer_set.expect_no_requests().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compact_header_screening_rejects_stale_parents_before_proof_of_work() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(30), async {
+        let (mut state, read, _tip, _changes) =
+            zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height(0), 0).await;
+        let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        state
+            .ready()
+            .await
+            .unwrap()
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                genesis.into(),
+            ))
+            .await
+            .unwrap();
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let mut compact = zebra_network::compact::CompactBlock::from_block(&block, 0).unwrap();
+        // Invalid proof of work must not mask the cheaper stale-parent rejection.
+        Arc::make_mut(&mut compact.header).solution =
+            zebra_chain::work::equihash::Solution::Regtest([0; 36]);
+        let compact = Arc::new(compact);
+        let mut mempool: MockService<_, _, PanicAssertion, BoxError> =
+            MockService::build().for_unit_tests();
+        for request in [
+            Request::CheckCompactHeader(compact.clone()),
+            Request::CompactBlockTransactions(compact),
+        ] {
+            let error = super::super::compact_request(
+                request,
+                Mainnet,
+                read.clone(),
+                Buffer::new(BoxService::new(mempool.clone()), 1),
+                Arc::new(tokio::sync::Semaphore::new(3)),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "compact header does not extend the committed best tip"
+            );
+        }
+        mempool.expect_no_requests().await;
+    })
+    .await
+    .expect("stale compact headers are rejected without checking proof of work");
+}
+
+#[test]
+fn compact_header_screening_checks_proof_of_work_and_shape() {
+    let block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Block>()
+        .unwrap();
+    let mut compact = zebra_network::compact::CompactBlock::from_block(&block, 0).unwrap();
+    assert!(super::super::screen_compact_header(&compact, &Mainnet).is_ok());
+    Arc::make_mut(&mut compact.header).solution =
+        zebra_chain::work::equihash::Solution::Regtest([0; 36]);
+    assert!(super::super::screen_compact_header(&compact, &Mainnet).is_err());
+    let network = Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    assert!(super::super::screen_compact_header(&compact, &network).is_ok());
+    compact.prefilled[0].0 = 1;
+    assert!(super::super::screen_compact_header(&compact, &network).is_err());
+}
+
+/// Tree roots requests are answered from the finalized state, and refused for other chains.
+#[tokio::test]
+async fn inbound_answers_tree_roots_from_read_state() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height::MAX, 0).await;
+    let state = ServiceBuilder::new().buffer(1).service(state);
+    let genesis: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.clone().into(),
+        ))
+        .await?;
+    let (verifier, _verifier_called) = recording_block_verifier();
+    let (inbound, _peers, _misbehavior) =
+        setup_gossiped_block_misbehavior_with_state(verifier, state, latest_chain_tip).await;
+    let mut inbound = inbound.with_compact_relay(Mainnet, read_state);
+
+    for (final_hash, expected) in [
+        (
+            genesis.hash(),
+            Some(vec![zebra_chain::parallel::tree::TreeRootsProof {
+                roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                successor_auth_data_root: None,
+            }]),
+        ),
+        (zebra_chain::block::Hash([1; 32]), None),
+    ] {
+        let response = timeout(
+            Duration::from_secs(5),
+            inbound.ready().await?.call(Request::TreeRoots {
+                start_height: Height(0),
+                final_hash,
+                count: 1,
+                excluded_peer: None,
+            }),
+        )
+        .await??;
+        assert_eq!(response, Response::TreeRoots(expected));
+    }
 
     Ok(())
 }

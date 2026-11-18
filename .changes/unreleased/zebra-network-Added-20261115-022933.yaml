@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added checkpoint tree-root retrieval and serving through `Request::TreeRoots` and `Response::TreeRootsFromPeer`.
+time: 2026-11-15T02:29:33.076332418+01:00

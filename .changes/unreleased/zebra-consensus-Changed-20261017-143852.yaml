@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Flush partial shielded verification batches after block transaction work is queued, without adding flush bookkeeping to transparent-only blocks.
+time: 2026-10-17T14:38:52.335286226+02:00

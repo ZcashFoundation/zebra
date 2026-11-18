@@ -41,18 +41,22 @@ bellman = { workspace = true }
 bls12_381 = { workspace = true }
 groth16 = { workspace = true }
 halo2 = { workspace = true }
+jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
+sinsemilla = { workspace = true }
 
 chrono = { workspace = true }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 futures = { workspace = true }
 futures-util = { workspace = true }
 metrics = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true, features = ["timeout", "util", "buffer"] }
 tracing = { workspace = true }
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
@@ -61,7 +65,7 @@ sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
 zcash_primitives.workspace = true
-zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+wagyu-zcash-parameters-6 = "0.2"
 zcash_transparent = { workspace = true }
 libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
@@ -85,13 +89,16 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-jubjub = { workspace = true }
+zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
+zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+wagyu-zcash-parameters = "0.2"
 
 hex = { workspace = true }
 nonempty = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 spandoc = { workspace = true }
+sinsemilla = { workspace = true, features = ["test-dependencies"] }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tower = { workspace = true, features = ["limit"] }

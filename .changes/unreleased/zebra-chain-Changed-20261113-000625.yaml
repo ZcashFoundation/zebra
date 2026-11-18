@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Decoded transactions retain their exact canonical byte counts, and block size accounting composes transaction lengths without reserializing decoded bodies. Rebuilt transactions are measured before their sizes are used ([#12287](https://github.com/ZcashFoundation/zebra/pull/12287)).
+time: 2026-11-13T00:06:25.524753264+01:00

@@ -146,6 +146,7 @@ fn candidate_set_updates_are_rate_limited() {
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -260,6 +261,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),

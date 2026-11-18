@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Sapling batch verification weighs each bundle by its number of spend and output proofs ([#11714](https://github.com/ZcashFoundation/zebra/issues/11714)).
+time: 2026-10-13T15:31:30.139732239+02:00

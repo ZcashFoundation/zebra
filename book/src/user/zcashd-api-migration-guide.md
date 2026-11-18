@@ -37,6 +37,10 @@ replacement that does the same job.
 
 ### Pruned history
 
+Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
+retention, isolated database kinds, monitoring, and recovery. Enabling pruning immediately removes
+`NODE_NETWORK` from peer advertisements and rejects zcashd sidecars, even before deletion.
+
 For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
 (`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.
 Verbosity 3 also fails if a spent output's parent transaction is unavailable, even when the
@@ -52,9 +56,11 @@ remains available below that floor. An archive reports `pruned: false` and omits
 These fields describe stored data, not a configured retention target.
 
 Historical headers, transaction IDs, address balances and UTXOs, treestates, and subtrees remain
-available from retained indexes. The [gRPC history contract](../api.md#historical-data-availability)
-uses an explicit status rather than silently ending a stream when bodies are unavailable.
-These contracts do not enable transaction-body deletion or add a pruning configuration option.
+available from retained indexes. These do not replace the bodies required for historical wallet
+rescans or indexer bootstrap. The [gRPC history contract](../api.md#historical-data-availability)
+returns `FAILED_PRECONDITION` for pruned bodies and preserves terminal stream errors after earlier
+results, even with a full data queue. A consumer that stalls while successful results are being
+queued receives `DEADLINE_EXCEEDED`. Clients must check range completeness if the connection fails.
 
 ### Pruned output versions
 

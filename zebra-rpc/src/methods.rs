@@ -35,6 +35,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
     ops::RangeInclusive,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -61,7 +62,7 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
-    block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
+    block::{self, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
@@ -71,10 +72,7 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade,
     },
-    serialization::{
-        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
-    },
+    serialization::{BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
@@ -85,8 +83,8 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, RouterError};
-use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
+use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService, MempoolTxSubscriber};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -398,6 +396,10 @@ pub trait Rpc {
     ///
     /// Historical tree states remain available without transaction bodies, using retained
     /// headers to resolve the block's identity, height, and time.
+    ///
+    /// Zebra doesn't store the note commitment trees of blocks that fast checkpoint sync committed
+    /// without them. At those heights, this method returns error -20:
+    /// "tree state unavailable: fast-synced height".
     #[method(name = "z_gettreestate")]
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse>;
 
@@ -588,6 +590,10 @@ pub trait Rpc {
     /// Submits block to the node to be validated and committed.
     /// Returns the [`SubmitBlockResponse`] for the operation, as a JSON string.
     ///
+    /// Exact successful proposal submissions are eligible for early relay after solved proof-of-work,
+    /// size, current-time and live-state checks. Other submissions undergo normal validation; RPC
+    /// responses still wait for verification and commit.
+    ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
     /// method: post
     /// tags: mining
@@ -595,11 +601,11 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hexdata`: (string, required)
-    /// - `jsonparametersobject`: (string, optional) - currently ignored
+    /// - `jsonparametersobject`: (any JSON value, optional) - currently ignored
     ///
     /// # Notes
     ///
-    ///  - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.
+    /// The optional second argument, including any `workid`, is currently ignored.
     #[method(name = "submitblock")]
     async fn submit_block(
         &self,
@@ -975,9 +981,20 @@ where
     /// Last best-tip publication served to a miner, shared by all RPC clones.
     first_template_tip: Arc<Mutex<Option<(block::Hash, Instant)>>>,
 
+    /// Read-only access to the block verifier's successful proposals for submission decoding.
+    prepared_blocks: Option<zebra_consensus::PreparedBlockCache>,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
+
+    /// One-shot construction-entry clock change; zero means no pending change.
+    #[cfg(test)]
+    template_build_time: Option<Arc<std::sync::atomic::AtomicU32>>,
+
+    /// Records which thread performs real template construction in executor-isolation tests.
+    #[cfg(test)]
+    template_build_thread: Option<Arc<std::sync::OnceLock<std::thread::ThreadId>>>,
 }
 
 /// A type alias for the last event logged by the server.
@@ -1076,8 +1093,13 @@ where
             last_warn_error_log_rx,
             gbt,
             first_template_tip: Default::default(),
+            prepared_blocks: None,
             #[cfg(test)]
             template_clock: None,
+            #[cfg(test)]
+            template_build_time: None,
+            #[cfg(test)]
+            template_build_thread: None,
         };
 
         // run the process queue
@@ -1107,6 +1129,21 @@ where
         template.into()
     }
 
+    /// Shares locally validated pending bodies with inbound peers.
+    pub fn with_submitted_blocks(mut self, cache: crate::SubmittedBlockCache) -> Self {
+        self.gbt.submitted_blocks = cache;
+        self
+    }
+
+    /// Reuses the consensus verifier's parsed proposal transactions when decoding mined submissions.
+    ///
+    /// The cache must come from the same verifier supplied to [`Self::new`]. Submissions still
+    /// undergo normal verification, including the submitted header's proof of work.
+    pub fn with_prepared_blocks(mut self, cache: zebra_consensus::PreparedBlockCache) -> Self {
+        self.prepared_blocks = Some(cache);
+        self
+    }
+
     /// Reads wall time for template deadlines and serve-time timestamp validation.
     fn template_clock_now(&self) -> DateTime32 {
         #[cfg(test)]
@@ -1117,12 +1154,112 @@ where
         DateTime32::now()
     }
 
+    /// Returns the note commitment tree roots and sizes that fast checkpoint sync stored for the
+    /// block with `hash`, or `None` if it committed that block with its trees.
+    async fn fast_sync_tree_roots(
+        &self,
+        hash: block::Hash,
+    ) -> Result<Option<zebra_state::FastSyncTreeRoots>> {
+        let zebra_state::ReadResponse::FastSyncTreeRoots(roots) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .map_misc_error()?
+        else {
+            unreachable!("unmatched response to a FastSyncTreeRoots request");
+        };
+
+        Ok(roots)
+    }
+
+    /// Builds off the async executor, retaining fallback ownership even if its caller cancels.
+    async fn build_block_template(
+        &self,
+        miner_params: &MinerParams,
+        chain_info: zebra_state::GetBlockTemplateChainInfo,
+        server_long_poll_id: LongPollId,
+        mempool_txs: Vec<transaction::VerifiedUnminedTx>,
+        mempool_tx_deps: mempool::TransactionDependencies,
+        build_guard: tokio::sync::OwnedMutexGuard<()>,
+    ) -> Result<(BlockTemplateResponse, tokio::sync::OwnedMutexGuard<()>)> {
+        let network = self.network.clone();
+        let miner_params = miner_params.clone();
+        let coinbase_cache = self.gbt.coinbase_cache();
+        #[cfg(test)]
+        let (clock, build_time, build_thread) = (
+            self.template_clock.clone(),
+            self.template_build_time.clone(),
+            self.template_build_thread.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            {
+                if let Some(thread) = build_thread {
+                    let _ = thread.set(std::thread::current().id());
+                }
+                if let (Some(clock), Some(build_time)) = (clock, build_time) {
+                    let timestamp = build_time.swap(0, std::sync::atomic::Ordering::SeqCst);
+                    if timestamp != 0 {
+                        clock.store(timestamp, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+            BlockTemplateResponse::from_mempool(
+                &network,
+                &coinbase_cache,
+                &miner_params,
+                &chain_info,
+                server_long_poll_id,
+                mempool_txs,
+                mempool_tx_deps,
+            )
+            .map(|template| (template, build_guard))
+        })
+        .await
+        .map_misc_error()?
+    }
+
+    /// Checks uncached templates built with overridden miner parameters in the background.
+    ///
+    /// Cached fallbacks instead retain their generation, so failures withdraw the served work.
+    fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
+        let network = self.network.clone();
+        let template = template.clone();
+        let verifier = self.gbt.block_verifier_router();
+        tokio::spawn(async move {
+            let proposal = tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            })
+            .await;
+            let result = match proposal {
+                Ok(Ok(proposal)) => tokio::time::timeout(
+                    types::get_block_template::PROPOSAL_CHECK_TIMEOUT,
+                    verifier.oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal))),
+                )
+                .await
+                .map_err(|elapsed| elapsed.to_string())
+                .and_then(|result| result.map(|_| ()).map_err(|error| error.to_string())),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = result {
+                tracing::debug!(%error, "fallback block template failed validation");
+            }
+        });
+    }
+
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
     /// `getblocktemplate` calls only validate the tip against the state instead of reading the
     /// mempool, selecting transactions, and building a coinbase transaction.
     ///
+    /// Subscribes to `mempool_changes` to rebuild after verified transactions change.
+    ///
     /// Returns `None` if mining isn't configured.
-    pub fn spawn_block_template_updater(&self) -> Option<JoinHandle<()>> {
+    pub fn spawn_block_template_updater(
+        &self,
+        mempool_changes: &MempoolTxSubscriber,
+    ) -> Option<JoinHandle<()>> {
         let miner_params = self.gbt.miner_params()?.clone();
         let template_cache = self.gbt.template_cache()?.clone();
 
@@ -1133,9 +1270,11 @@ where
                 self.gbt.coinbase_cache(),
                 template_cache,
                 self.mempool.clone(),
+                mempool_changes.subscribe(),
                 self.read_state.clone(),
                 self.latest_chain_tip.clone(),
                 self.gbt.sync_status(),
+                self.gbt.block_verifier_router(),
             )
             .in_current_span(),
         ))
@@ -1154,25 +1293,25 @@ where
     ///
     /// # Correctness
     ///
-    /// Long polling must not fall through to the synchronous path below while this cache is
-    /// serving. That path derives its own long poll ID from a fresh state and mempool read, so
-    /// with two independent ID sources neither side ever matches the other: the client alternates
-    /// between a cached template and a freshly built one, each call returning immediately, and it
-    /// never waits. Its work is cancelled on every response, so it mines nothing.
+    /// Long polling must not alternate between cached work and independently generated fallback
+    /// identities. While an updater is alive it owns initialization and refreshes; requests wait
+    /// for its publications rather than starting competing builds after a cache timeout.
     ///
-    /// Returns `None` if there is no updater task, if it hasn't caught up with a recent chain tip
-    /// change, or if the chain tip channel closed.
+    /// Returns `None` when no live updater can supply usable work or unowned work needs refreshing.
+    /// Sync and build failures are returned rather than hidden behind repeated cache waits.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
         long_poll_started: DateTime32,
-    ) -> Option<BlockTemplateResponse> {
-        let cache = self.gbt.template_cache()?;
+    ) -> Result<Option<BlockTemplateResponse>> {
+        let Some(cache) = self.gbt.template_cache() else {
+            return Ok(None);
+        };
 
-        // Skip the tip read when there's nothing to serve: without an updater task, every request
-        // builds its own template anyway.
-        if cache.is_empty() {
-            return None;
+        // Only handlers without a live updater may build on demand. An updater owns cold starts
+        // and boundary refreshes too, so its timeout cannot fan out another proof per request.
+        if cache.is_uninitialized() && !cache.updater_is_running() {
+            return Ok(None);
         }
 
         // Subscribe before the first read below. A template published between reading the cache
@@ -1189,20 +1328,65 @@ where
         tip_change.mark_best_tip_seen();
 
         loop {
-            let template = self.precomputed_template_for_state_tip(cache).await?;
+            let refresh_at = cache.fallback_refresh_at();
+            if refresh_at.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Ok(None);
+            }
+            types::get_block_template::check_synced_to_tip(
+                &self.network,
+                self.latest_chain_tip.clone(),
+                self.gbt.sync_status(),
+            )?;
+            let Some(template) = self.precomputed_template_for_state_tip(cache).await else {
+                if let Some((error_tip, error)) = cache.build_error() {
+                    let current_tip = tokio::time::timeout(
+                        precompute::SNAPSHOT_TIMEOUT,
+                        precompute::state_tip_hash(self.read_state.clone()),
+                    )
+                    .await
+                    .map_misc_error()??;
+                    if current_tip == error_tip {
+                        return Err(error);
+                    }
+                    if error_tip.is_none() {
+                        // A failed snapshot has no parent identity. Recheck it instead of
+                        // replaying an error from before genesis, while still reporting
+                        // current state failures.
+                        tokio::time::timeout(
+                            precompute::SNAPSHOT_TIMEOUT,
+                            types::get_block_template::fetch_chain_info(self.read_state.clone()),
+                        )
+                        .await
+                        .map_misc_error()??;
+                    }
+                }
+                if cache.updater_is_running() {
+                    tokio::select! {
+                        () = template_changes.changed() => {}
+                        _ = tokio::time::sleep(precompute::RETRY_DELAY) => {}
+                    }
+                    continue;
+                }
+                return Ok(None);
+            };
 
-            let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
+            let Some(work_id) = cache.work_id(template.long_poll_id, Some(template.as_ref()))
+            else {
+                continue;
+            };
+            let is_client_template = Some(work_id) == client_long_poll_id;
             let now = self.template_clock_now();
             let max_time_reached =
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = (*template).clone();
+                let mut template = Arc::unwrap_or_clone(template).response;
+                template.long_poll_id = work_id;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
 
-                return Some(template);
+                return Ok(Some(template));
             }
 
             // The client is long polling on exactly this template, so wait for a reason to send
@@ -1222,10 +1406,19 @@ where
 
                 tip_changed = tip_change.best_tip_changed() => {
                     // A closed chain tip channel means Zebra is shutting down.
-                    tip_changed.ok()?;
+                    if tip_changed.is_err() {
+                        return Ok(None);
+                    }
                 }
 
                 () = template_changes.changed() => {}
+
+                () = async {
+                    match refresh_at {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => return Ok(None),
 
                 // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
                 () = wait_for_max_time, if long_poll_started <= max_time => {}
@@ -1233,24 +1426,34 @@ where
         }
     }
 
-    /// Returns the precomputed template, if it extends the tip the state has committed.
+    /// Returns work extending the committed tip or the current proof-of-work checked parent.
     ///
     /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
-    /// tip change, re-reading the tip every time it publishes.
+    /// tip change, re-reading the tip on cache publications and committed-tip changes.
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
-    ) -> Option<Arc<BlockTemplateResponse>> {
+    ) -> Option<Arc<precompute::CachedTemplate>> {
         // Subscribe before the first read below, so a template published while this call is
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
+        // Commitment can withdraw a candidate between the two state reads below while its cached
+        // child remains usable. Observe tip changes too, without requiring another publication.
+        let mut tip_change = self.latest_chain_tip.clone();
+        tip_change.mark_best_tip_seen();
 
-        // Falling back to an on-demand build costs a shielded coinbase proof per request, so a
-        // shielded miner address waits longer for the updater than a transparent one.
+        // This bounds each cache/state wait. A live updater keeps ownership across timeouts;
+        // if it has stopped, requests may use the serialized fallback instead.
         let timeout = precompute::new_tip_timeout(self.gbt.miner_params()?);
 
         tokio::time::timeout(timeout, async move {
             loop {
+                types::get_block_template::check_synced_to_tip(
+                    &self.network,
+                    self.latest_chain_tip.clone(),
+                    self.gbt.sync_status(),
+                )
+                .ok()?;
                 // The state publishes committed blocks before updating `latest_chain_tip`.
                 // Read its tip on every cache publication, including after a wait, so neither
                 // a lagging tip channel nor a tip snapshot from before the wait admits stale work.
@@ -1267,10 +1470,49 @@ where
                 if let Some(template) =
                     cache.template_for_tip(tip_hash, &self.network, self.template_clock_now())
                 {
+                    types::get_block_template::check_synced_to_tip(
+                        &self.network,
+                        self.latest_chain_tip.clone(),
+                        self.gbt.sync_status(),
+                    )
+                    .ok()?;
                     return Some(template);
                 }
 
-                template_changes.changed().await;
+                if let Some(candidate) = precompute::mining_candidate(self.read_state.clone()).await
+                {
+                    if let Some(template) = cache.template_for_tip(
+                        candidate.tip_hash,
+                        &self.network,
+                        self.template_clock_now(),
+                    ) {
+                        // A detached state response can outlive its verifier. Check the live
+                        // subscription after cloning cached work, without waiting for the updater.
+                        let ReadResponse::MiningCandidateChanges(candidates) = self
+                            .read_state
+                            .clone()
+                            .oneshot(ReadRequest::MiningCandidateChanges)
+                            .await
+                            .ok()?
+                        else {
+                            return None;
+                        };
+                        if candidates.is_current(candidate.tip_hash) {
+                            types::get_block_template::check_synced_to_tip(
+                                &self.network,
+                                self.latest_chain_tip.clone(),
+                                self.gbt.sync_status(),
+                            )
+                            .ok()?;
+                            return Some(template);
+                        }
+                    }
+                }
+
+                tokio::select! {
+                    () = template_changes.changed() => {}
+                    result = tip_change.best_tip_changed() => result.ok()?,
+                }
             }
         })
         .await
@@ -1281,6 +1523,38 @@ where
     /// Returns a reference to the configured network.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// Returns whether synchronization and peers permit internal mining.
+    ///
+    /// Public networks require recently live peers. Regtest and configured Testnet may mine
+    /// without peers; networks with Proof-of-Work enabled still require synchronization.
+    pub fn internal_mining_is_enabled(&self) -> bool {
+        (self.network.disable_pow() || self.gbt.sync_status().is_close_to_tip())
+            && ((!matches!(self.network, Network::Mainnet) && !self.network.is_default_testnet())
+                || !self
+                    .address_book
+                    .recently_live_peers(chrono::Utc::now())
+                    .is_empty())
+    }
+
+    /// Reads the committed best tip directly from state, before any lagging tip notification.
+    ///
+    /// Callers must bound this state read with their request deadline.
+    pub fn read_committed_tip(
+        &self,
+    ) -> impl Future<Output = Result<Option<block::Hash>>> + Send + 'static {
+        let read_state = self.read_state.clone();
+        async move {
+            let response = read_state
+                .oneshot(ReadRequest::Tip)
+                .await
+                .map_error(server::error::LegacyCode::default())?;
+            let ReadResponse::Tip(tip) = response else {
+                unreachable!("unmatched response to a tip request");
+            };
+            Ok(tip.map(|(_, hash)| hash))
+        }
     }
 
     /// Sets the estimated end of support height reported by the `getdeprecationinfo` RPC.
@@ -1586,8 +1860,10 @@ where
 
         // Reference for the legacy error code:
         // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1259-L1260>
-        let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex)
+        let raw_transaction_bytes = hex_data::decode(raw_transaction_hex.as_bytes())
             .map_error(server::error::LegacyCode::Deserialization)?;
+        // Free the hex string before awaiting verification, as consuming decoding used to.
+        drop(raw_transaction_hex);
         let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
             .map_error(server::error::LegacyCode::Deserialization)?;
 
@@ -1817,45 +2093,11 @@ where
                 unreachable!("unmatched response to a OrchardTree request");
             };
 
-            let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
-
-            // This could be `None` if there's a chain reorg between state queries.
-            let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
-
-            let final_orchard_root = match nu5_activation {
-                Some(activation_height) if height >= activation_height => {
-                    Some(orchard_tree.root().into())
-                }
-                _other => None,
-            };
-
-            let sapling = SaplingTrees {
-                size: sapling_tree_size,
-            };
-
-            let orchard_tree_size = orchard_tree.count();
-            let orchard = OrchardTrees {
-                size: orchard_tree_size,
-            };
-
             let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
                 ironwood_tree_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to an IronwoodTree request");
-            };
-
-            // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
-            // Ironwood tree is empty (size 0).
-            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
-            let ironwood = IronwoodTrees {
-                size: ironwood_tree.count(),
-            };
-
-            let trees = GetBlockTrees {
-                sapling,
-                orchard,
-                ironwood,
             };
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
@@ -1869,6 +2111,44 @@ where
                 block_info_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a BlockInfo request");
+            };
+
+            // Before NU6.3 the Ironwood tree is empty (size 0).
+            let (orchard_root, orchard_tree_size, ironwood_tree_size) =
+                match (orchard_tree, ironwood_tree) {
+                    (Some(orchard_tree), Some(ironwood_tree)) => (
+                        orchard_tree.root(),
+                        orchard_tree.count(),
+                        ironwood_tree.count(),
+                    ),
+                    // Fast checkpoint sync stores only the roots and sizes of the trees it skipped.
+                    // Read them after `futs` is drained, so this read can't wait on its requests.
+                    _ => {
+                        let roots = self
+                            .fast_sync_tree_roots(hash)
+                            .await?
+                            // This could be `None` if there's a chain reorg between state queries.
+                            .ok_or_misc_error("missing Orchard or Ironwood tree")?;
+                        (roots.roots.orchard, roots.orchard_size, roots.ironwood_size)
+                    }
+                };
+
+            let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
+            let final_orchard_root = match nu5_activation {
+                Some(activation_height) if height >= activation_height => Some(orchard_root.into()),
+                _other => None,
+            };
+
+            let trees = GetBlockTrees {
+                sapling: SaplingTrees {
+                    size: sapling_tree_size,
+                },
+                orchard: OrchardTrees {
+                    size: orchard_tree_size,
+                },
+                ironwood: IronwoodTrees {
+                    size: ironwood_tree_size,
+                },
             };
 
             let delta = block_info.as_ref().and_then(|d| {
@@ -1971,8 +2251,18 @@ where
                 panic!("unexpected response to SaplingTree request")
             };
 
-            // This could be `None` if there's a chain reorg between state queries.
-            let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
+            // Fast checkpoint sync stores only the roots and sizes of the trees it skipped.
+            let (sapling_root, sapling_tree_size) = match sapling_tree {
+                Some(sapling_tree) => (sapling_tree.root(), sapling_tree.count()),
+                None => {
+                    let roots = self
+                        .fast_sync_tree_roots(hash)
+                        .await?
+                        // This could be `None` if there's a chain reorg between state queries.
+                        .ok_or_misc_error("missing Sapling tree")?;
+                    (roots.roots.sapling, roots.sapling_size)
+                }
+            };
 
             let zebra_state::ReadResponse::Depth(depth) = self
                 .read_state
@@ -1998,10 +2288,9 @@ where
             nonce.reverse();
 
             let sapling_activation = NetworkUpgrade::Sapling.activation_height(&network);
-            let sapling_tree_size = sapling_tree.count();
             let final_sapling_root: [u8; 32] =
                 if sapling_activation.is_some() && height >= sapling_activation.unwrap() {
-                    let mut root: [u8; 32] = sapling_tree.root().into();
+                    let mut root: [u8; 32] = sapling_root.into();
                     root.reverse();
                     root
                 } else {
@@ -2143,7 +2432,7 @@ where
                         // support prioritizing transactions
                         cmp::Reverse((
                             i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                                / tx.transaction.size as u128,
+                                / tx.transaction.size() as u128,
                             // transaction hashes are compared in their serialized byte-order.
                             tx.transaction.id.mined_id(),
                         ))
@@ -2431,6 +2720,13 @@ where
         };
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
+        if sapling_tree.is_none()
+            && network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into())
+            && self.fast_sync_tree_roots(hash).await?.is_some()
+        {
+            return Err("tree state unavailable: fast-synced height")
+                .map_error(server::error::LegacyCode::Database);
+        }
 
         let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
             match read_state
@@ -2811,8 +3107,7 @@ where
 
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
-            nsm_value_balance_for_next_block, validate_block_proposal,
-            zip317::select_mempool_transactions,
+            validate_block_proposal,
         };
 
         // Clone Services
@@ -2832,6 +3127,7 @@ where
                 &self.network,
                 latest_chain_tip,
                 sync_status,
+                self.gbt.proposal_checks(),
             )
             .await;
         }
@@ -2845,6 +3141,11 @@ where
             .gbt
             .miner_params()
             .ok_or_error(0, "miner parameters are required for get_block_template")?;
+        let coinbase_cache = self.gbt.coinbase_cache();
+        let mut template_changes = self
+            .gbt
+            .template_cache()
+            .map(precompute::TemplateCache::subscribe);
 
         // - Precomputed template
         //
@@ -2854,20 +3155,38 @@ where
 
         if let Some(template) = self
             .precomputed_block_template(client_long_poll_id, long_poll_started)
-            .await
+            .await?
         {
             return Ok(self.served_block_template(template));
         }
 
-        // - Checks and fetches that can change during long polling
-        //
-        // The loop returns the server long poll ID, which should be different to the client one.
-        let (server_long_poll_id, chain_info, mempool_txs, mempool_tx_deps, submit_old) = loop {
+        // A fallback is only needed without a live updater. Its lock covers the snapshot,
+        // blocking construction and publication, so concurrent requests reuse the first result.
+        loop {
             // Check if we are synced to the tip.
             // The result of this check can change during long polling.
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
+            check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
+            let build_guard = coinbase_cache.build.clone().lock_owned().await;
+            if self
+                .gbt
+                .template_cache()
+                .is_some_and(precompute::TemplateCache::updater_is_running)
+                || template_changes
+                    .as_mut()
+                    .is_some_and(precompute::TemplateChanges::take_changed)
+            {
+                drop(build_guard);
+                if let Some(template) = self
+                    .precomputed_block_template(client_long_poll_id, long_poll_started)
+                    .await?
+                {
+                    return Ok(self.served_block_template(template));
+                }
+                continue;
+            }
             check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
@@ -2910,6 +3229,11 @@ where
                     // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
                     .or_else(|| client_long_poll_id.is_none().then(Default::default))
             else {
+                drop(build_guard);
+                tokio::select! {
+                    _ = tokio::time::sleep(precompute::RETRY_DELAY) => {}
+                    _ = latest_chain_tip.best_tip_changed() => {}
+                }
                 continue;
             };
 
@@ -2921,6 +3245,14 @@ where
                 mempool_txs.iter().map(|tx| tx.transaction.id),
             )
             .generate_id();
+            let server_work_id = self
+                .gbt
+                .template_cache()
+                .map_or(server_long_poll_id, |cache| {
+                    cache
+                        .work_id(server_long_poll_id, None)
+                        .expect("uncached snapshots have no cached-generation precondition")
+                });
 
             // Recheck after the reads: a forward clock correction can expire a live range.
             // Only notify if it was still valid when this request started, otherwise miners
@@ -2933,20 +3265,67 @@ where
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
             // - the timestamp range expired during this request.
-            if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
-                // Expired work cannot be retained, even when only the mempool changed the ID.
-                let submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
-                    now <= max_time && server_long_poll_id.submit_old(old_long_poll_id)
-                });
-
-                break (
-                    server_long_poll_id,
-                    chain_info,
-                    mempool_txs,
-                    mempool_tx_deps,
-                    submit_old,
-                );
+            if Some(&server_work_id) != client_long_poll_id.as_ref() || max_time_reached {
+                let (mut template, _build_guard) = self
+                    .build_block_template(
+                        miner_params,
+                        chain_info,
+                        server_long_poll_id,
+                        mempool_txs,
+                        mempool_tx_deps,
+                        build_guard,
+                    )
+                    .await?;
+                let ReadResponse::Tip(Some((_, committed_tip))) = read_state
+                    .clone()
+                    .oneshot(ReadRequest::Tip)
+                    .await
+                    .map_misc_error()?
+                else {
+                    return Err(ErrorObject::owned(
+                        0,
+                        "no committed chain tip available",
+                        None::<()>,
+                    ));
+                };
+                if template.previous_block_hash != committed_tip {
+                    continue;
+                }
+                check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
+                let now = self.template_clock_now();
+                if template.needs_difficulty_refresh(&self.network, now) {
+                    continue;
+                }
+                (template.cur_time, template.max_time) =
+                    template.clamped_time_range(now).ok_or_misc_error(
+                        "local clock moved backwards while building the block template",
+                    )?;
+                // Publish before starting the background check. Its verdict belongs to this
+                // exact generation, even if an updater takes ownership while the check runs.
+                let work_id = if let Some(cache) = self.gbt.template_cache() {
+                    cache.preserve_work_identity(&mut template);
+                    cache
+                        .work_id(template.long_poll_id, None)
+                        .expect("new fallback responses have no cached-generation precondition")
+                } else {
+                    template.long_poll_id
+                };
+                template.submit_old = client_long_poll_id
+                    .as_ref()
+                    .map(|old_id| now <= template.max_time && work_id.submit_old(old_id));
+                if let Some(cache) = self.gbt.template_cache() {
+                    cache.publish_fallback(
+                        template.clone(),
+                        self.network.clone(),
+                        self.gbt.block_verifier_router(),
+                    );
+                } else if !template.transactions.is_empty() {
+                    self.validate_fallback_template(&template);
+                }
+                template.long_poll_id = work_id;
+                return Ok(self.served_block_template(template));
             }
+            drop(build_guard);
 
             // - Polling wait conditions
             //
@@ -2999,7 +3378,23 @@ where
                     // around to build a template for the new tip from the state and the mempool.
                     if let Some(template) = self
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
-                        .await
+                        .await?
+                    {
+                        return Ok(self.served_block_template(template));
+                    }
+                }
+
+                // A request can age out of an unowned cache while still long polling. A later
+                // shared publication must wake it even without a tip change or mempool tick.
+                () = async {
+                    match template_changes.as_mut() {
+                        Some(changes) => changes.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(template) = self
+                        .precomputed_block_template(client_long_poll_id, long_poll_started)
+                        .await?
                     {
                         return Ok(self.served_block_template(template));
                     }
@@ -3020,69 +3415,7 @@ where
                     // Recheck wall time in the next iteration in case the clock moved backwards.
                 }
             }
-        };
-
-        // - Processing fetched data to create a transaction template
-        //
-        // Apart from random weighted transaction selection,
-        // the template only depends on the previously fetched data.
-        // This processing never fails.
-
-        tracing::debug!(
-            mempool_tx_hashes = ?mempool_txs
-                .iter()
-                .map(|tx| tx.transaction.id.mined_id())
-                .collect::<Vec<_>>(),
-            "selecting transactions for the template from the mempool"
-        );
-
-        let height = chain_info.tip_height.next().map_misc_error()?;
-        let build_started = std::time::Instant::now();
-
-        // Randomly select some mempool transactions.
-        let coinbase_cache = self.gbt.coinbase_cache();
-        let parent_nsm_value_balance = nsm_value_balance_for_next_block(&self.network, &chain_info);
-
-        let mempool_txs = select_mempool_transactions(
-            &self.network,
-            height,
-            miner_params,
-            mempool_txs,
-            mempool_tx_deps,
-            Some(&coinbase_cache),
-            parent_nsm_value_balance,
-        );
-
-        tracing::debug!(
-            selected_mempool_tx_hashes = ?mempool_txs
-                .iter()
-                .map(|#[cfg(not(test))] tx, #[cfg(test)] (_, tx)| tx.transaction.id.mined_id())
-                .collect::<Vec<_>>(),
-            "selected transactions for the template from the mempool"
-        );
-
-        // Build from the fetched snapshot, then recheck the local-clock bound before serving.
-
-        let template = BlockTemplateResponse::new_internal(
-            &self.network,
-            &coinbase_cache,
-            miner_params,
-            &chain_info,
-            server_long_poll_id,
-            mempool_txs,
-            submit_old,
-        );
-        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
-            .record(build_started.elapsed().as_secs_f64());
-
-        // Coinbase construction can take seconds. Recheck the whole advertised range after it,
-        // just as the cache does, rather than returning timestamps invalidated by clock rollback.
-        (template.max_time
-            <= self
-                .template_clock_now()
-                .saturating_add(Duration32::from_hours(2)))
-        .then(|| self.served_block_template(template))
-        .ok_or_misc_error("local clock moved backwards while building the block template")
+        }
     }
 
     async fn submit_block(
@@ -3092,8 +3425,11 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        let block: Block = match block_bytes.zcash_deserialize_into() {
-            Ok(block_bytes) => block_bytes,
+        let decoded =
+            types::get_block_template::decode_block(block_bytes, self.prepared_blocks.clone())
+                .await?;
+        let decoded = match decoded {
+            Ok(decoded) => decoded,
             Err(error) => {
                 tracing::info!(
                     ?error,
@@ -3105,18 +3441,45 @@ where
                 );
             }
         };
+        let block = decoded.block();
 
         let height = block
             .coinbase_height()
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
-
-        let block_verifier_router_response = block_verifier_router
+        let (request, validated) = match self.gbt.mined_block_notifications() {
+            Some((notifications, validated)) => (
+                zebra_consensus::Request::CommitDecoded(decoded, Some(notifications)),
+                Some(validated),
+            ),
+            None => (zebra_consensus::Request::CommitDecoded(decoded, None), None),
+        };
+        let verification = block_verifier_router
             .ready()
             .await
             .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(Arc::new(block)))
-            .await;
+            .call(request);
+        tokio::pin!(verification);
+        let mut relayed = false;
+        let block_verifier_router_response = if let Some(mut validated) = validated {
+            tokio::select! {
+                biased;
+                changed = validated.changed() => {
+                    // Only the state writer emits this event, for an exact successful proposal
+                    // after solved PoW, size/time and live parent/invalidation checks.
+                    if changed.is_ok() {
+                        if let Some(block) = validated.borrow_and_update().clone() {
+                            self.gbt.submitted_blocks.insert(block_hash, height, block);
+                            relayed = true;
+                        }
+                    }
+                    verification.await
+                }
+                result = &mut verification => result,
+            }
+        } else {
+            verification.await
+        };
 
         let chain_error = match block_verifier_router_response {
             // Currently, this match arm returns `null` (Accepted) for blocks committed
@@ -3128,19 +3491,76 @@ where
             Ok(hash) => {
                 tracing::info!(?hash, ?height, "submit block accepted");
 
-                self.gbt
-                    .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
-
                 return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
             // by downcasting from Any to VerifyChainError.
             Err(box_error) => {
+                let timed_out = box_error.is::<tower::timeout::error::Elapsed>();
                 let error = box_error
                     .downcast::<RouterError>()
                     .map(|boxed_chain_error| *boxed_chain_error);
+                if let Ok(error) = &error {
+                    if error.is_resource_pressure() {
+                        // Queue pressure and range recovery are not consensus rejections.
+                        return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+                    }
+                }
+                use zebra_consensus::{error::TransactionError, VerifyBlockError};
+                let notification_error = match &error {
+                    Ok(RouterError::Block { source }) => match source.as_ref() {
+                        VerifyBlockError::Commit(error) => Some(error),
+                        _ => None,
+                    },
+                    Ok(RouterError::Checkpoint { source }) => match source.as_ref() {
+                        zebra_consensus::VerifyCheckpointError::CommitCheckpointVerified(error) => {
+                            error
+                                .downcast_ref::<zebra_state::CommitCheckpointVerifiedError>()
+                                .map(zebra_state::CommitCheckpointVerifiedError::inner)
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(
+                    error @ (zebra_state::CommitBlockError::MinedBlockNotificationFull
+                    | zebra_state::CommitBlockError::MinedBlockNotificationClosed),
+                ) = notification_error
+                {
+                    // Capacity is checked before mutation. This is a retryable operational error,
+                    // never a consensus rejection or a failure reported after a successful commit.
+                    return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+                }
+                // Another submission can still commit after duplicate or operational failures.
+                let inconclusive = match &error {
+                    Ok(error) if error.is_duplicate_request() => true,
+                    Ok(RouterError::Block { source }) => match source.as_ref() {
+                        VerifyBlockError::Depth { .. }
+                        | VerifyBlockError::StateService { .. }
+                        | VerifyBlockError::Time(_)
+                        | VerifyBlockError::Commit(
+                            zebra_state::CommitBlockError::WriteTaskExited { .. },
+                        )
+                        | VerifyBlockError::Transaction(
+                            TransactionError::TransparentInputNotFound,
+                        ) => true,
+                        VerifyBlockError::Commit(
+                            zebra_state::CommitBlockError::ValidateContextError(error),
+                        ) => matches!(
+                            error.as_ref(),
+                            zebra_state::ValidateContextError::NotReadyToBeCommitted { .. }
+                        ),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                // Operational failures do not invalidate an already validated body. Definitive
+                // commit failures still withdraw it from the pending-body cache.
+                if relayed && !timed_out && !inconclusive {
+                    self.gbt.submitted_blocks.remove(block_hash);
+                    tracing::warn!(?block_hash, ?height, ?error, "early-relayed block rejected");
+                }
 
                 tracing::info!(
                     ?error,
@@ -3265,16 +3685,18 @@ where
 
         let protocol_version = zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0;
 
-        // TODO: return actual supported local services when Zebra exposes them
-        let local_services = format!("{:016x}", PeerServices::NODE_NETWORK);
-
         // Deprecated: zcashd always returns 0.
         let timeoffset = 0;
 
-        let connections = read_address_book(&self.address_book, |book| {
-            book.recently_live_peers(Utc::now()).len()
+        // Report the same services that the local listener advertises to peers.
+        let (connections, local_services) = read_address_book(&self.address_book, |book| {
+            (
+                book.recently_live_peers(Utc::now()).len(),
+                book.local_services(),
+            )
         })
         .await?;
+        let local_services = format!("{:016x}", local_services);
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![
@@ -4563,7 +4985,7 @@ impl SendRawTransactionResponse {
 #[serde(untagged)]
 pub enum GetBlockResponse {
     /// The request block, hex-encoded.
-    Raw(#[serde(with = "hex")] SerializedBlock),
+    Raw(#[serde(with = "hex_data")] SerializedBlock),
     /// The block object.
     Object(Box<BlockObject>),
 }
@@ -4925,7 +5347,7 @@ impl Default for GetBlockHashResponse {
 #[serde(untagged)]
 pub enum GetRawTransactionResponse {
     /// The raw transaction, encoded as hex bytes.
-    Raw(#[serde(with = "hex")] SerializedTransaction),
+    Raw(#[serde(with = "hex_data")] SerializedTransaction),
     /// The transaction object.
     Object(Box<TransactionObject>),
 }

@@ -19,6 +19,7 @@ use std::{
 };
 
 use tower::{Service, ServiceExt};
+use tower_batch_control::RequestWeight;
 use zebra_chain::{
     block::{Block, Height},
     parameters::{Network, NetworkUpgrade},
@@ -30,6 +31,10 @@ use zebra_chain::{
 use crate::{error::TransactionError, BoxError};
 
 use super::{batch_fallback_verifier, BatchFallbackService, CacheKey, Cached, CachedItem, Item};
+
+/// Records proving-parameter initialization in the isolated startup regression test.
+pub(super) static OUTPUT_PARAMETERS_LOADED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// The `verifier` label the test caches report their metrics under.
 ///
@@ -118,6 +123,24 @@ fn cache_key(tx: &Transaction, nu: NetworkUpgrade) -> CacheKey {
         .expect("the transaction was selected for having a Sapling bundle")
         .cache_key()
         .expect("every Sapling item carries a cache key")
+}
+
+#[test]
+fn request_weight_counts_spend_and_output_proofs() {
+    let mut has_multiple_proofs = false;
+
+    for (nu, tx) in mined_sapling_transactions() {
+        let proof_count = tx.sapling_spends().count() + tx.sapling_outputs().count();
+        let item = item(&tx, nu).expect("the transaction was selected for its Sapling bundle");
+
+        assert_eq!(item.request_weight(), proof_count);
+        has_multiple_proofs |= proof_count > 1;
+    }
+
+    assert!(
+        has_multiple_proofs,
+        "test vectors must distinguish proof count from the default weight of one"
+    );
 }
 
 #[test]
@@ -351,4 +374,229 @@ async fn a_bundle_verified_under_one_upgrade_is_not_reused_under_another() {
         matches!(*error, TransactionError::SaplingVerificationFailed),
         "expected SaplingVerificationFailed, got: {error:?}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn block_flush_resolves_every_sapling_shard_without_timers() {
+    use crate::primitives::flush::{tests, BlockFlush, Queueing, Verifier};
+
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let item = item(&tx, nu).unwrap();
+    assert!(item.request_weight() * 2 < crate::primitives::MAX_BATCH_SIZE);
+    let shards = super::ShardedVerifier::new(2);
+    let flush_shards = shards.clone();
+    let admissions = shards.next.clone();
+    let mut cache = Cached::new(
+        tower_fallback::Fallback::new(shards, tower::service_fn(super::verify_single)),
+        8,
+        TEST_CACHE_VERIFIER_LABEL,
+    )
+    .with_flush(Verifier::Sapling);
+    let context = Arc::new(());
+    let _registration = BlockFlush::register(&context, 1);
+    let flushes = Arc::new(AtomicUsize::new(0));
+    let count = flushes.clone();
+    let start = tokio::time::Instant::now();
+    tests::FLUSH
+        .scope(
+            Arc::new(move |verifier| {
+                assert!(matches!(verifier, Verifier::Sapling));
+                count.fetch_add(1, Ordering::SeqCst);
+                flush_shards.try_flush()
+            }),
+            async {
+                let transaction = Queueing::for_transaction(&context).unwrap();
+                let responses = transaction
+                    .scope(|| (0..4).map(|_| cache.call(item.clone())).collect::<Vec<_>>());
+                drop(transaction);
+                for result in
+                    tests::without_advancing_time(futures::future::join_all(responses)).await
+                {
+                    result.expect("bundles in every shard must verify before any timer expires");
+                }
+            },
+        )
+        .await;
+    assert_eq!(admissions.load(Ordering::Relaxed), 4);
+    assert_eq!(flushes.load(Ordering::SeqCst), 1);
+    assert_eq!(tokio::time::Instant::now(), start);
+}
+
+#[tokio::test]
+async fn malformed_bundle_does_not_send_valid_bundles_to_fallback() {
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let valid = item(&tx, nu).unwrap();
+    let mut malformed = valid.clone();
+    malformed.bundle = malformed.bundle.map_authorization(
+        (),
+        |_, _| [0; 192],
+        |_, _| [0; 192],
+        |_, sig| sig,
+        |_, auth| auth,
+    );
+    assert!(valid.request_weight() * 3 < crate::primitives::MAX_BATCH_SIZE);
+    let fallbacks = Arc::new(AtomicUsize::new(0));
+    let count = fallbacks.clone();
+    let mut verifier = tower_fallback::Fallback::new(
+        super::ShardedVerifier::new(1),
+        tower::service_fn(move |item| {
+            count.fetch_add(1, Ordering::SeqCst);
+            super::verify_single(item)
+        }),
+    );
+    let mut responses = Vec::new();
+    for item in [valid.clone(), malformed, valid] {
+        responses.push(verifier.ready().await.unwrap().call(item));
+    }
+    assert!(verifier.primary().try_flush().unwrap());
+    let results = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        futures::future::join_all(responses),
+    )
+    .await
+    .expect("verification must finish");
+    assert!(results[0].is_ok());
+    assert!(results[1].is_err());
+    assert!(results[2].is_ok());
+    assert_eq!(fallbacks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn single_verifications_share_the_rayon_cpu_budget() {
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let item = item(&tx, nu).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        let mut responses = [
+            super::verify_single(item.clone()),
+            super::verify_single(item),
+        ];
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // The only worker queues both fallbacks; neither can execute until it yields.
+        for response in &mut responses {
+            assert!(response.as_mut().poll(&mut cx).is_pending());
+        }
+        while matches!(rayon::yield_now(), Some(rayon::Yield::Executed)) {}
+        for response in &mut responses {
+            assert!(matches!(
+                response.as_mut().poll(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+        }
+    });
+}
+
+#[test]
+fn shards_respect_configured_cpu_budget() {
+    for (parallelism, expected_shards) in [(1, 1), (4, 1), (8, 2), (32, 8), (64, 8)] {
+        let shards = super::shard_count(parallelism);
+        assert_eq!(shards, expected_shards);
+        let max_batches = (parallelism / shards).max(1);
+        assert!(shards * max_batches <= parallelism);
+    }
+}
+
+/// Pinned keys must remain byte-for-byte equal to the authenticated official parameters.
+#[test]
+fn pinned_verifying_keys_match_official_parameters() {
+    let (spend, output) = wagyu_zcash_parameters::load_sapling_parameters();
+    // This parses the complete official files and checks their upstream BLAKE2b-512 digests.
+    let _ = zcash_proofs::parse_parameters(&spend[..], &output[..], None);
+    for (bytes, pinned) in [
+        (&spend[..], super::params::SPEND_VK),
+        (&output[..], super::params::OUTPUT_VK),
+    ] {
+        let key = groth16::VerifyingKey::<bls12_381::Bls12>::read(bytes)
+            .expect("authenticated official verifying key must deserialize");
+        let mut encoded = Vec::new();
+        key.write(&mut encoded)
+            .expect("writing a verifying key to a Vec must succeed");
+        assert_eq!(encoded, pinned);
+    }
+}
+
+/// The output-only prover must still create a coinbase whose Sapling proof and signature verify.
+#[test]
+fn sapling_coinbase_output_proves_and_verifies() {
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
+    use zcash_primitives::transaction::{
+        builder::{BuildConfig, Builder},
+        fees::fixed::FeeRule,
+    };
+    use zcash_protocol::value::Zatoshis;
+
+    let network = Network::Mainnet;
+    let height = Height(1_687_106);
+    let address = sapling_crypto::zip32::ExtendedSpendingKey::master(&[0; 32])
+        .expect("fixed test seed must generate a valid Sapling spending key")
+        .default_address()
+        .1;
+    let mut builder = Builder::new(
+        &network,
+        height.into(),
+        BuildConfig::Coinbase { miner_data: None },
+    );
+    builder
+        .add_sapling_output::<std::convert::Infallible>(
+            Some(sapling_crypto::keys::OutgoingViewingKey([0; 32])),
+            address,
+            Zatoshis::from_u64(1).expect("one zatoshi is in range"),
+            zcash_protocol::memo::MemoBytes::empty(),
+        )
+        .expect("coinbase Sapling output must be accepted");
+    let result = builder
+        .build(
+            &Default::default(),
+            &[],
+            &[],
+            UnwrapErr(SysRng),
+            super::prover(),
+            super::prover(),
+            &FeeRule::non_standard(Zatoshis::ZERO),
+        )
+        .expect("Sapling coinbase must build with the output-only prover");
+    let mut bytes = Vec::new();
+    result.transaction().write(&mut bytes).unwrap();
+    let tx: Transaction = bytes.zcash_deserialize_into().unwrap();
+    assert_eq!(tx.sapling_spends_count(), 0);
+    assert_eq!(tx.sapling_outputs().count(), 1);
+    let item = item(&tx, NetworkUpgrade::Nu5).expect("coinbase must contain a Sapling bundle");
+    let result = super::validate(vec![item]);
+    assert_eq!(result.checks, [true]);
+    assert!(
+        result.valid,
+        "coinbase proof and binding signature must verify"
+    );
+}
+
+/// Startup verification and obtaining the coinbase prover must not initialize proving parameters.
+#[test]
+fn sapling_verification_does_not_load_proving_parameters() {
+    const CHILD: &str = "ZEBRA_TEST_SAPLING_LAZY_PARAMETERS";
+    if std::env::var_os(CHILD).is_some() {
+        std::sync::LazyLock::force(&super::VERIFYING_KEYS);
+        let _ = super::prover();
+        assert!(!OUTPUT_PARAMETERS_LOADED.load(Ordering::Relaxed));
+        return;
+    }
+
+    // Other tests can legitimately create output proofs. Use a fresh process, not mutable
+    // global environment or test ordering, to check the uninitialized production static.
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "primitives::sapling::tests::sapling_verification_does_not_load_proving_parameters",
+        ])
+        .env(CHILD, "1")
+        .status()
+        .expect("the isolated parameter test must start");
+    assert!(status.success());
 }

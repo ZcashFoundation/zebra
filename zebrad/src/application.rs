@@ -16,10 +16,7 @@ use semver::{BuildMetadata, Version};
 
 use tokio::sync::watch;
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::{
-    constants::LOCK_FILE_ERROR, state_database_format_version_in_code,
-    state_database_format_version_on_disk,
-};
+use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_on_disk};
 
 use crate::{
     commands::EntryPoint,
@@ -312,10 +309,10 @@ impl Application for ZebradApp {
             ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
-            // code constant
+            // One format version is shared by archive and pruned database kinds.
             (
                 "running state version",
-                state_database_format_version_in_code().to_string(),
+                zebra_state::state_database_format_version_in_code().to_string(),
             ),
             // state disk file, doesn't open database
             ("initial disk state version", disk_db_version),
@@ -479,6 +476,11 @@ impl Application for ZebradApp {
         // Log git metadata and platform info when zebrad starts up
         if is_server {
             info!("{metadata_section}");
+            #[cfg(feature = "pasta-asm")]
+            info!(
+                backend = pasta_curves::selected_backend(),
+                "Pasta field arithmetic backend"
+            );
 
             if command.config_path().is_some() {
                 info!("Using config file at: {:?}", command.config_path().unwrap());
@@ -594,10 +596,42 @@ impl Application for ZebradApp {
     }
 }
 
+/// Use eight glibc arenas unless the operator supplied an arena limit through the environment.
+///
+/// `MALLOC_ARENA_MAX` or `GLIBC_TUNABLES=glibc.malloc.arena_max=...` overrides this default.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn default_malloc_arena_max(
+    value: Option<&std::ffi::OsStr>,
+    tunables: Option<&std::ffi::OsStr>,
+) -> Option<std::ffi::c_int> {
+    let overridden = value.is_some()
+        || tunables.is_some_and(|tunables| {
+            tunables
+                .as_encoded_bytes()
+                .split(|byte| *byte == b':')
+                .any(|tunable| tunable.starts_with(b"glibc.malloc.arena_max="))
+        });
+    (!overridden).then_some(8)
+}
+
 /// Boot the given application, parsing subcommand and options from
 /// command-line arguments, and terminating when complete.
 // <https://docs.rs/abscissa_core/0.7.0/src/abscissa_core/application.rs.html#174-178>
 pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
+    // Tune glibc before application startup creates worker threads.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if let Some(limit) = default_malloc_arena_max(
+        env::var_os("MALLOC_ARENA_MAX").as_deref(),
+        env::var_os("GLIBC_TUNABLES").as_deref(),
+    ) {
+        // SAFETY: mallopt takes integer parameters, no pointers; this is a valid positive limit.
+        // Tuning is best-effort: failure leaves glibc's settings unchanged, so startup can continue.
+        #[allow(unsafe_code)]
+        unsafe {
+            nix::libc::mallopt(nix::libc::M_ARENA_MAX, limit);
+        }
+    }
+
     let args =
         EntryPoint::process_cli_args(env::args_os().collect()).unwrap_or_else(|err| err.exit());
 
@@ -606,34 +640,4 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
 }
 
 #[cfg(test)]
-mod tests {
-    use semver::Version;
-
-    use super::with_git_commit;
-
-    #[test]
-    fn with_git_commit_adds_commit_without_build_metadata() {
-        let version = with_git_commit(Version::new(7, 0, 0), Some("6d1e414"));
-
-        assert_eq!(version.to_string(), "7.0.0+git.6d1e414");
-    }
-
-    #[test]
-    fn with_git_commit_keeps_git_describe_metadata() {
-        let version =
-            Version::parse("7.0.0-rc.0+12.g6d1e414").expect("hard-coded version is valid");
-
-        assert_eq!(with_git_commit(version.clone(), Some("6d1e414")), version);
-    }
-
-    #[test]
-    fn with_git_commit_skips_missing_or_invalid_commits() {
-        let version = Version::new(7, 0, 0);
-
-        assert_eq!(with_git_commit(version.clone(), None), version);
-        assert_eq!(
-            with_git_commit(version.clone(), Some("not a commit")),
-            version
-        );
-    }
-}
+mod tests;

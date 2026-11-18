@@ -289,10 +289,7 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
-        // Get the block size to store with the BlockInfo. This is a bit wasteful
-        // since the block header and txs were serialized previously when writing
-        // them to the DB, and we could get the size if we modified the database
-        // code to return the size of data written; but serialization should be cheap.
+        // Decoded transactions keep their serialized bytes, so sizing the block is cheap.
         let block_size = finalized.block.zcash_serialized_size();
 
         let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Add `Config::fast_tree_sync` to config literals and handle the new root-supply/query request and response variants in exhaustive matches. Root messages carry `TreeRootsProof`; `CommitCheckpointVerifiedError::is_targeted_body_recovery()` identifies exact authorizing-body retries.'
+time: 2026-11-12T02:51:53.545685158+01:00

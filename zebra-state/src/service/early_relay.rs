@@ -1,0 +1,575 @@
+//! Authenticated, next-tip-only early block retention, independent of mining subscriptions.
+
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
+
+use tokio::sync::{watch, Semaphore};
+use zebra_chain::{
+    block::{self, Block},
+    parameters::NetworkUpgrade,
+};
+
+use super::{read, NonFinalizedState, ReadStateService};
+use crate::{BoxError, WatchReceiver};
+
+#[cfg(test)]
+mod tests;
+
+const LIFETIME: Duration = Duration::from_secs(15);
+// Includes wire contents and decoded metadata, using the shared conservative retention charge.
+const MAX_RETAINED_BYTES: usize = 64 * 1024 * 1024;
+
+/// Provenance of an authenticated body, independent of a download task's lifetime.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum EarlyRelayOrigin {
+    /// A body explicitly submitted through a local mined-block or decoded-submission request.
+    Local,
+    /// A downloaded body, whose exact supplying peer must still be known before fanout.
+    Peer,
+}
+
+#[derive(Debug)]
+struct Entry {
+    block: Arc<Block>,
+    origin: EarlyRelayOrigin,
+    hash: block::Hash,
+    alive: watch::Receiver<()>,
+    deadline: tokio::time::Instant,
+    context: WatchReceiver<NonFinalizedState>,
+}
+
+#[derive(Debug)]
+struct Reservation {
+    parent: block::Hash,
+    deadline: tokio::time::Instant,
+    alive: watch::Receiver<()>,
+}
+
+/// Internal cache ownership does not enable publication; only external subscriptions do.
+#[derive(Debug)]
+pub(super) struct EarlyRelayState {
+    snapshot: WatchReceiver<NonFinalizedState>,
+    /// Publication and withdrawal replace this value atomically, without a lock.
+    entry: watch::Sender<Option<Entry>>,
+    changes: watch::Sender<Option<block::Hash>>,
+    reservation: watch::Sender<Option<Reservation>>,
+    computation: Arc<Semaphore>,
+    rejection_computation: Arc<Semaphore>,
+    recipients: OnceLock<watch::Receiver<bool>>,
+}
+
+impl EarlyRelayState {
+    pub(super) fn new(snapshot: WatchReceiver<NonFinalizedState>) -> Arc<Self> {
+        Arc::new(Self {
+            snapshot,
+            entry: watch::Sender::new(None),
+            changes: watch::Sender::new(None),
+            reservation: watch::Sender::new(None),
+            computation: Arc::new(Semaphore::new(1)),
+            rejection_computation: Arc::new(Semaphore::new(1)),
+            recipients: OnceLock::new(),
+        })
+    }
+
+    pub(super) fn cache(self: &Arc<Self>) -> EarlyRelayCache {
+        EarlyRelayCache {
+            state: self.clone(),
+            changes: self.changes.subscribe(),
+        }
+    }
+
+    fn has_recipients(&self) -> bool {
+        self.recipients
+            .get()
+            .is_none_or(|recipients| recipients.has_changed().is_ok() && *recipients.borrow())
+    }
+
+    pub(super) fn best_tip_hash(&self) -> Option<block::Hash> {
+        self.snapshot.borrow_mapped(|state| {
+            state
+                .best_chain()
+                .map(|chain| chain.non_finalized_tip_hash())
+        })
+    }
+
+    fn rejections(&self) -> watch::Sender<super::non_finalized_state::RejectedBlocks> {
+        self.snapshot
+            .borrow_mapped(|state| state.rejected_blocks.clone())
+    }
+
+    pub(super) fn allows_early_relay(&self, hash: block::Hash) -> bool {
+        let rejected = self.rejections();
+        let rejected = rejected.borrow();
+        !rejected.is_full() && !rejected.contains(hash)
+    }
+
+    fn reject(&self, hash: block::Hash, height: block::Height) -> bool {
+        let rejected = self.rejections();
+        let mut full = false;
+        let mut became_full = false;
+        rejected.send_modify(|rejected| {
+            let was_full = rejected.is_full();
+            full = rejected.reject(hash, height);
+            became_full = full && !was_full;
+        });
+        if became_full {
+            tracing::warn!(
+                capacity = super::non_finalized_state::MAX_EARLY_RELAY_REJECTIONS,
+                "early relay and speculative mining disabled because rejection tracking is full"
+            );
+        }
+        self.withdraw((!full).then_some(hash));
+        full
+    }
+
+    fn withdraw(&self, hash: Option<block::Hash>) {
+        self.entry.send_if_modified(|entry| {
+            if entry
+                .as_ref()
+                .is_some_and(|entry| hash.is_none_or(|hash| entry.hash == hash))
+            {
+                *entry = None;
+                self.changes.send_replace(None);
+                return true;
+            }
+            false
+        });
+    }
+
+    /// Notify only while this publication still owns the retained body.
+    ///
+    /// The borrow excludes withdrawal until the notification is sent.
+    fn notify_published(&self, hash: block::Hash, alive: &watch::Receiver<()>) {
+        let entry = self.entry.borrow();
+        if entry.as_ref().is_some_and(|entry| {
+            entry.alive.same_channel(alive) && !entry.context.has_changed().unwrap_or(true)
+        }) {
+            self.changes.send_replace(Some(hash));
+        }
+    }
+
+    /// Store a reserved body only while its admission and authenticated context are current.
+    fn publish_reserved(&self, entry: Entry) -> bool {
+        let mut reservation = self.reservation.subscribe();
+        // Capture the token and watch version together, without holding this borrow over mutation.
+        let owns_reservation = reservation
+            .borrow_and_update()
+            .as_ref()
+            .is_some_and(|reserved| {
+                reserved.parent == entry.block.header.previous_block_hash
+                    && reserved.deadline == entry.deadline
+                    && reserved.alive.same_channel(&entry.alive)
+            });
+        if !owns_reservation {
+            return false;
+        }
+        self.entry.send_if_modified(|current| {
+            if tokio::time::Instant::now() >= entry.deadline
+                || reservation.has_changed().unwrap_or(true)
+                || entry.context.has_changed().unwrap_or(true)
+            {
+                return false;
+            }
+            *current = Some(entry);
+            true
+        })
+    }
+
+    fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
+        if self.changes.receiver_count() == 0
+            || !self.has_recipients()
+            || retained > MAX_RETAINED_BYTES
+            || guard.alive.receiver_count() != 0
+            || guard.context.has_changed().unwrap_or(true)
+            || self.best_tip_hash() != Some(block.header.previous_block_hash)
+        {
+            return;
+        }
+        let hash = block.hash();
+        let parent = block.header.previous_block_hash;
+        let alive = guard.alive.subscribe();
+        let deadline = tokio::time::Instant::now() + LIFETIME;
+        // Admission must follow the committed snapshot synchronously, rather than wait for
+        // the old cleanup task to observe a tip change and release a semaphore permit.
+        if !self.allows_early_relay(hash) {
+            return;
+        }
+        let reserved = self.reservation.send_if_modified(|reservation| {
+            if guard.context.has_changed().unwrap_or(true)
+                || reservation.as_ref().is_some_and(|reservation| {
+                    reservation.parent == parent
+                        && tokio::time::Instant::now() < reservation.deadline
+                })
+            {
+                return false;
+            }
+            *reservation = Some(Reservation {
+                parent,
+                deadline,
+                alive: alive.clone(),
+            });
+            true
+        });
+        if !reserved {
+            return;
+        }
+        self.publish_reserved(Entry {
+            block,
+            origin: guard.origin,
+            hash,
+            alive: alive.clone(),
+            deadline,
+            context: guard.context.clone(),
+        });
+        // Recheck after storing without nesting the rejection and cache locks. Notifications
+        // remain hints: serving checks rejection again, including a concurrent withdrawal.
+        if !self.allows_early_relay(hash) {
+            self.withdraw(Some(hash));
+        }
+        self.notify_published(hash, &alive);
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut alive = alive;
+            let mut snapshot = state.snapshot.clone();
+            snapshot.mark_as_seen();
+            let withdrawn = loop {
+                if state.best_tip_hash() != Some(parent) {
+                    break false;
+                }
+                tokio::select! {
+                    _ = alive.changed() => break true,
+                    _ = tokio::time::sleep_until(deadline) => break false,
+                    result = snapshot.changed() => {
+                        if result.is_err() {
+                            break false;
+                        }
+                    }
+                }
+            };
+            state.entry.send_if_modified(|entry| {
+                if entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.alive.same_channel(&alive))
+                {
+                    *entry = None;
+                    state.changes.send_replace(None);
+                    return true;
+                }
+                false
+            });
+            // Only withdrawal keeps replay admission reserved. A tip change observed above
+            // releases it even if that parent returns while entry cleanup waits for its lock.
+            while withdrawn && state.best_tip_hash() == Some(parent) {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(deadline) => break,
+                    result = snapshot.changed() => {
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            state.reservation.send_if_modified(|reservation| {
+                if reservation
+                    .as_ref()
+                    .is_some_and(|reservation| reservation.alive.same_channel(&alive))
+                {
+                    *reservation = None;
+                    return true;
+                }
+                false
+            });
+        });
+    }
+}
+
+/// A bounded cache of authenticated, not fully validated blocks for negotiated early-relay peers.
+///
+/// Holding a cache or its subscription enables publication, independently of mining listeners.
+/// At most one body is retained, for 15 seconds, with a 2 MB wire limit and a 64 MiB conservative
+/// wire-content/decoded-metadata charge (not exact allocator RSS). Dropping its verifier guard
+/// withdraws the body. A successful verifier holds the guard until state has published its read
+/// snapshot, closing the cache-to-state serving gap. Ordinary state queries never read this cache.
+/// Any published context change also withdraws the body, even if the same parent tip is restored.
+/// After withdrawal, the admission slot remains reserved until its deadline or a committed-tip
+/// change, preventing repeated early fanout of a rejected body without delaying consecutive tips.
+#[derive(Clone, Debug)]
+pub struct EarlyRelayCache {
+    state: Arc<EarlyRelayState>,
+    changes: watch::Receiver<Option<block::Hash>>,
+}
+
+impl PartialEq for EarlyRelayCache {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+}
+impl Eq for EarlyRelayCache {}
+
+impl EarlyRelayCache {
+    /// Restricts optional authentication and body retention to the supplied recipient demand.
+    ///
+    /// Without this restriction, holding this cache or a subscription enables optional work.
+    /// Required inbound authentication is never disabled. Demand is sampled when authentication
+    /// starts: a peer arriving after a skipped request receives the block through committed relay.
+    /// A closed channel disables optional work. The first restriction applies to all clones.
+    pub fn set_recipients(&self, recipients: watch::Receiver<bool>) {
+        let _ = self.state.recipients.set(recipients);
+    }
+
+    /// Returns a live body only while its parent is still the published snapshot's best tip.
+    ///
+    /// Only serve this body on a bilaterally negotiated early-relay connection. Expired, cancelled,
+    /// or stale entries are removed before returning; callers must fall back to committed state.
+    pub fn get(&self, hash: &block::Hash) -> Option<Arc<Block>> {
+        self.get_with_origin(hash).map(|(block, _)| block)
+    }
+
+    /// Returns a live body and its explicit provenance under the same checks as [`Self::get`].
+    ///
+    /// Peer bodies still require exact, live supplier provenance before early advertisement.
+    pub fn get_with_origin(&self, hash: &block::Hash) -> Option<(Arc<Block>, EarlyRelayOrigin)> {
+        let mut body = None;
+        self.state.entry.send_if_modified(|entry| {
+            let Some(current) = entry.as_ref() else {
+                return false;
+            };
+            if current.alive.has_changed().is_err()
+                || current.context.has_changed().unwrap_or(true)
+                || tokio::time::Instant::now() >= current.deadline
+            {
+                *entry = None;
+                self.state.changes.send_replace(None);
+                return true;
+            }
+            body = (current.hash == *hash).then(|| (current.block.clone(), current.origin));
+            false
+        });
+        let body = body?;
+        if !self.state.allows_early_relay(*hash) {
+            self.state.withdraw(Some(*hash));
+            return None;
+        }
+        Some(body)
+    }
+
+    /// Subscribes to the current candidate hash and withdrawals (`None`).
+    ///
+    /// Check [`Self::get`] before advertising: a notification may outlive its verifier or parent.
+    pub fn subscribe(&self) -> watch::Receiver<Option<block::Hash>> {
+        self.changes.clone()
+    }
+}
+
+/// Proof that state authenticated a NU5-or-later body against a committed parent.
+///
+/// Keep this guard until verification and commit finish. Dropping its last clone withdraws any
+/// cached body. The guard does not imply transaction validity or guarantee cache publication.
+#[derive(Clone, Debug)]
+pub struct EarlyRelayGuard {
+    alive: watch::Sender<()>,
+    state: Arc<EarlyRelayState>,
+    hash: block::Hash,
+    context: WatchReceiver<NonFinalizedState>,
+    height: block::Height,
+    origin: EarlyRelayOrigin,
+}
+
+impl EarlyRelayGuard {
+    /// Returns whether this authenticated hash was deterministically rejected.
+    ///
+    /// Capacity alone does not reject an unknown block: ordinary full validation must remain
+    /// available so commits and finalization can free rejection capacity.
+    pub fn is_rejected(&self) -> bool {
+        let rejected = self.state.rejections();
+        let rejected = rejected.borrow();
+        rejected.contains(self.hash)
+    }
+
+    /// Suppresses this authenticated hash until its height is finalized, without retaining its body.
+    ///
+    /// Call only for deterministic validation failures, never time, state availability, lookup,
+    /// infrastructure, or cancellation errors. A matching published body is withdrawn immediately,
+    /// including one retained by another verifier. Overflow disables all early relay until the
+    /// unrecorded rejections' heights are finalized.
+    pub fn reject(&self) {
+        self.state.reject(self.hash, self.height);
+    }
+}
+
+impl PartialEq for EarlyRelayGuard {
+    fn eq(&self, other: &Self) -> bool {
+        self.alive.same_channel(&other.alive)
+    }
+}
+impl Eq for EarlyRelayGuard {}
+
+impl ReadStateService {
+    /// Authenticates a verifier-reported deterministic failure without publishing speculative work.
+    pub(super) async fn reject_block(self, block: Arc<Block>) -> bool {
+        let hash = block.hash();
+        let is_rejected = || self.early_relay.rejections().borrow().contains(hash);
+        if is_rejected() {
+            return true;
+        }
+        let permit = self
+            .early_relay
+            .rejection_computation
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the authentication semaphore is never closed");
+        // Rejection bookkeeping must not queue ahead of normal block authentication.
+        // Another verifier may have recorded this hash while we waited.
+        if is_rejected() {
+            return true;
+        }
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let Some(height) = block.coinbase_height() else {
+                return false;
+            };
+            let merkle_root: block::merkle::Root =
+                block.transactions.iter().map(|tx| tx.hash()).collect();
+            if merkle_root != block.header.merkle_root {
+                return false;
+            }
+            let snapshot = self.latest_non_finalized_state();
+            let hash = block.hash();
+            match read::difficulty::authenticated_candidate_header(
+                &snapshot,
+                &self.db,
+                &self.network,
+                block.clone(),
+                false,
+            ) {
+                Ok(Some(_)) => {}
+                Err(_) => return false,
+                Ok(None) => {
+                    let Some(tip) = read::best_tip(&snapshot, &self.db) else {
+                        return false;
+                    };
+                    if read::difficulty::mining_candidate_header_context(
+                        &snapshot,
+                        &self.db,
+                        &self.network,
+                        block,
+                        tip,
+                    )
+                    .is_none()
+                    {
+                        return false;
+                    }
+                }
+            }
+            let full = self.early_relay.reject(hash, height);
+            self.mining_candidate.send_if_modified(|candidate| {
+                if candidate
+                    .as_ref()
+                    .is_some_and(|(_, info, _, _)| full || info.tip_hash == hash)
+                {
+                    *candidate = None;
+                    true
+                } else {
+                    false
+                }
+            });
+            true
+        })
+        .await
+        .expect("rejection authentication uses validated state snapshots")
+    }
+
+    pub(super) async fn early_relay(
+        self,
+        block: Arc<Block>,
+        required: bool,
+        publish: bool,
+        origin: EarlyRelayOrigin,
+    ) -> Result<Option<EarlyRelayGuard>, BoxError> {
+        let Some(height) = block.coinbase_height() else {
+            return Ok(None);
+        };
+        // Pre-NU5 final Sapling roots require tree updates. Do not claim authentication there.
+        if NetworkUpgrade::current(&self.network, height) < NetworkUpgrade::Nu5 {
+            return Ok(None);
+        }
+        // Optional requests only admit and publish children of the best tip, so other blocks
+        // return here instead of waiting for the authentication slot and a blocking task.
+        if !required
+            && (self.early_relay.changes.receiver_count() == 0
+                || !self.early_relay.has_recipients()
+                || self.early_relay.best_tip_hash() != Some(block.header.previous_block_hash))
+        {
+            return Ok(None);
+        }
+        let permit = self
+            .early_relay
+            .computation
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the authentication semaphore is never closed");
+        // Demand can disappear while optional requests wait behind another authentication.
+        if !required
+            && (self.early_relay.changes.receiver_count() == 0
+                || !self.early_relay.has_recipients())
+        {
+            return Ok(None);
+        }
+        let state = self.clone();
+        let candidate = block.clone();
+        let admitted = tokio::task::spawn_blocking(move || {
+            // A cancelled request retains computation admission until this closure finishes.
+            let _permit = permit;
+            let mut context = state.early_relay.snapshot.clone();
+            context.mark_as_seen();
+            read::difficulty::authenticated_candidate_header(
+                &state.latest_non_finalized_state(),
+                &state.db,
+                &state.network,
+                candidate.clone(),
+                !required,
+            )
+            .map(|history| {
+                history.map(|_| {
+                    (
+                        publish.then(|| {
+                            crate::request::block_wire_and_retained_bytes(&candidate, &[])
+                        }),
+                        context,
+                    )
+                })
+            })
+        })
+        .await
+        .expect(
+            "header validation returns invalid-input errors and its blocking task is never aborted",
+        )?;
+        let Some((charge, context)) = admitted else {
+            return Ok(None);
+        };
+        if context.has_changed().unwrap_or(true) {
+            return Ok(None);
+        }
+        let guard = EarlyRelayGuard {
+            alive: watch::Sender::new(()),
+            state: self.early_relay.clone(),
+            hash: block.hash(),
+            context,
+            height,
+            origin,
+        };
+        if guard.is_rejected() {
+            return Ok(Some(guard));
+        }
+        if let Some((wire, retained)) = charge {
+            if u64::try_from(wire).unwrap_or(u64::MAX) <= block::MAX_BLOCK_BYTES {
+                self.early_relay.publish(block, &guard, retained);
+            }
+        }
+        Ok(Some(guard))
+    }
+}

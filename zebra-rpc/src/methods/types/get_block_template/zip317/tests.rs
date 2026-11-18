@@ -2,21 +2,137 @@
 
 #![allow(clippy::unwrap_in_result)]
 
+use std::{collections::HashSet, sync::Arc};
+
+use rand::{rngs::StdRng, SeedableRng};
+
 use zcash_keys::address::Address;
 use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::{
     amount::Amount,
     block::{Header, Height, MAX_BLOCK_BYTES},
-    parameters::Network,
-    transaction,
-    transparent::OutPoint,
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
+    transaction::{self, LockTime, Transaction, VerifiedUnminedTx},
+    transparent::{Input, OutPoint, Output, Script},
 };
 use zebra_node_services::mempool::TransactionDependencies;
 
 use crate::methods::types::{get_block_template::MinerParams, transaction::TransactionTemplate};
 
-use super::{max_transaction_count_size, select_mempool_transactions};
+use super::{fee_weighted_order, max_transaction_count_size, select_mempool_transactions};
+
+/// Distinct, transparent-only candidates small enough that 18,400 fit in one block.
+fn transparent_candidates(count: usize) -> Vec<VerifiedUnminedTx> {
+    (0..count)
+        .map(|index| {
+            let tx = Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                vec![Input::PrevOut {
+                    outpoint: OutPoint::from_usize(transaction::Hash([1; 32]), index),
+                    unlock_script: Script::new(&[]),
+                    sequence: u32::MAX,
+                }],
+                vec![Output {
+                    value: Amount::new(1_000),
+                    lock_script: Script::new(&[0x51]),
+                }],
+                LockTime::unlocked(),
+                Height(2_000_000),
+            );
+            VerifiedUnminedTx::new(
+                Arc::new(tx).into(),
+                Amount::new(10_000 * (1 + i64::try_from(index % 4).unwrap())),
+                0,
+                0,
+                Default::default(),
+                &Network::Mainnet,
+                Height(2_000_000),
+            )
+            .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn weighted_order_first_pick_is_fee_proportional() {
+    let candidates = transparent_candidates(4);
+    let mut first_picks = [0u32; 4];
+    let runs = 50_000u32;
+    for seed in 0..u64::from(runs) {
+        let first = fee_weighted_order(candidates.clone(), &mut StdRng::seed_from_u64(seed))
+            .next()
+            .expect("positive-weight candidates are available");
+        let index = candidates
+            .iter()
+            .position(|tx| tx.transaction.id == first.transaction.id)
+            .expect("the selected transaction is a candidate");
+        first_picks[index] += 1;
+    }
+    let total_weight: f64 = candidates
+        .iter()
+        .map(|tx| f64::from(tx.fee_weight_ratio))
+        .sum();
+    for (tx, picks) in candidates.iter().zip(first_picks) {
+        let expected = f64::from(tx.fee_weight_ratio) / total_weight;
+        let observed = f64::from(picks) / f64::from(runs);
+        // One percentage point is more than four standard deviations for these probabilities.
+        assert!(
+            (observed - expected).abs() < 0.01,
+            "first-pick frequency {observed} must match fee-weight probability {expected}"
+        );
+    }
+}
+
+#[test]
+fn selects_all_large_mempool_candidates_when_they_fit() {
+    let candidates = transparent_candidates(18_400);
+    let expected: HashSet<_> = candidates.iter().map(|tx| tx.transaction.id).collect();
+    let selected = select_mempool_transactions(
+        &Network::Mainnet,
+        Height(2_000_000),
+        &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
+        candidates,
+        TransactionDependencies::default(),
+        None,
+    );
+    assert_eq!(
+        selected.len(),
+        expected.len(),
+        "no candidates are duplicated"
+    );
+    assert_eq!(
+        selected
+            .into_iter()
+            .map(|(_, tx)| tx.transaction.id)
+            .collect::<HashSet<_>>(),
+        expected,
+        "every fitting candidate is selected"
+    );
+}
+
+#[test]
+fn skips_zero_weights_and_rejects_invalid_weights() {
+    let cases: &[(&[f32], usize)] = &[
+        (&[], 0),
+        (&[0.0, 0.0], 0),
+        (&[0.0, 1.0, 0.0], 1),
+        (&[-1.0, 1.0], 0),
+        (&[f32::NAN, 1.0], 0),
+    ];
+    for &(weights, expected_count) in cases {
+        let mut candidates = transparent_candidates(weights.len());
+        for (tx, &weight) in candidates.iter_mut().zip(weights) {
+            tx.fee_weight_ratio = weight;
+        }
+        // Template selection recomputes weights from fees, so check the draw order directly.
+        let selected: Vec<_> =
+            fee_weighted_order(candidates, &mut StdRng::seed_from_u64(0)).collect();
+        assert_eq!(selected.len(), expected_count, "weights: {weights:?}");
+        assert!(selected.iter().all(|tx| tx.fee_weight_ratio > 0.0));
+    }
+}
 
 #[test]
 fn excludes_tx_with_unselected_dependencies() {
@@ -40,7 +156,6 @@ fn excludes_tx_with_unselected_dependencies() {
             &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
             vec![unmined_tx],
             mempool_tx_deps,
-            None,
             None,
         ),
         vec![],
@@ -81,7 +196,6 @@ fn includes_tx_with_selected_dependencies() {
         &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
-        None,
         None,
     );
 
@@ -136,12 +250,43 @@ fn reserves_space_for_block_header_and_transaction_count() {
         - max_transaction_count_size()
         - coinbase_tx_size;
 
-    let mut unmined_tx = network
-        .unmined_transactions_in_blocks(..)
-        .next()
-        .expect("should not be empty");
-
-    unmined_tx.transaction.size = safe_budget;
+    let template = transparent_candidates(1).pop().unwrap();
+    let transaction_with_script = |script_size| {
+        Arc::new(
+            template
+                .transaction
+                .transaction
+                .as_ref()
+                .clone()
+                .with_transparent_inputs(vec![Input::PrevOut {
+                    outpoint: OutPoint::from_usize(transaction::Hash([1; 32]), 0),
+                    unlock_script: Script::new(&vec![0; script_size]),
+                    sequence: u32::MAX,
+                }]),
+        )
+    };
+    // Both boundary cases use a five-byte CompactSize for the script length.
+    let transaction_overhead = transaction_with_script(65_536).zcash_serialized_size() - 65_536;
+    let transaction_with_size = |size| {
+        let transaction: transaction::UnminedTx =
+            transaction_with_script(size - transaction_overhead).into();
+        let miner_fee = transaction::zip317::conventional_fee(
+            transaction.conventional_actions,
+            &network,
+            height,
+        );
+        VerifiedUnminedTx::new(
+            transaction,
+            miner_fee,
+            0,
+            0,
+            Default::default(),
+            &network,
+            height,
+        )
+        .unwrap()
+    };
+    let unmined_tx = transaction_with_size(safe_budget);
 
     assert_eq!(
         select_mempool_transactions(
@@ -151,14 +296,13 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx.clone()],
             TransactionDependencies::default(),
             None,
-            None,
         )
         .len(),
         1,
         "should select a transaction exactly filling the safe block budget"
     );
 
-    unmined_tx.transaction.size = safe_budget + 1;
+    let unmined_tx = transaction_with_size(safe_budget + 1);
 
     assert_eq!(
         select_mempool_transactions(
@@ -167,7 +311,6 @@ fn reserves_space_for_block_header_and_transaction_count() {
             &miner_params,
             vec![unmined_tx],
             TransactionDependencies::default(),
-            None,
             None,
         ),
         vec![],
@@ -178,7 +321,6 @@ fn reserves_space_for_block_header_and_transaction_count() {
 /// Orchard and Ironwood candidates must share the ZIP-218 budget with the Sapling coinbase.
 #[test]
 fn reserves_shielded_budget_for_sapling_coinbase() {
-    use super::super::CoinbaseCache;
     use crate::config::mining::{default_miner_address, MinerAddressType};
     use std::sync::Arc;
     use zebra_chain::{
@@ -213,19 +355,15 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         )
         .unwrap(),
     );
-    let cache = CoinbaseCache::default();
-    let sizing = TransactionTemplate::new_coinbase_with_parent_pools(
+    let sizing = TransactionTemplate::coinbase_resource_usage(
         &network,
         height,
         &miner,
-        Amount::zero(),
         Some(Amount::zero()),
     )
     .unwrap();
-    let sizing_tx: Transaction = sizing.data.as_ref().zcash_deserialize_into().unwrap();
-    let coinbase_counts = ShieldedActionCounts::from_transaction(&sizing_tx);
-    assert!(sizing_tx.sapling_outputs().count() > 0);
-    cache.store(height, Amount::zero(), Some(Amount::zero()), sizing);
+    let coinbase_counts = sizing.shielded_actions;
+    assert!(coinbase_counts.sapling_io > 0);
 
     let transaction = fake_v6_transaction(
         NetworkUpgrade::Nu7,
@@ -267,7 +405,6 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         &miner,
         candidates,
         TransactionDependencies::default(),
-        Some(&cache),
         Some(Amount::zero()),
     );
     assert_eq!(
@@ -304,10 +441,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         ShieldedActionCounts::from_transaction(&actual_tx),
         coinbase_counts
     );
-    assert_eq!(
-        actual.data.as_ref().len(),
-        sizing_tx.zcash_serialized_size()
-    );
+    assert_eq!(actual_tx.zcash_serialized_size(), sizing.serialized_size);
 }
 
 #[test]
@@ -344,7 +478,6 @@ fn fee_activation_refreshes_template_candidates() {
                 &miner,
                 vec![low_fee.clone()],
                 TransactionDependencies::default(),
-                None,
                 Some(Amount::zero()),
             );
             assert_eq!(selected.len(), expected_count);
@@ -367,7 +500,6 @@ fn fee_activation_refreshes_template_candidates() {
             &miner,
             vec![high_fee],
             TransactionDependencies::default(),
-            None,
             Some(Amount::zero()),
         );
         assert_eq!(selected.len(), 1);

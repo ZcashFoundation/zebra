@@ -148,6 +148,37 @@ For most state upgrades, we want to modify the database format of the existing d
 Major version changes create a new cache and require a full resync unless a registered
 upgrade supports reusing the previous major version.
 
+Archive and pruned state share format v29 and the same linear upgrade list. Archives that
+never enabled pruning remain in `state/v29`, preserving ordinary rollback to 7.1.0.
+New pruning caches start directly in `state-pruned/v29`. Existing archives require an
+explicit stopped-node activation; enabling pruning against the archive kind returns
+`PruningRequiresIsolatedState` before any directory reuse or deletion:
+
+1. With pruning disabled, start the compatible writer and finish ordinary format upgrades.
+   Verify the tip and historical queries, and confirm `getblockchaininfo` reports `pruned: false`.
+2. Stop Zebra and every direct primary/secondary reader. Keep a stopped-node archive backup
+   outside the managed cache.
+3. Confirm `state/v29/<network>` is the intended complete archive and the destination
+   `state-pruned/v29/<network>` is absent. Create only the destination's parent directories,
+   then move the complete network directory, preserving its `version` file. Never merge,
+   overwrite another destination, or change the format-major directory number.
+4. Enable pruning and restart the writer before reconnecting compatible readers.
+
+Filesystem lookup and permission errors abort selection. Coexisting archive and pruned network
+directories for the current or previous major are rejected, never chosen between or merged.
+Stop all users and put the intended database in a separate cache root to resolve a conflict.
+Neither automatic old-version cleanup nor its disabling performs this activation move.
+
+Removing the pruning setting continues to use `state-pruned/v29`. Writable startup refuses
+it once a body prefix is missing; restore a complete archive snapshot or resync in a separate
+cache. Before any deletion, a complete database can continue there with pruning disabled.
+To regain the old archive path, first restart successfully with pruning disabled and verify
+`getblockchaininfo` reports `pruned: false`; then stop Zebra and every direct reader and move
+the complete network directory to an absent `state/v29/<network>` destination. Never perform
+that move on pruned data or overwrite an existing destination. This is an explicit operator
+recovery step, not an automatic rename. A pruned database also cannot change spending-index
+mode: writable opens reject incompatible builds before any blocks can be committed.
+
 The NU7/NSM format is v29. Its registered upgrade automatically reuses compatible v28
 state without resyncing or rewriting existing records. When no v29 database exists,
 the writer moves the v28 network directory into `state/v29`, provided the old state
@@ -156,19 +187,40 @@ records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
 The NSM balance follows the existing 52-byte `BlockInfo` prefix, leaving the
 block-size offset unchanged.
 
-Before upgrading, stop Zebra and direct database readers and retain a v28 backup
-outside the active cache for rollback. A v28 reader cannot read the wider records
+For a v28-to-v29 upgrade, stop Zebra and direct database readers and retain a v28
+backup outside the active cache for rollback. A v28 reader cannot read the wider records
 written by v29. Setting `state.delete_old_database = false` only disables cleanup;
 it does not preserve the directory that the upgrade moves.
 
 Direct database readers must be upgraded with the writer: Zallet's Zebra backend,
 Zaino's Zebra read-state backend, and other consumers opening Zebra's cache need a
-v29-compatible `zebra-state` dependency. Start the writer before compatible readers;
-read-only instances do not perform the upgrade. Manually renaming or symlinking
-versioned directories is not a substitute for the supported upgrade.
+compatible `zebra-state` dependency and must handle unavailable bodies. Resolve the actual
+kind with `Config::state_database_kind(network)?`, then use `Config::db_path(kind,
+state_database_format_version_in_code().major, network)`. The version helper returns the
+same format for both kinds; it does not identify a directory on its own. Read-only instances
+follow the archive before activation and the pruned directory afterward, without moving
+either, creating primary directories, or falling back to a different database. Stop readers
+during activation and reconnect them afterward. Start the writer first when a format
+transition requires migrations; secondary readers never apply migrations.
 Integration builds and their binary caches must identify the Zebra revision used
 by each direct reader as well as the writer, rather than matching only the
 downstream application's revision.
+
+### Fast-synced DB 29.1 compatibility
+
+Opt-in `state.fast_tree_sync` makes DB 29.1 a one-way upgrade once it commits its first
+fast-synced block, which it only does after peers at 3 distinct IP addresses have supplied
+roots. Older Zebra versions and direct database readers cannot use that database:
+their historical trees are stale and their subtree checks fail. Keep a backup from before
+fast sync outside the active cache for rollback. Otherwise, delete this network's state
+cache and resync with `state.fast_tree_sync = false`; merely disabling the option cannot
+restore missing historical trees.
+
+While trees are frozen, restarting still requires root-serving peers, even with the option
+disabled. Zebra stops after 120 seconds without authenticated roots and explains how to
+recover. `z_gettreestate` and lightwalletd tree-state methods explicitly report
+`tree state unavailable: fast-synced height` at unavailable heights, not empty trees.
+This experimental protocol remains draft pending a ZIP.
 
 ### Writing Blocks to the State
 
@@ -260,12 +312,24 @@ spending-index conversion, and detailed format checks finish successfully. The e
 Read-only instances and skipped or cancelled checks never open the pruning gate.
 
 Restart checks still search at most 100,000 blocks for observed transaction branch IDs. Missing
-history is not evidence of a valid branch. The deletion batch preserves the first matching witness,
-even if it is older than the requested retention window, and refuses deletion without one.
-Pruning remains test-only until its production startup and consumer protections are enabled.
+history is not evidence of a valid branch. Pruning caches a matching witness and checks new finalized
+blocks without rescanning a branchless suffix. Its initial search is bounded to 100,000 blocks;
+without a witness it waits without deleting bodies or rejecting the chain. Deletion preserves the
+witness even when it is older than the requested retention window.
+With `state.prune_blocks_older_than` set, one state-owned worker starts pruning after this gate
+opens, wakes at startup and on finalized-tip changes, and deletes at most 100 heights per batch.
+Only transaction bodies are deleted; genesis is retained. The retained floor is derived from
+transaction rows, with no new persisted marker or column family. The database-kind boundary
+keeps archive-only readers away from deleted bodies. Normal RocksDB compaction reclaims disk
+space outside the commit path.
 
-State copying inspects source availability and the target tip before opening a writable target.
-An unavailable source range requires an archive snapshot or resync; genesis remains copyable.
+Snapshots must retain the `state` or `state-pruned` kind as well as the format version and
+network namespace. Restore into an empty destination; never unpack a pruned snapshot under
+`state`. The copy command resolves these same paths, refuses unavailable source ranges or
+pruned targets, and disables target pruning while replaying and comparing a complete range.
+
+State copying inspects source availability and the target tip before opening a writable target;
+genesis remains copyable even when later source bodies are unavailable.
 
 #### Performance Constraints
 
@@ -400,6 +464,7 @@ We use the following rocksdb column families:
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 | `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
+| `fast_sync_tree_roots`             | `block::Height`        | `FastSyncTreeRoots`           | Create  |
 
 With the following additional modifications when compiled with the `indexer` feature
 (the column families themselves are always registered — see `STATE_COLUMN_FAMILIES_IN_CODE`
@@ -671,13 +736,21 @@ So they should not be used for consensus-critical checks.
   For each block committed, the old tree is deleted and a new one is inserted
   by its new height.
 
-- The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
+- The `{sapling, orchard, ironwood}_note_commitment_tree` stores the note commitment tree
   state for every height, for the specific pool. Each tree is stored
   as a "Merkle tree frontier" which is basically a (logarithmic) subset of
   the Merkle tree nodes as required to insert new items.
+  Heights committed by fast checkpoint sync are the exception: see `fast_sync_tree_roots`.
 
-- The `{sapling, orchard}_note_commitment_subtree` stores the completion height and
+- The `{sapling, orchard, ironwood}_note_commitment_subtree` stores the completion height and
   root for every completed level 16 note commitment subtree, for the specific pool.
+
+- `fast_sync_tree_roots` stores the Sapling, Orchard, and Ironwood note commitment tree roots and
+  sizes after each block that fast checkpoint sync committed without updating its trees. These
+  heights are contiguous, and have no trees in the `*_note_commitment_tree` column families, so
+  tree reads for them return nothing, and the tree size RPC fields use these sizes. Fast sync ends
+  by storing the trees embedded in Zebra, and the subtrees they completed, so subtrees can end at
+  these heights.
 
 - `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
   state. There is always a single entry for it. The tree is stored as the set of "peaks"

@@ -148,7 +148,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `initial_testnet_peers` | Array of address strings | Testnet seed list below | Initial Testnet peers. Regtest removes public seed names and retains only resolved loopback addresses. |
 | `persistent_peers` | Array of `host:port` strings | `[]` | Operator-selected peers kept connected independently of ordinary peer demand; see [selected peers](run.md#maintaining-connections-to-selected-peers). IPv6 literals need brackets. Each target reserves one outbound slot and must leave at least one for ordinary peers. Regtest connects only to localhost targets. |
 | `cache_dir` | Boolean or path string | `true` | Use the default cache directory when `true`, disable the peer disk cache when `false`, or use the supplied directory. Independent of `[state] cache_dir`. |
-| `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Zero produces a warning and becomes `25`. |
+| `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Near the network tip, at most this many ordinary outbound connections (persistent peers excluded) go to peers that don't serve historic blocks. Zero produces a warning and becomes `25`. |
 | `crawl_new_peer_interval` | Duration string | `"1m 1s"` | Interval between routine peer-address crawls. Zebra also crawls when all peers are busy and no connection candidates remain. The old key `new_peer_interval` is an accepted alias. |
 | `max_connections_per_ip` | `usize` | `1` | Concurrent peer-connection limit per IPv4 address or IPv6 `/64` subnet. Also affects inbound reconnection rate limiting. Zero produces a warning and becomes `1`; increasing it reduces peer diversity protections. |
 | `testnet_parameters` | Optional table | Absent | Compatibility layout for Testnet or Regtest parameters, used with a string-valued network selector. Ignored for Mainnet and when `network` itself contains parameters. |
@@ -337,12 +337,14 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
+| `prune_blocks_older_than` | Optional `u32` | Absent | Retain this many recent finalized block bodies and delete older transaction bodies; omission keeps an archive. The minimum is `10000` on Mainnet and Testnet, or `1001` on Regtest; zero is invalid. Genesis and non-finalized blocks are always retained. Deleted bodies are never restored, and enabling pruning stops advertising archive service. Existing archives must be moved to the pruned state directory while stopped before enabling it. See [Pruned Mining Nodes](pruning.md). |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
 | `debug_validity_check_interval` | Optional duration string | Absent | Run additional periodic state-validity checks. Without it, normal format checks still run at startup and shutdown. |
 | `debug_skip_non_finalized_state_backup_task` | Boolean | `false` | Developer option: replace the periodic backup task with synchronous writes before non-finalized-state and chain-tip updates. Does not disable restoring backups or override `ephemeral`/backup disabling. |
 
 Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
-7.0.0. Non-finalized backups use
+7.0.0. Pruning nodes use `<cache_dir>/state-pruned/v29/<network-directory>`
+instead. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.

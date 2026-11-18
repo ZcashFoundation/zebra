@@ -17,7 +17,7 @@ use std::{
     ops::RangeBounds,
     path::Path,
     sync::{
-        atomic::{self, AtomicBool},
+        atomic::{self, AtomicBool, AtomicU64},
         Arc,
     },
 };
@@ -38,7 +38,7 @@ use crate::{
         block::TRANSACTION_LOCATION_DISK_BYTES, FromDisk, IntoDisk, TransactionIndex,
         TransactionLocation,
     },
-    write_database_format_version_to_disk, Config, HistoryCapabilities, StateInitError,
+    Config, HistoryCapabilities, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -106,6 +106,12 @@ pub struct DiskDb {
     //
     // Everything contained in this state must be shared by all clones, or read-only.
     //
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
+    /// Database startup and each complete metrics export update this cached disk size.
+    cached_size: Arc<AtomicU64>,
+
     /// The shared inner RocksDB database.
     ///
     /// RocksDB allows reads and writes via a shared reference.
@@ -677,15 +683,22 @@ impl DiskDb {
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
         let mut total_mem: u64 = 0;
+        // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
+        let mut measured_column_family = false;
+        let mut complete_disk_measurement = true;
 
         for cf_descriptor in column_families {
             let cf_name = cf_descriptor.name().to_string();
             if let Some(cf_handle) = db.cf_handle(&cf_name) {
-                let disk = db
-                    .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0);
+                measured_column_family = true;
+                let disk = match db.property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                {
+                    Ok(Some(disk)) => disk,
+                    _ => {
+                        complete_disk_measurement = false;
+                        0
+                    }
+                };
                 let live = db
                     .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
                     .ok()
@@ -705,10 +718,16 @@ impl DiskDb {
                     .set(disk as f64);
                 metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
                     .set(mem as f64);
+            } else {
+                complete_disk_measurement = false;
             }
         }
 
         metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
+        if measured_column_family && complete_disk_measurement {
+            self.cached_size
+                .store(total_disk, atomic::Ordering::Relaxed);
+        }
         metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
         metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
 
@@ -737,23 +756,43 @@ impl DiskDb {
 
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
+        self.measure_size().0
+    }
+
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
+    /// Returns the latest disk space estimate, measuring read-only secondaries on demand.
+    ///
+    /// Secondary services have no periodic metrics task to refresh the startup estimate.
+    pub(crate) fn cached_size(&self) -> u64 {
+        if self.mode.is_read_only() {
+            self.size()
+        } else {
+            self.cached_size.load(atomic::Ordering::Relaxed)
+        }
+    }
+
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
+    /// Measures disk usage and reports whether every column family's property was available.
+    fn measure_size(&self) -> (u64, bool) {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
+        let mut measured_column_family = false;
+        let mut complete = true;
         for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
-                .expect("Column family handle must exist");
+                .expect("column family handle exists because RocksDB opened every descriptor");
+            measured_column_family = true;
 
-            total_size_on_disk += db
-                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
-                .ok()
-                .flatten()
-                .unwrap_or(0);
+            match db.property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size") {
+                Ok(Some(size)) => total_size_on_disk += size,
+                _ => complete = false,
+            }
         }
 
-        total_size_on_disk
+        (total_size_on_disk, measured_column_family && complete)
     }
 
     /// Sets `finished_format_upgrades` to true to indicate that Zebra has
@@ -982,6 +1021,13 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/e2248cd8c58339800ac5928192fa4bafd0d97f22).
+    /// The total WAL size that triggers flushing column families pinning the oldest logs.
+    ///
+    /// This limits restart recovery work during heavy sync without disabling WAL durability.
+    const MAX_TOTAL_WAL_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
@@ -1001,6 +1047,7 @@ impl DiskDb {
 
         column_families_on_disk
             .into_iter()
+            .chain([rocksdb::DEFAULT_COLUMN_FAMILY_NAME.to_owned()])
             .chain(column_families_in_code)
             .unique()
             .map(move |cf_name: String| {
@@ -1024,6 +1071,7 @@ impl DiskDb {
     /// # Errors
     ///
     /// - In read-only mode, if the cache directory is missing or unreadable.
+    /// - If pruning retention is invalid or an archive writer opens pruned history.
     ///
     /// # Panics
     ///
@@ -1037,6 +1085,8 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<DiskDb, StateInitError> {
+        config.validate_pruning(network)?;
+
         // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
         // database is a read-write primary this process owns and deletes on drop, while
         // a read-only secondary follows another process's primary and must never delete
@@ -1067,6 +1117,9 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
+        // A read-only secondary can't create column families, so it only opens the ones on disk.
+        // Databases last opened by older Zebra versions don't have newer column families.
+        let column_families_in_code = column_families_in_code.into_iter().filter(|_| !read_only);
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
@@ -1108,18 +1161,49 @@ impl DiskDb {
                     db: Arc::new(db),
                     secondary_dir,
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
                 // Guard the lowest writable entry point before launching migrations or checks.
                 let history = db.history_capabilities()?;
-                if !read_only && history.is_pruned() {
+                if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
                     return Err(StateInitError::PrunedDatabase {
                         path,
                         lowest_retained_height: history.lowest_retained_height,
                     });
                 }
+                if !read_only && history.is_pruned() {
+                    // Hold the writer lock while checking, before any caller can commit a block.
+                    let invalid_version = |source| StateInitError::HistoryRead {
+                        path: path.clone(),
+                        source,
+                    };
+                    let disk_version = database_format_version_on_disk(
+                        config,
+                        db_kind,
+                        format_version_in_code.major,
+                        network,
+                    )
+                    .map_err(invalid_version)?
+                    .ok_or_else(|| {
+                        invalid_version("pruned state requires a stored format version".into())
+                    })?;
+                    let disk_indexer = disk_version.build.contains("indexer");
+                    let running_indexer = cfg!(feature = "indexer");
+                    if disk_indexer != running_indexer {
+                        return Err(StateInitError::PrunedIndexModeMismatch {
+                            path,
+                            disk_indexer,
+                            running_indexer,
+                        });
+                    }
+                }
 
                 db.assert_default_cf_is_empty();
+                let (size, complete) = db.measure_size();
+                if complete {
+                    db.cached_size.store(size, atomic::Ordering::Relaxed);
+                }
 
                 Ok(db)
             }
@@ -1173,8 +1257,8 @@ impl DiskDb {
     }
 
     /// Returns the configured database kind for this database.
-    pub fn db_kind(&self) -> String {
-        self.db_kind.clone()
+    pub fn db_kind(&self) -> &str {
+        &self.db_kind
     }
 
     /// Returns the format version of the running code that created this `DiskDb` instance in memory.
@@ -1265,12 +1349,31 @@ impl DiskDb {
         self.db.write(batch.batch)
     }
 
+    /// Compacts transaction bodies below `below`, where the pruning worker deleted them.
+    ///
+    /// The range starts at the beginning of the column family, so it also covers bodies deleted
+    /// before a restart. Runs on the pruning worker, without taking the state writer's locks or
+    /// stalling writes for a flush.
+    pub(crate) fn compact_pruned_bodies(&self, below: Height) {
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .expect("transaction column family was created when opening state");
+        let mut options = rocksdb::CompactOptions::default();
+        options.set_exclusive_manual_compaction(false);
+        options.set_bottommost_level_compaction(rocksdb::BottommostLevelCompaction::ForceOptimized);
+        self.db.compact_range_cf_opt(
+            &transactions,
+            None::<&[u8]>,
+            Some(TransactionLocation::min_for_height(below).as_bytes()),
+            &options,
+        );
+    }
+
     // Private methods
 
-    /// Tries to reuse an existing db after a major upgrade.
+    /// Tries to reuse an existing database of the same kind after a major upgrade.
     ///
-    /// If the current db version belongs to `restorable_db_versions`, moves the previous major
-    /// database to the current path and updates its version file.
+    /// If the current version is restorable, moves its previous major to the current path.
     ///
     /// In `read_only` mode, returns the candidate's stored version without modifying either path.
     /// The caller must check that its records and directory version permit read-only reuse.
@@ -1367,21 +1470,10 @@ impl DiskDb {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
 
-                        let mut disk_version =
+                        let disk_version =
                             database_format_version_on_disk(config, db_kind, major_db_ver, network)
                                 .expect("unable to read database format version file")
                                 .expect("unable to parse database format version");
-
-                        disk_version.major = old_major_db_ver;
-
-                        write_database_format_version_to_disk(
-                            config,
-                            db_kind,
-                            major_db_ver,
-                            &disk_version,
-                            network,
-                        )
-                        .expect("unable to write database format version file to disk");
 
                         // Get the parent of the old path, e.g. `state/v25/` and delete it if it is
                         // empty.
@@ -1444,6 +1536,11 @@ impl DiskDb {
         //
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
+
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/e2248cd8c58339800ac5928192fa4bafd0d97f22).
+        // Flush older WALs during heavy sync to reduce restart replay work.
+        opts.set_max_total_wal_size(Self::MAX_TOTAL_WAL_SIZE_BYTES);
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.

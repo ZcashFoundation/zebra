@@ -51,7 +51,8 @@ pub use error::{
 };
 pub use request::{
     AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, ReadRequest, Request, SemanticallyVerifiedBlock,
+    HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
@@ -59,12 +60,15 @@ pub use request::Spend;
 
 pub use response::{
     AnyTx, BlockHeader, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
-    NonFinalizedBlocksListener, OutputWithMetadata, ReadResponse, Response,
+    MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, OutputWithMetadata,
+    ReadResponse, Response,
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
-    finalized_state::FinalizedState,
+    early_relay::{EarlyRelayCache, EarlyRelayGuard, EarlyRelayOrigin},
+    fast_tree_sync::EmbeddedTrees,
+    finalized_state::{FastSyncTreeRoots, FinalizedState},
     init, init_read_only,
     non_finalized_state::NonFinalizedState,
     spawn_init_read_only,
@@ -88,7 +92,10 @@ pub use service::{
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
-    arbitrary::{populated_state, populated_state_with_debug, CHAIN_TIP_UPDATE_WAIT_LIMIT},
+    arbitrary::{
+        populated_state, populated_state_with_debug,
+        populated_state_with_mining_candidate_lifetime, CHAIN_TIP_UPDATE_WAIT_LIMIT,
+    },
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };

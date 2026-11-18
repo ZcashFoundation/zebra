@@ -344,6 +344,11 @@ where
     /// a later connection reuses its address.
     find_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
 
+    /// Independent rotation of root-serving connections, preserved while peers are busy.
+    ///
+    /// Shares the find queue's connection lifecycle, but unrelated find traffic cannot move it.
+    tree_root_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
+
     /// Find requests waiting for a serving peer, in request order.
     ///
     /// After [`FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
@@ -360,7 +365,7 @@ where
     inventory_registry: InventoryRegistry,
 
     /// Block advert channels and remote versions for every connected peer, including busy peers.
-    block_advert_senders: watch::Sender<super::AdvertPeers>,
+    block_advert_senders: super::AdvertPeerRegistry,
 
     /// Coalesced discovery wakeups and bounded advert-maintenance completion requests.
     maintenance_waker: Arc<super::PeerSetWaker>,
@@ -546,10 +551,11 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             find_peer_queue: VecDeque::new(),
+            tree_root_peer_queue: VecDeque::new(),
             queued_find_requests: VecDeque::new(),
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
-            block_advert_senders: watch::channel(HashMap::new()).0,
+            block_advert_senders: super::AdvertPeerRegistry::default(),
             maintenance_waker: Arc::default(),
             maintenance_tx,
             maintenance_rx,
@@ -603,6 +609,7 @@ where
                 },
                 crate::constants::PEERSET_BUFFER_SIZE,
             ),
+            early_relay_recipients: self.block_advert_senders.early_relay_recipients.subscribe(),
         }
     }
 
@@ -731,14 +738,16 @@ where
         // Check for failures in ready peers, removing newly errored or disconnected peers.
         // So it needs to run after `poll_unready()`.
         let ready_peers = self.poll_ready_peer_errors(cx);
-        self.find_peer_queue.retain(|(key, _)| {
-            let connected =
-                self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
-            if !connected {
-                self.find_response_stalls.clear(*key);
-            }
-            connected
-        });
+        for queue in [&mut self.find_peer_queue, &mut self.tree_root_peer_queue] {
+            queue.retain(|(key, _)| {
+                let connected =
+                    self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
+                if !connected {
+                    self.find_response_stalls.clear(*key);
+                }
+                connected
+            });
+        }
         ready_peers.map(Ok)
     }
 
@@ -1022,15 +1031,27 @@ where
                         self.serving_peer_keys.remove(&key);
                     }
                     self.inventory_registry.clear_peer_failures(key);
+                    if svc.connection_info().early_block_relay {
+                        self.inventory_registry
+                            .add_compact_source(key, svc.compact_receive_tx.clone());
+                    }
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
+                    if svc
+                        .remote_services()
+                        .contains(PeerServices::NODE_TREE_ROOTS)
+                    {
+                        self.tree_root_peer_queue
+                            .push_back((key, svc.connection_info().clone()));
+                    }
                     self.block_advert_senders.send_modify(|peers| {
                         peers.insert(
                             key,
                             (
                                 svc.remote_version(),
                                 is_sidecar,
+                                svc.connection_info().early_block_relay,
                                 svc.block_advert_tx.clone(),
                             ),
                         );
@@ -1048,9 +1069,11 @@ where
     fn disconnect_from_ineligible_peers(&mut self) {
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
-        self.find_peer_queue.retain(|(key, info)| {
-            !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
-        });
+        for queue in [&mut self.find_peer_queue, &mut self.tree_root_peer_queue] {
+            queue.retain(|(key, info)| {
+                !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
+            });
+        }
         self.ready_services.retain(|key, service| {
             let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
             if !eligible {
@@ -1177,6 +1200,7 @@ where
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
         self.find_peer_queue.retain(|(addr, _)| addr != key);
+        self.tree_root_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
         self.block_advert_senders.send_modify(|peers| {
@@ -1245,6 +1269,7 @@ where
             self.find_response_stalls.clear(key);
             // Reject delayed response events before the next peer-set poll.
             self.find_peer_queue.retain(|(addr, _)| *addr != key);
+            self.tree_root_peer_queue.retain(|(addr, _)| *addr != key);
             self.block_advert_senders.send_modify(|peers| {
                 peers.remove(&key);
             });
@@ -1465,6 +1490,38 @@ where
         .boxed()
     }
 
+    /// Routes a tree roots request to a ready peer that advertised
+    /// [`PeerServices::NODE_TREE_ROOTS`] in fair rotation, or fails without queueing if none is ready.
+    fn route_tree_roots(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let Request::TreeRoots { excluded_peer, .. } = &req else {
+            unreachable!("only tree root requests use this route");
+        };
+        let peer = self
+            .tree_root_peer_queue
+            .iter()
+            .position(|(key, _)| {
+                Some(*key) != *excluded_peer && self.ready_services.contains_key(key)
+            })
+            .map(|index| {
+                let key = self.tree_root_peer_queue[index].0;
+                self.tree_root_peer_queue.rotate_left(index + 1);
+                key
+            });
+
+        match peer {
+            Some(key) => self
+                .call_ready_peer(key, req)
+                .map_ok(move |response| match response {
+                    Response::TreeRoots(Some(roots)) => Response::TreeRootsFromPeer(roots, key),
+                    response => response,
+                })
+                .boxed(),
+            None => {
+                future::ready(Err(SharedPeerError::from(PeerError::NoReadyPeers).into())).boxed()
+            }
+        }
+    }
+
     /// Tries to route a request to a ready peer that advertised that inventory,
     /// falling back to a ready peer that isn't missing the inventory.
     ///
@@ -1507,8 +1564,8 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready inventory advertiser or supplied source, waiting for a busy supplied block
-    /// source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
+    /// Prefers a ready inventory advertiser, then the carried source, waiting for a busy carried
+    /// block source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
@@ -1596,7 +1653,6 @@ where
             .inventory_registry
             .advertising_peers(hash)
             .copied()
-            .chain(advertiser)
             .collect();
         let advertising_peer_list = advertising_peers
             .iter()
@@ -1661,6 +1717,19 @@ where
             };
         }
 
+        // A recovery carries the child's source, which need not have advertised the parent.
+        // Prefer explicit parent inventory, but retain that source ahead of speculative peers.
+        // Like an advertiser, it is skipped for repeats once it has returned the block.
+        if let Some(peer) =
+            advertiser.filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
+        {
+            tracing::trace!(?hash, ?peer, "routing to the carried block source");
+            return InvRoute::Peer {
+                peer,
+                advertised: true,
+            };
+        }
+
         // An advert can arrive before its connection releases discovery capacity. Asking another
         // peer in that window can return notfound before it has even learned the new block.
         // Only the current announcing connection gets this short exclusive preference.
@@ -1690,11 +1759,13 @@ where
         // busy peer might have an advertised block, but only busy serving peers might have a
         // historic block.
         //
-        // Downloaders carry their known advertiser separately from this lossy registry.
+        // Downloaders carry their known source separately from this lossy registry. A recovery's
+        // source supplied the requested block's child, so that block is recent too.
         //
         // A disconnected or failed advertiser must not enable speculative non-serving fallback.
         let is_advertised = advertising_peers
             .iter()
+            .chain(advertiser.iter())
             .any(|addr| self.has_peer_with_addr(*addr) && !has_failed(addr));
         let busy_peer_might_have = |failed: bool| {
             self.cancel_handles.keys().any(|key| {
@@ -1790,7 +1861,7 @@ where
                     // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
                     (!missing).then_some(InvOutcome::Failed)
                 }
-                Ok(Response::Blocks(blocks))
+                Ok(Response::Blocks(blocks) | Response::EarlyBlocks(blocks))
                     if (advertised || is_repeat)
                         && blocks.iter().any(|block| block.available().is_some()) =>
                 {
@@ -2443,6 +2514,12 @@ where
         self.drain_inv_failures(&mut peer_cx);
 
         let ready_peers = self.poll_peers(&mut peer_cx)?;
+        let advert_peers = self.block_advert_senders.borrow();
+        self.inventory_registry.select_compact_sources(
+            self.minimum_peer_version.chain_tip().best_tip_hash(),
+            |peer| advert_peers.contains_key(peer),
+        );
+        drop(advert_peers);
 
         self.prune_disconnected_sidecar_keys();
         Self::retain_connected_keys(
@@ -2469,7 +2546,7 @@ where
                 self.block_advert_senders
                     .borrow()
                     .iter()
-                    .any(|(addr, (version, _, sender))| {
+                    .any(|(addr, (version, _, _, sender))| {
                         *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
                     })
             })
@@ -2551,8 +2628,19 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlockToAll(_) | Request::AdvertiseBlock(_, _) => {
+            Request::AdvertiseBlockToAll(_)
+            | Request::AdvertiseBlock(_, _)
+            | Request::AdvertiseEarlyBlock(_, _) => {
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
+            }
+            Request::EarlyBlocksByHash(_)
+            | Request::RawBlocksByHash(_)
+            | Request::EarlyRawBlocksByHash(_)
+            | Request::AdvertiseCompactBlock(..)
+            | Request::CheckCompactHeader(_)
+            | Request::CompactBlockTransactions(_)
+            | Request::CheckCompactBlock(..) => {
+                future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 
             // Broadcasts that must always reach the configured zcashd-compat sidecar peers
@@ -2560,6 +2648,7 @@ where
 
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
+            Request::TreeRoots { .. } => self.route_tree_roots(req),
 
             // Find requests rotate across serving peers with a bounded wait; others use P2C.
             _ => self.route_request(req),

@@ -14,18 +14,27 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
-    block, orchard, sapling,
+    block, orchard,
+    parallel::tree::TreeRootsProof,
+    parameters::NetworkUpgrade,
+    sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::{FastSyncTreeRoots, ZebraDb},
+        non_finalized_state::Chain,
+    },
     HashOrHeight,
 };
 
 // Doc-only items
 #[allow(unused_imports)]
 use zebra_chain::subtree::NoteCommitmentSubtree;
+
+/// Bounds tree database reads independently of the successor-body byte budget.
+pub(crate) const MAX_TREE_ROOT_PROOFS_PER_READ: u32 = 64;
 
 /// Returns the Sapling
 /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
@@ -314,6 +323,57 @@ where
     } else {
         BTreeMap::new()
     }
+}
+
+/// Returns a bounded prefix of finalized tree-root proofs for an admitted inclusive range.
+///
+/// ZIP-244 proofs require the actual next finalized block's authorizing-data root. Missing
+/// successor data is a neutral refusal, never a substitute digest or a partially usable proof.
+pub(crate) fn tree_roots(
+    db: &ZebraDb,
+    start: block::Height,
+    end: block::Height,
+) -> Option<Vec<TreeRootsProof>> {
+    let end = end.min(block::Height(
+        start.0.saturating_add(MAX_TREE_ROOT_PROOFS_PER_READ - 1),
+    ));
+    let roots = db.tree_roots_by_height_range(start, end)?;
+    let nu5 = NetworkUpgrade::Nu5.activation_height(&db.network());
+    // The proof count bounds tree reads, but not decoding and hashing large successor bodies.
+    // Check indexed sizes first, limiting that work to one maximum-size block per request.
+    let mut remaining_bytes = block::MAX_BLOCK_BYTES;
+    let mut proofs = Vec::with_capacity(roots.len());
+    for (height, roots) in (start.0..=end.0).map(block::Height).zip(roots) {
+        let next = (height + 1)?;
+        let successor_auth_data_root = if nu5.is_some_and(|nu5| next >= nu5) {
+            let size = u64::from(db.block_info(next.into())?.size());
+            let Some(remaining) = remaining_bytes.checked_sub(size) else {
+                break;
+            };
+            remaining_bytes = remaining;
+            Some(db.block(next.into()).ok()??.auth_data_root())
+        } else {
+            None
+        };
+        proofs.push(TreeRootsProof {
+            roots,
+            successor_auth_data_root,
+        });
+    }
+    Some(proofs)
+}
+
+/// Returns the note commitment tree roots and sizes that fast checkpoint sync stored for the
+/// finalized block specified by a hash or height, if it committed that block without its trees.
+///
+/// Only finalized blocks can be fast-synced, so this doesn't need the non-finalized chain.
+pub fn fast_sync_tree_roots(
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<FastSyncTreeRoots> {
+    let height = hash_or_height.height_or_else(|hash| db.height(hash))?;
+
+    db.fast_sync_tree_roots(height)
 }
 
 /// Get the history tree of the provided chain.

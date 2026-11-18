@@ -29,6 +29,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -41,7 +42,10 @@ use futures::{
 };
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, oneshot, Notify},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -173,6 +177,24 @@ impl TransactionDownloadVerifyError {
     }
 }
 
+/// A download and verify result queued before notifying the mempool.
+type VerifyResult = Result<
+    Result<
+        (
+            VerifiedUnminedTx,
+            Vec<transparent::OutPoint>,
+            Option<Height>,
+            Option<oneshot::Sender<Result<(), BoxError>>>,
+        ),
+        Box<(
+            TransactionDownloadVerifyError,
+            UnminedTxId,
+            Option<oneshot::Sender<Result<(), BoxError>>>,
+        )>,
+    >,
+    (UnminedTxId, tokio::time::error::Elapsed),
+>;
+
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
@@ -185,7 +207,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     // Services
@@ -196,7 +221,7 @@ where
     /// A service that verifies downloaded transactions.
     verifier: ZV,
 
-    /// A service that manages cached blockchain state.
+    /// A service that reads cached blockchain state without the state writer's buffer.
     state: ZS,
 
     /// The maximum OP_RETURN script size for the standard output checks.
@@ -206,28 +231,18 @@ where
     fee_reduction_height: Height,
 
     // Internal downloads state
-    /// A list of pending transaction download and verify tasks.
+    /// Pending tasks, retained to reap finished tasks and propagate panics.
     #[pin]
-    pending: FuturesUnordered<
-        JoinHandle<
-            Result<
-                Result<
-                    (
-                        VerifiedUnminedTx,
-                        Vec<transparent::OutPoint>,
-                        Option<Height>,
-                        Option<oneshot::Sender<Result<(), BoxError>>>,
-                    ),
-                    Box<(
-                        TransactionDownloadVerifyError,
-                        UnminedTxId,
-                        Option<oneshot::Sender<Result<(), BoxError>>>,
-                    )>,
-                >,
-                (UnminedTxId, tokio::time::error::Elapsed),
-            >,
-        >,
-    >,
+    pending: FuturesUnordered<JoinHandle<()>>,
+
+    /// The results of finished download and verify tasks.
+    results: mpsc::UnboundedReceiver<VerifyResult>,
+
+    /// The sender each task uses to queue its result.
+    results_sender: mpsc::UnboundedSender<VerifyResult>,
+
+    /// Transactions whose results have not been consumed, including cancelled tasks.
+    in_flight: usize,
 
     /// A list of channels that can be used to cancel pending transaction
     /// download and verify tasks. Each entry also stores the corresponding
@@ -255,6 +270,9 @@ where
     /// [`Self::cancel_handles`] have a source with that IP. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<IpAddr, usize>,
+
+    /// Wakes the queue checker to store and announce completed transactions.
+    transaction_verified: Arc<Notify>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -266,7 +284,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     type Item = Result<
@@ -287,18 +308,21 @@ where
     >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        // CORRECTNESS
-        //
-        // The current task must be scheduled for wakeup every time we return
-        // `Poll::Pending`.
-        //
-        // If no download and verify tasks have exited since the last poll, this
-        // task is scheduled for wakeup when the next task becomes ready.
-        //
-        // TODO: this would be cleaner with poll_map (#2693)
-        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let result = join_result.expect("transaction download and verify tasks must not panic");
+        let mut this = self.project();
+
+        // Results arrive separately; join handles still propagate task panics.
+        while let Poll::Ready(Some(join_result)) = this.pending.as_mut().poll_next(cx) {
+            join_result.expect("transaction download and verify tasks must not panic");
+        }
+
+        let result = this.results.poll_recv(cx);
+        // A cooperative yield must not strand queued results: the mempool returns readiness
+        // on Pending, so only another queue-check request will resume draining them.
+        if result.is_pending() && !this.results.is_empty() {
+            this.transaction_verified.notify_one();
+        }
+        let item = if let Some(result) = ready!(result) {
+            *this.in_flight -= 1;
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
                     let hash = tx.transaction.id;
@@ -337,10 +361,6 @@ where
 
         Poll::Ready(item)
     }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.pending.size_hint()
-    }
 }
 
 impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
@@ -352,7 +372,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     /// Initialize a new download stream with the provided services.
@@ -362,8 +385,17 @@ where
     /// `state` is used to check if transactions are already in the state.
     /// `fee_reduction_height` identifies fee failures that can become obsolete before completion.
     ///
+    /// `transaction_verified` wakes the queue checker after each result is queued.
+    ///
     /// Download retry and timeout limits should be applied to the `network` service.
-    pub fn new(network: ZN, verifier: ZV, state: ZS, fee_reduction_height: Height) -> Self {
+    pub fn new(
+        network: ZN,
+        verifier: ZV,
+        state: ZS,
+        fee_reduction_height: Height,
+        transaction_verified: Arc<Notify>,
+    ) -> Self {
+        let (results_sender, results) = mpsc::unbounded_channel();
         Self {
             network,
             verifier,
@@ -371,8 +403,12 @@ where
             max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
             fee_reduction_height,
             pending: FuturesUnordered::new(),
+            results,
+            results_sender,
+            in_flight: 0,
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
+            transaction_verified,
         }
     }
 
@@ -409,25 +445,23 @@ where
         if self.cancel_handles.contains_key(&txid) {
             debug!(
                 ?txid,
-                queue_len = self.pending.len(),
+                queue_len = self.in_flight,
                 ?MAX_INBOUND_CONCURRENCY,
                 "transaction id already queued for inbound download: ignored transaction"
             );
-            metrics::gauge!("mempool.currently.queued.transactions",)
-                .set(self.pending.len() as f64);
+            metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
 
             return reject(MempoolError::AlreadyQueued);
         }
 
-        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+        if self.in_flight >= MAX_INBOUND_CONCURRENCY {
             debug!(
                 ?txid,
-                queue_len = self.pending.len(),
+                queue_len = self.in_flight,
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many transactions queued for inbound download: ignored transaction"
             );
-            metrics::gauge!("mempool.currently.queued.transactions",)
-                .set(self.pending.len() as f64);
+            metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
 
             return reject(MempoolError::FullQueue);
         }
@@ -466,13 +500,14 @@ where
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
+            // Rejected IDs must not also pay for a tip lookup.
             Self::transaction_in_best_chain(&mut state, txid).await?;
 
             trace!(?txid, "transaction is not in best chain");
 
-            let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Ok((None, Height(0))),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+            let (tip_height, next_height) = match state.oneshot(zs::ReadRequest::Tip).await {
+                Ok(zs::ReadResponse::Tip(None)) => Ok((None, Height(0))),
+                Ok(zs::ReadResponse::Tip(Some((height, _hash)))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
                     Ok((Some(height), next_height))
@@ -568,6 +603,8 @@ where
         })
         .in_current_span();
 
+        let transaction_verified = self.transaction_verified.clone();
+        let results_sender = self.results_sender.clone();
         let task = tokio::spawn(async move {
             let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
 
@@ -621,10 +658,15 @@ where
                 },
             };
 
-            result
+            // Queue before notifying: the woken mempool must see the result even if this task
+            // has not exited yet. A dropped downloader needs no notification.
+            if results_sender.send(result).is_ok() {
+                transaction_verified.notify_one();
+            }
         });
 
         self.pending.push(task);
+        self.in_flight += 1;
         assert!(
             self.cancel_handles
                 .insert(txid, (cancel_tx, gossiped_tx_req, source))
@@ -639,11 +681,11 @@ where
 
         debug!(
             ?txid,
-            queue_len = self.pending.len(),
+            queue_len = self.in_flight,
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
         metrics::counter!("mempool.queued.transactions.total").increment(1);
 
         Ok(())
@@ -671,7 +713,7 @@ where
         }
     }
 
-    /// Cancel all running tasks and reset the downloader state.
+    /// Cancel all running tasks. Their admission slots remain reserved until results are consumed.
     // Note: copied from zebrad/src/components/sync/downloads.rs
     pub fn cancel_all(&mut self) {
         // Replace the pending task list with an empty one and drop it.
@@ -685,7 +727,7 @@ where
         self.pending_per_peer.clear();
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
-        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
     }
 
     /// Decrement the per-host pending count for `source`'s IP, removing the entry
@@ -700,10 +742,10 @@ where
         }
     }
 
-    /// Get the number of currently in-flight download tasks.
+    /// Get the number of transactions whose results have not been consumed.
     #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
-        self.pending.len()
+        self.in_flight
     }
 
     /// Get a list of the currently pending transaction requests.
@@ -723,11 +765,11 @@ where
             .await
             .map_err(CloneError::from)
             .map_err(TransactionDownloadVerifyError::StateError)?
-            .call(zs::Request::KnownTransaction(txid.mined_id()))
+            .call(zs::ReadRequest::KnownTransaction(txid.mined_id()))
             .await
         {
-            Ok(zs::Response::KnownTransaction(false)) => Ok(()),
-            Ok(zs::Response::KnownTransaction(true)) => {
+            Ok(zs::ReadResponse::KnownTransaction(false)) => Ok(()),
+            Ok(zs::ReadResponse::KnownTransaction(true)) => {
                 Err(TransactionDownloadVerifyError::InState)
             }
             Ok(_) => unreachable!("wrong response"),
@@ -748,7 +790,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     fn drop(mut self: Pin<&mut Self>) {

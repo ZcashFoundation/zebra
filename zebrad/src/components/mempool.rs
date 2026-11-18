@@ -24,13 +24,19 @@ use std::{
     iter,
     ops::Bound,
     pin::{pin, Pin},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use chrono::Duration;
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service,
+};
 
 use zebra_chain::{
     block::{self, Height},
@@ -82,11 +88,12 @@ use downloads::{
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type ReadState = BoxCloneService<zs::ReadRequest, zs::ReadResponse, zs::BoxError>;
 type TxVerifier = Buffer<
     BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
     transaction::MempoolRequest,
 >;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, ReadState>;
 
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
@@ -182,6 +189,9 @@ enum ActiveState {
         ///
         /// Updated in `poll_ready()` before each request.
         last_seen_tip: (block::Hash, Height),
+
+        /// Last chain tip height checked for expired transactions.
+        last_expiry_height: Option<Height>,
     },
 }
 
@@ -300,9 +310,11 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     outbound: Outbound,
 
-    /// Handle to the state service.
-    /// Used to construct the transaction downloader.
-    state: State,
+    /// Keeps the state writer alive until the mempool is dropped during shutdown.
+    _state: State,
+
+    /// Read-only state handle used to construct the transaction downloader.
+    read_state: ReadState,
 
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
@@ -336,6 +348,9 @@ pub struct Mempool {
     /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
     rejected_count_bar: Option<howudoin::Tx>,
+
+    /// Wakes the queue checker to store and announce verified transactions.
+    transaction_verified: Arc<Notify>,
 }
 
 impl Mempool {
@@ -349,15 +364,17 @@ impl Mempool {
         config: &Config,
         outbound: Outbound,
         state: State,
+        read_state: ReadState,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
-    ) -> (Self, MempoolTxSubscriber) {
+    ) -> (Self, MempoolTxSubscriber, Arc<Notify>) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
+        let transaction_verified = Arc::new(Notify::new());
 
         let mut service = Mempool {
             network: network.clone(),
@@ -368,10 +385,12 @@ impl Mempool {
             latest_chain_tip,
             chain_tip_change,
             outbound,
-            state,
+            _state: state,
+            read_state,
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
+            transaction_verified: transaction_verified.clone(),
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -387,7 +406,7 @@ impl Mempool {
         let is_caught_up_to_start = service.is_caught_up_to_start();
         service.update_state(None, is_caught_up_to_start);
 
-        (service, transaction_subscriber)
+        (service, transaction_subscriber, transaction_verified)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -432,8 +451,9 @@ impl Mempool {
             TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state.clone(),
+                self.read_state.clone(),
                 self.network.fee_reduction_height(),
+                self.transaction_verified.clone(),
             )
             .with_max_datacarrier_bytes(
                 self.config
@@ -445,6 +465,7 @@ impl Mempool {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
             last_seen_tip,
+            last_expiry_height: None,
         };
     }
 
@@ -713,6 +734,7 @@ impl Service<Request> for Mempool {
             storage,
             tx_downloads,
             last_seen_tip,
+            last_expiry_height,
         } = &mut self.active_state
         {
             // Refresh retained entries before completed downloads can insert and update metrics.
@@ -750,8 +772,12 @@ impl Service<Request> for Mempool {
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
                             let tx_id = tx.transaction.id;
-                            let insert_result =
-                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
+                            let insert_result = storage.insert(
+                                tx,
+                                spent_mempool_outpoints,
+                                best_tip_height,
+                                &mut invalidated_ids,
+                            );
 
                             tracing::trace!(
                                 ?insert_result,
@@ -880,11 +906,16 @@ impl Service<Request> for Mempool {
             }
 
             // Remove expired transactions from the mempool.
+            // Newly inserted transactions were verified for the next block at this tip, so
+            // they cannot already be expired. Only a tip height change requires another scan.
             //
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
-            if let Some(tip_height) = best_tip_height {
+            if let Some(tip_height) =
+                best_tip_height.filter(|&height| Some(height) != *last_expiry_height)
+            {
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
+                *last_expiry_height = Some(tip_height);
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
@@ -963,6 +994,7 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
                 last_seen_tip,
+                ..
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -1114,7 +1146,10 @@ impl Service<Request> for Mempool {
                 Request::CheckForVerifiedTransactions => {
                     trace!(?req, "got mempool request");
 
-                    // all the work for this request is done in poll_ready
+                    // Queue checks also reap abandoned waiters when the chain tip stalls.
+                    storage.pending_outputs.prune();
+
+                    // Verified transactions were collected in poll_ready.
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
 

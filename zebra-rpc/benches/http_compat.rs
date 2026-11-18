@@ -144,7 +144,9 @@ fn bench_response_round_trip(c: &mut Criterion) {
             // Cast safe: usize is at most 64 bits on supported platforms.
             group.throughput(Throughput::Bytes(body.len() as u64));
 
-            let mut middleware = HttpRequestMiddleware::new(inner_service(body.clone()), None, MB);
+            // No response limit: the bench measures conversion, not oversized-response errors.
+            let mut middleware =
+                HttpRequestMiddleware::new(inner_service(body.clone()), None, MB, usize::MAX);
             group.bench_function(BenchmarkId::new("middleware", &label), |b| {
                 b.iter(|| runtime.block_on(round_trip(&mut middleware, REQUEST)))
             });
@@ -186,7 +188,7 @@ fn bench_request_round_trip(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(request.len() as u64));
 
         let mut middleware =
-            HttpRequestMiddleware::new(inner_service(response.clone()), None, 8 * MB);
+            HttpRequestMiddleware::new(inner_service(response.clone()), None, 8 * MB, usize::MAX);
         group.bench_function(BenchmarkId::new("middleware", &label), |b| {
             b.iter(|| runtime.block_on(send(&mut middleware, request.clone())))
         });

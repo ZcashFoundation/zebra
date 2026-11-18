@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `DecodedBlock::deserialize` to retain consumed wire size and avoid reserializing decoded blocks for the size check, while retaining size counting for constructed blocks ([#11989](https://github.com/ZcashFoundation/zebra/issues/11989)).
+time: 2026-10-24T04:24:41.719627195+02:00

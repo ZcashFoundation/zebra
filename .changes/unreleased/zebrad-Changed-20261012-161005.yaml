@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  `getblockchaininfo` reports `size_on_disk` from an estimate refreshed about every 30 seconds
+  instead of measuring the database on every call.
+time: 2026-10-12T16:10:05.000000000+02:00

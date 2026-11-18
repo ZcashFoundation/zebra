@@ -459,12 +459,92 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
         handler.respond(response);
     }
 
+    // The block isn't fast-synced either.
+    read_state
+        .expect_request_that(|request| matches!(request, ReadRequest::FastSyncTreeRoots(_)))
+        .await
+        .respond(ReadResponse::FastSyncTreeRoots(None));
+
     let status = request_task
         .await
         .expect("request task should not panic")
         .expect_err("a missing commitment tree must not be served as a zero tree size");
 
     assert_ne!(status.code(), tonic::Code::Ok);
+
+    Ok(())
+}
+
+/// Blocks committed by fast checkpoint sync have no stored trees, so their tree sizes come from
+/// the sizes fast sync stored.
+#[tokio::test]
+async fn get_block_serves_fast_synced_tree_sizes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let height = block
+        .coinbase_height()
+        .expect("test block has a coinbase height");
+
+    let request_task = tokio::spawn(async move {
+        client
+            .get_block(tonic::Request::new(BlockId {
+                height: height.0.into(),
+                hash: Vec::new(),
+            }))
+            .await
+    });
+
+    read_state
+        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .await
+        .respond(ReadResponse::Block(Some(block)));
+
+    // Fast sync didn't store the trees. This block is pre-NU6.3, so no Ironwood read is issued.
+    for _ in 0..2 {
+        let handler = read_state
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                )
+            })
+            .await;
+
+        let response = match handler.request() {
+            ReadRequest::SaplingTree(_) => ReadResponse::SaplingTree(None),
+            _ => ReadResponse::OrchardTree(None),
+        };
+
+        handler.respond(response);
+    }
+
+    read_state
+        .expect_request_that(|request| matches!(request, ReadRequest::FastSyncTreeRoots(_)))
+        .await
+        .respond(ReadResponse::FastSyncTreeRoots(Some(
+            zebra_state::FastSyncTreeRoots {
+                roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                sapling_size: 5,
+                orchard_size: 7,
+                ironwood_size: 0,
+            },
+        )));
+
+    let chain_metadata = request_task
+        .await
+        .expect("request task should not panic")
+        .expect("a fast-synced block should be served with its stored tree sizes")
+        .into_inner()
+        .chain_metadata
+        .expect("compact blocks always carry chain metadata");
+
+    assert_eq!(chain_metadata.sapling_commitment_tree_size, 5);
+    assert_eq!(chain_metadata.orchard_commitment_tree_size, 7);
+    assert_eq!(chain_metadata.ironwood_commitment_tree_size, 0);
 
     Ok(())
 }
@@ -831,4 +911,65 @@ async fn start_server_and_get_client() -> Result<(
         chain_tip_sender,
         mempool_change_sender,
     ))
+}
+
+#[tokio::test]
+async fn tree_state_methods_reject_fast_synced_heights_explicitly() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server, client, mut read, _mempool, tip, _changes) =
+        start_server_and_get_client().await?;
+    let block: Arc<Block> =
+        zebra_test::vectors::MAINNET_BLOCKS[&419_201].zcash_deserialize_into()?;
+    let hash = block.hash();
+    tip.send_best_tip_height(block.coinbase_height());
+    tip.send_best_tip_hash(hash);
+    for latest in [false, true] {
+        let mut client = client.clone();
+        let request = tokio::spawn(async move {
+            if latest {
+                client
+                    .get_latest_tree_state(tonic::Request::new(Empty {}))
+                    .await
+            } else {
+                client
+                    .get_tree_state(tonic::Request::new(BlockId {
+                        height: 0,
+                        hash: hash.0.to_vec(),
+                    }))
+                    .await
+            }
+        });
+        read.expect_request(ReadRequest::BlockHeader(hash.into()))
+            .await
+            .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+                header: block.header.clone(),
+                hash,
+                height: block
+                    .coinbase_height()
+                    .expect("test vector has a coinbase height"),
+                next_block_hash: None,
+            })));
+        read.expect_request(ReadRequest::AnyChainSaplingTree(hash))
+            .await
+            .respond(ReadResponse::SaplingTree(None));
+        read.expect_request(ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .respond(ReadResponse::FastSyncTreeRoots(Some(
+                zebra_state::FastSyncTreeRoots {
+                    roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                    sapling_size: 1,
+                    orchard_size: 0,
+                    ironwood_size: 0,
+                },
+            )));
+        let error = tokio::time::timeout(Duration::from_secs(5), request)
+            .await??
+            .expect_err("missing historical trees cannot be returned as empty trees");
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        assert_eq!(
+            error.message(),
+            "tree state unavailable: fast-synced height"
+        );
+    }
+    Ok(())
 }
