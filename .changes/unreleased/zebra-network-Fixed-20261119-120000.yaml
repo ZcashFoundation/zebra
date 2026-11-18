@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: Fixed a panic in the inbound connection limiter when the time limit is longer than the time since the system clock started, which could abort `zebrad` on an early inbound connection on Windows.
+time: 2026-11-19T12:00:00.000000000Z
