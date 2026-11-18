@@ -5868,8 +5868,7 @@ pub mod arrayhex {
     where
         S: Serializer,
     {
-        let hex_string = hex::encode(data);
-        serializer.serialize_str(&hex_string)
+        serializer.serialize_str(&super::hex_data::encode(data))
     }
 
     #[allow(missing_docs)]
