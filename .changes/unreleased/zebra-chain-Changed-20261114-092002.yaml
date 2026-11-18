@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Read and write transaction byte vectors in bulk using published Zcash codec releases.
+time: 2026-11-14T09:20:02.790622021+01:00

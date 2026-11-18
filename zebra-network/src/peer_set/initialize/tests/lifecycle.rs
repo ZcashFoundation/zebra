@@ -372,3 +372,104 @@ async fn dropping_network_handles_stops_owned_tasks() {
     );
     drop(advertiser);
 }
+
+/// A configured persistent target connects without seeds and is released with the network owner.
+#[tokio::test]
+async fn persistent_config_starts_and_stops_with_network_owner() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let edge_addr = listener.local_addr().unwrap();
+    let edge = peer::Handshake::builder()
+        .with_config(Config {
+            listen_addr: edge_addr,
+            ..Config::default()
+        })
+        .with_advertised_services(crate::protocol::external::types::PeerServices::NODE_NETWORK)
+        .with_inbound_service(service_fn(|_| async {
+            Ok::<_, BoxError>(Response::Peers(Vec::new()))
+        }))
+        .with_user_agent("persistent lifecycle edge".to_owned())
+        .with_latest_chain_tip(NoChainTip)
+        .finish()
+        .unwrap();
+    let accept_edge = async {
+        let (stream, remote_addr) = listener.accept().await.unwrap();
+        edge.oneshot(peer::HandshakeRequest {
+            data_stream: stream,
+            connected_addr: peer::ConnectedAddr::new_inbound_direct(remote_addr.into()),
+            connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+        })
+        .await
+        .unwrap()
+    };
+
+    // A surviving maintenance connector would retain this sender after the owner is dropped.
+    let (inbound_owner, mut inbound_released) = tokio::sync::mpsc::channel::<()>(1);
+    let inbound = service_fn(move |_| {
+        let _owner = &inbound_owner;
+        async { Ok::<_, BoxError>(Response::Peers(Vec::new())) }
+    });
+    let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        persistent_peers: [edge_addr.to_string()].into(),
+        cache_dir: CacheDir::disabled(),
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+    let ((network, _addresses, misbehavior, advertiser), mut remote) =
+        timeout(SHUTDOWN_BOUND, async {
+            tokio::join!(
+                crate::init(
+                    config,
+                    inbound,
+                    NoChainTip,
+                    "persistent lifecycle node".to_owned()
+                ),
+                accept_edge,
+            )
+        })
+        .await
+        .expect("the configured local target connects without initial peers");
+    timeout(SHUTDOWN_BOUND, network.clone().oneshot(Request::Peers))
+        .await
+        .expect("the persistent connection must enter the actual peer set")
+        .expect("the configured target responds through the network service");
+    drop(network);
+
+    timeout(SHUTDOWN_BOUND, async {
+        let connection_closed = async {
+            while remote.ready().await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        let ((), released, ()) = tokio::join!(
+            connection_closed,
+            inbound_released.recv(),
+            misbehavior.closed()
+        );
+        assert_eq!(released, None);
+    })
+    .await
+    .expect("dropping the last owner releases the persistent connection and connector");
+    drop(advertiser);
+
+    // Move beyond the reconnect deadline with the runtime and target listener still alive.
+    tokio::time::pause();
+    tokio::time::advance(
+        crate::constants::MIN_PEER_RECONNECTION_DELAY + crate::constants::DNS_LOOKUP_TIMEOUT,
+    )
+    .await;
+    tokio::time::resume();
+    assert!(
+        timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err(),
+        "persistent retries must stop when the network is dropped",
+    );
+}

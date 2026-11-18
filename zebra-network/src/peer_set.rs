@@ -44,10 +44,52 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct BlockAdvert {
     pub(crate) hash: block::Hash,
+    pub(crate) compact_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) result: oneshot::Sender<Result<(), BoxError>>,
 }
 
-type AdvertPeers = HashMap<PeerSocketAddr, (Version, bool, mpsc::Sender<BlockAdvert>)>;
+type AdvertPeers = HashMap<PeerSocketAddr, (Version, bool, bool, mpsc::Sender<BlockAdvert>)>;
+
+/// Publishes recipient demand with every change to the registered advert channels.
+#[derive(Debug)]
+struct AdvertPeerRegistry {
+    peers: watch::Sender<AdvertPeers>,
+    early_relay_recipients: watch::Sender<bool>,
+}
+
+impl Default for AdvertPeerRegistry {
+    fn default() -> Self {
+        Self {
+            peers: watch::Sender::new(HashMap::new()),
+            early_relay_recipients: watch::Sender::new(false),
+        }
+    }
+}
+
+impl AdvertPeerRegistry {
+    fn subscribe(&self) -> watch::Receiver<AdvertPeers> {
+        self.peers.subscribe()
+    }
+
+    fn borrow(&self) -> watch::Ref<'_, AdvertPeers> {
+        self.peers.borrow()
+    }
+
+    fn send_modify(&self, update: impl FnOnce(&mut AdvertPeers)) {
+        let mut needed = false;
+        self.peers.send_modify(|peers| {
+            update(peers);
+            needed = peers
+                .values()
+                .any(|(_, _, negotiated, sender)| *negotiated && !sender.is_closed());
+        });
+        self.early_relay_recipients.send_if_modified(|recipients| {
+            let changed = *recipients != needed;
+            *recipients = needed;
+            changed
+        });
+    }
+}
 
 /// Discovery and maintenance requests wake both an active worker and the idle-buffer self-poller.
 #[derive(Debug, Default)]
@@ -69,14 +111,31 @@ impl Wake for PeerSetWaker {
 
 /// Bounded block fanout independent of ordinary peer request readiness.
 ///
-/// Accepts only `AdvertiseBlock` (sampled peers plus sidecars) and `AdvertiseBlockToAll`.
+/// Accepts `AdvertiseBlock` (sampled peers plus sidecars), `AdvertiseBlockToAll`, and
+/// `AdvertiseEarlyBlock` (the same sample, restricted to bilaterally negotiated connections).
 /// Readiness reconciles pending discovery and waits for an eligible connected peer, even if busy.
-/// Success requires every selected connection to complete its local write. Full queues, revoked
-/// connections, write failures, and losing all eligible peers after readiness are errors.
+/// Success acknowledges the first completed local write, not remote receipt or delivery to every
+/// selected peer. Other queued adverts continue independently. Per-peer failures are logged.
+/// If no write succeeds, full or closed queues, revoked connections, and write failures return an
+/// error. Losing all eligible peers after readiness is also an error.
+/// An acknowledgement timeout takes precedence over other errors and means delivery is unknown:
+/// a queued write may still complete. Caller timeouts likewise do not establish zero delivery.
+/// Dropping a call's future does not cancel queued adverts.
 /// Keep an owning [`NetworkService`] alive; advertiser handles do not own background tasks.
 #[derive(Clone, Debug)]
 pub struct BlockAdvertiser<C> {
     inner: ConcurrencyLimit<AdvertisePeers<C>>,
+    early_relay_recipients: watch::Receiver<bool>,
+}
+
+impl<C> BlockAdvertiser<C> {
+    /// Subscribes to whether a registered peer has negotiated early relay.
+    ///
+    /// This is an availability hint, not authorization to serve an uncommitted block. Peer-set
+    /// maintenance removes banned, outdated, and disconnected peers from the registered channels.
+    pub fn early_relay_recipients(&self) -> watch::Receiver<bool> {
+        self.early_relay_recipients.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -153,9 +212,10 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
 
     fn call(&mut self, request: Request) -> Self::Future {
         self.maintained = false;
-        let (hash, all) = match request {
-            Request::AdvertiseBlock(hash, _) => (hash, false),
-            Request::AdvertiseBlockToAll(hash) => (hash, true),
+        let (hash, all, early, source) = match request {
+            Request::AdvertiseBlock(hash, _) => (hash, false, false, None),
+            Request::AdvertiseBlockToAll(hash) => (hash, true, false, None),
+            Request::AdvertiseEarlyBlock(hash, source) => (hash, false, true, source),
             _ => return futures::future::ready(Err("not a block advertisement".into())).boxed(),
         };
         let minimum = self.minimum_version.current();
@@ -163,16 +223,22 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
         let peers = self.peers.borrow();
         let mut selected: Vec<_> = peers
             .iter()
-            .filter(|(addr, (version, _, sender))| {
-                *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
+            .filter(|(addr, (version, _, early_block_relay, sender))| {
+                *version >= minimum
+                    && (!early || *early_block_relay)
+                    && source.as_ref() != Some(*addr)
+                    && !bans.is_banned(addr.ip())
+                    && !sender.is_closed()
             })
-            .map(|(_, entry)| entry)
+            .map(|(addr, entry)| (*addr, entry))
             .collect();
         selected.shuffle(&mut rand::rng());
         let sample = broadcast_peer_count(&self.network, selected.len());
         let mut writes = FuturesUnordered::new();
+        let mut failure = None;
         let mut sampled = 0;
-        for (_, sidecar, sender) in selected {
+        let compact_slots = Arc::new(tokio::sync::Semaphore::new(3));
+        for (addr, (_, sidecar, _, sender)) in selected {
             if !all && !*sidecar {
                 if sampled >= sample {
                     continue;
@@ -180,28 +246,39 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
                 sampled += 1;
             }
             let (result, receiver) = oneshot::channel();
-            let admission = sender
-                .try_send(BlockAdvert { hash, result })
-                .map_err(|error| -> BoxError { error.to_string().into() });
+            if let Err(error) = sender.try_send(BlockAdvert {
+                hash,
+                compact_slots: compact_slots.clone(),
+                result,
+            }) {
+                tracing::debug!(?addr, %error, "block advert queue admission failed");
+                failure.get_or_insert_with(|| -> BoxError { error.to_string().into() });
+                continue;
+            }
             writes.push(async move {
-                admission?;
-                tokio::time::timeout(REQUEST_TIMEOUT, receiver).await??
+                let result = tokio::time::timeout(REQUEST_TIMEOUT, async { receiver.await? }).await;
+                (addr, result)
             });
         }
         async move {
-            if writes.is_empty() {
-                return Err("no eligible peers for block advertisement".into());
-            }
-            let mut failure = None;
-            while let Some(result) = writes.next().await {
-                if let Err(error) = result {
-                    failure.get_or_insert(error);
+            let mut timed_out = None;
+            while let Some((addr, result)) = writes.next().await {
+                match result {
+                    Ok(Ok(())) => return Ok(Response::Nil),
+                    Ok(Err(error)) => {
+                        tracing::debug!(?addr, %error, "block advert write failed");
+                        failure.get_or_insert(error);
+                    }
+                    Err(error) => {
+                        tracing::debug!(?addr, %error, "block advert acknowledgement timed out");
+                        timed_out.get_or_insert(error);
+                    }
                 }
             }
-            match failure {
-                Some(error) => Err(error),
-                None => Ok(Response::Nil),
-            }
+            Err(timed_out
+                .map(BoxError::from)
+                .or(failure)
+                .unwrap_or_else(|| "no eligible peers for block advertisement".into()))
         }
         .boxed()
     }

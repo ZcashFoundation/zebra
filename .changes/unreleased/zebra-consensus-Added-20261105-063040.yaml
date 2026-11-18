@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added authenticated early-relay verification through `Request::CommitEarlyRelay` and `VerifyBlockError::{EarlyRelay, EarlyRelayAdmission, EarlyRelayRejected, EarlyRelayUnavailable}`. The request takes `DecodedBlock` so callers can retain compact reconstruction evidence; unavailable parent context does not authenticate a body or establish invalidity ([#12289](https://github.com/ZcashFoundation/zebra/pull/12289)).
+time: 2026-11-05T06:30:40.214783469+01:00

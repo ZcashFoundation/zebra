@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Maintain selected peers with `network.persistent_peers`, reserving outbound slots and retrying failures with fresh DNS lookups.
+time: 2026-11-14T07:29:02.894782454+01:00

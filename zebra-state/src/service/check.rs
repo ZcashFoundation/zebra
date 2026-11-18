@@ -5,7 +5,9 @@ use std::sync::Arc;
 use chrono::Duration;
 
 use zebra_chain::{
-    block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
+    block::{
+        self, merkle::AuthDataRoot, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError,
+    },
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
@@ -133,11 +135,14 @@ pub(crate) fn block_is_valid_for_recent_chain(
 
 /// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
+///
+/// Any precomputed root must come from the same immutable checkpoint block body.
 #[tracing::instrument(skip(block, history_tree))]
 pub(crate) fn block_commitment_is_valid_for_chain_history(
     block: Arc<Block>,
     network: &Network,
     history_tree: &HistoryTree,
+    precomputed_auth_data_root: Option<AuthDataRoot>,
 ) -> Result<(), ValidateContextError> {
     match block.commitment(network)? {
         block::Commitment::PreSaplingReserved(_)
@@ -200,7 +205,14 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
                     "the history tree of the previous block must exist \
                  since the current block has a ChainHistoryBlockTxAuthCommitment",
                 );
-            let auth_data_root = block.auth_data_root();
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or
+            // the Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/3482b607a4008da9d2a6833243959d88f28a0659).
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+            let auth_data_root =
+                precomputed_auth_data_root.unwrap_or_else(|| block.auth_data_root());
 
             let hash_block_commitments = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                 &history_tree_root,
@@ -264,7 +276,7 @@ fn height_one_more_than_parent_height(
 ///
 /// These checks are performed together, because the time field is used to
 /// calculate the expected difficulty adjustment.
-fn difficulty_threshold_and_time_are_valid(
+pub(crate) fn difficulty_threshold_and_time_are_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
@@ -323,17 +335,20 @@ fn difficulty_threshold_and_time_are_valid(
     Ok(())
 }
 
-/// Check if zebra is following a legacy chain and return an error if so.
+/// Checks the cached chain and returns the first block with observed transaction branch IDs.
 ///
 /// `nu5_activation_height` should be `NetworkUpgrade::Nu5.activation_height(network)`, and
 /// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
 /// They are only changed from the defaults for testing.
+///
+/// Returns `None` only after reaching a pre-NU5 block. Missing bodies or an exhausted iterator
+/// cannot establish branch consistency and fail closed.
 pub(crate) fn legacy_chain<I>(
     nu5_activation_height: block::Height,
     ancestors: I,
     network: &Network,
     max_legacy_chain_blocks: usize,
-) -> Result<(), BoxError>
+) -> Result<Option<block::Height>, BoxError>
 where
     I: Iterator<Item = Result<Arc<Block>, crate::BlockReadError>>,
 {
@@ -344,7 +359,12 @@ where
         .and_then(|block| block.coinbase_height());
 
     for (index, block) in ancestors.enumerate() {
-        let block = block?;
+        let block = block.map_err(|error| {
+            format!(
+                "cannot prove the cached chain follows the configured network upgrade: {error}; \
+                 restore an archive snapshot or resync"
+            )
+        })?;
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
@@ -355,7 +375,7 @@ where
             .expect("valid blocks have coinbase heights")
             < nu5_activation_height
         {
-            return Ok(());
+            return Ok(None);
         }
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
@@ -386,11 +406,16 @@ where
             .find_map(|trans| trans.network_upgrade())
             .is_some();
         if has_network_upgrade {
-            return Ok(());
+            return Ok(block.coinbase_height());
         }
     }
 
-    Ok(())
+    Err(
+        "cannot prove the cached chain follows the configured network upgrade: \
+         ancestor history ended before finding a transaction branch ID or a pre-NU5 block; \
+         restore an archive snapshot or resync"
+            .into(),
+    )
 }
 
 /// Perform initial contextual validity checks for the configured network,

@@ -8,7 +8,8 @@ use thiserror::Error;
 
 use crate::{
     amount::{Amount, NonNegative},
-    block::MAX_BLOCK_BYTES,
+    block::{Height, MAX_BLOCK_BYTES},
+    parameters::Network,
     serialization::ZcashSerialize,
     transaction::{Transaction, UnminedTx},
 };
@@ -16,10 +17,23 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
-//
-// TODO: allow Amount<NonNegative> in constants
-pub const MARGINAL_FEE: u64 = 1_000;
+/// Returns the ZIP-317 marginal fee in zatoshis per logical action for the next block.
+///
+/// Both fee parameters change at the network's [ZIP-2009] activation height.
+///
+/// [ZIP-2009]: https://zips.z.cash/zip-2009
+pub fn marginal_fee(network: &Network, next_block_height: Height) -> u64 {
+    fee_parameters(network, next_block_height).0
+}
+
+/// Returns the marginal fee and block production weight ratio cap for the next block.
+fn fee_parameters(network: &Network, next_block_height: Height) -> (u64, f32) {
+    if next_block_height >= network.fee_reduction_height() {
+        (1_000, 10.0)
+    } else {
+        (5_000, 4.0)
+    }
+}
 
 /// The number of grace logical actions allowed by the ZIP-317 fee calculation.
 const GRACE_ACTIONS: u32 = 2;
@@ -29,10 +43,6 @@ const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 
 /// The standard size of p2pkh outputs for the ZIP-317 fee calculation, in bytes.
 const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
-
-/// The weight ratio cap for ZIP-317 block production.
-/// `weight_ratio_cap` in ZIP-317.
-const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 10.0;
 
 /// The minimum fee for the block production weight ratio calculation, in zatoshis.
 /// If a transaction has a lower fee, this value is used instead.
@@ -65,33 +75,39 @@ pub const MIN_MEMPOOL_TX_FEE_RATE: usize = 100;
 /// This is a `usize` to simplify transaction size-based calculation code.
 pub const MEMPOOL_TX_FEE_REQUIREMENT_CAP: usize = 1000;
 
-/// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
+/// Returns the conventional fee for an action count in the next block, as defined by [ZIP-317].
+///
+/// Use the cached count in [`UnminedTx`] or the result of [`conventional_actions`].
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
-pub fn conventional_fee(transaction: &Transaction) -> Amount<NonNegative> {
-    // zcash_primitives checks for non-p2pkh inputs, but Zebra doesn't.
-    // Conventional fees are only used in the standard rules for mempool eviction
-    // and block production, so these implementations are compatible.
-    //
-    // <https://github.com/zcash/librustzcash/blob/main/zcash_primitives/src/transaction/fees/zip317.rs#L135>
-
-    let marginal_fee: Amount<NonNegative> = MARGINAL_FEE.try_into().expect("fits in amount");
+pub fn conventional_fee(
+    conventional_actions: u32,
+    network: &Network,
+    next_block_height: Height,
+) -> Amount<NonNegative> {
+    let marginal_fee: Amount<NonNegative> = marginal_fee(network, next_block_height)
+        .try_into()
+        .expect("the marginal fee fits in an amount");
 
     // marginal_fee * max(logical_actions, GRACE_ACTIONS)
-    let conventional_fee = marginal_fee * conventional_actions(transaction).into();
+    let conventional_fee = marginal_fee * conventional_actions.into();
 
-    conventional_fee.expect("conventional fee is positive and limited by serialized size limit")
+    conventional_fee.expect("a u32 action count times the marginal fee fits in an amount")
 }
 
-/// Returns the number of unpaid actions for `transaction`, as defined by [ZIP-317].
+/// Returns the unpaid actions for `transaction` in the next block, as defined by [ZIP-317].
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-pub fn unpaid_actions(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -> u32 {
-    // max(logical_actions, GRACE_ACTIONS)
-    let conventional_actions = conventional_actions(&transaction.transaction);
+pub fn unpaid_actions(
+    transaction: &UnminedTx,
+    miner_fee: Amount<NonNegative>,
+    network: &Network,
+    next_block_height: Height,
+) -> u32 {
+    let conventional_actions = transaction.conventional_actions;
 
     // floor(tx.fee / marginal_fee)
-    let marginal_fee_weight_ratio = miner_fee / MARGINAL_FEE;
+    let marginal_fee_weight_ratio = miner_fee / marginal_fee(network, next_block_height);
     let marginal_fee_weight_ratio: i64 = marginal_fee_weight_ratio
         .expect("marginal fee is not zero")
         .into();
@@ -104,7 +120,7 @@ pub fn unpaid_actions(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -
     unpaid_actions.try_into().unwrap_or_default()
 }
 
-/// Returns the block production fee weight ratio for `transaction`, as defined by [ZIP-317].
+/// Returns the next block's fee weight ratio for `transaction`, as defined by [ZIP-317].
 ///
 /// This calculation will always return a positive, non-zero value.
 ///
@@ -112,6 +128,8 @@ pub fn unpaid_actions(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -
 pub fn conventional_fee_weight_ratio(
     transaction: &UnminedTx,
     miner_fee: Amount<NonNegative>,
+    network: &Network,
+    next_block_height: Height,
 ) -> f32 {
     // Check that this function will always return a positive, non-zero value.
     //
@@ -125,11 +143,16 @@ pub fn conventional_fee_weight_ratio(
 
     let miner_fee = max(miner_fee.into(), MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE) as f32;
 
-    let conventional_fee = i64::from(transaction.conventional_fee) as f32;
+    // Fees are bounded by MAX_MONEY, so converting to f32 is finite; policy permits rounding.
+    let conventional_fee = i64::from(conventional_fee(
+        transaction.conventional_actions,
+        network,
+        next_block_height,
+    )) as f32;
 
     let uncapped_weight = miner_fee / conventional_fee;
 
-    uncapped_weight.min(BLOCK_PRODUCTION_WEIGHT_RATIO_CAP)
+    uncapped_weight.min(fee_parameters(network, next_block_height).1)
 }
 
 /// Returns the conventional actions for `transaction`, `max(logical_actions, GRACE_ACTIONS)`,

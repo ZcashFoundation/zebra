@@ -9,17 +9,18 @@
 mod tests;
 
 use core::fmt;
-use std::sync::Arc;
+use std::{io, sync::Arc};
 
 use thiserror::Error;
 
 use libzcash_script::ZcashScript;
 
-use zcash_script::{opcode::PossiblyBad, script, script::Evaluable as _, Opcode};
+use zcash_script::{opcode::PossiblyBad, script, Opcode};
 use zcash_transparent::bundle as zp_transparent;
 use zebra_chain::{
-    parameters::NetworkUpgrade,
-    transaction::{HashType, SigHasher},
+    parameters::{ConsensusBranchId, NetworkUpgrade},
+    serialization::{sha256d, CompactSizeMessage, ZcashSerialize},
+    transaction::{HashType, SigHasher, UnminedTxId},
     transparent,
 };
 
@@ -91,6 +92,10 @@ pub struct CachedFfiTransaction {
 
     /// The sighasher context to use to compute sighashes.
     sighasher: SigHasher,
+
+    /// The commitment returned by [`Self::context_digest`], computed by [`Self::new`] when an
+    /// input script can pass verification.
+    context_digest: Option<[u8; 32]>,
 }
 
 impl CachedFfiTransaction {
@@ -103,11 +108,30 @@ impl CachedFfiTransaction {
         nu: NetworkUpgrade,
     ) -> Result<Self, Error> {
         let sighasher = SigHasher::new(&transaction, nu, all_previous_outputs.clone())?;
-        Ok(Self {
+        // `SigHasher::new` has already rejected network upgrades without a consensus branch ID.
+        let branch_id = nu
+            .branch_id()
+            .ok_or(zebra_chain::Error::InvalidConsensusBranchId)?;
+        let mut cached = Self {
             transaction,
             all_previous_outputs,
             sighasher,
-        })
+            context_digest: None,
+        };
+
+        // `is_valid` rejects every input of a coinbase transaction, or of a transaction whose
+        // spent outputs don't match its inputs, so there is no success to commit to.
+        if !cached.transaction.is_coinbase()
+            && !cached.vin().is_empty()
+            && cached.all_previous_outputs.len() == cached.vin().len()
+        {
+            let mut digest = sha256d::Writer::default();
+            if cached.write_context(branch_id, &mut digest).is_ok() {
+                cached.context_digest = Some(digest.finish());
+            }
+        }
+
+        Ok(cached)
     }
 
     /// Returns the transparent inputs of this transaction, borrowed from the underlying
@@ -139,6 +163,51 @@ impl CachedFfiTransaction {
     /// Return the sighasher being used for this transaction.
     pub fn sighasher(&self) -> &SigHasher {
         &self.sighasher
+    }
+
+    /// Returns a commitment to everything [`Self::is_valid`] reads except the input index.
+    ///
+    /// It commits to the transaction's [`UnminedTxId`], whose legacy hash or authorizing data
+    /// digest covers every signature script, to the consensus branch ID that sighashes are
+    /// computed under, and to the number of spent outputs and each one's value and length-prefixed
+    /// `scriptPubKey`, in input order. The script verification flags are fixed, so they need no
+    /// commitment. Callers can remember a successful [`Self::is_valid`] under this digest and the
+    /// input index.
+    ///
+    /// [`Self::new`] computes the digest alongside the sighash precomputation, so this only copies
+    /// it. It is `None` for coinbase transactions, transactions without transparent inputs, spent
+    /// outputs that don't match the inputs one to one, and spent outputs too large to encode.
+    pub fn context_digest(&self) -> Option<[u8; 32]> {
+        self.context_digest
+    }
+
+    /// Writes the verification context that [`Self::context_digest`] commits to, with sighashes
+    /// computed under `branch_id`.
+    ///
+    /// Every field is fixed-size or length-prefixed, so different contexts never write the same
+    /// bytes.
+    fn write_context(
+        &self,
+        branch_id: ConsensusBranchId,
+        mut writer: impl io::Write,
+    ) -> io::Result<()> {
+        match self.transaction.unmined_id() {
+            UnminedTxId::Legacy(id) => {
+                writer.write_all(&[0])?;
+                writer.write_all(&id.0)?;
+            }
+            UnminedTxId::Witnessed(id) => {
+                writer.write_all(&[1])?;
+                writer.write_all(&id.as_bytes())?;
+            }
+        }
+        writer.write_all(&u32::from(branch_id).to_le_bytes())?;
+        CompactSizeMessage::try_from(self.all_previous_outputs.len())?
+            .zcash_serialize(&mut writer)?;
+        for output in self.all_previous_outputs.iter() {
+            output.zcash_serialize(&mut writer)?;
+        }
+        Ok(())
     }
 
     /// Returns the total number of P2SH sigops across all inputs of this transaction.
@@ -297,79 +366,56 @@ pub trait Sigops {
     fn sigops(&self) -> Result<u32, libzcash_script::Error> {
         let interpreter = get_interpreter(&|_, _| None, 0, true);
 
-        Ok(self.scripts().into_iter().try_fold(0, |acc, s| {
+        Ok(self.scripts().try_fold(0, |acc, script| {
             interpreter
-                .legacy_sigop_count_script(&script::Code(s))
+                .legacy_sigop_count_script(script)
                 .map(|n| acc + n)
         })?)
     }
 
-    /// Returns the input and output scripts in the transaction as owned byte vectors.
+    /// Returns borrowed input and output scripts, in transaction order.
     ///
     /// For consensus sigop accounting, this must include the coinbase input
     /// script (height prefix followed by extra data), matching zcashd's
     /// `GetLegacySigOpCount()`.
-    fn scripts(&self) -> Vec<Vec<u8>>;
+    fn scripts(&self) -> impl Iterator<Item = &script::Code>;
 }
 
 impl Sigops for zebra_chain::transaction::Transaction {
-    fn scripts(&self) -> Vec<Vec<u8>> {
-        let mut scripts: Vec<Vec<u8>> = self
-            .inputs()
-            .into_iter()
-            .map(|input| match &input {
-                transparent::Input::PrevOut { unlock_script, .. } => {
-                    unlock_script.as_raw_bytes().to_vec()
-                }
-                // Coinbase scriptSig = encoded height || extra data, which must be reconstructed
-                // for sigop counting. `coinbase_script()` round-trips through
-                // `write_coinbase_height`, which only fails when called on a malformed in-memory
-                // genesis coinbase. Any coinbase that was successfully deserialized round-trips
-                // cleanly, so this `expect` cannot fire on validation paths.
-                transparent::Input::Coinbase { .. } => input
-                    .coinbase_script()
-                    .expect("coinbase_script reconstructs from a deserialized coinbase input"),
-            })
-            .collect();
-
-        scripts.extend(
-            self.outputs()
-                .into_iter()
-                .map(|o| o.lock_script.as_raw_bytes().to_vec()),
-        );
-
-        scripts
+    fn scripts(&self) -> impl Iterator<Item = &script::Code> {
+        transparent_scripts(self.transparent_bundle())
     }
 }
 
 impl Sigops for zebra_chain::transaction::UnminedTx {
-    fn scripts(&self) -> Vec<Vec<u8>> {
+    fn scripts(&self) -> impl Iterator<Item = &script::Code> {
         self.transaction.scripts()
     }
 }
 
 impl Sigops for CachedFfiTransaction {
-    fn scripts(&self) -> Vec<Vec<u8>> {
+    fn scripts(&self) -> impl Iterator<Item = &script::Code> {
         self.transaction.scripts()
     }
 }
 
 impl Sigops for zcash_primitives::transaction::Transaction {
-    fn scripts(&self) -> Vec<Vec<u8>> {
-        self.transparent_bundle()
-            .into_iter()
-            .flat_map(|bundle| {
-                // `zcash_primitives` stores the coinbase input's full serialized scriptSig (height
-                // prefix + extra data) in the synthesized input's script_sig, so it is included
-                // as-is for sigop counting.
-                bundle
-                    .vin
-                    .iter()
-                    .map(|i| i.script_sig().0 .0.clone())
-                    .chain(bundle.vout.iter().map(|o| o.script_pubkey().0 .0.clone()))
-            })
-            .collect()
+    fn scripts(&self) -> impl Iterator<Item = &script::Code> {
+        transparent_scripts(self.transparent_bundle())
     }
+}
+
+/// Borrows native scripts, including the full coinbase scriptSig (height prefix and extra data).
+fn transparent_scripts(
+    bundle: Option<&zp_transparent::Bundle<zp_transparent::Authorized>>,
+) -> impl Iterator<Item = &script::Code> {
+    bundle.into_iter().flat_map(|bundle| {
+        bundle
+            .vin
+            .iter()
+            .map(|input| &input.script_sig().0)
+            .chain(bundle.vout.iter().map(|output| &output.script_pubkey().0))
+    })
 }
 
 /// Extract the redeem script bytes from a P2SH scriptSig.
@@ -383,10 +429,11 @@ impl Sigops for zcash_primitives::transaction::Transaction {
 /// non-push-only scriptSigs.
 ///
 /// [`CScript::GetSigOpCount(const CScript& scriptSig)`]: https://github.com/zcash/zcash/blob/v6.11.0/src/script/script.cpp#L176-L199
-fn extract_p2sh_redeem_script(unlock_script: &transparent::Script) -> Option<Vec<u8>> {
-    let code = script::Code(unlock_script.as_raw_bytes().to_vec());
+fn extract_p2sh_redeem_script(mut unlock_script: &[u8]) -> Option<Vec<u8>> {
     let mut last_push_data: Option<Vec<u8>> = None;
-    for opcode in code.parse() {
+    while !unlock_script.is_empty() {
+        let (opcode, remaining) = PossiblyBad::parse(unlock_script);
+        unlock_script = remaining;
         match opcode {
             Ok(PossiblyBad::Good(Opcode::PushValue(pv))) => {
                 last_push_data = Some(pv.value());
@@ -419,9 +466,23 @@ pub fn p2sh_input_sigop_count(
         transparent::Input::Coinbase { .. } => return 0,
     };
 
-    let lock_code = script::Code(spent_output.lock_script.as_raw_bytes().to_vec());
+    p2sh_script_sigop_count(
+        unlock_script.as_raw_bytes(),
+        spent_output.lock_script.as_raw_bytes(),
+    )
+}
 
-    if !lock_code.is_pay_to_script_hash() {
+/// Recognizes only the direct 20-byte push accepted by the script interpreter.
+fn is_pay_to_script_hash(lock_script: &[u8]) -> bool {
+    lock_script.len() == 23
+        && lock_script[0] == 0xa9
+        && lock_script[1] == 0x14
+        && lock_script[22] == 0x87
+}
+
+/// Counts a borrowed scriptSig's redeem script only when the spent scriptPubKey is P2SH.
+fn p2sh_script_sigop_count(unlock_script: &[u8], lock_script: &[u8]) -> u32 {
+    if !is_pay_to_script_hash(lock_script) {
         return 0;
     }
 
@@ -444,11 +505,10 @@ pub fn p2sh_input_sigop_count(
 /// Callers are therefore permitted to pass an empty `spent_outputs` slice for coinbase transactions
 /// (which is what the block-verifier does, since coinbase inputs have no previous output).
 ///
-/// # Correctness
+/// # Panics
 ///
-/// For non-coinbase transactions, `spent_outputs.len()` must equal the number of transparent inputs
-/// in `tx`. If the lengths differ, `zip()` silently truncates the longer iterator, causing an
-/// incorrect (undercount) result.
+/// Panics if a non-coinbase transaction's transparent input count differs from
+/// `spent_outputs.len()`, rather than silently undercounting unmatched inputs.
 ///
 /// [`GetP2SHSigOpCount()`]: https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L840-L852
 pub fn p2sh_sigop_count(
@@ -459,15 +519,25 @@ pub fn p2sh_sigop_count(
         return 0;
     }
 
-    debug_assert_eq!(
-        tx.inputs().len(),
+    let inputs = tx
+        .transparent_bundle()
+        .map(|bundle| bundle.vin.as_slice())
+        .unwrap_or_default();
+    assert_eq!(
+        inputs.len(),
         spent_outputs.len(),
-        "spent_outputs must align with transaction inputs for non-coinbase txs"
+        "successful UTXO lookups supply one spent output per non-coinbase input"
     );
 
-    tx.inputs()
+    inputs
         .iter()
-        .zip(spent_outputs.iter())
-        .map(|(input, spent_output)| p2sh_input_sigop_count(input, spent_output))
+        .zip(spent_outputs)
+        .filter(|(input, _)| *input.prevout() != zp_transparent::OutPoint::NULL)
+        .map(|(input, spent_output)| {
+            p2sh_script_sigop_count(
+                &input.script_sig().0 .0,
+                spent_output.lock_script.as_raw_bytes(),
+            )
+        })
         .sum()
 }

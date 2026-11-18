@@ -225,7 +225,8 @@ fn connection_state_commands_omit_serialization_details() {
     }
 }
 
-/// Bound block requests before inbound dispatch without capping transactions or counting duplicates.
+/// Bound block requests before inbound dispatch without capping transactions or counting duplicates,
+/// on legacy and negotiated early-relay connections.
 #[tokio::test]
 async fn getdata_block_hashes_are_bounded_before_dispatch() {
     let _init_guard = zebra_test::init();
@@ -259,7 +260,7 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
             .chain(blocks[..GETDATA_MAX_BLOCK_COUNT].iter().copied())
             .collect();
 
-        for items in [
+        let cases = [
             blocks[..1].to_vec(),
             blocks[..GETDATA_MAX_BLOCK_COUNT].to_vec(),
             blocks[..=GETDATA_MAX_BLOCK_COUNT].to_vec(),
@@ -269,7 +270,11 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
             transactions,
             ignored.to_vec(),
             Vec::new(),
-        ] {
+        ];
+        for (items, early_block_relay) in cases
+            .iter()
+            .flat_map(|items| [(items, false), (items, true)])
+        {
             // The connection keeps the first distinct block hashes, in inventory order.
             let mut expected_blocks = HashSet::new();
             for hash in items.iter().filter_map(InventoryHash::block_hash) {
@@ -284,7 +289,8 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
                 .collect();
             let (mut connection, _client_tx, mut inbound_service, _outbound, _error_slot) =
                 new_test_connection();
-            let message = Message::GetData(items);
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = early_block_relay;
+            let message = Message::GetData(items.clone());
 
             if expected_blocks.is_empty() && expected_transactions.is_empty() {
                 assert_eq!(
@@ -299,7 +305,8 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
                 async {
                     let request = inbound_service.expect_request_that(|_| true).await;
                     match request.request() {
-                        Request::BlocksByHash(hashes) => {
+                        Request::RawBlocksByHash(hashes)
+                        | Request::EarlyRawBlocksByHash(hashes) => {
                             assert!(
                                 !expected_blocks.is_empty(),
                                 "transactions stay transactions"
@@ -513,6 +520,162 @@ async fn client_poll_peer_set_returns_nil() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
+/// Only negotiated connections may ask the inbound service to consult its early serving cache.
+#[tokio::test(start_paused = true)]
+async fn early_block_getdata_preserves_negotiated_provenance() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        for negotiated in [false, true] {
+            let (mut connection, _client_tx, mut inbound, mut outbound, error_slot) =
+                new_test_connection();
+            let info = Arc::make_mut(&mut connection.connection_info);
+            info.early_block_relay = negotiated;
+            // A remote signal alone is not sufficient.
+            info.remote
+                .services
+                .insert(crate::types::PeerServices::NODE_COMPACT_BLOCKS);
+            let hashes = HashSet::from([block.hash()]);
+            let request = if negotiated {
+                Request::EarlyRawBlocksByHash(hashes)
+            } else {
+                Request::RawBlocksByHash(hashes)
+            };
+            let (unhandled, (), message) = tokio::join!(
+                connection.handle_message_as_request(Message::GetData(vec![block.hash().into()])),
+                async {
+                    inbound
+                        .expect_request(request)
+                        .await
+                        .respond(Response::Blocks(vec![InventoryResponse::Available((
+                            block.clone(),
+                            None,
+                        ))]));
+                },
+                outbound.next(),
+            );
+            assert_eq!(unhandled, None);
+            assert_eq!(message, Some(Message::Block(block.clone())));
+            assert!(error_slot.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("inbound early serving must use the negotiated request variant");
+}
+
+/// Full and partial downloads retain source addresses and classify every negotiated block response.
+#[tokio::test(start_paused = true)]
+async fn early_block_download_classifies_full_and_partial_responses() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    let source = "127.0.0.1:8233".parse().unwrap();
+    let missing = block::Hash([0x55; 32]);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        for negotiated in [false, true] {
+            for partial in [false, true] {
+                let (mut connection, mut client_tx, _inbound, mut outbound, error_slot) =
+                    new_test_connection();
+                let info = Arc::make_mut(&mut connection.connection_info);
+                info.early_block_relay = negotiated;
+                info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+                let (mut peer_tx, peer_rx) = mpsc::channel(1);
+                let task = tokio::spawn(connection.run(peer_rx));
+                if negotiated {
+                    assert_eq!(
+                        outbound.next().await,
+                        Some(Message::SendCompact {
+                            high_bandwidth: true,
+                            version: 1
+                        })
+                    );
+                }
+                let request = if partial {
+                    Request::BlocksByHash(HashSet::from([block.hash(), missing]))
+                } else {
+                    Request::BlockDownload {
+                        hash: block.hash(),
+                        advertiser: None,
+                    }
+                };
+                let (tx, rx) = oneshot::channel();
+                client_tx
+                    .send(ClientRequest {
+                        request,
+                        tx,
+                        span: Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                let Some(Message::GetData(hashes)) = outbound.next().await else {
+                    panic!("block downloads send getdata");
+                };
+                assert!(hashes.contains(&block.hash().into()));
+                assert_eq!(hashes.len(), if partial { 2 } else { 1 });
+                peer_tx
+                    .send(Ok(Message::Block(block.clone())))
+                    .await
+                    .unwrap();
+                let mut blocks = vec![InventoryResponse::Available((block.clone(), Some(source)))];
+                if partial {
+                    peer_tx
+                        .send(Ok(Message::NotFound(vec![missing.into()])))
+                        .await
+                        .unwrap();
+                    blocks.push(InventoryResponse::Missing(missing));
+                }
+                let expected = if negotiated {
+                    Response::EarlyBlocks(blocks)
+                } else {
+                    Response::Blocks(blocks)
+                };
+                assert_eq!(rx.await.unwrap().unwrap(), expected);
+                assert!(error_slot.try_get_error().is_none());
+                task.abort();
+            }
+        }
+    })
+    .await
+    .expect("block downloads must finish without losing negotiated provenance");
+}
+
+/// Misrouted early requests fail locally rather than sending wire messages or panicking.
+#[tokio::test(start_paused = true)]
+async fn early_block_outbound_requests_require_the_correct_service() {
+    let _init_guard = zebra_test::init();
+    let (connection, mut client_tx, _inbound, mut outbound, error_slot) = new_test_connection();
+    let task = tokio::spawn(connection.run(futures::stream::pending()));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        for request in [
+            Request::EarlyBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::RawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::EarlyRawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::AdvertiseEarlyBlock(block::Hash([0; 32]), None),
+        ] {
+            let (tx, rx) = oneshot::channel();
+            client_tx
+                .send(ClientRequest {
+                    request,
+                    tx,
+                    span: Span::none(),
+                })
+                .await
+                .unwrap();
+            assert!(rx.await.unwrap().is_err());
+        }
+        assert!(outbound.try_recv().is_err());
+        assert!(error_slot.try_get_error().is_none());
+    })
+    .await
+    .expect("unsupported outbound requests must fail without waiting for a peer");
+    task.abort();
+}
+
 /// An empty mempool reply releases the connection before the request timeout.
 #[tokio::test(start_paused = true)]
 async fn empty_mempool_reply_unblocks_queued_block_request() {
@@ -698,9 +861,9 @@ async fn empty_find_blocks_result_sends_no_inventory() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
-/// Dedicated block adverts preserve the ordinary request counter and cancellation labels.
+/// Dedicated block adverts count as requests even after their callers stop waiting.
 #[test]
-fn block_advert_request_metrics_include_cancellation() {
+fn block_advert_request_metrics_ignore_caller_cancellation() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let recorder = ConnectionMetricsRecorder::default();
 
@@ -713,7 +876,11 @@ fn block_advert_request_metrics_include_cancellation() {
                 let hash = block::Hash([1; 32]);
                 let (result, delivery) = tokio::sync::oneshot::channel();
                 let (_, message) = tokio::join!(
-                    connection.send_block_advert(crate::peer_set::BlockAdvert { hash, result }),
+                    connection.send_block_advert(crate::peer_set::BlockAdvert {
+                        hash,
+                        compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+                        result
+                    }),
                     outbound_messages.next(),
                 );
                 assert_eq!(
@@ -727,29 +894,37 @@ fn block_advert_request_metrics_include_cancellation() {
 
                 let (result, delivery) = tokio::sync::oneshot::channel();
                 drop(delivery);
-                connection
-                    .send_block_advert(crate::peer_set::BlockAdvert { hash, result })
-                    .await;
-                assert!(outbound_messages.try_recv().is_err());
+                let (_, message) = tokio::join!(
+                    connection.send_block_advert(crate::peer_set::BlockAdvert {
+                        hash,
+                        compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+                        result,
+                    }),
+                    outbound_messages.next(),
+                );
+                assert_eq!(
+                    message,
+                    Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+                );
 
                 assert_eq!(
                     recorder.counter(Key::from_parts(
                         "zebra.net.out.requests",
                         &[("command", Request::AdvertiseBlock(hash, None).command())],
                     )),
-                    1,
+                    2,
                 );
                 assert_eq!(
                     recorder.counter(Key::from_parts(
                         "zebra.net.out.requests.canceled",
                         &[("command", Request::AdvertiseBlockToAll(hash).command())],
                     )),
-                    1,
+                    0,
                 );
-                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 1);
+                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 0);
             })
             .await
-            .expect("the local transport and canceled advert complete without remote responses");
+            .expect("both local writes complete without remote responses");
         });
     });
 }
@@ -778,6 +953,7 @@ async fn block_advert_while_awaiting_response() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: idle_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();
@@ -802,6 +978,7 @@ async fn block_advert_while_awaiting_response() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: busy_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();
@@ -826,6 +1003,138 @@ async fn block_advert_while_awaiting_response() {
     })
     .await
     .expect("adverts and the original response finish before the request timeout");
+}
+
+/// A blocked abandoned advert must not extend an outstanding request's response deadline.
+#[tokio::test(start_paused = true)]
+async fn abandoned_block_advert_preserves_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut connection, mut client_tx, _service, mut outbound, error_slot) = new_test_connection();
+    let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
+    connection.block_advert_rx = advert_rx;
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let connection = connection.run(peer_rx).shared();
+
+    let (tx, mut response) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::Peers,
+            tx,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(outbound.next().await, Some(Message::GetAddr));
+    assert!(connection.clone().now_or_never().is_none());
+
+    tokio::time::advance(REQUEST_TIMEOUT - Duration::from_secs(1)).await;
+    let (result, delivery) = tokio::sync::oneshot::channel();
+    drop(delivery);
+    advert_tx
+        .try_send(crate::peer_set::BlockAdvert {
+            hash: block::Hash([1; 32]),
+            compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+            result,
+        })
+        .unwrap();
+
+    // Leave the outbound channel full so the advert's flush stays pending.
+    assert!(connection.clone().now_or_never().is_none());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(
+        connection.clone().now_or_never().is_none(),
+        "an ordinary request timeout must not close the connection",
+    );
+    let error = response
+        .try_recv()
+        .unwrap()
+        .expect("the pending request must receive its timeout without waiting for the advert")
+        .unwrap_err();
+    assert_eq!(error.inner_debug(), "ConnectionReceiveTimeout");
+    assert!(error_slot.try_get_error().is_none());
+
+    assert_eq!(
+        outbound.next().await,
+        Some(Message::Inv(vec![InventoryHash::Block(block::Hash(
+            [1; 32]
+        ))])),
+        "the abandoned advert must still be written after the request times out",
+    );
+    assert!(connection.clone().now_or_never().is_none());
+
+    let (tx, response) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::Peers,
+            tx,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(outbound.next().await, Some(Message::GetAddr));
+    assert!(connection.clone().now_or_never().is_none());
+    peer_tx.try_send(Ok(Message::Addr(Vec::new()))).unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(
+        response.await.unwrap().unwrap(),
+        Response::Peers(Vec::new())
+    );
+    assert!(error_slot.try_get_error().is_none());
+}
+
+/// Ping deadlines close the connection even when an abandoned advert's flush is stalled.
+#[tokio::test(start_paused = true)]
+async fn ping_deadline_closes_connection_with_or_without_stalled_block_advert() {
+    let _init_guard = zebra_test::init();
+    for stalled_advert in [false, true] {
+        let (mut connection, mut client_tx, _service, mut outbound, error_slot) =
+            new_test_connection();
+        let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
+        connection.block_advert_rx = advert_rx;
+        let (_peer_tx, peer_rx) = mpsc::channel(1);
+        let connection = connection.run(peer_rx).shared();
+
+        let nonce = Nonce::default();
+        let (tx, mut response) = oneshot::channel();
+        client_tx
+            .try_send(ClientRequest {
+                request: Request::Ping(nonce),
+                tx,
+                span: Span::current(),
+            })
+            .unwrap();
+        assert!(connection.clone().now_or_never().is_none());
+        assert_eq!(outbound.next().await, Some(Message::Ping(nonce)));
+        assert!(connection.clone().now_or_never().is_none());
+
+        tokio::time::advance(REQUEST_TIMEOUT - Duration::from_secs(1)).await;
+        if stalled_advert {
+            let (result, delivery) = tokio::sync::oneshot::channel();
+            drop(delivery);
+            advert_tx
+                .try_send(crate::peer_set::BlockAdvert {
+                    hash: block::Hash([1; 32]),
+                    compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+                    result,
+                })
+                .unwrap();
+            // Do not drain the advert: its flush must remain pending at the Ping deadline.
+            assert!(connection.clone().now_or_never().is_none());
+        }
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            connection.now_or_never().is_some(),
+            "the Ping timeout must close the connection without waiting for the advert flush",
+        );
+        let error = response.try_recv().unwrap().unwrap().unwrap_err();
+        assert_eq!(error.inner_debug(), "ConnectionReceiveTimeout");
+        assert_eq!(
+            error_slot.try_get_error().unwrap().inner_debug(),
+            "ConnectionReceiveTimeout",
+        );
+        assert!(client_tx.is_closed());
+    }
 }
 
 /// A pending GetBlocks response must not be displaced by a simultaneous unsolicited advert.
@@ -859,6 +1168,7 @@ async fn getblocks_response_precedes_ready_block_advert() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: advert_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();
@@ -892,6 +1202,114 @@ async fn getblocks_response_precedes_ready_block_advert() {
     })
     .await
     .expect("the response and advert are both delivered");
+}
+
+/// A singleton reaches inbound and remains available to the pending discovery request.
+#[tokio::test]
+async fn connection_find_blocks_singleton_inv_is_also_advertised() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        _shared_error_slot,
+    ) = new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, request_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            },
+            tx: request_tx,
+            span: Span::current(),
+        })
+        .expect("internal request channel is valid");
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::GetBlocks {
+            known_blocks: vec![],
+            stop: None,
+        }),
+    );
+
+    let hash = block::Hash([1; 32]);
+    peer_tx
+        .try_send(Ok(Message::Inv(vec![hash.into()])))
+        .expect("peer inbound response channel is valid");
+
+    inbound_service
+        .expect_request(Request::AdvertiseBlock(hash, None))
+        .await
+        .respond(Response::Nil);
+    assert_eq!(
+        request_rx
+            .await
+            .expect("peer internal response channel is valid")
+            .expect("singleton inventory completes FindBlocks"),
+        Response::BlockHashes(vec![hash]),
+    );
+
+    connection.abort();
+}
+
+/// Multi-block inventories complete FindBlocks without being advertised to inbound.
+#[tokio::test]
+async fn connection_find_blocks_multi_inv_is_not_advertised() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        _shared_error_slot,
+    ) = new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, request_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            },
+            tx: request_tx,
+            span: Span::current(),
+        })
+        .expect("internal request channel is valid");
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::GetBlocks {
+            known_blocks: vec![],
+            stop: None,
+        }),
+    );
+
+    let hashes = vec![block::Hash([1; 32]), block::Hash([2; 32])];
+    peer_tx
+        .try_send(Ok(Message::Inv(
+            hashes.iter().copied().map(Into::into).collect(),
+        )))
+        .expect("peer inbound response channel is valid");
+    assert_eq!(
+        request_rx
+            .await
+            .expect("peer internal response channel is valid")
+            .expect("multi-block inventory completes FindBlocks"),
+        Response::BlockHashes(hashes),
+    );
+    inbound_service.expect_no_requests().await;
+
+    connection.abort();
 }
 
 /// Test that the connection run loop fails correctly when dropped
@@ -1668,6 +2086,67 @@ async fn connection_is_randomly_disconnected_on_overload() {
     );
 }
 
+/// An inbound block `getdata` is answered from stored block bytes: the connection asks the inbound
+/// service for raw blocks, then sends each one as a `block` message, followed by a `notfound`
+/// for the missing blocks.
+#[tokio::test]
+async fn connection_serves_inbound_block_getdata_from_raw_bytes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector blocks are valid");
+    let missing_hash = block::Hash([0x11; 32]);
+    let raw = Arc::new(block::SerializedBlock::from(
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec(),
+    ));
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        _client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+    let connection_handle = tokio::spawn(connection.run(peer_rx));
+
+    peer_tx
+        .send(Ok(Message::GetData(vec![
+            InventoryHash::Block(block.hash()),
+            InventoryHash::Block(missing_hash),
+        ])))
+        .await
+        .expect("send to channel always succeeds");
+
+    inbound_service
+        .expect_request(Request::RawBlocksByHash(HashSet::from([
+            block.hash(),
+            missing_hash,
+        ])))
+        .await
+        .respond(Response::RawBlocks(vec![
+            InventoryResponse::Available(raw.clone()),
+            InventoryResponse::Missing(missing_hash),
+        ]));
+
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::RawBlock(raw)),
+        "the available block must be sent from its stored bytes"
+    );
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::NotFound(vec![InventoryHash::Block(missing_hash)])),
+        "the missing block must be reported in a notfound message"
+    );
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none(), "unexpected connection error: {error:?}");
+
+    connection_handle.abort();
+}
+
 #[tokio::test]
 async fn connection_ping_pong_round_trip() {
     let _init_guard = zebra_test::init();
@@ -1755,7 +2234,7 @@ fn find_blocks_response_hash_limit() {
         .collect();
 
     for len in [500, 501] {
-        let mut handler = Handler::FindBlocks;
+        let mut handler = Handler::FindBlocks { extends: None };
         let items = hashes[..len]
             .iter()
             .copied()
@@ -2143,4 +2622,67 @@ fn new_test_connection() -> (
     ErrorSlot,
 ) {
     super::new_test_connection()
+}
+
+#[tokio::test]
+async fn early_relay_withdrawn_response_is_not_sent() {
+    early_relay_response_after_withdrawal(false).await;
+}
+
+#[tokio::test]
+async fn early_relay_committed_response_survives_withdrawal() {
+    early_relay_response_after_withdrawal(true).await;
+}
+
+async fn early_relay_response_after_withdrawal(committed: bool) {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut connection, _client, mut inbound, mut outbound, error) = new_test_connection();
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let hash = block.hash();
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let authorized = live.clone();
+        let response = Response::AuthorizedBlocks {
+            blocks: vec![InventoryResponse::Available((block.clone(), None))],
+            authorization: crate::BlockAuthorization::new(move |_| {
+                authorized.load(Ordering::SeqCst)
+            }),
+        };
+        let request = Request::EarlyBlocksByHash([hash].into());
+        let send = connection.drive_peer_request(request.clone());
+        tokio::pin!(send);
+        let responder = tokio::select! {
+            responder = inbound.expect_request(request) => responder,
+            _ = &mut send => panic!("serving must wait for the inbound response"),
+        };
+        responder.respond(response);
+        // Revoke the detached response after lookup but before its local wire write.
+        live.store(false, Ordering::SeqCst);
+        let fallback = async {
+            // The ordinary lookup sees the state after the early body was snapshotted.
+            inbound
+                .expect_request(Request::BlocksByHash([hash].into()))
+                .await
+                .respond(Response::Blocks(vec![if committed {
+                    InventoryResponse::Available((block.clone(), None))
+                } else {
+                    InventoryResponse::Missing(hash)
+                }]));
+            outbound.next().await
+        };
+        let (_, message) = futures::join!(send, fallback);
+        assert_eq!(
+            message,
+            Some(if committed {
+                Message::Block(block)
+            } else {
+                Message::NotFound(vec![hash.into()])
+            })
+        );
+        assert!(error.try_get_error().is_none());
+    })
+    .await
+    .expect("withdrawal must fall back to committed state without closing the connection");
 }

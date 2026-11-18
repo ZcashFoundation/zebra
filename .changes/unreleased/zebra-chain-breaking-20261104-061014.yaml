@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Reject i64 block heights above `Height::MAX`; the conversion error type is now `&'static str`.
+time: 2026-11-04T06:10:14.917877204+01:00

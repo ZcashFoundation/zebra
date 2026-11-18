@@ -17,17 +17,18 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
+use rayon::prelude::*;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock, MAX_BLOCK_BYTES},
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     primitives::byte_array::increment_big_endian,
     sapling,
     serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
@@ -138,15 +139,21 @@ impl ZebraDb {
 
     /// Returns the complete block, or `None` if its hash or height is unknown.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     pub fn block(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<Arc<Block>>, BlockReadError> {
         Ok(self
-            .complete_block(hash_or_height, |header: &Arc<block::Header>| {
-                header.merkle_root
-            })?
+            .complete_block(
+                hash_or_height,
+                |header: &Arc<block::Header>| header.merkle_root,
+                |_, _, tx_count| Vec::with_capacity(tx_count),
+                |transactions, transaction| {
+                    transactions.push(Arc::<Transaction>::from_bytes(transaction))
+                },
+            )?
             .map(|(header, transactions)| {
                 Arc::new(Block {
                     header,
@@ -157,7 +164,8 @@ impl ZebraDb {
 
     /// Returns the complete block and its serialized size, or `None` for an unknown block.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     #[allow(clippy::unwrap_in_result)]
     pub fn block_and_size(
         &self,
@@ -173,21 +181,7 @@ impl ZebraDb {
             .map(|raw_tx| Arc::<Transaction>::from_bytes(raw_tx.raw_bytes()))
             .collect();
 
-        // Compute the size of the block from the size of header and size of
-        // transactions. This requires summing them all and also adding the
-        // size of the CompactSize-encoded transaction count.
-        // See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks
-        let tx_count = CompactSizeMessage::try_from(txs.len())
-            .expect("must work for a previously serialized block");
-        let tx_raw = tx_count
-            .zcash_serialize_to_vec()
-            .expect("must work for a previously serialized block");
-        let size = raw_header.raw_bytes().len()
-            + raw_txs
-                .iter()
-                .map(|raw_tx| raw_tx.raw_bytes().len())
-                .sum::<usize>()
-            + tx_raw.len();
+        let size = serialized_block_size(&raw_header, &raw_txs);
 
         let block = Block {
             header,
@@ -196,34 +190,77 @@ impl ZebraDb {
         Ok(Some((Arc::new(block), size)))
     }
 
+    /// Returns the serialized [`Block`] with [`block::Hash`] or [`Height`], if it exists in the
+    /// finalized chain, reassembled from the stored header and transaction bytes.
+    ///
+    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// The stored bytes are not parsed, so a change to how blocks serialize needs a database
+    /// upgrade to keep them equal to the serialization.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn serialized_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<Option<SerializedBlock>, BlockReadError> {
+        Ok(self
+            .complete_block(
+                hash_or_height,
+                raw_header_merkle_root,
+                |header: &RawBytes, height, tx_count| {
+                    // The stored size is only a capacity hint: it can be missing before upgrades
+                    // finish, and a corrupt value must not cause an oversized allocation.
+                    let capacity = self
+                        .block_info(height.into())
+                        .map_or(0, |info| u64::from(info.size()).min(MAX_BLOCK_BYTES));
+                    // `as` is lossless: the capacity is at most `MAX_BLOCK_BYTES`.
+                    let mut bytes = Vec::<u8>::with_capacity(capacity as usize);
+                    bytes.extend_from_slice(header.raw_bytes());
+                    CompactSizeMessage::try_from(tx_count)
+                        .expect("u16 transaction indexes keep counts within CompactSize limits")
+                        .zcash_serialize(&mut bytes)
+                        .expect("writing to a Vec never fails");
+                    bytes
+                },
+                |bytes, transaction| bytes.extend_from_slice(transaction),
+            )?
+            .map(|(_, bytes)| bytes.into()))
+    }
+
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
     fn raw_block(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<(RawBytes, Vec<RawBytes>)>, BlockReadError> {
-        self.complete_block(hash_or_height, |header: &RawBytes| {
-            block::Header::from_bytes(header.raw_bytes()).merkle_root
-        })
+        self.complete_block(
+            hash_or_height,
+            raw_header_merkle_root,
+            |_, _, tx_count| Vec::with_capacity(tx_count),
+            |transactions, transaction| transactions.push(RawBytes::from_bytes(transaction)),
+        )
     }
 
     /// Reads one complete body without intermediate serialized copies.
+    ///
+    /// `new_body` gets the header, height and transaction count, then `push_transaction` gets each
+    /// stored transaction in block order. The body is only returned if it is complete.
     ///
     /// Headers and transaction indexes are retained permanently. Check the body's contiguous
     /// locations against the final indexed location, so deletion cannot produce a partial block.
     /// This also works on secondary databases, which do not support RocksDB snapshots.
     /// Secondary reads also check the Merkle root because catch-up can expose partial indexes.
     #[allow(clippy::unwrap_in_result)]
-    fn complete_block<H: FromDisk, T: FromDisk>(
+    fn complete_block<H: FromDisk, B>(
         &self,
         hash_or_height: HashOrHeight,
         header_merkle_root: impl FnOnce(&H) -> block::merkle::Root,
-    ) -> Result<Option<(H, Vec<T>)>, BlockReadError> {
+        new_body: impl FnOnce(&H, Height, usize) -> B,
+        mut push_transaction: impl FnMut(&mut B, &[u8]),
+    ) -> Result<Option<(H, B)>, BlockReadError> {
         let Some(height) = hash_or_height.height_or_else(|hash| self.height(hash)) else {
             return Ok(None);
         };
         let incomplete = |error| {
-            // Secondary catch-up is not atomic across columns, so an incomplete view is not yet
-            // visible. The retained-body floor will later distinguish genuinely pruned bodies.
+            // Secondary catch-up is not atomic across columns, so inconsistent retained metadata
+            // is not yet visible. Missing bodies are classified separately using the actual floor.
             if self.db.is_read_only() {
                 Ok(None)
             } else {
@@ -279,26 +316,29 @@ impl ZebraDb {
         options.set_iterate_upper_bound(upper_bound);
         let mut bodies = self.db.raw_iterator_cf_opt(&tx_by_loc, options);
         bodies.seek(first);
-        let mut transactions = Vec::with_capacity(expected_count);
+        let mut body = new_body(&header, height, expected_count);
+        let mut count = 0;
         // TODO: consider separating transaction reads from deserialization so decoding can run
         // in parallel. Benchmark blocks with multiple large shielded transactions to check
         // whether the speedup justifies buffering the serialized transactions.
         while let Some(key) = bodies.key().filter(|key| *key <= last.as_ref()) {
             let location = TransactionLocation::from_bytes(key);
-            if location.index.as_usize() != transactions.len() {
-                return incomplete(BlockReadError::BlockBodyUnavailable { height });
+            if location.index.as_usize() != count {
+                return self.missing_body_error(height).map_or(Ok(None), Err);
             }
-            if transactions.len() >= expected_count {
+            if count >= expected_count {
                 return incomplete(BlockReadError::CorruptBlock { height });
             }
-            transactions.push(T::from_bytes(
+            push_transaction(
+                &mut body,
                 bodies.value().expect("a valid iterator has a value"),
-            ));
+            );
+            count += 1;
             bodies.next();
         }
         bodies.status().expect("unexpected database failure");
-        if transactions.len() != expected_count {
-            return incomplete(BlockReadError::BlockBodyUnavailable { height });
+        if count != expected_count {
+            return self.missing_body_error(height).map_or(Ok(None), Err);
         }
 
         if self.db.is_read_only() {
@@ -332,43 +372,83 @@ impl ZebraDb {
             }
         }
 
-        Ok(Some((header, transactions)))
+        Ok(Some((header, body)))
+    }
+
+    /// Classifies missing transaction bytes without treating a torn secondary view as pruned.
+    fn missing_body_error(&self, height: Height) -> Option<BlockReadError> {
+        match self.history_capabilities() {
+            Ok(history) if height > Height::MIN && height < history.lowest_retained_height => {
+                return Some(BlockReadError::BlockBodyUnavailable { height });
+            }
+            Err(crate::StateInitError::HistoryRead { source, .. })
+                if source.is::<rocksdb::Error>() =>
+            {
+                panic!("unexpected database failure: {source}");
+            }
+            _ => {}
+        }
+
+        // An invalid suffix cannot establish pruning.
+        if self.db.is_read_only() {
+            None
+        } else {
+            Some(BlockReadError::CorruptBlock { height })
+        }
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.sapling_tree_by_height(&height)
     }
 
     /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.orchard_tree_by_height(&height)
     }
 
     /// Returns the Ironwood [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn ironwood_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.ironwood_tree_by_height(&height)
+    }
+
+    /// Returns the height of `hash_or_height`, or `None` if its hash isn't in the finalized state
+    /// or fast checkpoint sync committed it without its trees.
+    ///
+    /// The trees `*_tree_by_height()` return for those heights are older frozen trees.
+    fn height_with_stored_trees(&self, hash_or_height: HashOrHeight) -> Option<Height> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        self.fast_sync_tree_roots(height)
+            .is_none()
+            .then_some(height)
     }
 
     // Read tip block methods
@@ -388,7 +468,8 @@ impl ZebraDb {
 
     /// Returns the complete tip block, or `None` for an empty database.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     pub fn tip_block(&self) -> Result<Option<Arc<Block>>, BlockReadError> {
         match self.tip() {
             Some((height, _)) => self.block(height.into()),
@@ -398,24 +479,80 @@ impl ZebraDb {
 
     // Read transaction methods
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
+    /// Returns a known transaction, its height, and its block time, or `None` for an unknown hash.
+    ///
+    /// Missing bytes below the retained-body floor return
+    /// [`BlockReadError::BlockBodyUnavailable`]. Missing retained bytes or metadata return
+    /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
     #[allow(clippy::unwrap_in_result)]
     pub fn transaction(
         &self,
         hash: transaction::Hash,
-    ) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)> {
+    ) -> Result<Option<(Arc<Transaction>, Height, DateTime<Utc>)>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
+        let height = location.height;
+        let Some(header) = self.block_header(height.into()) else {
+            return if self.db.is_read_only() {
+                Ok(None)
+            } else {
+                Err(BlockReadError::CorruptBlock { height })
+            };
+        };
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let Some(tx) = self.db.zs_get(&tx_by_loc, &location) else {
+            return self.missing_body_error(height).map_or(Ok(None), Err);
+        };
 
-        let transaction_location = self.transaction_location(hash)?;
+        Ok(Some((tx, height, header.time)))
+    }
 
-        let block_time = self
-            .block_header(transaction_location.height.into())
-            .map(|header| header.time);
+    /// Reads only the version header of a retained transaction body.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_version(&self, hash: transaction::Hash) -> Option<u32> {
+        struct Version(u32);
+        impl FromDisk for Version {
+            fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+                let header = bytes.as_ref()[..4]
+                    .try_into()
+                    .expect("stored transaction headers contain four bytes");
+                // The high bit signals the Overwinter format, not the version number.
+                Self(u32::from_le_bytes(header) & 0x7fff_ffff)
+            }
+        }
 
+        let location = self.transaction_location(hash)?;
+        let transactions = self
+            .db
+            .cf_handle("tx_by_loc")
+            .expect("transaction column exists");
         self.db
-            .zs_get(&tx_by_loc, &transaction_location)
-            .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
+            .zs_get::<_, _, Version>(&transactions, &location)
+            .map(|version| version.0)
+    }
+
+    /// Returns the stored bytes of the [`Transaction`] with [`transaction::Hash`],
+    /// if a transaction with that hash exists in the finalized chain. The bytes are not parsed,
+    /// so a change to how transactions serialize needs a database upgrade to keep them equal.
+    ///
+    /// Pruned bodies return [`BlockReadError::BlockBodyUnavailable`], like [`Self::transaction`].
+    #[allow(clippy::unwrap_in_result)]
+    pub fn serialized_transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Result<Option<SerializedTransaction>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let Some(raw_tx) = self.db.zs_get::<_, _, RawBytes>(&tx_by_loc, &location) else {
+            return self
+                .missing_body_error(location.height)
+                .map_or(Ok(None), Err);
+        };
+
+        Ok(Some(raw_tx.into_raw_bytes().into()))
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
@@ -569,34 +706,32 @@ impl ZebraDb {
             })
             .collect();
 
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
-            finalized
-                .block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.inputs().into_iter())
-                .flat_map(|input| input.outpoint())
-                .map(|outpoint| {
-                    (
-                        outpoint,
-                        // Some utxos are spent in the same block, so they will be in
-                        // `tx_hash_indexes` and `new_outputs`
-                        self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
-                        }),
-                        self.utxo(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| {
-                                finalized
-                                    .new_outputs
-                                    .get(&outpoint)
-                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
-                            })
-                            .expect("already checked UTXO was in state or block"),
-                    )
-                })
-                .collect();
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
+        // Read spent UTXOs before deleting any, including outputs created in this block.
+        let outpoints: Vec<_> = finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs())
+            .filter_map(|input| input.outpoint())
+            .collect();
+        let read_spent = |outpoint| {
+            read_spent_utxo(
+                self,
+                finalized.height,
+                outpoint,
+                &tx_hash_indexes,
+                &finalized.new_outputs,
+            )
+        };
+        let spent_utxos: Vec<_> = if outpoints.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
+            outpoints.into_par_iter().map(read_spent).collect()
+        } else {
+            outpoints.into_iter().map(read_spent).collect()
+        };
 
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             spent_utxos
@@ -631,14 +766,24 @@ impl ZebraDb {
 
         // Get the current address balances, before the transactions in this block
 
-        fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
+        fn read_addr_locs<T: Send, F: Fn(&transparent::Address) -> Option<T> + Sync>(
             changed_addresses: HashSet<transparent::Address>,
             f: F,
         ) -> HashMap<transparent::Address, T> {
-            changed_addresses
-                .into_iter()
-                .filter_map(|address| Some((address, f(&address)?)))
-                .collect()
+            let read_address = |address| Some((address, f(&address)?));
+            if changed_addresses.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
+                changed_addresses
+                    .into_par_iter()
+                    .filter_map(read_address)
+                    .collect()
+            } else {
+                changed_addresses
+                    .into_iter()
+                    .filter_map(read_address)
+                    .collect()
+            }
         }
 
         // # Performance
@@ -698,6 +843,31 @@ impl ZebraDb {
     pub fn write_batch(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         self.db.write(batch)
     }
+}
+
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
+/// Resolve a spent output from disk or from an earlier transaction in this block.
+fn read_spent_utxo(
+    db: &ZebraDb,
+    height: Height,
+    outpoint: transparent::OutPoint,
+    tx_hash_indexes: &HashMap<transaction::Hash, usize>,
+    new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> (transparent::OutPoint, OutputLocation, transparent::Utxo) {
+    let db_out_loc = db.output_location(&outpoint);
+    let out_loc = db_out_loc.unwrap_or_else(|| lookup_out_loc(height, &outpoint, tx_hash_indexes));
+    let utxo = db_out_loc
+        .and_then(|loc| db.utxo_by_location(loc))
+        .map(|ordered_utxo| ordered_utxo.utxo)
+        .or_else(|| {
+            new_outputs
+                .get(&outpoint)
+                .map(|ordered_utxo| ordered_utxo.utxo.clone())
+        })
+        .expect("spent UTXOs were already checked to exist in the state or block");
+
+    (outpoint, out_loc, utxo)
 }
 
 /// Lookup the output location for an outpoint.
@@ -848,4 +1018,23 @@ impl DiskWriteBatch {
             self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
     }
+}
+
+/// Returns the serialized size of a block made of `raw_header` and `raw_txs`.
+///
+/// See <https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks>
+fn serialized_block_size(raw_header: &RawBytes, raw_txs: &[RawBytes]) -> usize {
+    let tx_count = CompactSizeMessage::try_from(raw_txs.len())
+        .expect("must work for a previously serialized block");
+    raw_header.raw_bytes().len()
+        + tx_count.zcash_serialized_size()
+        + raw_txs
+            .iter()
+            .map(|raw_tx| raw_tx.raw_bytes().len())
+            .sum::<usize>()
+}
+
+/// Returns the Merkle root committed to by a serialized header.
+fn raw_header_merkle_root(header: &RawBytes) -> block::merkle::Root {
+    block::Header::from_bytes(header.raw_bytes()).merkle_root
 }

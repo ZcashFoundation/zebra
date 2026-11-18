@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Method `transparent::Address::from_str` now rejects TEX addresses with Bech32 checksums; ZIP 320 requires Bech32m.
+time: 2026-11-04T06:14:03.211326771+01:00

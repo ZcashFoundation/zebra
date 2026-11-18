@@ -28,7 +28,9 @@ release_revision="$2"
 scripts="$(cd "$(dirname "$0")" && pwd)"
 
 package_version() {
-  git show "${1}:${2}/Cargo.toml" 2>/dev/null | awk '
+  local project="$2"
+  [[ "$project" == "zebrad-api" ]] && project=zebrad
+  git show "${1}:${project}/Cargo.toml" 2>/dev/null | awk '
     /^\[package\]/ { in_package = 1; next }
     /^\[/ { in_package = 0 }
     in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
@@ -39,7 +41,7 @@ projects() {
   git show "${base_revision}:.changie.yaml" | awk '
     /^projects:/ { in_projects = 1; next }
     /^[^[:space:]#]/ { in_projects = 0 }
-    in_projects && $1 == "key:" { print $2 }
+    in_projects && $1 == "key:" && $2 != "zebrad-api" { print $2 }
   '
 }
 

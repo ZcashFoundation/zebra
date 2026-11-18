@@ -47,6 +47,7 @@ fn sanitize_extremes() {
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
+        start_height: None,
     };
 
     let max_time_entry = MetaAddr {
@@ -62,6 +63,7 @@ fn sanitize_extremes() {
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
+        start_height: None,
     };
 
     if let Some(min_sanitized) = min_time_entry.sanitize(&Mainnet) {
@@ -99,8 +101,12 @@ fn new_local_listener_is_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer =
-        MetaAddr::new_local_listener_change(address).into_new_meta_addr(instant_now, local_now);
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura:
+    // https://github.com/zakura-core/zakura/commit/d397cf9d490df6afaffaffbc23f6eacf74eea54b
+    let peer = MetaAddr::new_local_listener_change(address, PeerServices::NODE_NETWORK)
+        .into_new_meta_addr(instant_now, local_now);
 
     assert!(peer.is_active_for_gossip(chrono_now));
 }
@@ -641,6 +647,7 @@ fn ipv4_mapped_misbehavior_panics_without_fix() {
         true,
         String::new(),
         crate::protocol::external::types::Version(170_100),
+        zebra_chain::block::Height(0),
     )
     .into_new_meta_addr(
         instant_now,
@@ -693,6 +700,7 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
         true,
         String::new(),
         crate::protocol::external::types::Version(170_100),
+        zebra_chain::block::Height(0),
     )
     .into_new_meta_addr(
         instant_now,
@@ -717,4 +725,40 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
         100,
         "canonicalization must preserve the misbehavior increment"
     );
+}
+
+/// Heartbeats preserve the advertised height; reconnects replace it and gossip removes it.
+#[test]
+fn start_height_tracks_the_latest_handshake() {
+    let addr = "127.0.0.1:8233".parse().unwrap();
+    let instant = Instant::now();
+    let now = Utc::now();
+    let delay = CONCURRENT_ADDRESS_CHANGE_PERIOD + Duration::from_secs(1);
+    let connected = |height| {
+        MetaAddr::new_connected(
+            addr,
+            &PeerServices::NODE_NETWORK,
+            false,
+            String::new(),
+            crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+            zebra_chain::block::Height(height),
+        )
+    };
+    let peer = connected(2_500_000).into_new_meta_addr(instant, now.try_into().unwrap());
+    let peer = MetaAddr::new_responded(addr, None)
+        .apply_to_meta_addr(peer, instant + delay, now + delay)
+        .expect("later heartbeat updates the connected peer");
+    assert_eq!(
+        peer.start_height(),
+        Some(zebra_chain::block::Height(2_500_000))
+    );
+
+    let peer = connected(2_500_010)
+        .apply_to_meta_addr(peer, instant + 2 * delay, now + 2 * delay)
+        .expect("later handshake updates the peer");
+    assert_eq!(
+        peer.start_height(),
+        Some(zebra_chain::block::Height(2_500_010))
+    );
+    assert_eq!(peer.sanitize(&Mainnet).unwrap().start_height(), None);
 }

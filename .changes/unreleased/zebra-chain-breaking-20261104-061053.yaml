@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Methods `ParametersBuilder::to_network` and `Parameters::new_regtest` now reject malformed and TEX lockbox disbursement addresses. Replace those recipients with P2SH or P2PKH addresses.
+time: 2026-11-04T06:10:53.453285803+01:00

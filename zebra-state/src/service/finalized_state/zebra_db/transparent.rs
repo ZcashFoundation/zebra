@@ -49,6 +49,12 @@ use super::super::TypedColumnFamily;
 /// The name of the transaction hash by spent outpoints column family.
 pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
 
+/// The name of the unspent output location by transparent address location column family.
+///
+/// Every spend deletes an entry, so addresses with long spent histories leave many deletion
+/// markers that each range scan of the address has to skip until a compaction drops them.
+pub const UTXO_LOC_BY_TRANSPARENT_ADDR_LOC: &str = "utxo_loc_by_transparent_addr_loc";
+
 /// The name of the [balance](AddressBalanceLocation) by transparent address column family.
 pub const BALANCE_BY_TRANSPARENT_ADDR: &str = "balance_by_transparent_addr";
 
@@ -243,6 +249,18 @@ impl ZebraDb {
             .collect()
     }
 
+    /// Compacts the address UTXO index keys from `from` to `to` (`None` leaves that end open),
+    /// dropping the deletion markers left by spent outputs.
+    pub(crate) fn compact_address_utxo_index_range(&self, from: Option<&[u8]>, to: Option<&[u8]>) {
+        self.db
+            .compact_cf_range(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, from, to);
+    }
+
+    /// Returns how many background errors RocksDB has seen, including failed compactions.
+    pub(crate) fn background_error_count(&self) -> u64 {
+        self.db.background_error_count()
+    }
+
     /// Returns the unspent transparent output locations for a [`transparent::Address`] in the
     /// finalized chain `query_height_range`, at most `limit` of them.
     pub fn address_utxo_locations(
@@ -251,10 +269,8 @@ impl ZebraDb {
         query_height_range: RangeInclusive<Height>,
         limit: Option<usize>,
     ) -> BTreeSet<AddressUnspentOutput> {
-        let utxo_loc_by_transparent_addr_loc = self
-            .db
-            .cf_handle("utxo_loc_by_transparent_addr_loc")
-            .unwrap();
+        let utxo_loc_by_transparent_addr_loc =
+            self.db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
 
         // A potentially invalid key representing the first UTXO sent to the address,
         // or the query start height.
@@ -505,11 +521,8 @@ impl DiskWriteBatch {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
 
-        // Update the in-memory `address_balances` transaction-by-transaction, debiting inputs
-        // before crediting outputs within each transaction. This ordering keeps every
-        // intermediate per-address balance within the consensus range, even when the block
-        // contains a same-address transparent self-spend chain whose batch credit-first
-        // intermediate balance would otherwise exceed MAX_MONEY.
+        // Debit each transaction before crediting it, and defer coinbase payouts until their
+        // fees have been debited. Preserve first-output locations independently of balance order.
         Self::prepare_transparent_address_balance_updates(
             network,
             *height,
@@ -552,15 +565,10 @@ impl DiskWriteBatch {
         self.prepare_transparent_balances_batch(db, address_balances);
     }
 
-    /// Update `address_balances` in memory for the transparent transfers in `transactions`,
-    /// processed transaction-by-transaction in block order, debiting inputs before crediting
-    /// outputs within each transaction.
+    /// Update address balances by debiting each transaction before crediting its outputs.
     ///
-    /// This mirrors `zcashd`'s `UpdateCoins` and is what allows a same-address transparent
-    /// self-spend chain in one block to be applied without the intermediate per-address
-    /// balance exceeding `MAX_MONEY`. For any consensus-valid block, every per-step
-    /// intermediate balance stays inside the [`Amount`] constraint of the enclosing
-    /// `AddressBalanceLocationUpdates` variant.
+    /// Coinbase credits follow fee-paying transactions, keeping intermediate balances within the
+    /// [`Amount`] constraint. Coinbase address locations are registered first to preserve block order.
     ///
     /// This function does not touch the RocksDB batch; index writes are still handled by
     /// [`Self::prepare_new_transparent_outputs_batch`] and
@@ -584,7 +592,24 @@ impl DiskWriteBatch {
             transactions: &[Arc<Transaction>],
             spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         ) {
-            for (tx_index, transaction) in transactions.iter().enumerate() {
+            let mut coinbase_outputs = transactions.first().map(|tx| tx.outputs());
+            if let Some(outputs) = &coinbase_outputs {
+                for (output_index, output) in outputs.iter().enumerate() {
+                    if let Some(address) = output.address(network) {
+                        addr_locs.entry(address).or_insert_with(|| {
+                            AddressBalanceLocationInner::new(OutputLocation::from_usize(
+                                height,
+                                0,
+                                output_index,
+                            ))
+                            .into()
+                        });
+                    }
+                }
+            }
+            let transactions = transactions.iter().enumerate();
+            for (tx_index, transaction) in transactions.clone().skip(1).chain(transactions.take(1))
+            {
                 // Debit transparent inputs first. Coinbase inputs have no outpoint, so
                 // `filter_map(Input::outpoint)` skips them.
                 for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
@@ -603,7 +628,14 @@ impl DiskWriteBatch {
                 }
 
                 // Then credit transparent outputs.
-                for (output_index, output) in transaction.outputs().iter().enumerate() {
+                let outputs = if tx_index == 0 {
+                    coinbase_outputs
+                        .take()
+                        .expect("the first transaction's outputs were cached before iteration")
+                } else {
+                    transaction.outputs()
+                };
+                for (output_index, output) in outputs.iter().enumerate() {
                     if let Some(receiving_address) = output.address(network) {
                         let new_output_location =
                             OutputLocation::from_usize(height, tx_index, output_index);
@@ -665,7 +697,7 @@ impl DiskWriteBatch {
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
         let tx_loc_by_transparent_addr_loc =
             db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
@@ -737,7 +769,7 @@ impl DiskWriteBatch {
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
 
         // Mark all transparent inputs as spent.
         //

@@ -67,4 +67,4 @@ Zebra enforces code quality through review. For the full list of architecture ru
 - **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
 - **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
 - **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Never edit `CHANGELOG.md` by hand. Add a change fragment with `changie new -j <crate> -k <kind> -b "..."` (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
+- **Changelog**: Never edit generated changelogs by hand. Add a fragment with `changie new -j <project> -k <kind> -b "..."`: `zebrad` for operators, `zebrad-api` for `zebrad` Rust APIs and technical behavior, or another crate's name (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html)).

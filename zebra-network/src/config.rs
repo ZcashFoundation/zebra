@@ -34,6 +34,7 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -78,23 +79,17 @@ pub struct Config {
     /// Can be `address:port` or just `address`. If there is no configured
     /// port, Zebra will use the default port for the configured `network`.
     ///
-    /// `address` can be an IP address or a DNS name. DNS names are
-    /// only resolved once, when Zebra starts up.
+    /// `address` must be an IP address.
     ///
     /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
     /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
     ///
-    /// If a specific listener address is configured, Zebra will advertise
-    /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("\[::\]:port"), which is not advertised to other nodes.
-    ///
-    /// Zebra does not currently support:
-    /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
-    /// - [Auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
-    ///
-    /// However, other Zebra instances compensate for unspecified or incorrect
-    /// listener addresses by adding the external IP addresses of peers to
-    /// their address books.
+    /// An explicit [`external_addr`](Self::external_addr) takes precedence when advertising
+    /// this node to peers. Otherwise Zebra uses a public listener address, or discovers its
+    /// public IP from peer handshakes when the listener address is not publicly routable.
+    /// Discovered addresses use the actual listener port, not a port reported by a peer.
+    /// Discovery does not configure NAT or discover externally remapped ports; use
+    /// `external_addr` if the public port differs from the listener port.
     pub listen_addr: SocketAddr,
 
     /// The external address of this node if any.
@@ -108,6 +103,23 @@ pub struct Config {
     /// The network to connect to.
     pub network: Network,
 
+    /// Enable compact blocks and early relay with peers that also support them.
+    ///
+    /// Enabled by default. Negotiated peers can serve authenticated blocks before full
+    /// transaction validation; callers must still fully verify every block.
+    /// Ordinary committed relay is unchanged. See the [draft Compact Block Relay ZIP].
+    ///
+    /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+    pub compact_block_relay: bool,
+
+    /// Runtime service capabilities advertised to peers.
+    ///
+    /// Defaults to archive and tree-root service. At startup, zebrad sets this from the node's
+    /// storage mode.
+    /// This field is not serialized or read from configuration files.
+    #[serde(skip)]
+    pub local_services: PeerServices,
+
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
     pub initial_mainnet_peers: IndexSet<String>,
@@ -115,6 +127,20 @@ pub struct Config {
     /// A list of initial peers for the peerset when operating on
     /// testnet.
     pub initial_testnet_peers: IndexSet<String>,
+
+    /// Operator-selected peers to keep connected independently of ordinary peer demand.
+    ///
+    /// Defaults to an empty list of unique `host:port` strings, with configuration order
+    /// preserved; IPv6 literals require brackets. Each target maintains at most one connection.
+    /// DNS and handshakes have timeouts. Resolved addresses are tried at the shared outbound
+    /// connection interval; after failure or disconnection the next DNS round waits at least
+    /// [`crate::constants::MIN_PEER_RECONNECTION_DELAY`].
+    ///
+    /// Each target reserves one slot within [`Self::peerset_outbound_connection_limit`], leaving
+    /// at least one slot for ordinary outbound peers. Configurations with as many targets as the
+    /// outbound limit are rejected. Reservations do not bypass bans, per-IP limits, protocol
+    /// checks, or duplicate endpoint protection. Regtest only connects to localhost addresses.
+    pub persistent_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
     ///
@@ -173,7 +199,8 @@ pub struct Config {
     /// The initial target size for the peer set.
     ///
     /// Also used to limit the number of inbound and outbound connections made by Zebra,
-    /// and the size of the cached peer list.
+    /// the ordinary outbound connections (persistent peers excluded) to peers that don't serve
+    /// historic blocks, and the size of the cached peer list.
     ///
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
@@ -243,6 +270,39 @@ impl Config {
         self.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER
     }
 
+    /// Outbound slots available to initial peers and the ordinary peer crawler.
+    pub(crate) fn ordinary_outbound_connection_limit(&self) -> usize {
+        self.peerset_outbound_connection_limit()
+            .saturating_sub(self.persistent_peers.len())
+    }
+
+    /// Checks persistent target syntax and leaves at least one ordinary outbound slot.
+    pub(crate) fn validate_persistent_peers(&self) -> Result<(), &'static str> {
+        if self.persistent_peers.len() >= self.peerset_outbound_connection_limit() {
+            return Err(
+                "persistent_peers must leave at least one ordinary outbound connection slot",
+            );
+        }
+        for peer in &self.persistent_peers {
+            let valid = peer
+                .parse::<SocketAddr>()
+                .is_ok_and(|addr| addr.port() != 0)
+                || peer.rsplit_once(':').is_some_and(|(host, port)| {
+                    !host.is_empty()
+                        && host
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))
+                        && port.parse::<u16>().is_ok_and(|port| port != 0)
+                });
+            if !valid {
+                return Err(
+                    "persistent_peers entries must be host:port or IP:port with a nonzero port",
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// The maximum number of inbound connections that Zebra will accept at the same time.
     /// When this limit is reached, Zebra drops new inbound connections,
     /// without handshaking on them.
@@ -277,6 +337,9 @@ impl Config {
     /// Resolve initial seed peer IP addresses, based on the configured network,
     /// and load cached peers from disk, if available.
     ///
+    /// With persistent targets configured, failed seed DNS is not retried here, so unavailable
+    /// ordinary seeds cannot prevent initialization of independently maintained connections.
+    ///
     /// # Panics
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
@@ -285,7 +348,7 @@ impl Config {
 
         if self.network.is_regtest() {
             // Only return local peer addresses and skip loading the peer cache on Regtest.
-            return Config::resolve_peers(&hostnames, true)
+            return Config::resolve_peers(&hostnames, self.persistent_peers.is_empty())
                 .await
                 .into_iter()
                 .filter(PeerSocketAddr::is_localhost)
@@ -296,7 +359,11 @@ impl Config {
         // Ignore disk errors because the cache is optional and the method already logs them.
         let disk_peers = self.load_peer_cache().await.unwrap_or_default();
 
-        let dns_peers = Config::resolve_peers(&hostnames, disk_peers.is_empty()).await;
+        let dns_peers = Config::resolve_peers(
+            &hostnames,
+            disk_peers.is_empty() && self.persistent_peers.is_empty(),
+        )
+        .await;
 
         dns_peers.into_iter().chain(disk_peers).collect()
     }
@@ -397,7 +464,7 @@ impl Config {
     /// # Panics
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
-    async fn resolve_host_once(host: &str) -> Result<HashSet<PeerSocketAddr>, BoxError> {
+    pub(crate) async fn resolve_host_once(host: &str) -> Result<HashSet<PeerSocketAddr>, BoxError> {
         let fut = tokio::net::lookup_host(host);
         let fut = tokio::time::timeout(DNS_LOOKUP_TIMEOUT, fut);
 
@@ -580,8 +647,11 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
+            compact_block_relay: true,
+            local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
+            persistent_peers: IndexSet::new(),
             cache_dir: CacheDir::default(),
             crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
@@ -665,6 +735,7 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
+    compact_block_relay: bool,
 
     /// Legacy testnet parameters, kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -672,6 +743,7 @@ struct DConfig {
 
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
+    persistent_peers: IndexSet<String>,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
@@ -686,9 +758,11 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
+            compact_block_relay: config.compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
+            persistent_peers: config.persistent_peers,
             cache_dir: config.cache_dir,
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
@@ -747,8 +821,11 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
+            compact_block_relay,
+            local_services: _,
             initial_mainnet_peers,
             initial_testnet_peers,
+            persistent_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -780,9 +857,11 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
+            compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
+            persistent_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -800,9 +879,11 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
+            compact_block_relay,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
+            persistent_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -878,17 +959,24 @@ impl<'de> Deserialize<'de> for Config {
             non_zero_config_field.filter(|config_value| config_value > &0).unwrap_or(default_config_value)
         });
 
-        Ok(Config {
+        let config = Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
+            compact_block_relay,
+            local_services: PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
             initial_mainnet_peers,
             initial_testnet_peers,
+            persistent_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
-        })
+        };
+        config
+            .validate_persistent_peers()
+            .map_err(de::Error::custom)?;
+        Ok(config)
     }
 }
 

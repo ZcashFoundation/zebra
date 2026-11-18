@@ -130,6 +130,15 @@ while IFS= read -r -d '' manifest; do
   fi
 
   echo "Validated ${package} ${version} in ${changelog}."
+  # Only releases with pending technical notes need a technical section.
+  # Keep the operator notes output and the list of real Cargo packages unchanged.
+  if [[ "$package" == "zebrad" ]] &&
+    git grep --quiet -E "^project:[[:space:]]*'?zebrad-api'?[[:space:]]*$" "$base_revision" -- .changes/unreleased; then
+    if ! validate_changelog_section "$release_revision" "zebrad/CHANGELOG.md" "## [${version}]" "$temporary_section"; then
+      echo "::error title=Incomplete technical changelog::zebrad/CHANGELOG.md must contain a non-empty '## [${version}]' section for zebrad Rust APIs." >&2
+      failed=true
+    fi
+  fi
 done < <(git diff --name-only -z --diff-filter=AM "$base_revision" "$release_revision" -- '**/Cargo.toml')
 
 if [[ "$release_count" -eq 0 ]]; then

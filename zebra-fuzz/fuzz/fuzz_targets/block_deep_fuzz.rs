@@ -773,7 +773,11 @@ fn deep_fuzz_transaction(tx: &Transaction) {
 
     // --- ZIP-317 Fee Calculations ---
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        zebra_chain::transaction::zip317::conventional_fee(tx)
+        zebra_chain::transaction::zip317::conventional_fee(
+            zebra_chain::transaction::zip317::conventional_actions(tx),
+            &Network::Mainnet,
+            Height(0),
+        )
     }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         zebra_chain::transaction::zip317::conventional_actions(tx)

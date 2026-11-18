@@ -5,7 +5,10 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use tokio::time::{self, timeout};
+use tokio::{
+    sync::Notify,
+    time::{self, timeout},
+};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
@@ -17,7 +20,7 @@ use zebra_chain::{
         Network, NetworkUpgrade,
     },
     serialization::ZcashDeserializeInto,
-    transaction::{Transaction, VerifiedUnminedTx},
+    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::{self, OutPoint},
 };
 use zebra_consensus::transaction as tx;
@@ -25,7 +28,7 @@ use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
-    mempool::{self, *},
+    mempool::{self, queue_checker::RATE_LIMIT_DELAY, *},
     sync::{RecentSyncLengths, SyncStatus},
 };
 
@@ -183,6 +186,208 @@ fn v4_script_failure_near_activation_has_no_mempool_score() {
 }
 
 #[tokio::test]
+async fn mempool_grow_refreshes_stored_fee_parameters() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let activation = network.fee_reduction_height();
+    let (mut mempool, _peers, _state, _verifier, mut recent_syncs, mut tip_sender) =
+        super::prop::setup(&network);
+    let mut tip = super::prop::genesis_chain_tip().expect("genesis fixture is valid");
+    tip.height = (activation - 3).expect("activation follows height three");
+    tip.hash = block::Hash([1; 32]);
+    tip.transactions.clear();
+    tip.transaction_hashes = Arc::from([]);
+    tip_sender.set_finalized_tip(tip.clone());
+    mempool.enable(&mut recent_syncs).await;
+
+    let mut transaction = network
+        .unmined_transactions_in_blocks(..=1)
+        .next()
+        .expect("transaction fixture exists")
+        .transaction
+        .transaction
+        .as_ref()
+        .clone();
+    super::standardize_transaction(&mut transaction);
+    let unmined = UnminedTx::from(Arc::new(transaction));
+    let miner_fee = (i64::from(unmined.conventional_actions) * 5_000)
+        .try_into()
+        .expect("legacy fee fits in an amount");
+    let transaction = VerifiedUnminedTx::new(
+        unmined,
+        miner_fee,
+        0,
+        0,
+        Arc::new(Vec::new()),
+        &network,
+        tip.height.next().expect("next height exists"),
+    )
+    .expect("transaction pays the pre-activation fee");
+    let id = transaction.transaction.id.mined_id();
+    assert_eq!(transaction.fee_weight_ratio, 1.0);
+    mempool
+        .storage()
+        .insert(
+            transaction,
+            Vec::new(),
+            Some(tip.height),
+            &mut HashSet::new(),
+        )
+        .expect("transaction enters storage");
+
+    for (step, expected_ratio) in [(2, 1.0), (3, 5.0), (4, 5.0)] {
+        tip.previous_block_hash = tip.hash;
+        tip.hash = block::Hash([step; 32]);
+        tip.height = tip.height.next().expect("next height exists");
+        tip_sender.set_finalized_tip(tip.clone());
+        mempool.dummy_call().await;
+
+        let storage = mempool.storage();
+        let retained = storage
+            .transactions()
+            .get(&id)
+            .expect("transaction is retained");
+        assert_eq!(retained.fee_weight_ratio, expected_ratio);
+        assert_eq!(retained.unpaid_actions, 0);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn mempool_fee_policy_follows_jumps_and_rollbacks() {
+    use std::task::Poll;
+    use zebra_chain::transaction::zip317;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let activation = network.fee_reduction_height();
+    for (old_offset, new_offset, fee_per_action, expected_ratio) in [
+        (-3, 1, 5_000, Some(5.0)),
+        (1, -3, 5_000, Some(1.0)),
+        (1, -3, 1_000, None),
+    ] {
+        let (mut mempool, _peers, mut state, mut verifier, mut recent_syncs, mut tip_sender) =
+            super::prop::setup(&network);
+        let mut tip = super::prop::genesis_chain_tip().expect("genesis fixture is valid");
+        tip.height = (activation + old_offset).expect("activation is far from height bounds");
+        tip.hash = block::Hash([1; 32]);
+        tip.transactions.clear();
+        tip.transaction_hashes = Arc::from([]);
+        tip_sender.set_best_non_finalized_tip(tip.clone());
+        mempool.enable(&mut recent_syncs).await;
+
+        let mut transaction = network
+            .unmined_transactions_in_blocks(..=1)
+            .next()
+            .expect("transaction fixture exists")
+            .transaction
+            .transaction
+            .as_ref()
+            .clone();
+        super::standardize_transaction(&mut transaction);
+        let transaction = UnminedTx::from(Arc::new(transaction));
+        let miner_fee = (i64::from(transaction.conventional_actions) * fee_per_action)
+            .try_into()
+            .expect("conventional fee fits in an amount");
+        let classify = |height| {
+            VerifiedUnminedTx::new(
+                transaction.clone(),
+                miner_fee,
+                0,
+                0,
+                Arc::new(Vec::new()),
+                &network,
+                height,
+            )
+        };
+        mempool
+            .storage()
+            .insert(
+                classify(tip.height.next().unwrap()).expect("transaction pays the current fee"),
+                Vec::new(),
+                Some(tip.height),
+                &mut HashSet::new(),
+            )
+            .expect("transaction enters storage");
+
+        // A skipped block or reorg breaks the parent link and takes the normal reset path.
+        tip.height = (activation + new_offset).expect("activation is far from height bounds");
+        tip.hash = block::Hash([2; 32]);
+        tip_sender.set_best_non_finalized_tip(tip.clone());
+        mempool.dummy_call().await;
+        let reverify = async {
+            state
+                .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
+                .await
+                .unwrap()
+                .respond(zs::ReadResponse::KnownTransaction(false));
+            state
+                .expect_request(zs::ReadRequest::Tip)
+                .await
+                .unwrap()
+                .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
+            let height = tip.height.next().unwrap();
+            let result = classify(height);
+            if expected_ratio.is_none() {
+                assert_eq!(result.as_ref().unwrap_err(), &zip317::Error::UnpaidActions);
+            }
+            verifier
+                .expect_request(tx::MempoolRequest {
+                    transaction: transaction.clone(),
+                    height,
+                })
+                .await
+                .unwrap()
+                .respond(
+                    result
+                        .map(|transaction| tx::MempoolResponse {
+                            transaction,
+                            spent_mempool_outpoints: Vec::new(),
+                        })
+                        .map_err(TransactionError::Zip317),
+                );
+        };
+        let complete = futures::future::poll_fn(|cx| {
+            if let Poll::Ready(Err(error)) = mempool.poll_ready(cx) {
+                panic!("mempool readiness failed: {error}");
+            }
+            if mempool.tx_downloads().in_flight() == 0 {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        });
+        timeout(Duration::from_secs(5), async {
+            futures::join!(complete, reverify);
+        })
+        .await
+        .expect("retained transactions are reclassified at the new height");
+
+        let Response::FullTransactions {
+            transactions,
+            last_seen_tip_hash,
+            ..
+        } = (&mut mempool)
+            .oneshot(Request::FullTransactions)
+            .await
+            .unwrap()
+        else {
+            panic!("expected full transactions");
+        };
+        assert_eq!(last_seen_tip_hash, tip.hash);
+        if let Some(expected_ratio) = expected_ratio {
+            assert_eq!(transactions.len(), 1);
+            assert_eq!(transactions[0].fee_weight_ratio, expected_ratio);
+            assert_eq!(transactions[0].unpaid_actions, 0);
+        } else {
+            assert!(
+                transactions.is_empty(),
+                "reduced fees cannot survive rollback"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized
     for _ in 0..10 {
@@ -222,9 +427,12 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     let mut inserted_ids = HashSet::new();
-    service
-        .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        genesis_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
     inserted_ids.insert(genesis_transaction.transaction.id);
 
     // Test `Request::TransactionIds`
@@ -294,7 +502,9 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         inserted_ids.insert(tx.transaction.id);
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service
+            .storage()
+            .insert(tx.clone(), Vec::new(), None, &mut HashSet::new());
     }
 
     // Test `Request::RejectedTransactionIds`
@@ -356,7 +566,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .storage()
         .transactions()
         .values()
-        .map(|tx| tx.transaction.size)
+        .map(|tx| tx.transaction.size())
         .sum();
 
     // TODO: Derive memory usage when available
@@ -367,6 +577,93 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
 
     Ok(())
+}
+
+/// Repeated polls and insertions only rescan expiration after the tip height changes.
+#[tokio::test]
+async fn mempool_expires_transactions_once_per_tip_height() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut mempool,
+            _peer_set,
+            mut state_service,
+            mut chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+
+        // Start after the first network upgrade so the next block grows rather than resets the pool.
+        let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        (&mut state_service)
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block1.into()))
+            .await
+            .unwrap();
+        chain_tip_change.wait_for_tip_change().await.unwrap();
+        mempool.enable(&mut recent_syncs).await;
+        assert_eq!(mempool.latest_chain_tip.best_tip_height(), Some(Height(1)));
+        assert_eq!(mempool.storage().expiry_scan_count, 1);
+
+        let block: Block = network.test_block(982681, 925483).unwrap();
+        let mut transaction = (*block.transactions[1]).clone();
+        transaction.set_expiry_height(Height(2));
+        let expiring_transaction = VerifiedUnminedTx::new(
+            Arc::new(transaction).into(),
+            Amount::try_from(1_000_000).unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+            &network,
+            Height(2),
+        )
+        .unwrap();
+        let surviving_transaction = network
+            .unmined_transactions_in_blocks(3..=3)
+            .next()
+            .unwrap();
+        let surviving_id = surviving_transaction.transaction.id;
+
+        for transaction in [expiring_transaction, surviving_transaction] {
+            mempool
+                .storage()
+                .insert(
+                    transaction,
+                    Vec::new(),
+                    Some(Height(1)),
+                    &mut HashSet::new(),
+                )
+                .unwrap();
+            for _ in 0..4 {
+                mempool.dummy_call().await;
+                assert_eq!(mempool.storage().expiry_scan_count, 1);
+            }
+        }
+        assert_eq!(mempool.storage().transaction_count(), 2);
+
+        let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        state_service
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block2.into()))
+            .await
+            .unwrap();
+        chain_tip_change.wait_for_tip_change().await.unwrap();
+
+        for _ in 0..4 {
+            mempool.dummy_call().await;
+            assert_eq!(mempool.storage().expiry_scan_count, 2);
+        }
+        assert_eq!(mempool.latest_chain_tip.best_tip_height(), Some(Height(2)));
+        assert_eq!(
+            mempool.storage().tx_ids().collect::<HashSet<_>>(),
+            HashSet::from([surviving_id]),
+        );
+    })
+    .await
+    .expect("expiration checks must finish within the test deadline");
 }
 
 #[tokio::test]
@@ -417,7 +714,9 @@ async fn mempool_queue_single() -> Result<(), Report> {
     for tx in transactions.iter() {
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service
+            .storage()
+            .insert(tx.clone(), Vec::new(), None, &mut HashSet::new());
     }
 
     // Test `Request::Queue` for a new transaction
@@ -505,9 +804,12 @@ async fn mempool_service_stays_enabled_when_sync_status_falls_behind() -> Result
     assert!(service.is_enabled());
 
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service
-        .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        genesis_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
 
     // Test if the mempool answers correctly (i.e. is enabled)
     let response = service
@@ -1171,6 +1473,242 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     Ok(())
 }
 
+#[tokio::test(start_paused = true)]
+async fn delayed_fee_rejections_follow_current_activation_policy() {
+    use std::task::Poll;
+    use zebra_chain::transaction::{zip317, LockTime};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let activation = network.fee_reduction_height();
+    let before = activation.previous().unwrap();
+    let fixture = network
+        .unmined_transactions_in_blocks(..)
+        .find(|tx| {
+            !tx.transaction.transaction.is_coinbase()
+                && !tx.transaction.transaction.inputs().is_empty()
+                && !tx.transaction.transaction.outputs().is_empty()
+        })
+        .expect("a transparent spending transaction fixture exists");
+    let mut transaction = Transaction::test_v5(
+        NetworkUpgrade::current(&network, activation),
+        fixture.transaction.transaction.inputs(),
+        fixture.transaction.transaction.outputs(),
+        LockTime::unlocked(),
+        activation,
+    );
+    super::standardize_transaction(&mut transaction);
+    let transaction = UnminedTx::from(Arc::new(transaction));
+    assert_eq!(transaction.transaction.expiry_height(), Some(activation));
+
+    for (verification_height, pays_reduced_fee, consensus_error, should_retry, from_peer) in [
+        (before, true, None, true, false),
+        (before, false, None, true, false),
+        (before, true, None, true, true),
+        (before.previous().unwrap(), true, None, false, true),
+        (activation, false, None, false, true),
+        (
+            before,
+            true,
+            Some(TransactionError::Halo2VerificationFailed),
+            false,
+            true,
+        ),
+    ] {
+        let (
+            mut mempool,
+            _peer_set,
+            mut state_service,
+            mut tx_verifier,
+            mut recent_syncs,
+            mut chain_tip_sender,
+        ) = super::prop::setup(&network);
+        let mut changes = mempool.transaction_sender.subscribe();
+        let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(1);
+        mempool.misbehavior_sender = misbehavior_tx;
+        let peer_score = if from_peer && consensus_error.is_some() {
+            100
+        } else {
+            0
+        };
+        let mut tip = super::prop::genesis_chain_tip().unwrap();
+        tip.height = verification_height.previous().unwrap();
+        tip.hash = block::Hash([2; 32]);
+        tip.transactions.clear();
+        tip.transaction_hashes = Arc::from([]);
+        chain_tip_sender.set_best_non_finalized_tip(tip.clone());
+        mempool.enable(&mut recent_syncs).await;
+
+        let miner_fee = Amount::try_from(if consensus_error.is_some() {
+            i64::from(transaction.conventional_actions) * 5_000
+        } else if pays_reduced_fee {
+            i64::from(transaction.conventional_actions) * 1_000
+        } else {
+            0
+        })
+        .unwrap();
+        let classify = |height| {
+            VerifiedUnminedTx::new(
+                transaction.clone(),
+                miner_fee,
+                0,
+                0,
+                Arc::new(vec![]),
+                &network,
+                height,
+            )
+            .map(|transaction| tx::MempoolResponse {
+                transaction,
+                spent_mempool_outpoints: vec![],
+            })
+            .map_err(TransactionError::Zip317)
+        };
+
+        let source = "127.0.0.1:8233".parse().unwrap();
+        let request = if from_peer {
+            Request::QueueFromPeer {
+                candidates: vec![transaction.clone().into()],
+                source,
+            }
+        } else {
+            Request::Queue(vec![transaction.clone().into()])
+        };
+        let response = (&mut mempool).oneshot(request).await.unwrap();
+        let Response::Queued(mut responses) = response else {
+            panic!("expected a queued response");
+        };
+        let mut rpc_response = responses.pop().map(Result::unwrap);
+        state_service
+            .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
+            .await
+            .unwrap()
+            .respond(zs::ReadResponse::KnownTransaction(false));
+        state_service
+            .expect_request(zs::ReadRequest::Tip)
+            .await
+            .unwrap()
+            .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
+        let delayed_verification = tx_verifier
+            .expect_request(tx::MempoolRequest {
+                transaction: transaction.clone(),
+                height: verification_height,
+            })
+            .await
+            .unwrap();
+
+        tip.previous_block_hash = tip.hash;
+        tip.hash = block::Hash([3; 32]);
+        tip.height = verification_height;
+        chain_tip_sender.set_best_non_finalized_tip(tip.clone());
+        mempool.dummy_call().await;
+        let error = consensus_error.unwrap_or_else(|| {
+            let error = classify(verification_height).unwrap_err();
+            assert!(matches!(
+                error,
+                TransactionError::Zip317(zip317::Error::UnpaidActions)
+            ));
+            error
+        });
+        delayed_verification.respond(Err(error));
+
+        let reverify = async {
+            if should_retry {
+                state_service
+                    .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
+                    .await
+                    .unwrap()
+                    .respond(zs::ReadResponse::KnownTransaction(false));
+                state_service
+                    .expect_request(zs::ReadRequest::Tip)
+                    .await
+                    .unwrap()
+                    .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
+                let verification = tx_verifier
+                    .expect_request(tx::MempoolRequest {
+                        transaction: transaction.clone(),
+                        height: activation,
+                    })
+                    .await
+                    .unwrap();
+                if let Some(rpc_response) = &mut rpc_response {
+                    assert!(matches!(
+                        rpc_response.try_recv(),
+                        Err(oneshot::error::TryRecvError::Empty)
+                    ));
+                }
+                assert!(
+                    changes.try_recv().is_err(),
+                    "obsolete failures are not broadcast"
+                );
+                verification.respond(classify(activation));
+            }
+        };
+        let complete = futures::future::poll_fn(|cx| {
+            if let Poll::Ready(Err(error)) = mempool.poll_ready(cx) {
+                panic!("mempool readiness failed: {error}");
+            }
+            if mempool.tx_downloads().in_flight() == 0 {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        });
+        timeout(Duration::from_secs(5), async {
+            futures::join!(complete, reverify);
+        })
+        .await
+        .expect("the original submission must finish without another tip or resubmission");
+
+        let accepted = should_retry && pays_reduced_fee;
+        if let Some(rpc_response) = rpc_response {
+            assert_eq!(
+                rpc_response
+                    .await
+                    .expect("the RPC responder must be retained")
+                    .is_ok(),
+                accepted,
+            );
+        }
+        assert_eq!(
+            mempool
+                .storage()
+                .transactions()
+                .contains_key(&transaction.id.mined_id()),
+            accepted,
+        );
+        let ids = [transaction.id].into_iter().collect();
+        assert_eq!(
+            changes
+                .try_recv()
+                .expect("the terminal result is broadcast"),
+            if accepted {
+                MempoolChange::added(ids)
+            } else {
+                MempoolChange::invalidated(ids)
+            },
+        );
+        assert!(
+            changes.try_recv().is_err(),
+            "only the terminal result is broadcast"
+        );
+        if !accepted {
+            assert!(matches!(
+                mempool.storage().should_download_or_verify(transaction.id),
+                Err(MempoolError::StorageExactTip(
+                    ExactTipRejectionError::FailedVerification(_)
+                ))
+            ));
+        }
+        if peer_score == 0 {
+            assert!(misbehavior_rx.try_recv().is_err());
+        } else {
+            let report = misbehavior_rx.try_recv().expect("invalid proof report");
+            assert_eq!(report.addr, zn::PeerSocketAddr::from(source));
+            assert_eq!(report.score, peer_score);
+        }
+    }
+}
+
 /// Regression test for #10689: `poll_ready()` must stay ready when the
 /// `MempoolChange` broadcast channel has no subscribers.
 ///
@@ -1258,6 +1796,64 @@ async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), 
     ));
 
     Ok(())
+}
+
+/// Verification wakes the idle mempool before the queue checker's backstop fires.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit() {
+    let network = Network::Mainnet;
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mut changes,
+    ) = setup_with_mempool_config(&network, mempool::Config::default(), true, false).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    let tx = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("mainnet test vectors contain transactions")
+        .transaction;
+    let queued = mempool
+        .ready()
+        .await
+        .expect("the enabled mempool is ready")
+        .call(Request::Queue(vec![tx.clone().into()]))
+        .await
+        .expect("the mempool accepts queue requests");
+    assert!(matches!(queued, Response::Queued(_)));
+    let verification = tx_verifier.expect_request_that(|_| true).await;
+
+    // Start the backstop only after setup, so paused time cannot consume part of its delay.
+    // From here until the announcement, only the queue checker can poll the mempool.
+    let transaction_verified = mempool.transaction_verified.clone();
+    let mempool = Buffer::new(BoxService::new(mempool), 1);
+    let queue_checker = QueueChecker::spawn(mempool, transaction_verified);
+    let height = verification.request().height;
+    verification.respond(transaction::MempoolResponse::from(
+        VerifiedUnminedTx::new(
+            tx.clone(),
+            Amount::try_from(1_000_000).expect("valid fee"),
+            0,
+            0,
+            Arc::new(vec![]),
+            &network,
+            height,
+        )
+        .expect("transaction passes ZIP-317 checks"),
+    ));
+
+    // Storage insertion publishes to this same channel for gossip and mining subscribers.
+    let change = timeout(RATE_LIMIT_DELAY / 2, changes.recv())
+        .await
+        .expect("verification must wake the queue checker before its backstop")
+        .expect("the mempool keeps the change channel open");
+    assert_eq!(change, MempoolChange::added([tx.id].into_iter().collect()));
+    queue_checker.abort();
 }
 
 /// Check if a transaction that fails download is _not_ rejected.
@@ -1423,6 +2019,8 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     0,
                     0,
                     std::sync::Arc::new(vec![]),
+                    &zebra_chain::parameters::Network::Mainnet,
+                    zebra_chain::block::Height::MAX,
                 )
                 .expect("verification should pass"),
             ));
@@ -1485,6 +2083,8 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     0,
                     0,
                     std::sync::Arc::new(vec![]),
+                    &zebra_chain::parameters::Network::Mainnet,
+                    zebra_chain::block::Height::MAX,
                 )
                 .expect("verification should pass"),
             ));
@@ -1695,7 +2295,12 @@ async fn mempool_reject_non_standard() -> Result<(), Report> {
     // Expect insertion to fail for non-standard transaction.
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -1740,9 +2345,12 @@ async fn mempool_accept_standard_op_return() -> Result<(), Report> {
 
     service.enable(&mut recent_syncs).await;
 
-    service
-        .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        last_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
 
     Ok(())
 }
@@ -1789,7 +2397,12 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -1844,7 +2457,12 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -1891,7 +2509,12 @@ async fn mempool_reject_non_standard_scriptpubkey() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -1940,7 +2563,12 @@ async fn mempool_reject_bare_multisig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -1987,7 +2615,12 @@ async fn mempool_reject_large_multisig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2030,7 +2663,12 @@ async fn mempool_reject_large_scriptsig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2073,7 +2711,12 @@ async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2117,7 +2760,12 @@ async fn mempool_reject_too_many_sigops() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for too many sigops");
 
     assert_eq!(
@@ -2167,7 +2815,12 @@ async fn mempool_reject_non_standard_inputs() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard inputs");
 
     assert_eq!(
@@ -2303,7 +2956,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2311,11 +2964,12 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _transaction_verified) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
@@ -2388,7 +3042,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2396,6 +3050,8 @@ async fn cancel_handles_drained_after_verification_timeout() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2476,7 +3132,7 @@ async fn verification_timeout_releases_peer_slot() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2484,6 +3140,8 @@ async fn verification_timeout_releases_peer_slot() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
     ));
 
     let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
@@ -2554,7 +3212,7 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2562,6 +3220,8 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2602,17 +3262,18 @@ async fn enabled_mempool_with_mock_verifier(
     tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
 ) {
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let (state, _read_only_state, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(StateConfig::ephemeral(), network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
     let (sync_status, mut recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(10);
-    let (mut mempool, mempool_changes) = Mempool::new(
+    let (mut mempool, mempool_changes, _transaction_verified) = Mempool::new(
         network,
         &config,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
@@ -2764,4 +3425,55 @@ async fn mempool_early_output_check_uses_configured_datacarrier_limit() -> Resul
     }
 
     Ok(())
+}
+
+/// Queue checks reap abandoned output channels without waiting for a new block.
+#[tokio::test]
+async fn stalled_tip_queue_check_prunes_abandoned_output_waiters() {
+    let network = Network::Mainnet;
+    let (mut mempool, _peers, _state, _tip_changes, _verifier, mut recent_syncs, _changes) =
+        timeout(Duration::from_secs(30), setup(&network, u64::MAX, true))
+            .await
+            .expect("the ephemeral state initializes within the test deadline");
+    mempool.enable(&mut recent_syncs).await;
+
+    let live_outpoint = OutPoint::from_usize(zebra_chain::transaction::Hash([0x31; 32]), 0);
+    let live_waiter = mempool
+        .ready()
+        .await
+        .expect("enabled mempool accepts output requests")
+        .call(Request::AwaitOutput(live_outpoint));
+
+    for round in 0..2 {
+        for index in 0..8 {
+            let outpoint = OutPoint::from_usize(
+                zebra_chain::transaction::Hash([0x32; 32]),
+                round * 8 + index,
+            );
+            let abandoned = mempool
+                .ready()
+                .await
+                .expect("enabled mempool accepts output requests")
+                .call(Request::AwaitOutput(outpoint));
+            drop(abandoned);
+        }
+        mempool.dummy_call().await;
+        assert_eq!(
+            mempool.storage().pending_outputs.len(),
+            1,
+            "queue checks retain only the live waiter while the chain tip remains fixed"
+        );
+    }
+
+    let expected = transparent::Output::new(Amount::zero(), transparent::Script::new(&[]));
+    mempool
+        .storage()
+        .pending_outputs
+        .respond(&live_outpoint, expected.clone());
+    let response = timeout(Duration::from_secs(1), live_waiter)
+        .await
+        .expect("pruning must preserve the live receiver")
+        .expect("live output request receives its matching output");
+    assert!(matches!(response, Response::UnspentOutput(output) if output == expected));
+    assert_eq!(mempool.storage().pending_outputs.len(), 0);
 }

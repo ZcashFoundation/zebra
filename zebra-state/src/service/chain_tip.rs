@@ -130,8 +130,8 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
 }
 
 impl From<CheckpointVerifiedBlock> for ChainTipBlock {
-    fn from(CheckpointVerifiedBlock(prepared): CheckpointVerifiedBlock) -> Self {
-        prepared.into()
+    fn from(prepared: CheckpointVerifiedBlock) -> Self {
+        SemanticallyVerifiedBlock::from(prepared).into()
     }
 }
 

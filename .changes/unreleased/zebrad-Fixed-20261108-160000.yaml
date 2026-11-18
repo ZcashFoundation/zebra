@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: '`getaddressutxos` is about 50 times faster for addresses whose outputs were all spent over a long history, such as the funding stream addresses. The first start runs a short state upgrade, about a minute on Mainnet.'
+time: 2026-11-08T16:00:00.000000000Z

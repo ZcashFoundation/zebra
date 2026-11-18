@@ -50,6 +50,8 @@ use crate::{
     BoxError, Config, PeerSocketAddr, VersionMessage,
 };
 
+mod external_addr;
+
 #[cfg(test)]
 mod tests;
 
@@ -78,6 +80,7 @@ where
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
+    external_addrs: Arc<futures::lock::Mutex<external_addr::ExternalAddrs>>,
 
     parent_span: Span,
 }
@@ -119,6 +122,7 @@ where
             minimum_peer_version: self.minimum_peer_version.clone(),
             bans_receiver: self.bans_receiver.clone(),
             nonces: self.nonces.clone(),
+            external_addrs: self.external_addrs.clone(),
             parent_span: self.parent_span.clone(),
         }
     }
@@ -142,6 +146,12 @@ pub struct ConnectionInfo {
     /// Derived from `remote.version` and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
+
+    /// Whether both ends advertised the experimental early-block-relay service bit.
+    ///
+    /// Derived from this connection's version exchange, not gossiped services or user agents.
+    /// This permits early serving but does not authenticate or validate any received block.
+    pub early_block_relay: bool,
 }
 
 /// The peer address that we are handshaking with.
@@ -463,7 +473,7 @@ where
 
     /// Provide the services this node advertises to other peers.  Optional.
     ///
-    /// If this is unset, the node will advertise itself as a client.
+    /// If this is unset, the configured local service capabilities are used.
     pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
         self.our_services = Some(services);
         self
@@ -530,7 +540,7 @@ where
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
-        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let our_services = self.our_services.unwrap_or(config.local_services);
         let relay = self.relay.unwrap_or(false);
         let network = config.network.clone();
         let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
@@ -548,6 +558,9 @@ where
                 .bans_receiver
                 .unwrap_or_else(|| tokio::sync::watch::channel(crate::BanList::default()).1),
             nonces,
+            external_addrs: Arc::new(futures::lock::Mutex::new(
+                external_addr::ExternalAddrs::default(),
+            )),
             parent_span: Span::current(),
         })
     }
@@ -583,12 +596,15 @@ where
 /// We split `Handshake` into its components before calling this function, to avoid infectious
 /// `Sync` bounds on the returned future.
 ///
+/// Outbound connections to non-serving peers claim a non-serving slot from `connection_tracker`.
+///
 /// Returns the [`VersionMessage`] sent by the remote peer, and the [`Version`] negotiated with the
 /// remote peer, inside a [`ConnectionInfo`] struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
+    connection_tracker: &mut ConnectionTracker,
     config: Config,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
     user_agent: String,
@@ -671,7 +687,7 @@ where
         .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
-    let (their_addr, our_services, our_listen_addr) = match connected_addr {
+    let (their_addr, mut our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
         Isolated => {
@@ -695,6 +711,10 @@ where
             (their_addr, our_services, advertise_addr)
         }
     };
+    our_services.set(
+        PeerServices::NODE_COMPACT_BLOCKS,
+        config.compact_block_relay && !matches!(connected_addr, Isolated),
+    );
 
     let start_height = minimum_peer_version
         .chain_tip()
@@ -706,7 +726,6 @@ where
         services: our_services,
         timestamp,
         address_recv: AddrInVersion::new(their_addr, PeerServices::NODE_NETWORK),
-        // TODO: detect external address (#1893)
         address_from: AddrInVersion::new(our_listen_addr, our_services),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
@@ -810,12 +829,16 @@ where
     // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
     // initial block download.
     //
-    // At or near the network tip the requirement is dropped, because non-serving peers (like
-    // pruned nodes) can still serve recent blocks and transactions. Inbound and isolated
-    // connections are always exempt, so light clients can still connect to us.
-    if is_syncing
-        && matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
+    // At or near the network tip, non-serving peers (like pruned nodes) can still serve recent
+    // blocks and transactions, so they can fill up to `peerset_initial_target_size` ordinary
+    // outbound slots (persistent peers excluded). The other outbound slots stay reserved for
+    // serving peers, so a node that falls behind still has peers that can send it the missing
+    // blocks. Inbound and isolated connections are always exempt, so light clients can still
+    // connect to us.
+    if matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
         && !remote.services.contains(PeerServices::NODE_NETWORK)
+        && (is_syncing
+            || !connection_tracker.try_mark_non_serving(config.peerset_initial_target_size))
     {
         debug!(
             remote_ip = ?their_addr,
@@ -840,12 +863,16 @@ where
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+    let early_block_relay = our_services
+        .intersection(remote.services)
+        .contains(PeerServices::NODE_COMPACT_BLOCKS);
 
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
     let connection_info = Arc::new(ConnectionInfo {
         connected_addr: *connected_addr,
         remote,
         negotiated_version,
+        early_block_relay,
     });
 
     debug!(
@@ -969,7 +996,10 @@ where
         let inbound_service = self.inbound_service.clone();
         let address_book_updater = self.address_book_updater.clone();
         let inv_collector = self.inv_collector.clone();
-        let config = self.config.clone();
+        let mut config = self.config.clone();
+        let listener = config.listen_addr;
+        let external = config.external_addr;
+        let external_addrs = self.external_addrs.clone();
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
@@ -989,6 +1019,27 @@ where
             // Start timing the handshake for metrics
             let handshake_start = Instant::now();
 
+            match connected_addr {
+                OutboundDirect { addr } | InboundDirect { addr } => {
+                    let addresses =
+                        external_addrs
+                            .lock()
+                            .await
+                            .addresses(listener, external, Instant::now());
+                    config.external_addr = addresses
+                        .iter()
+                        .flatten()
+                        .find(|address| address.is_ipv4() == addr.is_ipv4())
+                        .or_else(|| addresses.iter().flatten().next())
+                        .copied();
+                }
+                // Proxy and isolated connections must not reveal our public listener.
+                OutboundProxy { .. } | InboundProxy { .. } | Isolated => {
+                    config.external_addr = None;
+                    config.listen_addr = get_unspecified_ipv4_addr(config.network.clone());
+                }
+            }
+
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder().for_network(&config.network).finish(),
@@ -997,6 +1048,7 @@ where
             let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
+                &mut connection_tracker,
                 config,
                 nonces,
                 user_agent,
@@ -1045,7 +1097,8 @@ where
 
                     // Rejected non-serving peers are reported by the crawler's `report_failed`
                     // without their services, so they get the standard failure backoff and can
-                    // be dialed again once the node is near the network tip (#11061).
+                    // be dialed again once the node is near the network tip and a non-serving
+                    // outbound slot is free (#11061).
                     return Err(err);
                 }
             };
@@ -1065,6 +1118,7 @@ where
                         connected_addr.is_inbound(),
                         connection_info.remote.user_agent.clone(),
                         connection_info.negotiated_version,
+                        connection_info.remote.start_height,
                     ))
                     .await;
             }
@@ -1077,6 +1131,41 @@ where
             let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(connection_info.negotiated_version);
             bare_codec.reconfigure_full_body_len();
+            bare_codec.reconfigure_early_block_relay(connection_info.early_block_relay);
+            let compact_recovery = connection_info.early_block_relay.then(|| {
+                let (sender, receiver) = tokio::sync::watch::channel(None);
+                bare_codec.reconfigure_compact_recovery(receiver);
+                sender
+            });
+
+            if matches!(connected_addr, OutboundDirect { .. } | InboundDirect { .. }) {
+                let addresses = {
+                    let mut discovered = external_addrs.lock().await;
+                    if let OutboundDirect { addr } = connected_addr {
+                        discovered.observe(
+                            addr.ip(),
+                            connection_info.remote.address_recv.addr().ip(),
+                            Instant::now(),
+                        );
+                    }
+                    discovered.addresses(listener, external, Instant::now())
+                };
+                let addresses: Vec<_> = addresses
+                    .into_iter()
+                    .flatten()
+                    .filter(|addr| external_addr::is_public(addr.ip()) && addr.port() != 0)
+                    .map(|addr| {
+                        MetaAddr::new_gossiped_meta_addr(
+                            addr.into(),
+                            our_services,
+                            DateTime32::now(),
+                        )
+                    })
+                    .collect();
+                if !addresses.is_empty() {
+                    peer_conn.send(Message::Addr(addresses)).await?;
+                }
+            }
 
             debug!("constructing client, spawning server");
 
@@ -1086,6 +1175,7 @@ where
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
             // Bound pending adverts; slow peers can catch up through later tip gossip.
             let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+            let (compact_receive_tx, compact_receive_rx) = tokio::sync::watch::channel(None);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -1120,6 +1210,7 @@ where
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
             let inbound_inv_collector = inv_collector;
+            let early_block_relay = connection_info.early_block_relay;
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
             let peer_rx = peer_rx
@@ -1171,8 +1262,13 @@ where
                 .then(move |msg| {
                     let inbound_inv_collector = inbound_inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    register_inventory_status(msg, connected_addr, inbound_inv_collector)
-                        .instrument(span)
+                    register_inventory_status(
+                        msg,
+                        connected_addr,
+                        early_block_relay,
+                        inbound_inv_collector,
+                    )
+                    .instrument(span)
                 })
                 .boxed();
 
@@ -1198,11 +1294,12 @@ where
                     MetaAddr::new_gossiped_meta_addr(addr, remote_services, DateTime32::now())
                 });
 
-            let server = Connection::new(
+            let mut server = Connection::new(
                 inbound_service,
                 (
                     server_rx,
                     block_advert_rx,
+                    compact_receive_rx,
                     minimum_peer_version,
                     bans_receiver,
                 ),
@@ -1212,6 +1309,7 @@ where
                 connection_info.clone(),
                 alternate_addrs.collect(),
             );
+            server.compact_recovery = compact_recovery;
 
             let connection_task = tokio::spawn(
                 server
@@ -1236,6 +1334,7 @@ where
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 block_advert_tx,
+                compact_receive_tx,
                 error_slot,
                 connection_task,
                 heartbeat_task,
@@ -1288,12 +1387,22 @@ fn serialization_error_metric_label(error: &SerializationError) -> &'static str 
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
+/// Compact announcements count only on connections that negotiated experimental early relay.
 pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,
+    early_block_relay: bool,
     inv_collector: broadcast::Sender<InventoryChange>,
 ) -> Result<Message, SerializationError> {
     match (&msg, connected_addr.get_transient_addr()) {
+        (Ok(Message::CompactBlock(block)), Some(transient_addr)) if early_block_relay => {
+            // High-bandwidth compact relay replaces the singleton inventory announcement. Keep
+            // source-less sync downloads routed to the peer holding these reconstructable bytes.
+            let _ = inv_collector.send(InventoryChange::new_available(
+                InventoryHash::Block(block.block_hash()),
+                transient_addr,
+            ));
+        }
         (Ok(Message::Inv(advertised)), Some(transient_addr)) => {
             // We ignore inventory messages with more than one
             // block, because they are most likely replies to a

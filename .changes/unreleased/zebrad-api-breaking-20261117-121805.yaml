@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: '`components::mempool::Storage::insert` takes an `evicted_ids` set and adds the ID of every transaction it evicts, including dependents evicted with their ancestors ([#12303](https://github.com/ZcashFoundation/zebra/pull/12303)).'
+time: 2026-11-17T12:18:05.548164175+01:00

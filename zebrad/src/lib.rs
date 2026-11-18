@@ -94,6 +94,22 @@
 //! [skip verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
 //! [specific compiler flags]: https://zebra.zfnd.org/dev/tokio-console.html#setup
 //!
+//! ### Mining notifications
+//!
+//! * `zmq`: publish best-block hashes using zcashd's ZMQ protocol over TCP, implemented in Rust.
+//!   Enable the endpoint in [`components::notify::Config`].
+//!
+//! ### Performance
+//!
+//! * `pasta-asm`: enable Pasta field assembly on AArch64 and non-Apple x86_64 with 64-bit
+//!   pointers. Included in `default-release-binaries` and official release builds.
+//!   On x86_64, runtime CPU detection selects assembly when BMI2 and ADX are available,
+//!   falling back to portable arithmetic otherwise. AArch64 needs no additional CPU features.
+//!   Other targets use portable arithmetic. Cargo unifies this feature across packages.
+//!   The selected backend is logged at startup.
+//!   Read the [mining guide](https://zebra.zfnd.org/user/mining.html#pasta-assembly)
+//!   for build instructions and measurements.
+//!
 //! ### Testing
 //!
 //! * `proptest-impl`: enable randomised test data generation.

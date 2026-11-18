@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `primitives::zcash_note_encryption::zero_ovk_memos`, which returns the memo of each shielded output of a transaction as recovered with the all-zero outgoing viewing key. For coinbase transactions, these are the publicly readable coinbase memos.
+time: 2026-11-04T02:41:23.587854894+01:00

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Keep the minimum Regtest peer protocol version monotone when Overwinter and Sapling activate at different heights.
+time: 2026-11-04T06:09:24.609007479+01:00

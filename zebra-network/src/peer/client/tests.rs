@@ -356,6 +356,7 @@ where
             connected_addr: self.connected_addr.unwrap_or(ConnectedAddr::Isolated),
             remote,
             negotiated_version,
+            early_block_relay: false,
         });
 
         let client = Client {
@@ -363,6 +364,7 @@ where
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
             block_advert_tx,
+            compact_receive_tx: tokio::sync::watch::channel(None).0,
             error_slot: error_slot.clone(),
             connection_task,
             heartbeat_task,

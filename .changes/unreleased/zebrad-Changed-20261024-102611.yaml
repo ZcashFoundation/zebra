@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Build Halo2 verifying keys in the background at startup, avoiding first-use Orchard and Ironwood key construction after preload finishes without waiting for it before RPC or network readiness ([#12007](https://github.com/ZcashFoundation/zebra/issues/12007)).
+time: 2026-10-24T10:26:11.373668987+02:00

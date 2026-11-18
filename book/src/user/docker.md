@@ -156,7 +156,9 @@ For Kubernetes, configure liveness and readiness probes against `/healthy` and `
 
 Zebra uses TCP port 8233 on Mainnet and 18233 on Testnet for peer-to-peer connections. When running in Docker, publish this port with `-p` (as shown in the [Quick Start](#quick-start)) so other nodes can connect to yours. Without it, Zebra still syncs via outbound connections but does not accept inbound peers.
 
-If Zebra is behind a NAT, firewall, or load balancer, set `external_addr` so it advertises your public address to peers instead of the internal bind address:
+Zebra can discover its public IP from agreeing outbound peers, but discovery does not publish a
+container port or configure NAT forwarding. Set `external_addr` to override discovery, particularly
+when a load balancer uses a different public address or port:
 
 ```toml
 [network]

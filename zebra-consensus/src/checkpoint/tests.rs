@@ -19,6 +19,8 @@ use crate::{error::TransactionError, router::RouterError};
 
 use super::*;
 
+mod body_replay;
+mod commit_tasks;
 mod queue_pressure;
 
 /// The timeout we apply to each verify future during testing.
@@ -179,7 +181,7 @@ async fn rewritten_coinbase_heights_are_rejected_before_the_height_check() -> Re
                 assert!(matches!(error, VerifyCheckpointError::Finished));
                 assert!(!error.is_body_header_mismatch());
             } else {
-                let _request = checkpoint_verifier.queue_block(block.clone())?;
+                let _request = checkpoint_verifier.queue_block(block.clone(), None)?;
                 assert_eq!(checkpoint_verifier.queued[&block_height].len(), 1);
             }
         }
@@ -1297,8 +1299,10 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
                 bytes: checked_block_2.retained_bytes(),
                 block: checked_block_2,
                 tx,
+                notifications: None,
                 retained: RetainedBlockPermit(checkpoint_verifier.retained_blocks.clone()),
             }),
+            body_replay: None,
         })
         .expect("the verifier holds the receiver");
     // If the verifier was rewound, it would queue the block, and wait for its commit.
@@ -1396,6 +1400,49 @@ fn chain_with_checkpoints(
         .collect();
 
     (chain, checkpoints)
+}
+
+/// Internal callers bypass network decoding, so the verifier enforces the block size limit.
+/// A decoded block at the limit is still admitted.
+#[tokio::test]
+async fn oversized_internal_blocks_are_rejected() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let (chain, checkpoints) = chain_with_checkpoints(4, &[0, 4]);
+    let with_script = |script_len| {
+        let mut block = chain[1].clone();
+        let block_mut = Arc::make_mut(&mut block);
+        let coinbase = Arc::make_mut(&mut block_mut.transactions[0]);
+        let mut outputs = coinbase.outputs();
+        outputs[0].lock_script = transparent::Script::new(&vec![0; script_len]);
+        coinbase.set_outputs(outputs);
+        let merkle_root = block_mut.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block_mut.header).merkle_root = merkle_root;
+        block
+    };
+    let limit = usize::try_from(block::MAX_BLOCK_BYTES)?;
+    // Keep the script length's CompactSize prefix five bytes wide while filling the block.
+    let overhead = with_script(65_536).zcash_serialized_size() - 65_536;
+    let at_limit = with_script(limit - overhead).zcash_serialize_to_vec()?;
+    assert_eq!(at_limit.len(), limit);
+    let decoded = Arc::<Block>::zcash_deserialize(&at_limit[..])?;
+
+    let mut verifier = CheckpointVerifier::from_list(
+        checkpoints.clone(),
+        &network_without_pow(),
+        Some(checkpoints[0]),
+        MockService::build().for_unit_tests(),
+    )
+    .map_err(|e| eyre!(e))?;
+
+    assert!(verifier.queue_block(decoded, None).is_ok());
+    assert!(matches!(
+        verifier.queue_block(with_script(limit - overhead + 1), None),
+        Err(VerifyCheckpointError::VerifyBlock(
+            VerifyBlockError::OversizedBlock
+        ))
+    ));
+    Ok(())
 }
 
 /// When the queue is out of memory, a block replaces the highest queued blocks that aren't linked
@@ -1614,4 +1661,251 @@ async fn copies_of_linked_block_at_other_heights_are_rejected() -> Result<(), Re
     }
 
     Ok(())
+}
+
+/// A queued local child retains its notification when the caller drops before checkpoint validation.
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_checkpoint_retains_notification_after_caller_drop() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let genesis =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+                .unwrap();
+        let child =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .unwrap();
+        let state = zs::init_test(&Mainnet).await;
+        let mut verifier = CheckpointVerifier::from_list(
+            [
+                (block::Height(0), genesis.hash()),
+                (block::Height(1), child.hash()),
+            ],
+            &Mainnet,
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, validation) = tokio::sync::watch::channel(None);
+        let notifications = zs::MinedBlockNotifications::new(committed, validated);
+
+        drop(verifier.verify(child.clone(), Some(notifications)));
+        assert_eq!(
+            verifier.oneshot(genesis.clone()).await.unwrap(),
+            genesis.hash(),
+            "the missing parent is admitted independently of its queued child",
+        );
+        assert_eq!(
+            commits.recv().await.unwrap(),
+            (child.hash(), block::Height(1)),
+            "the existing commit owner retains notifications after the caller drops",
+        );
+        assert!(validation.borrow().is_none());
+        assert_eq!(
+            state
+                .oneshot(zs::Request::Block(child.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(child)),
+        );
+    })
+    .await
+    .expect("checkpoint notifications must survive caller cancellation");
+}
+
+#[derive(Clone, Copy)]
+enum ReplacementObserver {
+    Healthy,
+    Full,
+    Closed,
+}
+
+async fn ordinary_checkpoint_replacement(observer: ReplacementObserver) {
+    timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let genesis =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+                .unwrap();
+        let child =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .unwrap();
+        let state = zs::init_test(&Mainnet).await;
+        let mut verifier = CheckpointVerifier::from_list(
+            [
+                (block::Height(0), genesis.hash()),
+                (block::Height(1), child.hash()),
+            ],
+            &Mainnet,
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let existing = (block::Hash([9; 32]), block::Height(0));
+        match observer {
+            ReplacementObserver::Healthy => {}
+            ReplacementObserver::Full => committed.try_send(existing).unwrap(),
+            ReplacementObserver::Closed => commits.close(),
+        }
+        let (validated, validation) = tokio::sync::watch::channel(None);
+        drop(verifier.verify(
+            child.clone(),
+            Some(zs::MinedBlockNotifications::new(committed, validated)),
+        ));
+        let replacement = verifier.call(child.clone());
+        assert_eq!(
+            verifier.call(genesis.clone()).await.unwrap(),
+            genesis.hash()
+        );
+        assert_eq!(replacement.await.unwrap(), child.hash());
+        assert_eq!(
+            state
+                .oneshot(zs::Request::Block(child.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(child.clone())),
+        );
+        assert!(validation.borrow().is_none());
+        match observer {
+            ReplacementObserver::Healthy => assert_eq!(
+                commits.recv().await,
+                Some((child.hash(), block::Height(1))),
+                "ordinary replacement must retain the healthy mined observer",
+            ),
+            ReplacementObserver::Full => {
+                assert_eq!(commits.recv().await, Some(existing));
+                assert!(commits.try_recv().is_err());
+            }
+            ReplacementObserver::Closed => assert!(commits.recv().await.is_none()),
+        }
+    })
+    .await
+    .expect("a superseded mined observer must not gate the ordinary replacement");
+}
+
+#[tokio::test]
+async fn ordinary_checkpoint_duplicate_preserves_healthy_mined_observer() {
+    let _init_guard = zebra_test::init();
+    ordinary_checkpoint_replacement(ReplacementObserver::Healthy).await;
+}
+
+#[tokio::test]
+async fn ordinary_checkpoint_duplicate_ignores_unavailable_mined_observers() {
+    let _init_guard = zebra_test::init();
+    ordinary_checkpoint_replacement(ReplacementObserver::Full).await;
+    ordinary_checkpoint_replacement(ReplacementObserver::Closed).await;
+}
+
+/// An old child's recovery can arrive after an ordinary copy is queued.
+#[tokio::test]
+async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
+    let _init_guard = zebra_test::init();
+    for observer in [
+        ReplacementObserver::Healthy,
+        ReplacementObserver::Full,
+        ReplacementObserver::Closed,
+    ] {
+        // Each variant initializes its own state, so each gets its own deadline.
+        timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+            let blocks: Vec<_> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+                .values()
+                .take(3)
+                .map(|bytes| Arc::<Block>::zcash_deserialize(*bytes).unwrap())
+                .collect();
+            let tip = (block::Height(0), blocks[0].hash());
+            let state = zs::init_test(&Mainnet).await;
+            state
+                .clone()
+                .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
+                    blocks[0].clone().into(),
+                ))
+                .await
+                .unwrap();
+            let mut verifier = CheckpointVerifier::from_list(
+                [tip, (block::Height(2), blocks[2].hash())],
+                &Mainnet,
+                Some(tip),
+                state,
+            )
+            .unwrap();
+
+            // The parent's failure resets the verifier before the old child's recovery arrives.
+            verifier
+                .reset_sender
+                .send(CommitFailure {
+                    epoch: 0,
+                    tip: Some(tip),
+                    child: None,
+                    body_replay: None,
+                })
+                .unwrap();
+            let ordinary_body = Arc::new((*blocks[2]).clone());
+            let ordinary = verifier.call(ordinary_body.clone());
+            assert_eq!(verifier.epoch, 1);
+
+            let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+            let existing = (block::Hash([9; 32]), block::Height(0));
+            match observer {
+                ReplacementObserver::Healthy => {}
+                ReplacementObserver::Full => committed.try_send(existing).unwrap(),
+                ReplacementObserver::Closed => commits.close(),
+            }
+            let (validated, validation) = tokio::sync::watch::channel(None);
+            let (tx, old_response) = oneshot::channel();
+            let old_child: CheckpointVerifiedBlock = blocks[2].clone().into();
+            // Model the reservation still held by the old child's pending recovery owner.
+            verifier.retained_blocks.fetch_add(1, Ordering::Relaxed);
+            verifier
+                .reset_sender
+                .send(CommitFailure {
+                    epoch: 0,
+                    tip: Some(tip),
+                    child: Some(QueuedBlock {
+                        bytes: old_child.retained_bytes(),
+                        block: old_child,
+                        tx,
+                        notifications: Some(zs::MinedBlockNotifications::new(committed, validated)),
+                        retained: RetainedBlockPermit(verifier.retained_blocks.clone()),
+                    }),
+                    body_replay: None,
+                })
+                .unwrap();
+            // Drain the late recovery without supplying the missing parent yet.
+            assert!(matches!(
+                verifier.call(blocks[0].clone()).await,
+                Err(VerifyCheckpointError::AlreadyVerified { .. })
+            ));
+            assert!(Arc::ptr_eq(
+                &verifier.queued[&block::Height(2)][0].block.block,
+                &ordinary_body,
+            ));
+            assert!(matches!(
+                old_response.await.unwrap(),
+                Err(VerifyCheckpointError::NewerRequest { .. })
+            ));
+            assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 1);
+
+            assert_eq!(
+                verifier.call(blocks[1].clone()).await.unwrap(),
+                blocks[1].hash(),
+            );
+            assert_eq!(ordinary.await.unwrap(), blocks[2].hash());
+            assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 0);
+            assert!(validation.borrow().is_none());
+            match observer {
+                ReplacementObserver::Healthy => {
+                    assert_eq!(
+                        commits.recv().await,
+                        Some((blocks[2].hash(), block::Height(2)))
+                    );
+                }
+                ReplacementObserver::Full => {
+                    assert_eq!(commits.recv().await, Some(existing));
+                    assert!(commits.try_recv().is_err());
+                }
+                ReplacementObserver::Closed => assert!(commits.recv().await.is_none()),
+            }
+        })
+        .await
+        .expect("late recovery must preserve notifications without gating ordinary commits");
+    }
 }

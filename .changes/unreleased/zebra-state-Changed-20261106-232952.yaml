@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Prune cached block hashes and outputs at finalized heights regardless of fork arrival order.
+time: 2026-11-06T23:29:52.18727293+01:00

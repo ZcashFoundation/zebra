@@ -29,19 +29,21 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{Future, FutureExt, TryFutureExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt, TryFutureExt};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
     amount::{self},
     block::{self, Block},
+    diagnostic::task::CheckForPanics,
     parameters::{
-        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
+        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network, NetworkUpgrade,
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
+    serialization::ZcashSerialize,
     transparent,
     work::equihash,
 };
@@ -73,6 +75,8 @@ struct QueuedBlock {
     bytes: usize,
     /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<Verified, VerifyCheckpointError>>,
+    /// Optional local mining notifications, without reserving notification capacity.
+    notifications: Option<zs::MinedBlockNotifications>,
     /// Counts this body through queueing, state commit, and failure recovery.
     retained: RetainedBlockPermit,
 }
@@ -92,6 +96,8 @@ impl Drop for RetainedBlockPermit {
 struct Verified {
     /// The block, with additional precalculated data.
     block: CheckpointVerifiedBlock,
+    /// Optional local mining notifications, sent with the block's commit request.
+    notifications: Option<zs::MinedBlockNotifications>,
     /// Keeps accepted work counted until commit or recovery finishes.
     retained: RetainedBlockPermit,
 
@@ -105,7 +111,15 @@ struct Verified {
     previous_sent: Option<oneshot::Receiver<()>>,
 
     /// Signals the next verified block once this block has been sent to the state.
-    sent: oneshot::Sender<()>,
+    sent: Option<oneshot::Sender<()>>,
+}
+
+/// Checkpoint-certified effects and their admission slot during authorizing-body recovery.
+#[derive(Debug)]
+struct BodyReplay {
+    height: block::Height,
+    hash: block::Hash,
+    retained: RetainedBlockPermit,
 }
 
 /// A failed checkpoint block commit, sent from its commit task to the verifier.
@@ -127,6 +141,8 @@ struct CommitFailure {
     /// they are valid. The verifier queues them again, and their commit tasks
     /// commit them once they are verified again.
     child: Option<QueuedBlock>,
+    /// The checkpoint-certified identity of an authorizing body the writer needs replaced.
+    body_replay: Option<BodyReplay>,
 }
 
 /// A list of unverified blocks at a particular height.
@@ -195,6 +211,11 @@ where
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 
+    /// Accepted commit tasks are supervised independently of request futures.
+    commit_task_sender: tokio::sync::mpsc::UnboundedSender<JoinHandle<()>>,
+    /// The application takes this handle into its ongoing task ownership.
+    pub(crate) commit_task_handle: Option<JoinHandle<()>>,
+
     /// A queue of unverified blocks.
     ///
     /// Contains a list of unverified blocks at each block height. In most cases,
@@ -222,15 +243,16 @@ where
     /// The current progress of this verifier.
     verifier_progress: Progress<block::Height>,
 
-    /// A channel to receive requests to reset the verifier,
-    /// receiving the tip of the state.
+    /// Commit failures that reset progress or request an exact authorizing-body replay.
     reset_receiver: mpsc::Receiver<CommitFailure>,
-    /// A channel to send requests to reset the verifier,
-    /// passing the tip of the state.
+    /// Sender for commit-failure notifications.
     reset_sender: mpsc::Sender<CommitFailure>,
 
     /// The number of times the verifier was reset after a failed block commit.
     epoch: u64,
+
+    /// The serial finalized writer repairs one checkpoint-certified body at a time.
+    body_replay: Option<BodyReplay>,
 
     /// Resolves once the last verified block has been sent to the state.
     previous_block_sent: Option<oneshot::Receiver<()>>,
@@ -344,6 +366,21 @@ where
             progress_from_tip(&checkpoint_list, initial_tip);
 
         let (sender, receiver) = mpsc::channel();
+        let (commit_task_sender, mut commit_tasks) =
+            tokio::sync::mpsc::unbounded_channel::<JoinHandle<()>>();
+        let commit_task_handle = tokio::spawn(async move {
+            let mut pending = FuturesUnordered::new();
+            loop {
+                tokio::select! {
+                    Some(task) = commit_tasks.recv() => pending.push(task),
+                    Some(result) = pending.next(), if !pending.is_empty() => {
+                        // Propagate panics; a cancelled task means the runtime is shutting down.
+                        let _ = result.panic_if_task_has_panicked();
+                    }
+                    else => break,
+                }
+            }
+        });
         let mut previous_height = 0;
         let maximum_gap = checkpoint_list
             .iter()
@@ -371,6 +408,8 @@ where
             network: network.clone(),
             initial_tip_hash,
             state_service,
+            commit_task_sender,
+            commit_task_handle: Some(commit_task_handle),
             queued: BTreeMap::new(),
             retained_blocks: Arc::new(AtomicUsize::new(0)),
             retained_block_limit,
@@ -380,6 +419,7 @@ where
             reset_receiver: receiver,
             reset_sender: sender,
             epoch: 0,
+            body_replay: None,
             previous_block_sent: None,
             #[cfg(feature = "progress-bar")]
             queued_blocks_bar,
@@ -394,6 +434,19 @@ where
         }
 
         verifier
+    }
+
+    /// Standalone verifiers retain supervision until the application takes ownership.
+    fn check_commit_tasks(&mut self) {
+        if let Some(result) = self
+            .commit_task_handle
+            .as_mut()
+            .and_then(|handle| handle.now_or_never())
+        {
+            // The supervisor only ends when the runtime cancels it during shutdown.
+            self.commit_task_handle = None;
+            let _ = result.panic_if_task_has_panicked();
+        }
     }
 
     /// Update diagnostics for queued blocks.
@@ -462,6 +515,7 @@ where
 
     /// Reset the verifier progress back to given tip.
     fn reset_progress(&mut self, tip: Option<(block::Height, block::Hash)>) {
+        self.body_replay = None;
         let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
         self.initial_tip_hash = initial_tip_hash;
         self.verifier_progress = verifier_progress;
@@ -721,6 +775,20 @@ where
         let height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
+        let replay = self
+            .body_replay
+            .as_ref()
+            .filter(|replay| replay.hash == hash);
+        if replay.is_some_and(|replay| replay.height != height) {
+            return Err(VerifyCheckpointError::CoinbaseHeight { hash });
+        }
+
+        // Decoded transactions retain exact sizes; only internally rebuilt bodies need counting.
+        let block_size = u64::try_from(block.zcash_serialized_size())
+            .map_err(|_| VerifyBlockError::OversizedBlock)?;
+        if block_size > block::MAX_BLOCK_BYTES {
+            return Err(VerifyBlockError::OversizedBlock.into());
+        }
 
         if self.network.disable_pow() {
             crate::block::check::difficulty_threshold_is_valid(
@@ -745,7 +813,10 @@ where
             &block.transaction_hashes,
         )?;
 
-        self.check_height(height)?;
+        // A certified replay is already counted in the verifier's progress.
+        if replay.is_none() {
+            self.check_height(height)?;
+        }
 
         Ok(block)
     }
@@ -762,6 +833,7 @@ where
     fn queue_block(
         &mut self,
         block: Arc<Block>,
+        notifications: Option<zs::MinedBlockNotifications>,
     ) -> Result<oneshot::Receiver<Result<Verified, VerifyCheckpointError>>, VerifyCheckpointError>
     {
         // Set up a oneshot channel to send results
@@ -774,13 +846,13 @@ where
         let bytes = block.retained_bytes();
 
         self.make_room(height, hash, bytes, 1)?;
-
         // Admission is serialized through &mut self; commit owners can only decrease the count.
         self.retained_blocks.fetch_add(1, Ordering::Relaxed);
-        let new_qblock = QueuedBlock {
+        let mut new_qblock = QueuedBlock {
             block,
             bytes,
             tx,
+            notifications,
             retained: RetainedBlockPermit(self.retained_blocks.clone()),
         };
         self.queued_bytes += bytes;
@@ -807,6 +879,13 @@ where
             // So signatures, proofs, or scripts could be different,
             // even if the block hash is the same.
 
+            // Ordinary supersession keeps a mined observer without requiring its capacity.
+            if new_qblock.notifications.is_none() {
+                new_qblock.notifications = qb.notifications.take().map(|mut observer| {
+                    observer.allow_ordinary_commit();
+                    observer
+                });
+            }
             let old = std::mem::replace(qb, new_qblock);
             self.queued_bytes -= old.bytes;
             let _ = old.tx.send(Err(e));
@@ -966,7 +1045,7 @@ where
     /// Queue `child` again, after the state failed it without checking it.
     ///
     /// It has already passed [`Self::check_block`], so only its height and queue limits are checked.
-    fn requeue_child(&mut self, child: QueuedBlock) {
+    fn requeue_child(&mut self, mut child: QueuedBlock) {
         let (height, hash) = (child.block.height, child.block.hash);
         if let Err(e) = self.check_height(height) {
             let _ = child.tx.send(Err(e));
@@ -974,11 +1053,19 @@ where
         }
 
         // Prefer a copy that a caller has already submitted again.
-        if self
+        if let Some(newer) = self
             .queued
-            .get(&height)
-            .is_some_and(|qblocks| qblocks.iter().any(|qb| qb.block.hash == hash))
+            .get_mut(&height)
+            .and_then(|qblocks| qblocks.iter_mut().find(|qb| qb.block.hash == hash))
         {
+            // Keep the newer body and response, but preserve an otherwise-unrepresented mined
+            // observer as best-effort.
+            if newer.notifications.is_none() {
+                newer.notifications = child.notifications.take().map(|mut observer| {
+                    observer.allow_ordinary_commit();
+                    observer
+                });
+            }
             let _ = child
                 .tx
                 .send(Err(VerifyCheckpointError::NewerRequest { height, hash }));
@@ -1187,10 +1274,11 @@ where
             let (sent, next_sent) = oneshot::channel();
             let verified = Verified {
                 block: qblock.block,
+                notifications: qblock.notifications,
                 retained: qblock.retained,
                 epoch: self.epoch,
                 previous_sent: self.previous_block_sent.replace(next_sent),
-                sent,
+                sent: Some(sent),
             };
 
             // Sending can fail, but there's nothing we can do about it.
@@ -1285,7 +1373,7 @@ pub enum VerifyCheckpointError {
         height: block::Height,
         hash: block::Hash,
     },
-    #[error("the block {hash:?} does not have a coinbase height")]
+    #[error("the block {hash:?} has a missing or unexpected coinbase height")]
     CoinbaseHeight { hash: block::Hash },
     #[error("merkle root {actual:?} does not match expected {expected:?}")]
     BadMerkleRoot {
@@ -1375,6 +1463,16 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns whether the state retained descendants and requested only this body again.
+    fn is_targeted_body_recovery(&self) -> bool {
+        match self {
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .is_some_and(|error| error.is_targeted_body_recovery()),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if the block's authorizing data doesn't match the commitment in
     /// its header.
     ///
@@ -1442,15 +1540,54 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.check_commit_tasks();
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
+        self.verify(block, None)
+    }
+}
+
+impl<S> CheckpointVerifier<S>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    /// Verify a checkpointed block, carrying local mining notifications with the queued body.
+    ///
+    /// No notification capacity is reserved before the block is committed. Dropping the response
+    /// neither drops queued work nor cancels an accepted commit.
+    #[instrument(name = "checkpoint", skip(self, block, notifications))]
+    pub(crate) fn verify(
+        &mut self,
+        block: Arc<Block>,
+        notifications: Option<zs::MinedBlockNotifications>,
+    ) -> <Self as Service<Arc<Block>>>::Future {
+        self.check_commit_tasks();
+
         // Reset the verifier back to the state tip if requested
         // (e.g. due to an error when committing a block to the state)
         let mut requeued = false;
-        while let Ok(CommitFailure { epoch, tip, child }) = self.reset_receiver.try_recv() {
+        while let Ok(CommitFailure {
+            epoch,
+            tip,
+            child,
+            body_replay,
+        }) = self.reset_receiver.try_recv()
+        {
+            if let Some(body_replay) = body_replay {
+                if epoch == self.epoch {
+                    assert!(
+                        self.body_replay.as_ref().is_none_or(|pending| {
+                            pending.height == body_replay.height && pending.hash == body_replay.hash
+                        }),
+                        "the serial finalized writer repairs one authorizing body at a time"
+                    );
+                    self.body_replay = Some(body_replay);
+                }
+                continue;
+            }
             if epoch == self.epoch {
                 self.reset_progress(tip);
                 self.epoch = self.epoch.wrapping_add(1);
@@ -1465,15 +1602,41 @@ where
             self.process_checkpoint_range();
         }
 
-        // # Security
-        //
-        // Once the final checkpoint is verified, `queue_block()` rejects every block as
-        // `Finished`. Don't reject them before it checks them: a peer can rewrite the coinbase
-        // height of the block it was asked for to route it here, and `Finished` would drop that
-        // block without showing that its body was forged (GHSA-g9rc-89v4-hhvf).
-        let mut rx = match self.queue_block(block) {
-            Ok(rx) => rx,
-            Err(e) => return async { Err(e) }.boxed(),
+        let mut rx = if self
+            .body_replay
+            .as_ref()
+            .is_some_and(|replay| replay.hash == block.hash())
+        {
+            let block = match self.check_block(block) {
+                Ok(block) => block,
+                Err(e) => return async { Err(e) }.boxed(),
+            };
+            let BodyReplay { retained, .. } = self
+                .body_replay
+                .take()
+                .expect("a validated replay retains its certificate and admission slot");
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(Ok(Verified {
+                block,
+                notifications,
+                retained,
+                epoch: self.epoch,
+                previous_sent: None,
+                sent: None,
+            }));
+            rx
+        } else {
+            // # Security
+            //
+            // Once the final checkpoint is verified, `queue_block()` rejects every block as
+            // `Finished`. Don't reject them before it checks them: a peer can rewrite the
+            // coinbase height of the block it was asked for to route it here, and `Finished`
+            // would drop that block without showing that its body was forged
+            // (GHSA-g9rc-89v4-hhvf).
+            match self.queue_block(block, notifications) {
+                Ok(rx) => rx,
+                Err(e) => return async { Err(e) }.boxed(),
+            }
         };
 
         self.process_checkpoint_range();
@@ -1497,7 +1660,9 @@ where
         // We accomplish this by spawning a new task containing the
         // commit-if-verified logic. This task will always execute, except if
         // the program is interrupted, in which case there is no longer a
-        // checkpoint verifier to keep in sync with the state.
+        // checkpoint verifier to keep in sync with the state. The task is
+        // supervised by `commit_task_handle`, so its panics stop the node even
+        // when the caller has dropped the response future.
         //
         // # State Commit Failures
         //
@@ -1513,20 +1678,42 @@ where
         // cancelling its downloads) would leave the verifier ahead of the
         // state, and it would reject the blocks it is missing.
         let state_service = self.state_service.clone();
+        let network = self.network.clone();
         let reset_sender = self.reset_sender.clone();
-        let commit_checkpoint_verified = tokio::spawn(async move {
+        let commit_checkpoint_verified = async move {
             loop {
-                let Verified {
-                    mut block,
-                    retained,
-                    epoch,
-                    previous_sent,
-                    sent,
-                } = rx
+                let verified = rx
                     .await
                     // The verifier can drop a block it got back from a failed commit
                     // while it is being dropped.
                     .unwrap_or(Err(VerifyCheckpointError::Dropped))?;
+                // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license
+                // or the Apache License, Version 2.0, at your option.
+                // Adapted from zakura-core/zakura
+                // (https://github.com/zakura-core/zakura/commit/3482b607a4008da9d2a6833243959d88f28a0659).
+                // Adapted from zakura-core/zakura
+                // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+                let verified = if NetworkUpgrade::current(&network, verified.block.height)
+                    >= NetworkUpgrade::Nu5
+                {
+                    tokio::task::spawn_blocking(move || {
+                        let mut verified = verified;
+                        verified.block = verified.block.with_precomputed_auth_data_root();
+                        verified
+                    })
+                    .await
+                    .expect("checkpoint auth-root preparation should not panic")
+                } else {
+                    verified
+                };
+                let Verified {
+                    block,
+                    notifications,
+                    retained,
+                    epoch,
+                    previous_sent,
+                    sent,
+                } = verified;
                 let hash = block.hash;
 
                 // Send blocks to the state in the order they were verified.
@@ -1536,9 +1723,21 @@ where
 
                 // Keep a copy of the block in case the state fails it without checking it.
                 // Its new outputs are only rebuilt if that happens.
-                let new_outputs = std::mem::take(&mut block.new_outputs);
-                let mut child = block.clone();
-                block.new_outputs = new_outputs;
+                let mut child = zs::SemanticallyVerifiedBlock {
+                    block: block.block.clone(),
+                    hash: block.hash,
+                    height: block.height,
+                    new_outputs: Default::default(),
+                    transaction_hashes: block.transaction_hashes.clone(),
+                    received_time: block.received_time,
+                };
+                let request = match notifications.clone() {
+                    Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {
+                        block,
+                        notifications,
+                    },
+                    None => zs::Request::CommitCheckpointVerifiedBlock(block),
+                };
 
                 let mut commit_state_service = state_service.clone();
                 let result = async move {
@@ -1547,10 +1746,12 @@ where
                         .ready()
                         .await
                         .map_err(VerifyCheckpointError::CommitCheckpointVerified)?
-                        .call(zs::Request::CommitCheckpointVerifiedBlock(block));
+                        .call(request);
 
                     // The state service got this block first, so the next block can be sent.
-                    let _ = sent.send(());
+                    if let Some(sent) = sent {
+                        let _ = sent.send(());
+                    }
 
                     match commit
                         .map_err(VerifyCheckpointError::CommitCheckpointVerified)
@@ -1586,6 +1787,19 @@ where
                 // they are submitted again. The syncer re-downloads them, but
                 // other submitters (like the zcashd state migration) don't.
                 if let Err(error @ VerifyCheckpointError::CommitCheckpointVerified(_)) = &result {
+                    if error.is_targeted_body_recovery() {
+                        let _ = reset_sender.send(CommitFailure {
+                            epoch,
+                            tip: None,
+                            child: None,
+                            body_replay: Some(BodyReplay {
+                                height: child.height,
+                                hash,
+                                retained,
+                            }),
+                        });
+                        return result;
+                    }
                     let tip = match state_service
                         .clone()
                         .oneshot(zs::Request::Tip)
@@ -1609,10 +1823,12 @@ where
                             tip,
                             child: Some(QueuedBlock {
                                 bytes: child.retained_bytes(),
-                                block: child,
+                                block: child.into(),
                                 tx,
+                                notifications,
                                 retained,
                             }),
+                            body_replay: None,
                         };
                         if reset_sender.send(failure).is_ok() {
                             rx = child_rx;
@@ -1623,27 +1839,32 @@ where
                             epoch,
                             tip,
                             child: None,
+                            body_replay: None,
                         });
                     }
                 }
 
                 return result;
             }
+        };
+        let (result_tx, result_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = result_tx.send(commit_checkpoint_verified.await);
         });
+        // The supervisor is only gone during shutdown; the task still runs and reports its result.
+        let _ = self.commit_task_sender.send(task);
 
         async move {
-            let result = commit_checkpoint_verified.await;
-            // Avoid a panic on shutdown
+            let result = result_rx.await;
+            // Avoid a misleading error on shutdown
             //
-            // When `zebrad` is terminated using Ctrl-C, the `commit_checkpoint_verified` task
-            // can return a `JoinError::Cancelled`. We expect task cancellation on shutdown,
-            // so we don't need to panic here. The persistent state is correct even when the
-            // task is cancelled, because block data is committed inside transactions, in
-            // height order.
+            // When `zebrad` is terminated using Ctrl-C, the commit task can be cancelled. The
+            // persistent state is correct even when the task is cancelled, because block data is
+            // committed inside transactions, in height order.
             if zebra_chain::shutdown::is_shutting_down() {
                 Err(VerifyCheckpointError::ShuttingDown)
             } else {
-                result.expect("commit_checkpoint_verified should not panic")
+                result.unwrap_or(Err(VerifyCheckpointError::Dropped))
             }
         }
         .boxed()

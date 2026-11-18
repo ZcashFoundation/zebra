@@ -75,7 +75,7 @@ pub struct ZebradConfig {
     /// Mempool configuration
     pub mempool: crate::components::mempool::Config,
 
-    /// Block notify configuration
+    /// Best-chain tip notification configuration
     pub notify: crate::components::notify::Config,
 
     /// RPC configuration

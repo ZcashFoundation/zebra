@@ -4,6 +4,7 @@
 
 mod first_template;
 mod prop;
+mod proposal;
 mod snapshot;
 pub mod utils;
 mod vectors;

@@ -36,6 +36,8 @@
 //! * `ReadRequest::Block(_)` → `Ok(ReadResponse::Block(None))` — drives the
 //!   `getblock` "block not found" formatter, including the verbosity=2 branch
 //!   that walks each tx (which is decode-light when the block is None).
+//! * `ReadRequest::RawBlock(_)` / `ReadRequest::AnyChainRawTransaction(_)` → `None` —
+//!   drives the verbosity 0 "not found" branches of `getblock` / `getrawtransaction`.
 //! * `ReadRequest::Transaction(_)` → `Ok(ReadResponse::Transaction(None))` —
 //!   drives `getrawtransaction` None-branch.
 //! * `ReadRequest::AddressBalance(_)` → constructed zero balance to walk the
@@ -44,6 +46,7 @@
 //!   that consult the tip before mutating.
 //! * `Request::InvalidateBlock(_)` → `Ok(Response::Invalidated([0u8; 32]))` to
 //!   walk past the state-write await in `invalidateblock`.
+//! * `Request::PreciousBlock(h)` → `Ok(Response::Precious(h))` to echo the requested hash.
 //! * `Request::ReconsiderBlock(_)` → `Ok(Response::Reconsidered(vec![]))`.
 //!
 //! Other variants fall through to `Err(BoxError)`, so any
@@ -202,6 +205,8 @@ enum RpcCall {
     /// then state write request. Same parser as `getblock` hash variant
     /// but exercised through a different dispatch.
     InvalidateBlock(String),
+    /// `preciousblock(block_hash)` — parses the hash, then requests a tip preference.
+    PreciousBlock(String),
     /// `reconsiderblock(block_hash)` — methods.rs. Mirror of
     /// `invalidateblock`, complementary state mutation.
     ReconsiderBlock(String),
@@ -391,6 +396,8 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
             R::Block(_) => Ok(Resp::Block(None)),
+            R::RawBlock(_) => Ok(Resp::RawBlock(None)),
+            R::AnyChainRawTransaction(_) => Ok(Resp::RawTransaction(None)),
             R::AnyChainBlock(_) => Ok(Resp::Block(None)),
             R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
             R::Transaction(_) => Ok(Resp::Transaction(None)),
@@ -472,6 +479,7 @@ impl Service<zebra_state::Request> for MockState {
             // attempt with a non-zero input hash. This is a mock-contract requirement (mirrors
             // how the real state actually behaves), not a defensive workaround for a real bug.
             R::InvalidateBlock(h) => Ok(Resp::Invalidated(h)),
+            R::PreciousBlock(h) => Ok(Resp::Precious(h)),
             R::ReconsiderBlock(_) => Ok(Resp::Reconsidered(Vec::new())),
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),
         };
@@ -786,6 +794,11 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
         // ── Tier-B fork manipulation ───────────────────────────────
         RpcCall::InvalidateBlock(block_hash) => {
             let _ = AssertUnwindSafe(rpc.invalidate_block(block_hash))
+                .catch_unwind()
+                .await;
+        }
+        RpcCall::PreciousBlock(block_hash) => {
+            let _ = AssertUnwindSafe(rpc.precious_block(block_hash))
                 .catch_unwind()
                 .await;
         }

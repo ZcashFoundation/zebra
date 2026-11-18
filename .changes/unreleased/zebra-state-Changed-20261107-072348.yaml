@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Answer single-outpoint `AwaitUtxos` requests with a direct lookup instead of the unordered batch path.
+time: 2026-11-07T07:23:48.362610248+01:00

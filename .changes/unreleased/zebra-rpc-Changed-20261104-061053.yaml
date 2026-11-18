@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Include required founders reward outputs in pre-Canopy coinbase templates and use the pre-NU5 header commitment rules.
+time: 2026-11-04T06:10:53.690770266+01:00

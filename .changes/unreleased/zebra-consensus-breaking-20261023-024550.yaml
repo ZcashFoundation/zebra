@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Handle `Request::CommitEarlyRelay(DecodedBlock)` in exhaustive request matches. Pass `DecodedBlock` using `.into()` for ordinary blocks or `DecodedBlock::from_reconstructed` for compact reconstruction evidence ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)). Negotiated downloads authenticate bodies before classifying later failures. Authenticated deterministic failures from ordinary and locally submitted blocks are also reported through `zebra_state::Request::RejectBlock`, preventing renewed speculative relay and mining; unauthenticated bodies and transient failures remain unrecorded ([#12289](https://github.com/ZcashFoundation/zebra/pull/12289)).
+time: 2026-10-23T02:45:50.916190558+02:00

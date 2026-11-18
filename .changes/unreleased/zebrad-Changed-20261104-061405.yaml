@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Correct founders reward payouts and pre-NU5 header commitments in external mining templates.
+time: 2026-11-04T06:14:05.451340512+01:00

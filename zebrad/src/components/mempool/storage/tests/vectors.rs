@@ -24,6 +24,41 @@ const EVICTION_MEMORY_TIME: Duration = Duration::from_secs(60 * 60);
 /// Transaction count used in some tests to derive the mempool test size.
 const MEMPOOL_TX_COUNT: usize = 4;
 
+/// Repeated rejections preserve insertion order, expiry, and capacity.
+#[tokio::test(start_paused = true)]
+async fn eviction_list_repeated_insertion_preserves_order_and_expiry() {
+    let _init_guard = zebra_test::init();
+    let mut evictions = EvictionList::new(2, Duration::from_secs(10));
+    let oldest = transaction::Hash([1; 32]);
+    let newer = transaction::Hash([2; 32]);
+    let newest = transaction::Hash([3; 32]);
+
+    evictions.insert(oldest);
+    evictions.insert(oldest);
+    assert_eq!(evictions.len(), 1);
+    tokio::time::advance(Duration::from_secs(5)).await;
+    evictions.insert(newer);
+    evictions.insert(newer);
+    evictions.insert(oldest);
+    assert_eq!(evictions.len(), 2);
+    assert!(evictions.contains_key(&oldest));
+    assert!(evictions.contains_key(&newer));
+
+    evictions.insert(newest);
+    assert_eq!(evictions.len(), 2);
+    assert!(!evictions.contains_key(&oldest));
+    assert!(evictions.contains_key(&newer));
+    assert!(evictions.contains_key(&newest));
+
+    tokio::time::advance(Duration::from_secs(5)).await;
+    evictions.insert(newer);
+    tokio::time::advance(Duration::from_secs(6)).await;
+    assert_eq!(evictions.len(), 0);
+    evictions.insert(newer);
+    assert_eq!(evictions.len(), 1);
+    assert!(evictions.contains_key(&newer));
+}
+
 #[test]
 fn mempool_storage_crud_exact_mainnet() {
     let _init_guard = zebra_test::init();
@@ -44,7 +79,7 @@ fn mempool_storage_crud_exact_mainnet() {
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
-    let _ = storage.insert(unmined_tx.clone(), Vec::new(), None);
+    let _ = storage.insert(unmined_tx.clone(), Vec::new(), None, &mut HashSet::new());
 
     // Check that it is in the mempool, and not rejected.
     assert!(storage.contains_transaction_exact(&unmined_tx.transaction.id.mined_id()));
@@ -74,7 +109,7 @@ fn mempool_storage_transactions_exact_matches_witnessed_id() {
         .0[0] ^= 1;
 
     assert_eq!(
-        storage.insert(unmined_tx.clone(), Vec::new(), None),
+        storage.insert(unmined_tx.clone(), Vec::new(), None, &mut HashSet::new()),
         Ok(exact_id)
     );
     assert_eq!(
@@ -93,6 +128,73 @@ fn mempool_storage_transactions_exact_matches_witnessed_id() {
             .collect::<Vec<_>>(),
         vec![&unmined_tx.transaction]
     );
+}
+
+#[test]
+fn mempool_storage_rejects_submission_evicted_with_ancestor() {
+    let _init_guard = zebra_test::init();
+    let parent = Network::Mainnet
+        .unmined_transactions_in_blocks(..=10)
+        .find(|tx| {
+            let outputs = tx.transaction.transaction.outputs();
+            !outputs.is_empty() && outputs.iter().all(|output| !output.is_dust())
+        })
+        .expect("early mainnet block fixtures contain a non-dust coinbase transaction");
+    let parent_id = parent.transaction.id;
+    let outpoint = OutPoint::from_usize(parent_id.mined_id(), 0);
+    let mut child = parent.clone();
+    child.transaction = Arc::new(
+        parent
+            .transaction
+            .transaction
+            .as_ref()
+            .clone()
+            .with_transparent_inputs(vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: 0,
+            }]),
+    )
+    .into();
+    let child_id = child.transaction.id;
+    assert_eq!(parent.eviction_weight(), child.eviction_weight());
+
+    // Either transaction can be selected; retry until eviction selects the ancestor.
+    for _ in 0..64 {
+        let mut storage = Storage::new(&config::Config {
+            tx_cost_limit: parent.cost(),
+            ..Default::default()
+        });
+        assert_eq!(
+            storage.insert(parent.clone(), vec![], None, &mut HashSet::new()),
+            Ok(parent_id)
+        );
+        let mut evicted_ids = HashSet::new();
+        let result = storage.insert(child.clone(), vec![outpoint], None, &mut evicted_ids);
+        assert!(!storage.contains_transaction_exact(&child_id.mined_id()));
+
+        if !storage.contains_transaction_exact(&parent_id.mined_id()) {
+            let rejection = SameEffectsChainRejectionError::RandomlyEvicted;
+            assert_eq!(result, Err(rejection.clone().into()));
+            assert_eq!(evicted_ids, HashSet::from([parent_id, child_id]));
+            assert_eq!(storage.rejection_error(&child_id), None);
+            assert_eq!(
+                storage.rejection_error(&parent_id),
+                Some(rejection.clone().into())
+            );
+            // Once the parent is mined, the child's input no longer depends on the mempool.
+            storage.clear_tip_rejections();
+            storage.clear_mined_dependencies(&HashSet::from([parent_id.mined_id()]));
+            assert_eq!(
+                storage.insert(child, vec![], None, &mut HashSet::new()),
+                Ok(child_id)
+            );
+            assert!(storage.contains_transaction_exact(&child_id.mined_id()));
+            return;
+        }
+    }
+
+    panic!("equal-weight random eviction should select the ancestor within 64 attempts");
 }
 
 #[test]
@@ -136,7 +238,12 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let mut maybe_inserted_transactions = Vec::new();
     let mut some_rejected_transactions = Vec::new();
     for unmined_transaction in unmined_transactions.clone() {
-        let result = storage.insert(unmined_transaction.clone(), Vec::new(), None);
+        let result = storage.insert(
+            unmined_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        );
         match result {
             Ok(_) => {
                 // While the transaction was inserted here, it can be rejected later.
@@ -210,7 +317,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
-    let _ = storage.insert(unmined_tx_1.clone(), Vec::new(), None);
+    let _ = storage.insert(unmined_tx_1.clone(), Vec::new(), None, &mut HashSet::new());
 
     // Check that it is in the mempool, and not rejected.
     assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id.mined_id()));
@@ -233,7 +340,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         Some(SameEffectsChainRejectionError::Mined.into())
     );
     assert_eq!(
-        storage.insert(unmined_tx_1, Vec::new(), None),
+        storage.insert(unmined_tx_1, Vec::new(), None, &mut HashSet::new()),
         Err(SameEffectsChainRejectionError::Mined.into())
     );
 
@@ -251,7 +358,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Insert unmined tx into the mempool.
     assert_eq!(
-        storage.insert(unmined_tx_2.clone(), Vec::new(), None),
+        storage.insert(unmined_tx_2.clone(), Vec::new(), None, &mut HashSet::new()),
         Ok(unmined_tx_2.transaction.id)
     );
 
@@ -276,7 +383,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         Some(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
     assert_eq!(
-        storage.insert(unmined_tx_2, Vec::new(), None),
+        storage.insert(unmined_tx_2, Vec::new(), None, &mut HashSet::new()),
         Err(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
 }
@@ -317,10 +424,13 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             0,
             0,
             std::sync::Arc::new(vec![]),
+            &zebra_chain::parameters::Network::Mainnet,
+            zebra_chain::block::Height::MAX,
         )
         .expect("verification should pass"),
         Vec::new(),
         None,
+        &mut HashSet::new(),
     )?;
 
     assert_eq!(storage.transaction_count(), 1);
@@ -387,7 +497,12 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
         }
 
         storage
-            .insert(unmined_tx.clone(), fake_spent_outpoints, None)
+            .insert(
+                unmined_tx.clone(),
+                fake_spent_outpoints,
+                None,
+                &mut HashSet::new(),
+            )
             .expect("should insert transaction");
 
         // Add up to 5 of this transaction's outputs as fake spent outpoints for the next transaction
@@ -444,6 +559,36 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn mempool_remove_exact_requires_matching_witnessed_id() {
+    let _init_guard = zebra_test::init();
+    let mut storage = Storage::new(&config::Config::default());
+    let tx = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .find(|tx| tx.transaction.id.auth_digest().is_some())
+        .expect("mainnet fixtures contain v5 transactions");
+    let id = tx.transaction.id;
+    storage
+        .insert(tx, vec![], None, &mut HashSet::new())
+        .expect("a fresh pool has no conflicts");
+    let mut different_witness = id;
+    different_witness
+        .auth_digest_mut()
+        .expect("v5 IDs contain an authorizing data digest")
+        .0[0] ^= 1;
+    assert_eq!(
+        storage.remove_exact(&HashSet::from([
+            different_witness,
+            UnminedTxId::Legacy(id.mined_id()),
+            UnminedTxId::Legacy(transaction::Hash([0xfe; 32])),
+        ])),
+        0
+    );
+    assert_eq!(storage.transaction_count(), 1);
+    assert_eq!(storage.remove_exact(&HashSet::from([id])), 1);
+    assert_eq!(storage.remove_exact(&HashSet::from([id])), 0);
+    assert!(storage.rejection_error(&id).is_none());
+}
 // ---- Policy function unit tests ----
 
 use super::super::policy::{p2pk_lock_script, p2pkh_lock_script, p2sh_lock_script};

@@ -18,14 +18,17 @@ changeFormat: '- {{.Body}}'
 projectsVersionSeparator: '-'
 # Every changelog Zebra publishes needs a project here: `changie merge` only
 # writes the paths listed below, and it rewrites each one from
-# `.changes/<key>/v*.md`. A project with no version files gets truncated to just
-# the header, so never add a project before migrating its history.
+# `.changes/<key>/v*.md`. A project with no version files gets just the header:
+# migrate existing history before adding a project; new histories start empty.
 # `zebra-grpc` and `zebra-scan` are deliberately absent: those crates were
 # removed, and their changelogs are frozen history that changie must not touch.
 projects:
     - label: zebrad
       key: zebrad
       changelog: CHANGELOG.md
+    - label: zebrad Rust APIs
+      key: zebrad-api
+      changelog: zebrad/CHANGELOG.md
     - label: zebra-chain
       key: zebra-chain
       changelog: zebra-chain/CHANGELOG.md

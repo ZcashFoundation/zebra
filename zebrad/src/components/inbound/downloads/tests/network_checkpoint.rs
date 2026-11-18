@@ -39,9 +39,10 @@ async fn download_from_known_advertiser(lose_registry_update: bool) {
         ),
         state.clone(),
         tip,
+        zebra_chain::parameters::Network::Mainnet,
     );
     assert!(matches!(
-        downloads.download_and_verify(hash, Some(peers.addrs[1])),
+        downloads.download_and_verify(hash, Some(peers.connections[1].clone())),
         DownloadAction::AddedToQueue,
     ));
     state
@@ -56,13 +57,17 @@ async fn download_from_known_advertiser(lose_registry_update: bool) {
         request.request(),
         &zn::Request::BlockDownload {
             hash,
-            advertiser: Some(peers.addrs[1]),
+            advertiser: Some(peers.connections[1].clone()),
         },
     );
     request.respond(Ok(zn::Response::Blocks(vec![Available((
         block.clone(),
         Some(peers.addrs[1]),
     ))])));
+    state
+        .expect_request(zs::Request::KnownBlock(block.header.previous_block_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
     verifier
         .expect_request(zebra_consensus::Request::Commit(block))
         .await

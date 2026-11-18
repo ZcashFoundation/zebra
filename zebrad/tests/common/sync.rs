@@ -526,7 +526,12 @@ impl GenesisPeer {
 
             async move {
                 let response = match request {
-                    Request::BlocksByHash(hashes) => Response::Blocks(
+                    // Connections request blocks as `RawBlocksByHash`, or `EarlyRawBlocksByHash`
+                    // when they negotiated compact relay.
+                    Request::BlocksByHash(hashes)
+                    | Request::RawBlocksByHash(hashes)
+                    | Request::EarlyBlocksByHash(hashes)
+                    | Request::EarlyRawBlocksByHash(hashes) => Response::Blocks(
                         hashes
                             .into_iter()
                             .map(|hash| {

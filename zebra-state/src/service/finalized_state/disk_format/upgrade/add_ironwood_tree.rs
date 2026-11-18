@@ -34,6 +34,10 @@ impl DiskFormatUpgrade for Upgrade {
         "add ironwood shielded pool state (genesis tree and anchor backfill)"
     }
 
+    fn requires_full_history(&self) -> bool {
+        false
+    }
+
     #[allow(clippy::unwrap_in_result)]
     fn run(
         &self,

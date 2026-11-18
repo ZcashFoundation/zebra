@@ -1,0 +1,7 @@
+project: zebra-network
+kind: breaking
+body: >-
+  Added advertised start heights to address-book peer metadata. Pass `start_height: Height` to
+  `MetaAddr::new_connected()` and `MetaAddrChange::UpdateConnected`; read it with their
+  `start_height()` getters.
+time: 2026-10-24T20:20:05.510806235+02:00

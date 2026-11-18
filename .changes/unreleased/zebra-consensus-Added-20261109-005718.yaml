@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: '`BlockTxVerifier` implements `Clone`, allowing block transaction verification to be dispatched directly and interleaved within the async runtime''s cooperative budget.'
+time: 2026-11-09T00:57:18.802635913+01:00

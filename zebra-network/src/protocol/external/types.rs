@@ -120,7 +120,9 @@ impl Version {
     ) -> Version {
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
-            (Testnet(params), Overwinter) if params.is_default_testnet() => 170_003,
+            (Testnet(params), Overwinter) if params.is_default_testnet() || params.is_regtest() => {
+                170_003
+            }
             (Mainnet, Overwinter) => 170_005,
             (Testnet(params), Sapling) if params.is_default_testnet() => 170_007,
             (Testnet(params), Sapling) if params.is_regtest() => 170_006,
@@ -179,6 +181,20 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
+
+        /// Serves note commitment tree roots for its finalized chain in response to `gettreeroots`.
+        ///
+        /// The draft P2P v2 ZIP (`draft-arya-jvff-p2p-quic-transport`) assigns this bit to
+        /// `NODE_TREE_ROOTS` for its `get-tree-roots` request. This is the legacy-protocol
+        /// counterpart.
+        const NODE_TREE_ROOTS = 1 << 3;
+
+        /// Support compact blocks and authenticated next-tip relay before full transaction validation.
+        ///
+        /// Both ends must advertise this bit, assigned by the [draft Compact Block Relay ZIP].
+        ///
+        /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+        const NODE_COMPACT_BLOCKS = 1 << 16;
     }
 }
 

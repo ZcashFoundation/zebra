@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Prepare transaction verification on blocking threads, so blocks with many shielded transactions verify faster without stalling async workers.
+time: 2026-11-04T06:26:01.534968151+01:00

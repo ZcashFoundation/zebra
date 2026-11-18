@@ -19,7 +19,7 @@ use crate::{
         MAX_PEER_MISBEHAVIOR_SCORE,
     },
     meta_addr::{MetaAddr, MetaAddrChange},
-    protocol::external::types::PeerServices,
+    protocol::external::{canonical_peer_addr, connection_limit_key, types::PeerServices},
     AddressBook,
 };
 
@@ -28,6 +28,7 @@ use crate::{
 fn address_book_empty() {
     let address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -55,20 +56,78 @@ fn gossiped_change(
         .expect("gossiped MetaAddr should produce a NewGossiped change")
 }
 
-fn assert_address_book_invariants(address_book: &AddressBook) {
+#[test]
+fn pruned_listener_survives_gossip_and_is_a_connection_candidate() {
+    let now = Utc::now();
+    let sender = AddressBook::new(
+        "127.0.0.1:8233".parse().unwrap(),
+        PeerServices::empty(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    let listener = sender.sanitized(now).pop().unwrap();
+    let listener_addr = listener.addr;
+    let mut receiver = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        PeerServices::NODE_NETWORK,
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    assert!(receiver
+        .update(listener.new_gossiped_change().unwrap())
+        .is_some());
+    let candidate = receiver
+        .reconnection_peers(Instant::now(), now)
+        .next()
+        .unwrap();
+    assert_eq!(candidate.addr, listener_addr);
+    assert_eq!(candidate.services, Some(PeerServices::empty()));
+    let relayed = receiver.sanitized(now).pop().unwrap();
+    assert_eq!(relayed.addr, listener_addr);
+    assert_eq!(relayed.services, Some(PeerServices::empty()));
+}
+
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
+pub(super) fn assert_address_book_invariants(address_book: &AddressBook) {
+    assert_eq!(address_book.by_addr.len(), address_book.by_priority.len());
+    assert_eq!(
+        address_book.by_addr.len(),
+        address_book
+            .by_group
+            .values()
+            .map(|addrs| addrs.len())
+            .sum::<usize>(),
+    );
     assert!(
-        address_book.by_addr.values().is_sorted(),
+        address_book.peers().is_sorted(),
         "address book values must remain sorted in ascending MetaAddr reconnection-attempt order",
     );
 
     for (addr, meta_addr) in &address_book.by_addr {
-        assert_eq!(
-            *addr, meta_addr.addr,
-            "address book keys must match their stored MetaAddr addresses",
-        );
+        assert_eq!(*addr, meta_addr.addr);
+        assert_eq!(*addr, canonical_peer_addr(*addr));
+        assert!(address_book
+            .by_priority
+            .contains(&super::super::PeerPriority::from(meta_addr)));
+        assert!(address_book
+            .by_group
+            .get(&connection_limit_key(addr.ip()))
+            .is_some_and(|addrs| addrs.contains(addr)));
+    }
+    for (group, addrs) in &address_book.by_group {
+        assert!(!addrs.is_empty());
+        for addr in addrs {
+            assert_eq!(*group, connection_limit_key(addr.ip()));
+            assert!(address_book.by_addr.contains_key(addr));
+        }
     }
 }
 
+// Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
 ///
 /// Applying a ban-threshold misbehavior update with
@@ -81,8 +140,13 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
     let other_port_same_ip: crate::PeerSocketAddr = "127.0.0.1:8234".parse().unwrap();
     let unrelated_addr: crate::PeerSocketAddr = "127.0.0.2:8233".parse().unwrap();
 
-    let mut address_book =
-        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
+        &Mainnet,
+        2,
+        Span::current(),
+    );
 
     // Seed two entries on the soon-to-be-banned IP plus an unrelated entry,
     // so the ban path's `by_addr` cleanup loop has visible work to do.
@@ -110,6 +174,8 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
         reason: "test misbehavior".to_string(),
     });
+    assert_address_book_invariants(&address_book);
+    assert!(address_book.get(other_port_same_ip).is_none());
 
     assert!(
         address_book.bans().is_banned(banned_addr.ip()),
@@ -293,6 +359,7 @@ fn address_book_insert_canonicalizes_key_and_value() {
 
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -424,7 +491,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
 
 /// Regression test for <https://github.com/ZcashFoundation/zebra/issues/11134>.
 ///
-/// `by_addr` is ordered by reconnection order, not grouped by IP, so the ban path's old
+/// Peers are ordered by reconnection order, not grouped by IP, so the ban path's old
 /// `skip_while(ip != banned).take_while(ip == banned)` scan stopped at the first entry for a
 /// different IP, and any later entry on the banned IP survived. That survivor then stayed at the
 /// front of the reconnection order for the lifetime of the process: it was selected as a candidate
@@ -439,8 +506,13 @@ fn ban_removes_every_entry_for_the_banned_ip() {
 
     // `max_connections_per_ip` is above one, so `reconnection_peers` does not skip the second
     // entry on the banned IP for being a duplicate IP.
-    let mut address_book =
-        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
+        &Mainnet,
+        2,
+        Span::current(),
+    );
 
     // `MetaAddr`'s `Ord` sorts more recently gossiped addresses first, so these last seen times
     // place the unrelated IP between the two entries for the banned IP.
@@ -455,8 +527,11 @@ fn ban_removes_every_entry_for_the_banned_ip() {
     // Without this ordering the test would also pass before the fix, because a contiguous scan
     // removes contiguous entries correctly.
     assert_eq!(
-        address_book.by_addr.keys().collect::<Vec<_>>(),
-        vec![&banned_addr, &unrelated_addr, &zombie_addr],
+        address_book
+            .peers()
+            .map(|peer| peer.addr)
+            .collect::<Vec<_>>(),
+        vec![banned_addr, unrelated_addr, zombie_addr],
         "test setup: the unrelated IP must sort between the two entries for the banned IP",
     );
 
@@ -471,8 +546,11 @@ fn ban_removes_every_entry_for_the_banned_ip() {
         "ban-threshold misbehavior should ban the peer IP",
     );
     assert_eq!(
-        address_book.by_addr.keys().collect::<Vec<_>>(),
-        vec![&unrelated_addr],
+        address_book
+            .peers()
+            .map(|peer| peer.addr)
+            .collect::<Vec<_>>(),
+        vec![unrelated_addr],
         "the ban should remove every entry for the banned IP, including the one that does not \
          sort next to the banned address",
     );
@@ -498,6 +576,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
 fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -547,6 +626,7 @@ fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
 fn ipv4_ban_does_not_affect_neighbouring_addresses() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -598,6 +678,7 @@ fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
     ] {
         let mut address_book = AddressBook::new(
             "0.0.0.0:0".parse().unwrap(),
+            crate::types::PeerServices::NODE_NETWORK,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             Span::current(),
@@ -633,6 +714,7 @@ fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
 fn misbehavior_score_is_reported_per_group() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -679,6 +761,7 @@ fn misbehavior_score_is_reported_per_group() {
 async fn bans_expire_after_the_ban_duration() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -740,6 +823,7 @@ async fn bans_expire_after_the_ban_duration() {
 async fn applying_a_ban_prunes_lapsed_bans() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -792,6 +876,7 @@ async fn applying_a_ban_prunes_lapsed_bans() {
 async fn a_lapsed_group_can_be_banned_again() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),

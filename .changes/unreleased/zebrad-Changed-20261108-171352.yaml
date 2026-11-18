@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Avoid delaying newly gossiped blocks until the next sync discovery deadline when their source is briefly busy.
+time: 2026-11-08T17:13:52.845169486+01:00

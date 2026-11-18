@@ -131,11 +131,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State is checked once for the whole peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -152,15 +152,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the merged download set in response order with one batch.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -360,9 +356,9 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 
     // Find the first unknown hash in this peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -379,9 +375,9 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 
     // Recheck every hash in the merged download set.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
 
     peer_set
         .expect_request(zn::Request::BlockDownload {
@@ -405,6 +401,90 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         "unexpected error or panic in chain sync task: {chain_sync_result:?}",
     );
 
+    Ok(())
+}
+
+/// A singleton committed by gossip during fanout must not restart discovery of remaining blocks.
+#[tokio::test]
+async fn sync_obtain_tips_skips_blocks_committed_during_fanout() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let (h0, h1, h2) = (block0.hash(), block1.hash(), block2.hash());
+    let chain_sync_task = tokio::spawn(chain_sync_future);
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(h0))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![h0]));
+    let discovery = zn::Request::FindBlocks {
+        known_blocks: vec![h0],
+        stop: None,
+    };
+    peer_set
+        .expect_request(discovery.clone())
+        .await
+        .respond(zn::Response::BlockHashes(vec![h1]));
+    state_service
+        .expect_request(zs::Request::KnownBlocks(vec![h1]))
+        .await
+        .respond(zs::Response::KnownBlocks(vec![None]));
+
+    // Hold another fanout response until the singleton has entered the download set.
+    peer_set
+        .expect_request(discovery.clone())
+        .await
+        .respond(zn::Response::BlockHashes(vec![h2]));
+    state_service
+        .expect_request(zs::Request::KnownBlocks(vec![h2]))
+        .await
+        .respond(zs::Response::KnownBlocks(vec![None]));
+    for _ in 2..sync::FANOUT {
+        peer_set
+            .expect_request(discovery.clone())
+            .await
+            .respond(zn::Response::BlockHashes(Vec::new()));
+    }
+
+    // Inbound gossip has now committed H1; only H2 still needs downloading.
+    state_service
+        .expect_request(zs::Request::KnownBlocks(vec![h1, h2]))
+        .await
+        .respond(zs::Response::KnownBlocks(vec![
+            Some(zs::KnownBlock::BestChain),
+            None,
+        ]));
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: h2,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block2))
+        .await
+        .respond(h2);
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+    assert!(!chain_sync_task.is_finished(), "sync must keep running");
+    chain_sync_task.abort();
     Ok(())
 }
 
@@ -461,9 +541,12 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 
     // Block 1 is missing, because its download was cancelled by a sync restart.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![
+            None,
+            Some(zs::KnownBlock::Queue),
+        ]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -480,13 +563,12 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 
     // Recheck every hash in the merged download set: block 2 is queued, waiting for block 1.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::Queue)));
+        .respond(zs::Response::KnownBlocks(vec![
+            None,
+            Some(zs::KnownBlock::Queue),
+        ]));
 
     // Both blocks are downloaded, so the missing parent reaches the state.
     peer_set
@@ -612,9 +694,9 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // Find the first unknown hash in this peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -631,13 +713,9 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // Recheck every hash in the merged download set.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     peer_set
         .expect_request(zn::Request::BlockDownload {
@@ -829,11 +907,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State checks every hash, including duplicates, in peer response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block1_hash,
+            block1_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 4]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -850,15 +933,11 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the deduplicated download set in response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -1141,11 +1220,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 982k)
+    // State checks the whole peer response, including the high block.
     state_service
-        .expect_request(zs::Request::KnownBlock(block982k_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block982k_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 3]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -1162,19 +1245,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 982k, 1, 2) in response order
+    // State rechecks all hashes in response order with one batch.
     state_service
-        .expect_request(zs::Request::KnownBlock(block982k_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block982k_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 3]));
 
     // Blocks 982k, 1, 2 are fetched in order, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
@@ -1319,11 +1398,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State checks the whole peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -1340,15 +1419,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the merged download set in response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -1982,6 +2057,64 @@ async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
     );
 }
 
+/// Early relay wraps a negotiated body's later failure. A body failure under the wrapper must be
+/// re-requested like an unwrapped one, without cancelling the sync round.
+#[tokio::test]
+async fn early_relay_body_failure_requeues_hash_without_restart() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x2B; 32]);
+    let body_error = || Box::new(VerifyBlockError::Transaction(TransactionError::BadBalance));
+    for wrapped in [
+        VerifyBlockError::EarlyRelayUnavailable(body_error()),
+        VerifyBlockError::EarlyRelay(body_error()),
+    ] {
+        chain_sync
+            .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block {
+                    source: Box::new(wrapped),
+                },
+                height: block::Height(44),
+                hash,
+                advertiser_addr: None,
+            }))
+            .expect("an early-relay body failure must not restart the syncer");
+        assert!(
+            chain_sync.reobtain_hashes.shift_remove(&hash),
+            "a body failure doesn't invalidate the hash, so it must be re-requested"
+        );
+    }
+}
+
+/// Failed early-relay authentication and replays of rejected hashes are block failures, so a peer
+/// can't use them to cancel the sync round.
+#[tokio::test]
+async fn early_relay_admission_failure_does_not_restart_sync() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x3C; 32]);
+    for error in [
+        VerifyBlockError::EarlyRelayAdmission(zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryRoot {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        )),
+        VerifyBlockError::EarlyRelayRejected,
+    ] {
+        chain_sync
+            .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block {
+                    source: Box::new(error),
+                },
+                height: block::Height(45),
+                hash,
+                advertiser_addr: None,
+            }))
+            .expect("an early-relay admission failure must not restart the syncer");
+    }
+}
+
 /// A block body that doesn't match its header must score the serving peer and re-request the
 /// hash, without cancelling the sync round, whichever component found the mismatch.
 ///
@@ -2272,10 +2405,11 @@ async fn canonical_header_modified_body_is_retried(checkpoint_sync: bool) {
             _ => unreachable!("a forged body must fail before transaction or state verification"),
         })
     });
-    let (router, _mempool, tasks, max_checkpoint_height) = zebra_consensus::router::init_test(
+    let (router, _mempool, tasks, max_checkpoint_height, _) = zebra_consensus::router::init_test(
         ConsensusConfig { checkpoint_sync },
         &Network::Mainnet,
         state,
+        MockService::build().for_unit_tests(),
     )
     .await;
     assert_eq!(height <= max_checkpoint_height, checkpoint_sync);
@@ -3407,6 +3541,14 @@ async fn singleton_tip_rounds_reap_completed_downloads() {
                     zs::Request::KnownBlock(requested) => zs::Response::KnownBlock(
                         (requested == known_hash).then_some(zs::KnownBlock::BestChain),
                     ),
+                    zs::Request::KnownBlocks(requested) => zs::Response::KnownBlocks(
+                        requested
+                            .into_iter()
+                            .map(|requested| {
+                                (requested == known_hash).then_some(zs::KnownBlock::BestChain)
+                            })
+                            .collect(),
+                    ),
                     _ => unreachable!("the syncer only checks known blocks and the locator"),
                 })
             });
@@ -3562,6 +3704,9 @@ async fn inter_round_ancestor_failure_is_retried() {
             futures::future::ok::<_, crate::BoxError>(match request {
                 zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent_hash]),
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                zs::Request::KnownBlocks(requested) => {
+                    zs::Response::KnownBlocks(vec![None; requested.len()])
+                }
                 _ => unreachable!("only known blocks and the locator are queried"),
             })
         });
@@ -3658,6 +3803,9 @@ async fn sync_tip_responses_share_batch_capacity() {
                         zs::Response::BlockLocator(vec![block::Hash::from([0; 32])])
                     }
                     zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                    zs::Request::KnownBlocks(requested) => {
+                        zs::Response::KnownBlocks(vec![None; requested.len()])
+                    }
                     _ => unreachable!("the syncer only checks known blocks and the locator"),
                 };
                 futures::future::ok::<_, crate::BoxError>(response)
@@ -4066,4 +4214,205 @@ fn infrastructure_verification_errors_restart_sync() {
         };
         assert!(TestChainSync::should_restart_sync(&error), "{error:?}");
     }
+}
+
+/// How inbound gossip handles a singleton that also answers block discovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SingletonGossip {
+    /// The advertisement reaches gossip after the syncer has queued the block.
+    AfterSync,
+    /// Gossip drops the advertisement because its advertiser already has a download in flight.
+    Busy,
+    /// Gossip claimed the block before discovery, but its download never completes.
+    Stalled,
+}
+
+/// Gossip skips a discovered singleton that the syncer is already downloading.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_singleton_race_downloads_once() {
+    singleton_discovery_downloads_once(SingletonGossip::AfterSync).await;
+}
+
+/// A singleton dropped by per-IP admission is downloaded in the same discovery round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_singleton_race_recovers_from_busy_inbound() {
+    singleton_discovery_downloads_once(SingletonGossip::Busy).await;
+}
+
+/// A stalled gossip claim does not stop the syncer fetching the block in the same round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_singleton_race_ignores_stalled_gossip_claim() {
+    singleton_discovery_downloads_once(SingletonGossip::Stalled).await;
+}
+
+async fn singleton_discovery_downloads_once(gossip: SingletonGossip) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use futures::StreamExt;
+    use tower::buffer::Buffer;
+
+    use crate::components::inbound::downloads::{DownloadAction, Downloads};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let config = ZebradConfig {
+            state: StateConfig::ephemeral(),
+            ..Default::default()
+        };
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let hash = block.hash();
+        let parent = block.header.previous_block_hash;
+        let downloads = Arc::new(AtomicUsize::new(0));
+        let download_count = downloads.clone();
+        let raw_block = Arc::new(block::SerializedBlock::from(
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec(),
+        ));
+        let remote = tower::service_fn(move |request| {
+            let response = match request {
+                zn::Request::FindBlocks { known_blocks, stop } => {
+                    assert_eq!(known_blocks, vec![parent]);
+                    assert_eq!(stop, None);
+                    zn::Response::BlockHashes(vec![hash])
+                }
+                zn::Request::RawBlocksByHash(hashes) => {
+                    assert_eq!(hashes, [hash].into_iter().collect());
+                    download_count.fetch_add(1, Ordering::SeqCst);
+                    zn::Response::RawBlocks(vec![Available(raw_block.clone())])
+                }
+                request => panic!("unexpected remote request: {request:?}"),
+            };
+            std::future::ready(Ok::<_, zn::BoxError>(response))
+        });
+        let mut adverts = MockService::build().for_unit_tests();
+        let (local_stream, remote_stream) = tokio::io::duplex(1 << 20);
+        let (local, remote) = tokio::join!(
+            zn::connect_isolated_with_inbound(
+                &config.network.network,
+                local_stream,
+                String::new(),
+                adverts.clone(),
+            ),
+            zn::connect_isolated_with_inbound(
+                &config.network.network,
+                remote_stream,
+                String::new(),
+                remote,
+            ),
+        );
+        let network = Buffer::new(local.unwrap(), 10);
+        let _remote = remote.unwrap();
+        let busy_hash = block::Hash([0x55; 32]);
+        let state = tower::service_fn(move |request| async move {
+            let response = match request {
+                zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent]),
+                zs::Request::KnownBlock(requested) if requested == busy_hash => {
+                    std::future::pending().await
+                }
+                zs::Request::KnownBlock(requested) if requested == parent => {
+                    zs::Response::KnownBlock(Some(zs::KnownBlock::Finalized))
+                }
+                zs::Request::KnownBlock(requested) => {
+                    assert_eq!(requested, hash);
+                    zs::Response::KnownBlock(None)
+                }
+                zs::Request::KnownBlocks(requested) => {
+                    assert_eq!(requested, vec![hash]);
+                    zs::Response::KnownBlocks(vec![None])
+                }
+                request => panic!("unexpected state request: {request:?}"),
+            };
+            Ok::<_, zs::BoxError>(response)
+        });
+        let mut verifier = MockService::build().for_unit_tests();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(Height(0));
+        let (misbehavior, _reports) = tokio::sync::mpsc::channel(1);
+        let (mut sync, _status) = ChainSync::new(
+            &config,
+            Height(0),
+            network,
+            verifier.clone(),
+            state,
+            tower::service_fn(|_: zs::ReadRequest| {
+                std::future::ready(Ok::<_, zs::BoxError>(zs::ReadResponse::BlockInfo(None)))
+            }),
+            tip.clone(),
+            misbehavior,
+        );
+        let mut inbound = Downloads::new(
+            2,
+            // Gossip downloads never complete, so only the syncer can fetch the block.
+            tower::service_fn(|_: zn::Request| {
+                std::future::pending::<Result<zn::Response, zn::BoxError>>()
+            }),
+            verifier.clone(),
+            state,
+            tip,
+            config.network.network.clone(),
+        )
+        .with_sync_downloads(sync.in_flight_downloads());
+
+        let advertiser = Some(zn::test_support::connection_info(
+            "127.0.0.1:8233".parse().unwrap(),
+        ));
+        match gossip {
+            SingletonGossip::AfterSync => {}
+            SingletonGossip::Busy => assert!(matches!(
+                inbound.download_and_verify(busy_hash, advertiser.clone()),
+                DownloadAction::AddedToQueue
+            )),
+            SingletonGossip::Stalled => {
+                assert!(matches!(
+                    inbound.download_and_verify(hash, advertiser.clone()),
+                    DownloadAction::AddedToQueue
+                ));
+                assert!(sync.in_flight_downloads().contains(&hash));
+            }
+        }
+
+        let (result, ()) = tokio::join!(sync.try_to_sync(), async {
+            for _ in 0..sync::FANOUT {
+                let advert = adverts
+                    .expect_request(zn::Request::AdvertiseBlock(hash, None))
+                    .await;
+                match gossip {
+                    SingletonGossip::AfterSync => {}
+                    SingletonGossip::Busy => assert!(matches!(
+                        inbound.download_and_verify(hash, advertiser.clone()),
+                        DownloadAction::TooManyFromPeer
+                    )),
+                    SingletonGossip::Stalled => assert!(matches!(
+                        inbound.download_and_verify(hash, advertiser.clone()),
+                        DownloadAction::AlreadyQueued
+                    )),
+                }
+                advert.respond(zn::Response::Nil);
+            }
+        });
+        result.unwrap();
+        if gossip == SingletonGossip::AfterSync {
+            assert!(matches!(
+                inbound.download_and_verify(hash, advertiser),
+                DownloadAction::AlreadyQueued
+            ));
+        }
+
+        // Hold verification across discovery completion so a duplicate cannot hide behind state.
+        let verification = verifier
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    zebra_consensus::Request::Commit(block) if block.hash() == hash
+                )
+            })
+            .await;
+        verifier.expect_no_requests().await;
+        assert_eq!(downloads.load(Ordering::SeqCst), 1);
+        verification.respond(hash);
+        assert_eq!(sync.downloads.next().await.unwrap().unwrap().1, hash);
+    })
+    .await
+    .expect("singleton discovery and recovery must complete promptly");
 }

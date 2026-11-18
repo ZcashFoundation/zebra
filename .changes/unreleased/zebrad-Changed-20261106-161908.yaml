@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Skip optional pre-commit relay authentication and retention when no connected peer has negotiated compact relay.
+time: 2026-11-06T16:19:08.847151273+01:00

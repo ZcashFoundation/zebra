@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: Avoid allocating and parsing owned scripts when extracting transparent output addresses ([#11999](https://github.com/ZcashFoundation/zebra/issues/11999)).
+time: 2026-10-24T07:09:44.789434383+02:00

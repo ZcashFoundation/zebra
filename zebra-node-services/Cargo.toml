@@ -51,5 +51,7 @@ serde_json = { workspace = true }
 jsonrpsee-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
+zebra-test = { path = "../zebra-test/" }
+
 [lints]
 workspace = true

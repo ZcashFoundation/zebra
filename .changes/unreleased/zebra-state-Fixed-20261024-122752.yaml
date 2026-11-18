@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Non-finalized commits acknowledge published state before finalizing older blocks past the reorg limit. Success does not guarantee durability or completion of those finalization writes; the writer finishes them before processing another block, and finalization failures remain fatal ([#12009](https://github.com/ZcashFoundation/zebra/issues/12009)).
+time: 2026-10-24T12:27:52.556322817+02:00

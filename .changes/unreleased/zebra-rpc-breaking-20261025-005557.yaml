@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: breaking
+body: >-
+  Added the `prune_height` argument and getter to `GetBlockchainInfoResponse`. Historical body
+  requests now distinguish pruned data from unknown objects and operational failures.
+time: 2026-10-25T00:55:57.042688183+02:00

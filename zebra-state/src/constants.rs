@@ -21,6 +21,9 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
+/// The directory name isolating potentially pruned state from archive-only readers.
+pub const PRUNED_STATE_DATABASE_KIND: &str = "state-pruned";
+
 /// The database format major version, incremented each time the on-disk database format has a
 /// breaking data format change.
 ///
@@ -45,6 +48,13 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.2.0: compacts `utxo_loc_by_transparent_addr_loc` once, and enables deletion-triggered
+///   compaction on it, so address queries no longer skip the deletion markers of spent outputs.
+/// - 29.1.0: fast checkpoint sync. Adds the `fast_sync_tree_roots` column family, which stores
+///   the note commitment tree roots and sizes of heights committed without their Sapling, Orchard,
+///   and Ironwood trees. Those heights have no trees by height, but the subtrees they completed are
+///   stored. Older Zebra versions read stale trees for those heights, and fail the subtree format
+///   checks, so they can't use a fast-synced database.
 /// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
 ///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
 ///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
@@ -58,16 +68,15 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 2;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
 const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 
-/// Returns the full semantic version of the currently running state database format code.
+/// Returns the full semantic version of the state database format code, shared by both kinds.
 ///
-/// This is the version implemented by the Zebra code that's currently running,
-/// the version on disk can be different.
+/// Use [`Config::state_database_kind()`] to resolve the directory kind. The version on disk can differ.
 pub fn state_database_format_version_in_code() -> Version {
     Version {
         major: DATABASE_FORMAT_VERSION,

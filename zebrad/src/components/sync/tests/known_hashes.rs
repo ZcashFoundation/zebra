@@ -161,18 +161,32 @@ where
     fn state_response(&mut self, request: &zs::Request) -> zs::Response {
         match request {
             zs::Request::BlockLocator => zs::Response::BlockLocator(vec![Hash([0; 32])]),
-            zs::Request::KnownBlock(hash) => {
-                let location = self.known_block(*hash);
-
-                if let Some(expected_hash) = self.pending_initial_scan.pop_front() {
-                    assert_eq!(*hash, expected_hash, "responses must be scanned in order");
-
-                    if location.is_none() || location == Some(zs::KnownBlock::Queue) {
-                        self.pending_initial_scan.clear();
-                    }
+            zs::Request::KnownBlocks(hashes) => {
+                let initial_scan = !self.pending_initial_scan.is_empty();
+                if initial_scan {
+                    assert!(
+                        hashes.iter().eq(self.pending_initial_scan.iter()),
+                        "responses must be scanned in order"
+                    );
+                    self.pending_initial_scan.clear();
                 }
 
-                zs::Response::KnownBlock(location)
+                // The initial scan only uses membership up to the first unknown hash, so later
+                // hashes stay unobserved, as they were when each hash was looked up separately.
+                let mut found_unknown = false;
+                let locations = hashes
+                    .iter()
+                    .map(|hash| {
+                        if initial_scan && found_unknown {
+                            return None;
+                        }
+                        let location = self.known_block(*hash);
+                        found_unknown |= matches!(location, None | Some(zs::KnownBlock::Queue));
+                        location
+                    })
+                    .collect();
+
+                zs::Response::KnownBlocks(locations)
             }
             request => panic!("unexpected state request: {request:?}"),
         }

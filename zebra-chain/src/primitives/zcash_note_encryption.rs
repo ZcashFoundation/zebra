@@ -12,6 +12,20 @@ use crate::{
 /// Returns true if all Sapling, Orchard, or Ironwood outputs, if any, decrypt successfully
 /// with an all-zeroes outgoing viewing key.
 pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height) -> bool {
+    zero_ovk_memos(tx, network, height).all(|memo| memo.is_some())
+}
+
+/// Returns the memo of each Sapling, Orchard, and Ironwood output of `tx`, in transaction encoding
+/// order, as recovered with an all-zeroes outgoing viewing key, or `None` for an output that does
+/// not decrypt with that key.
+///
+/// Consensus requires every shielded output of a coinbase transaction to decrypt with this key, so
+/// these are the publicly readable memos of a coinbase transaction.
+pub fn zero_ovk_memos<'a>(
+    tx: &'a Transaction,
+    network: &Network,
+    height: Height,
+) -> impl Iterator<Item = Option<[u8; 512]>> + 'a {
     let nu = NetworkUpgrade::current(network, height);
 
     let null_sapling_ovk = sapling_crypto::keys::OutgoingViewingKey([0u8; 32]);
@@ -24,53 +38,55 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
         sapling_crypto::note_encryption::Zip212Enforcement::Off
     };
 
-    if let Some(bundle) = tx.inner().deref().sapling_bundle() {
-        for output in bundle.shielded_outputs().iter() {
-            let recovery = sapling_crypto::note_encryption::try_sapling_output_recovery(
+    let sapling = tx
+        .inner()
+        .deref()
+        .sapling_bundle()
+        .into_iter()
+        .flat_map(|bundle| bundle.shielded_outputs())
+        .map(move |output| {
+            sapling_crypto::note_encryption::try_sapling_output_recovery(
                 &null_sapling_ovk,
                 output,
                 zip_212_enforcement,
-            );
-            if recovery.is_none() {
-                return false;
-            }
-        }
-    }
+            )
+            .map(|(_, _, memo)| memo)
+        });
 
-    if let Some(bundle) = tx.inner().deref().orchard_bundle() {
-        for act in bundle.actions() {
-            if zcash_note_encryption::try_output_recovery_with_ovk(
+    let orchard = tx
+        .inner()
+        .deref()
+        .orchard_bundle()
+        .into_iter()
+        .flat_map(|bundle| bundle.actions())
+        .map(|act| {
+            zcash_note_encryption::try_output_recovery_with_ovk(
                 &orchard::note_encryption::OrchardDomain::for_action(act),
                 &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
                 act,
                 act.cv_net(),
                 &act.encrypted_note().out_ciphertext,
             )
-            .is_none()
-            {
-                return false;
-            }
-        }
-    }
+            .map(|(_, _, memo)| memo)
+        });
 
     // From NU6.3, newly shielded coinbase value is routed to the Ironwood pool, so the coinbase
     // output-decryptability rule must cover Ironwood actions too. The Ironwood bundle reuses the
     // Orchard action shape but its notes use the `IronwoodDomain` (V3) note-plaintext version.
-    if let Some(bundle) = tx.ironwood_bundle() {
-        for act in bundle.actions() {
-            if zcash_note_encryption::try_output_recovery_with_ovk(
+    let ironwood = tx
+        .ironwood_bundle()
+        .into_iter()
+        .flat_map(|bundle| bundle.actions())
+        .map(|act| {
+            zcash_note_encryption::try_output_recovery_with_ovk(
                 &orchard::note_encryption::IronwoodDomain::for_action(act),
                 &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
                 act,
                 act.cv_net(),
                 &act.encrypted_note().out_ciphertext,
             )
-            .is_none()
-            {
-                return false;
-            }
-        }
-    }
+            .map(|(_, _, memo)| memo)
+        });
 
-    true
+    sapling.chain(orchard).chain(ironwood)
 }

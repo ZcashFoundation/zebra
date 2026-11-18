@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `Request::{CommitMinedBlock, CommitMinedCheckpointVerifiedBlock}`, `MinedBlockNotifications`, and `CommitBlockError::{MinedBlockNotificationFull, MinedBlockNotificationClosed}`. Update exhaustive request and error matches; mined commits require notification capacity before mutation, while superseded ordinary commits retain observers as best-effort. `FinalizedState::commit_finalized` takes an `Option<MinedBlockNotifications>` as the third element of its block tuple and a new `committed_permit` argument; pass `None` for both to commit without mined notifications.
+time: 2026-10-19T13:13:48.151315514+02:00

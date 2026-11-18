@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Transaction duplicate-spend checks avoid temporary collections and skip hash-table allocation for empty and single-spend pools, while retaining duplicate rejection and separate nullifier domains.
+time: 2026-11-08T18:50:59.380505722+01:00

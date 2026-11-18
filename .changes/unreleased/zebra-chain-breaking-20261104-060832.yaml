@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Gate ZIP 2009 fees by network and next-block height. Replace `MARGINAL_FEE` with `marginal_fee()`, pass the network and next-block height to `VerifiedUnminedTx::new()` and `zip317::{conventional_fee, conventional_fee_weight_ratio, unpaid_actions}`, pass `conventional_fee()` an action count instead of a transaction, and use `UnminedTx::conventional_actions` instead of its `conventional_fee` field or `VerifiedUnminedTx::conventional_actions`.
+time: 2026-11-04T06:08:32.408159487+01:00

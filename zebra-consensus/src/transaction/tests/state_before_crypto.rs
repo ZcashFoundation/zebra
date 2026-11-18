@@ -17,7 +17,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
         .enable_all()
         .build()
         .expect("the state runtime must initialize");
-    let (state, _read_state, _, _) =
+    let (_state, read_state, _, _) =
         state_runtime.block_on(zebra_state::init_test_services(&Network::Mainnet));
 
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -27,7 +27,13 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
             .expect("a V4 or V5 transaction has an expiry height");
         let fee = crate::transaction::miner_fee(&tx, &HashMap::new())
             .expect("a Sapling-only fixture has a fee without transparent UTXOs");
-        assert!(fee >= zip317::conventional_fee(&tx));
+        assert!(
+            fee >= zip317::conventional_fee(
+                zip317::conventional_actions(&tx),
+                &Network::Mainnet,
+                height,
+            )
+        );
         let item = sapling_item(&tx, network_upgrade);
         timeout(
             test_timeout(),
@@ -38,9 +44,9 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
         .expect("the mainnet fixture has valid Sapling proofs and signatures");
         let transaction: zebra_chain::transaction::UnminedTx = Arc::new(tx).into();
         zip317::mempool_checks(
-            zip317::unpaid_actions(&transaction, fee),
+            zip317::unpaid_actions(&transaction, fee, &Network::Mainnet, height),
             fee,
-            transaction.size,
+            transaction.size(),
         )
         .expect("the fixture independently satisfies the mempool fee policy");
         let verifier = crate::primitives::sapling::VERIFIER.isolated();
@@ -49,7 +55,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
             .scope(verifier.clone(), async {
                 timeout(
                     test_timeout(),
-                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state).oneshot(
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, read_state).oneshot(
                         MempoolRequest {
                             transaction,
                             height,
@@ -108,21 +114,27 @@ fn mempool_valid_state_response_releases_proof_verification() {
                     );
                 tokio::pin!(verification);
                 assert!(futures::poll!(&mut verification).is_pending());
-                let response = state
-                    .expect_request_that(|request| {
-                        matches!(
-                            request,
-                            zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                        )
-                    })
-                    .await
-                    .expect("mempool verification must check nullifiers and anchors");
+                // Preparation runs on a blocking thread, so keep polling until the state request.
+                let request = state.expect_request_that(|request| {
+                    matches!(
+                        request,
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
+                });
+                let response = tokio::select! {
+                    response = request => {
+                        response.expect("mempool verification must check nullifiers and anchors")
+                    }
+                    result = &mut verification => {
+                        panic!("verification must wait for the state response: {result:?}")
+                    }
+                };
                 assert_eq!(
                     crate::primitives::sapling::inner_calls_for(&verifier, &item),
                     0,
                     "proof verification must wait for the state response"
                 );
-                response.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+                response.respond(zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors);
                 timeout(test_timeout(), verification)
                     .await
                     .expect("mempool verification completes")
@@ -161,9 +173,9 @@ fn mempool_anchor_state_readiness_and_response_keep_their_deadline() {
             let calls = Arc::new(AtomicUsize::new(0));
             let state_calls = calls.clone();
             let state = tower::limit::ConcurrencyLimit::new(
-                service_fn(move |_: zebra_state::Request| {
+                service_fn(move |_: zebra_state::ReadRequest| {
                     state_calls.fetch_add(1, Ordering::SeqCst);
-                    std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()
+                    std::future::pending::<Result<zebra_state::ReadResponse, crate::BoxError>>()
                 }),
                 1,
             );

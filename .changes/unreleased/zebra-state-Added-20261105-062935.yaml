@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Prefer an equal-work tip through `Request::PreciousBlock` and receive its selection result through `Response::Precious`.
+time: 2026-11-05T06:29:35.912707764+01:00

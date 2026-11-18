@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     mem::{size_of, size_of_val},
-    ops::{Add, Deref, DerefMut, RangeInclusive},
+    ops::{Add, Deref, RangeInclusive},
     pin::Pin,
     sync::Arc,
     time::Instant,
@@ -12,10 +12,10 @@ use std::{
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
-    block::{self, Block, HeightDiff},
+    block::{self, merkle::AuthDataRoot, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
-    parallel::tree::NoteCommitmentTrees,
+    parallel::tree::{NoteCommitmentTrees, TreeRootsProof},
     parameters::Network,
     serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
@@ -33,7 +33,12 @@ use crate::{
 };
 use crate::{
     error::{InvalidateError, LayeredStateError, ReconsiderError},
+    service::{
+        fast_tree_sync::{EmbeddedTrees, FastTreeSync},
+        finalized_state::FastSyncTreeRoots,
+    },
     AwaitUtxoError, CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError,
+    EarlyRelayOrigin,
 };
 
 /// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
@@ -290,6 +295,10 @@ pub struct SemanticallyVerifiedBlock {
     pub received_time: Option<Instant>,
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
 /// A block ready to be committed directly to the finalized state with
 /// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
 ///
@@ -298,8 +307,24 @@ pub struct SemanticallyVerifiedBlock {
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+///
+/// The wrapped block is immutable so a cached authorizing-data root cannot be paired with another
+/// block body:
+///
+/// ```compile_fail
+/// use std::sync::Arc;
+/// use zebra_chain::block::Block;
+/// use zebra_state::CheckpointVerifiedBlock;
+///
+/// fn replace_body(mut verified: CheckpointVerifiedBlock, block: Arc<Block>) {
+///     verified.block = block;
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+pub struct CheckpointVerifiedBlock {
+    verified: SemanticallyVerifiedBlock,
+    auth_data_root: Option<AuthDataRoot>,
+}
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -323,6 +348,8 @@ pub struct ContextuallyVerifiedBlock {
     /// The height of the block.
     pub(crate) height: block::Height,
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// New transparent outputs created in this block, indexed by
     /// [`OutPoint`](transparent::OutPoint).
     ///
@@ -335,6 +362,8 @@ pub struct ContextuallyVerifiedBlock {
     /// The non-finalized chain indexes share these outputs, instead of copying them.
     pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
     /// [`OutPoint`](transparent::OutPoint).
     ///
@@ -390,6 +419,17 @@ pub enum FinalizableBlock {
     Checkpoint {
         checkpoint_verified: CheckpointVerifiedBlock,
     },
+    /// A checkpoint-verified block that fast checkpoint sync commits without updating its
+    /// Sapling, Orchard, and Ironwood note commitment trees.
+    FastCheckpoint {
+        checkpoint_verified: CheckpointVerifiedBlock,
+        /// The block's verified tree roots, and the tree sizes after it.
+        tree_roots: FastSyncTreeRoots,
+        /// The chain history tree after the block, built from its verified roots.
+        history_tree: Arc<HistoryTree>,
+        /// The embedded trees after the block, if fast sync ends with it.
+        embedded_trees: Option<Arc<EmbeddedTrees>>,
+    },
     Contextual {
         contextually_verified: ContextuallyVerifiedBlock,
         treestate: Treestate,
@@ -417,6 +457,8 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: DeferredPoolBalanceChange,
+    /// How fast checkpoint sync committed this block's note commitment trees, if it did.
+    pub(super) fast_tree_sync: Option<FastTreeSync>,
 }
 
 impl FinalizedBlock {
@@ -460,7 +502,14 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
+            fast_tree_sync: None,
         }
+    }
+
+    /// Records that fast checkpoint sync committed this block's note commitment trees as `fast`.
+    pub(crate) fn with_fast_tree_sync(mut self, fast: FastTreeSync) -> Self {
+        self.fast_tree_sync = Some(fast);
+        self
     }
 }
 
@@ -479,6 +528,10 @@ impl FinalizableBlock {
         match self {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
+            }
+            | FinalizableBlock::FastCheckpoint {
+                checkpoint_verified,
+                ..
             } => checkpoint_verified.block.clone(),
             FinalizableBlock::Contextual {
                 contextually_verified,
@@ -513,6 +566,52 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
+    ///
+    /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
+    /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
+    pub fn retained_bytes(&self) -> usize {
+        block_wire_and_retained_bytes(&self.block, &self.transaction_hashes)
+            .1
+            .saturating_add(self.contextual_data_retained_bytes())
+    }
+
+    /// Contextual metadata and output maps, excluding the shared block and transaction hashes.
+    pub(crate) fn contextual_data_retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(output_retained_bytes(&self.new_outputs))
+            // Shared new outputs are charged to each owner.
+            .saturating_add(
+                self.new_outputs
+                    .len()
+                    .saturating_mul(size_of::<transparent::OrderedUtxo>()),
+            )
+            .saturating_add(output_retained_bytes(&self.spent_outputs))
+    }
+
+    /// Rebind a successfully validated proposal to its solved block.
+    ///
+    /// The caller must verify proof of work and ensure every serialized byte except nonce and
+    /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
+    pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        self.hash = block.hash();
+        self.block = block;
+        self.received_time = Some(received_time);
+    }
+
+    /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
+    ///
+    /// The caller must first verify solved proof of work, current time, serialized size, and exact
+    /// proposal equality except nonce and solution. Copies the shared output map into the queue
+    /// metadata.
+    pub fn into_mined_request(self, notifications: MinedBlockNotifications) -> Request {
+        Request::CommitMinedBlock {
+            block: self.clone().into(),
+            contextual: Some(Box::new(self)),
+            notifications,
+        }
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -548,6 +647,8 @@ impl ContextuallyVerifiedBlock {
         .map(|(contextually_verified, _transaction_fees)| contextually_verified)
     }
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's gross transaction
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
@@ -594,6 +695,66 @@ impl ContextuallyVerifiedBlock {
     }
 }
 
+/// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
+///
+/// The wire size is charged twice: once for decoded variable-length content, and once for the
+/// serialized bytes each decoded transaction keeps.
+pub(crate) fn block_wire_and_retained_bytes(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> (usize, usize) {
+    let wire_bytes = block.zcash_serialized_size();
+    let mut bytes = wire_bytes
+        .saturating_mul(2)
+        .saturating_add(size_of::<Block>())
+        .saturating_add(size_of::<block::Header>())
+        .saturating_add(
+            block
+                .transactions
+                .capacity()
+                .saturating_mul(size_of::<Arc<transaction::Transaction>>()),
+        )
+        .saturating_add(size_of_val(transaction_hashes));
+    for transaction in &block.transactions {
+        bytes = bytes.saturating_add(size_of_val(transaction.as_ref()));
+        if let Some(bundle) = transaction.transparent_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.vin.as_slice()))
+                .saturating_add(size_of_val(bundle.vout.as_slice()));
+        }
+        if let Some(bundle) = transaction.sprout_bundle() {
+            bytes = bytes.saturating_add(size_of_val(bundle.joinsplits.as_slice()));
+        }
+        if let Some(bundle) = transaction.sapling_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.shielded_spends()))
+                .saturating_add(size_of_val(bundle.shielded_outputs()));
+        }
+        for action in transaction
+            .orchard_actions()
+            .chain(transaction.ironwood_actions())
+        {
+            bytes = bytes.saturating_add(size_of_val(action));
+        }
+    }
+    (wire_bytes, bytes)
+}
+
+/// Include scripts from prior transactions, not just the current block's wire bytes.
+pub(crate) fn output_retained_bytes<U: std::borrow::Borrow<transparent::OrderedUtxo>>(
+    outputs: &HashMap<transparent::OutPoint, U>,
+) -> usize {
+    outputs.values().fold(
+        outputs
+            .capacity()
+            .saturating_mul(size_of::<(transparent::OutPoint, U)>()),
+        |bytes, output| {
+            let output: &transparent::OrderedUtxo = output.borrow();
+            bytes.saturating_add(output.utxo.output.lock_script.as_raw_bytes().len())
+        },
+    )
+}
+
 impl CheckpointVerifiedBlock {
     /// Creates a [`CheckpointVerifiedBlock`] from [`Block`] with optional deferred balance and
     /// optional pre-computed hash.
@@ -606,7 +767,22 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
+        Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
+    }
+
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+    /// Computes and caches the authorizing-data root from this immutable block body.
+    pub fn with_precomputed_auth_data_root(mut self) -> Self {
+        self.auth_data_root = Some(self.block.auth_data_root());
+        self
+    }
+
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+    /// Returns the cached root, if it was computed before the block reached the writer.
+    pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
+        self.auth_data_root
     }
 }
 
@@ -666,7 +842,18 @@ pub(crate) fn new_outputs_retained_bytes(
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        Self::from(SemanticallyVerifiedBlock::from(block))
+    }
+}
+
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
+    fn from(verified: SemanticallyVerifiedBlock) -> Self {
+        Self {
+            verified,
+            auth_data_root: None,
+        }
     }
 }
 
@@ -690,6 +877,8 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
         Self {
@@ -722,7 +911,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
 
 impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        checkpoint_verified.0
+        checkpoint_verified.verified
     }
 }
 
@@ -730,12 +919,7 @@ impl Deref for CheckpointVerifiedBlock {
     type Target = SemanticallyVerifiedBlock;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for CheckpointVerifiedBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &self.verified
     }
 }
 
@@ -881,10 +1065,135 @@ impl MappedRequest for AwaitUtxoRequest {
     }
 }
 
+/// State-owned relay notifications for a locally mined block.
+///
+/// Once queued, these senders live with the commit rather than its response future. The single
+/// state writer reserves a slot without waiting immediately before processing the commit. A full or
+/// closed channel rejects the mined request before mutation or early relay, without blocking other
+/// writes. An ordinary same-hash replacement retains the observer as best-effort: unavailable
+/// notification capacity cannot reject that ordinary commit. Otherwise, after success (including
+/// side-chain commits), the writer inserts the notification before replying. Channel insertion does
+/// not guarantee peer delivery; subsequent receiver closure cannot turn a successful commit into an
+/// error. Dropping a response future alone never changes notification requirements.
+#[derive(Clone, Debug)]
+pub struct MinedBlockNotifications {
+    pub(crate) committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+    pub(crate) validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    /// Whether notification capacity is required by the current commit request.
+    required: bool,
+}
+
+impl MinedBlockNotifications {
+    /// Creates notifications using the existing bounded committed channel and validated-body watch.
+    ///
+    /// No channel capacity is reserved while a queued block waits for its parent. The validated
+    /// watch is updated only for an exact successful proposal result after live parent, local
+    /// invalidation, and current header-time checks, immediately before applying the block.
+    pub fn new(
+        committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+        validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    ) -> Self {
+        Self {
+            committed,
+            validated,
+            required: true,
+        }
+    }
+
+    /// Retains a superseded mined observer without imposing its requirements on an ordinary commit.
+    ///
+    /// Use only when an ordinary same-hash request supersedes the mined request, not when its
+    /// response future is dropped. Healthy observers still receive the commit; a full or closed
+    /// channel no longer rejects it. Capacity is checked only at the writer's commit boundary.
+    pub fn allow_ordinary_commit(&mut self) {
+        self.required = false;
+    }
+
+    /// Reserves only at the writer's commit boundary, never while waiting for a queued parent.
+    pub(crate) fn try_reserve_committed(
+        &self,
+    ) -> Result<
+        Option<tokio::sync::mpsc::OwnedPermit<(block::Hash, block::Height)>>,
+        crate::CommitBlockError,
+    > {
+        let result = self
+            .committed
+            .clone()
+            .try_reserve_owned()
+            .map_err(|error| match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationFull
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationClosed
+                }
+            });
+        match result {
+            Ok(permit) => Ok(Some(permit)),
+            Err(error) if !self.required => {
+                tracing::warn!(
+                    ?error,
+                    "superseded mined notification observer unavailable; continuing ordinary commit"
+                );
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl PartialEq for MinedBlockNotifications {
+    fn eq(&self, other: &Self) -> bool {
+        self.committed.same_channel(&other.committed)
+            && self.validated.same_channel(&other.validated)
+            && self.required == other.required
+    }
+}
+
+impl Eq for MinedBlockNotifications {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
+    /// Authenticates a NU5-or-later body against its parent in the published non-finalized state.
+    ///
+    /// The caller must first check PoW/Equihash, size, cheap structure/resource limits, transaction
+    /// Merkle root, duplicates, and branch consistency. Returns [`Response::EarlyRelay`]; only
+    /// current-best-tip children can be cached, and only while an early-relay subscription exists.
+    EarlyRelay {
+        /// The immutable block whose transaction authorization commitment must be checked.
+        block: Arc<Block>,
+        /// If true, authenticate even when caching is disabled or full, against a parent retained
+        /// in any published non-finalized chain. Missing snapshot context returns no guard.
+        /// If false, skip disabled caching or absent recipients and admit only the current best tip.
+        require_authentication: bool,
+        /// Explicit local or peer provenance, retained with the authenticated body.
+        origin: EarlyRelayOrigin,
+    },
+
+    /// Authenticates an early-relay body without publishing it or reserving publication capacity.
+    ///
+    /// Uses the same caller preconditions and response as [`Request::EarlyRelay`], against a parent
+    /// in any published non-finalized chain. Missing snapshot context returns no guard; callers
+    /// bound any retries. Use this before assigning peer punishment after deferred authentication.
+    AuthenticateEarlyRelay(Arc<Block>),
+
+    /// Records a deterministic full-verification failure after independently authenticating its body.
+    ///
+    /// Only the block verifier's failure handling may send this request, after proof of work,
+    /// size, transaction structure, Merkle-root and branch checks. Never expose it through an RPC
+    /// method or peer request. Missing parents, UTXOs, timeouts, cancellation and infrastructure
+    /// failures are not deterministic rejections. Returns [`Response::Rejected`].
+    RejectBlock(Arc<Block>),
+
+    /// Announces a block after proof-of-work and transaction Merkle-root checks.
+    ///
+    /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
+    /// without full transaction and contextual validation, and withdrawn on guard drop or after
+    /// 1 second.
+    MiningCandidate(Arc<Block>),
+
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
@@ -895,6 +1204,11 @@ pub enum Request {
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
+    ///
+    /// Success acknowledges publication in the non-finalized state, before older blocks past the
+    /// reorg limit are written to the finalized database. The same writer completes those writes
+    /// before processing another block. A finalization failure remains fatal; success is not a
+    /// durability guarantee for the new block or completion of older blocks' finalization.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
@@ -909,6 +1223,42 @@ pub enum Request {
     ///
     /// [0]: (crate::error::CommitSemanticallyVerifiedError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
+
+    /// Commits a locally mined block with state-owned relay notifications.
+    ///
+    /// Uses the queue, cancellation, error, and response semantics of
+    /// [`Request::CommitSemanticallyVerifiedBlock`]. Replacing a queued request retains its block
+    /// and cached verdict. An ordinary replacement retains its notifications as best-effort:
+    /// healthy observers still receive the commit, but full or closed channels cannot reject the
+    /// ordinary request. Another mined replacement installs its own required notifications.
+    ///
+    /// A full or closed required notification channel returns an operational
+    /// [`crate::CommitBlockError`] before mutation or early relay. Successful required notifications
+    /// are inserted before the response; ordinary commits do not require notification capacity.
+    CommitMinedBlock {
+        /// The solved block after semantic validation.
+        block: SemanticallyVerifiedBlock,
+        /// An exact successful proposal result rebound to this solved block, if available.
+        ///
+        /// The caller must check solved proof of work, current time, and serialized size.
+        /// Only this path can publish a validated body before applying it to the live state.
+        contextual: Option<Box<ContextuallyVerifiedBlock>>,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
+
+    /// Commits a locally mined checkpoint-verified block with durable commit notification.
+    ///
+    /// Uses [`Request::CommitCheckpointVerifiedBlock`] semantics and never publishes an early
+    /// validated-body notification. Notifications survive cancellation of the response future.
+    /// Full or closed required notification channels reject before mutation. An ordinary same-hash
+    /// replacement retains the observer as best-effort, as with [`Request::CommitMinedBlock`].
+    CommitMinedCheckpointVerifiedBlock {
+        /// The block verified against a checkpoint.
+        block: CheckpointVerifiedBlock,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
 
     /// Commit a checkpointed block to the state, skipping most but not all
     /// contextual validation.
@@ -993,7 +1343,13 @@ pub enum Request {
     ///
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or missing retained data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     Transaction(transaction::Hash),
+
+    /// Returns [`Response::KnownTransaction`] for best-chain membership without reading the body.
+    KnownTransaction(transaction::Hash),
 
     /// Looks up a transaction by hash in any chain.
     ///
@@ -1003,6 +1359,9 @@ pub enum Request {
     ///   if the transaction is in any chain;
     /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction)
     ///   otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or missing retained data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     AnyChainTransaction(transaction::Hash),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
@@ -1018,8 +1377,8 @@ pub enum Request {
     /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1033,8 +1392,8 @@ pub enum Request {
     ///   if the block height is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1047,15 +1406,25 @@ pub enum Request {
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     BlockAndSize(HashOrHeight),
 
-    /// Looks up a block header by hash or height in the current best chain.
+    /// Looks up a serialized block by hash or height in the current best chain.
     ///
     /// Returns
     ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
+    /// * [`Response::RawBlock(Some(SerializedBlock))`](Response::RawBlock) if the block is in the best chain;
+    /// * [`Response::RawBlock(None)`](Response::RawBlock) otherwise.
+    ///
+    /// Finalized blocks are served from their stored bytes, without deserializing them, so
+    /// this is the cheap way to send a block to a peer.
+    RawBlock(HashOrHeight),
+
+    /// Looks up a block header by hash or height in the current best chain.
+    ///
+    /// Returns [`Response::BlockHeader`] with the header and its identity, or `None` for an
+    /// unknown block. A known block with missing header data returns [`crate::BlockReadError`].
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1084,6 +1453,14 @@ pub enum Request {
     /// Outdated requests are pruned on a regular basis.
     AwaitUtxo(transparent::OutPoint),
 
+    /// Waits for all outpoints with [`Request::AwaitUtxo`] semantics.
+    ///
+    /// Returns [`Response::Utxos`] in input order, including duplicate outpoints.
+    /// The first lookup error cancels the remaining waits.
+    ///
+    /// Wrap the request in a timeout to bound the entire batch's wait.
+    AwaitUtxos(Vec<transparent::OutPoint>),
+
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.
     ///
@@ -1091,8 +1468,9 @@ pub enum Request {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding 500 hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding 500 hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1155,6 +1533,11 @@ pub enum Request {
     /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
+    /// Looks up each hash with [`Request::KnownBlock`] semantics.
+    ///
+    /// Returns [`Response::KnownBlocks`] in input order, including duplicate hashes.
+    KnownBlocks(Vec<block::Hash>),
+
     /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
     /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
     ///
@@ -1174,29 +1557,81 @@ pub enum Request {
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+    /// Prefers the given block over equal-work chain tips in the non-finalized state.
+    ///
+    /// Finalized blocks, known non-tip blocks, and lower-work tips succeed without changing state.
+    /// The latest call wins; the preference is lost when the tip changes or the node restarts.
+    ///
+    /// Returns [`Response::Precious`] with the requested hash, or a
+    /// [`PreciousError`](crate::error::PreciousError) if the block was not found or the request
+    /// could not be processed.
+    PreciousBlock(block::Hash),
+
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Commit a successful proposal result rebound to a solved block, without contextual rechecks.
+    ///
+    /// The caller must check proof of work, current time and serialized size after rebinding.
+    /// Returns [`Response::Committed`], with the same queue semantics as a semantic commit.
+    CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
+
+    /// Supplies the unverified note commitment tree roots after each block from `start_height`,
+    /// for fast checkpoint sync.
+    ///
+    /// The block writer verifies each root against the chain's header commitments before using
+    /// it, and drops roots it doesn't need.
+    /// Accepting a batch acknowledges the last returned rejected source.
+    ///
+    /// Returns [`Response::TreeRootsSupplied`].
+    SupplyTreeRoots {
+        /// The height of the block whose roots come first.
+        start_height: block::Height,
+        /// The roots after each consecutive block and their successor commitment preimages.
+        roots: Vec<TreeRootsProof>,
+        /// The peer that supplied these proofs, blamed only if its own proof is invalid.
+        source: std::net::SocketAddr,
+    },
+
+    /// Returns the heights whose note commitment tree roots fast checkpoint sync needs next, in
+    /// [`Response::WantedTreeRoots`].
+    WantedTreeRoots,
 }
 
 impl Request {
     /// Returns a [`&'static str`](str) name of the variant representing this value.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            Request::MiningCandidate(_) => "mining_candidate",
+            Request::EarlyRelay { .. } => "early_relay",
+            Request::AuthenticateEarlyRelay(_) => "authenticate_early_relay",
+            Request::RejectBlock(_) => "reject_block",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
+            Request::CommitMinedBlock { .. } => "commit_mined_block",
+            Request::CommitMinedCheckpointVerifiedBlock { .. } => {
+                "commit_mined_checkpoint_verified_block"
+            }
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
+            Request::AwaitUtxos(_) => "await_utxos",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
+            Request::KnownTransaction(_) => "known_transaction",
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
             Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
+            Request::RawBlock(_) => "raw_block",
             Request::BlockHeader(_) => "block_header",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
@@ -1206,9 +1641,13 @@ impl Request {
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
+            Request::KnownBlocks(_) => "known_blocks",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
+            Request::PreciousBlock(_) => "precious_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::SupplyTreeRoots { .. } => "supply_tree_roots",
+            Request::WantedTreeRoots => "wanted_tree_roots",
         }
     }
 
@@ -1227,9 +1666,45 @@ impl Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns the current early mining context in [`ReadResponse::MiningCandidate`].
+    MiningCandidate,
+
+    /// Subscribes to early mining changes and enables candidate computation while held.
+    /// Returns [`ReadResponse::MiningCandidateChanges`].
+    MiningCandidateChanges,
+
+    /// Returns [`ReadResponse::EarlyRelayCache`], enabling early block retention while the cache
+    /// or one of its subscribers is held, subject to its recipient restriction. Independent of mining.
+    EarlyRelayCache,
+
+    /// Checks height and contextual difficulty/time for a child of the published best-chain tip.
+    /// Rejects locally invalidated or deterministically rejected block hashes until finalization.
+    ///
+    /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
+    /// Callers must independently check proof of work and bound compact-body resources.
+    CheckBestTipHeader {
+        /// The candidate header.
+        header: Arc<block::Header>,
+        /// The height from its prefilled coinbase.
+        height: block::Height,
+    },
+
+    /// Authenticates a NU5-or-later body's history and authorization commitments at the snapshot tip.
+    ///
+    /// Callers must first bound the body and check transaction Merkle roots and duplicates.
+    /// Returns [`ReadResponse::ValidBestTipBlockCommitments`] or an error. Neither result updates
+    /// rejection, mining, or early-relay caches; success does not imply transaction validity.
+    CheckBestTipBlockCommitments(Arc<Block>),
+
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
-    /// with the current disk space usage in bytes.
+    /// with the latest disk space usage estimate in bytes. Primary services normally refresh
+    /// it every 30 seconds; read-only services measure it on demand.
     UsageInfo,
+
+    /// Returns stored body availability in [`ReadResponse::HistoryCapabilities`].
+    ///
+    /// The retained suffix describes actual storage, not a configured retention target.
+    HistoryCapabilities,
 
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
@@ -1260,8 +1735,8 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1276,8 +1751,8 @@ pub enum ReadRequest {
     ///   followed by side chains in order from most to least work.
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1290,15 +1765,24 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     BlockAndSize(HashOrHeight),
 
-    /// Looks up a block header by hash or height in the current best chain.
+    /// Looks up a serialized block by hash or height in the current best chain.
     ///
     /// Returns
     ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
+    /// * [`ReadResponse::RawBlock(Some(SerializedBlock))`](ReadResponse::RawBlock) if the block is in the best chain;
+    /// * [`ReadResponse::RawBlock(None)`](ReadResponse::RawBlock) otherwise.
+    ///
+    /// Finalized blocks are served from their stored bytes, without deserializing them.
+    RawBlock(HashOrHeight),
+
+    /// Looks up a block header by hash or height in the current best chain.
+    ///
+    /// Returns [`ReadResponse::BlockHeader`] with the header and its identity, or `None` for an
+    /// unknown block. A known block with missing header data returns [`crate::BlockReadError`].
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1314,13 +1798,13 @@ pub enum ReadRequest {
     ///   the best chain;
     /// * [`ReadResponse::SpentOutputs(None)`](ReadResponse::SpentOutputs) otherwise.
     ///
-    /// An outpoint whose spent output cannot be found in the best chain is omitted from the
-    /// map, so callers must treat a missing outpoint as "prevout unknown", not an error.
+    /// An unknown parent or outpoint is omitted from the map, so callers must treat a missing
+    /// outpoint as "prevout unknown", not an error. Known unavailable parents are never omitted.
     ///
     /// Used by the `getblock` RPC at verbosity 3.
     ///
-    /// Returns [`crate::BlockReadError`] for incomplete primary data.
-    /// Returns `None` for incomplete secondary views.
+    /// Returns [`crate::BlockReadError`] if the block or a known parent is pruned or corrupt.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     SpentOutputs(HashOrHeight),
 
     /// Looks up a transaction by hash in the current best chain.
@@ -1329,7 +1813,17 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError::BlockBodyUnavailable`] for missing non-genesis transaction
+    /// bytes below the retained floor. Missing retained data returns
+    /// [`crate::BlockReadError::CorruptBlock`].
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     Transaction(transaction::Hash),
+
+    /// Returns whether a transaction is in the best chain, without reading its body.
+    ///
+    /// Returns [`ReadResponse::KnownTransaction`]. A known pruned transaction is still mined.
+    KnownTransaction(transaction::Hash),
 
     /// Looks up a transaction by hash in any chain.
     ///
@@ -1339,7 +1833,23 @@ pub enum ReadRequest {
     ///   if the transaction is in any chain;
     /// * [`ReadResponse::AnyChainTransaction(None)`](ReadResponse::AnyChainTransaction)
     ///   otherwise.
+    ///
+    /// Returns [`crate::BlockReadError::BlockBodyUnavailable`] for missing non-genesis transaction
+    /// bytes below the retained floor. Missing retained data returns
+    /// [`crate::BlockReadError::CorruptBlock`].
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     AnyChainTransaction(transaction::Hash),
+
+    /// Looks up a serialized transaction by hash in any chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::RawTransaction(Some(SerializedTransaction))`](ReadResponse::RawTransaction)
+    ///   if the transaction is in any chain;
+    /// * [`ReadResponse::RawTransaction(None)`](ReadResponse::RawTransaction) otherwise.
+    ///
+    /// Finalized transactions are served from their stored bytes, without deserializing them.
+    AnyChainRawTransaction(transaction::Hash),
 
     /// Looks up the transaction IDs for a block, using a block hash or height.
     ///
@@ -1400,8 +1910,9 @@ pub enum ReadRequest {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1698,9 +2209,32 @@ pub enum ReadRequest {
         known_chain_tips: HashSet<block::Hash>,
     },
 
-    /// Returns `true` if the transparent output is spent in the best chain,
-    /// or `false` if it is unspent.
-    IsTransparentOutputSpent(transparent::OutPoint),
+    /// Returns an unspent best-chain output and its metadata in [`ReadResponse::UnspentOutput`].
+    ///
+    /// The creating transaction version is unavailable when its body has been pruned.
+    UnspentOutput(transparent::OutPoint),
+
+    /// Looks up the note commitment tree roots after each finalized block from `start_height`
+    /// to the block at height `start_height + count - 1`, if that block's hash is `final_hash`.
+    ///
+    /// Returns [`ReadResponse::TreeRoots`] with a bounded prefix of complete root proofs, or with
+    /// `None` if read admission is saturated, the finalized chain doesn't have `final_hash` at
+    /// that height, required successor authorizing data is unavailable, or `count` is zero or
+    /// above [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
+    TreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+    },
+
+    /// Looks up the note commitment tree roots and sizes that fast checkpoint sync stored for a
+    /// finalized block it committed without its Sapling, Orchard, and Ironwood trees.
+    ///
+    /// Returns [`ReadResponse::FastSyncTreeRoots`] with `None` if the block isn't such a block.
+    FastSyncTreeRoots(HashOrHeight),
 }
 
 impl ReadRequest {
@@ -1708,6 +2242,7 @@ impl ReadRequest {
     pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
+            ReadRequest::HistoryCapabilities => "history_capabilities",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
@@ -1715,10 +2250,13 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
+            ReadRequest::RawBlock(_) => "raw_block",
             ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::KnownTransaction(_) => "known_transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
+            ReadRequest::AnyChainRawTransaction(_) => "any_chain_raw_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
@@ -1747,11 +2285,18 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
+            ReadRequest::MiningCandidate => "mining_candidate",
+            ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
+            ReadRequest::EarlyRelayCache => "early_relay_cache",
+            ReadRequest::CheckBestTipHeader { .. } => "check_best_tip_header",
+            ReadRequest::CheckBestTipBlockCommitments(_) => "check_best_tip_block_commitments",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
-            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::UnspentOutput(_) => "unspent_output",
+            ReadRequest::TreeRoots { .. } => "tree_roots",
+            ReadRequest::FastSyncTreeRoots(_) => "fast_sync_tree_roots",
         }
     }
 
@@ -1784,8 +2329,10 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::AnyChainBlock(hash_or_height))
             }
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
+            Request::RawBlock(hash_or_height) => Ok(ReadRequest::RawBlock(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
+            Request::KnownTransaction(tx_hash) => Ok(ReadRequest::KnownTransaction(tx_hash)),
             Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
@@ -1804,15 +2351,31 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitContextuallyVerifiedBlock(_)
+            | Request::CommitMinedBlock { .. }
+            | Request::CommitMinedCheckpointVerifiedBlock { .. }
+            | Request::MiningCandidate(_)
+            | Request::EarlyRelay { .. }
+            | Request::AuthenticateEarlyRelay(_)
+            | Request::RejectBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
+            | Request::PreciousBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
-            Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                     Manually convert the request to ReadRequest::AnyChainUtxo, \
-                     and handle pending UTXOs"),
+            Request::SupplyTreeRoots { .. } | Request::WantedTreeRoots => {
+                Err("ReadService does not track fast sync tree roots")
+            }
 
-            Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
+            Request::AwaitUtxo(_) | Request::AwaitUtxos(_) => {
+                Err("ReadService does not track pending UTXOs. \
+                 Manually convert the request to ReadRequest::AnyChainUtxo, \
+                 and handle pending UTXOs")
+            }
+
+            Request::KnownBlock(_) | Request::KnownBlocks(_) => {
+                Err("ReadService does not track queued blocks")
+            }
 
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),

@@ -16,6 +16,7 @@ use vectors::{
 };
 
 use zebra_rpc::client::zebra_chain::{
+    block::Height,
     sapling::ValueCommitment,
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
@@ -141,6 +142,7 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let verification_progress = obj.verification_progress();
     let chain_work = obj.chain_work();
     let pruned = obj.pruned();
+    let prune_height = obj.prune_height();
     let size_on_disk = obj.size_on_disk();
     let commitments = obj.commitments();
     let best_block_hash = obj.best_block_hash();
@@ -164,11 +166,22 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
         verification_progress,
         chain_work,
         pruned,
+        prune_height,
         size_on_disk,
         commitments,
     );
 
     assert_eq!(obj, new_obj);
+    assert_eq!(prune_height, None);
+    let mut json = serde_json::to_value(&obj)?;
+    assert!(json.get("pruneheight").is_none());
+
+    json["pruned"] = serde_json::json!(true);
+    json["pruneheight"] = serde_json::json!(12_345);
+    let pruned: GetBlockchainInfoResponse = serde_json::from_value(json.clone())?;
+    assert!(pruned.pruned());
+    assert_eq!(pruned.prune_height(), Some(Height(12_345)));
+    assert_eq!(serde_json::to_value(pruned)?, json);
 
     Ok(())
 }
@@ -1193,6 +1206,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
   "blocks": 2934350,
   "currentblocksize": 1629,
   "currentblocktx": 0,
+  "difficulty": 12345.6789,
   "networksolps": 6644588130,
   "networkhashps": 6644588130,
   "chain": "main",
@@ -1204,6 +1218,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
     let tip_height = obj.tip_height();
     let current_block_size = obj.current_block_size();
     let current_block_tx = obj.current_block_tx();
+    let difficulty = obj.difficulty();
     let networksolps = obj.networksolps();
     let networkhashps = obj.networkhashps();
     let chain = obj.chain().clone();
@@ -1213,6 +1228,7 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
         tip_height,
         current_block_size,
         current_block_tx,
+        difficulty,
         networksolps,
         networkhashps,
         chain,
@@ -1302,6 +1318,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2500000,
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
@@ -1312,6 +1329,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2499900,
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,
@@ -1324,6 +1342,8 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(obj.len(), 2);
     assert_eq!(obj[0].services().as_str(), "0000000000000001");
     assert_eq!(obj[0].lastrecv(), 1700000000);
+    assert_eq!(obj[0].startingheight(), 2500000);
+    assert_eq!(obj[1].startingheight(), 2499900);
     assert_eq!(obj[0].banscore(), 0);
     assert_eq!(obj[0].subver().as_str(), "/Zebra:2.1.0/");
     assert_eq!(obj[0].version(), 170140);
@@ -1341,6 +1361,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2500000,
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
@@ -1353,6 +1374,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "services": "0000000000000001",
     "lastrecv": 1700000000,
     "inbound": false,
+    "startingheight": 2499900,
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,

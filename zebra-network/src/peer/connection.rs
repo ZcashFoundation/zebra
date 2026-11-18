@@ -7,7 +7,14 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::{HashSet, VecDeque},
+    fmt,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
 
 use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
@@ -24,7 +31,7 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
+        GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
         MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
         PEER_ADDR_RESPONSE_LIMIT,
     },
@@ -36,7 +43,7 @@ use crate::{
     },
     peer_set::{BlockAdvert, ConnectionTracker},
     protocol::{
-        external::{types::Nonce, InventoryHash, Message},
+        external::{types::Nonce, Codec, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
     },
     BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
@@ -44,6 +51,7 @@ use crate::{
 
 use InventoryResponse::*;
 
+mod compact_relay;
 mod peer_tx;
 
 #[cfg(test)]
@@ -59,17 +67,26 @@ pub(super) enum Handler {
         ping_sent_at: Instant,
     },
     Peers,
-    FindBlocks,
+    FindBlocks {
+        extends: Option<block::Hash>,
+    },
     FindHeaders,
     BlocksByHash {
         pending_hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
+    },
+    CompactBlock {
+        reconstruction: crate::compact::Reconstruction,
+        permit: tokio::sync::OwnedSemaphorePermit,
     },
     TransactionsById {
         pending_ids: HashSet<UnminedTxId>,
         transactions: Vec<UnminedTx>,
     },
     MempoolTransactionIds,
+    TreeRoots {
+        count: u32,
+    },
 }
 
 impl fmt::Display for Handler {
@@ -81,8 +98,9 @@ impl fmt::Display for Handler {
             Handler::Ping { .. } => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
 
-            Handler::FindBlocks => "FindBlocks".to_string(),
+            Handler::FindBlocks { .. } => "FindBlocks".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
+            Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
                 pending_hashes,
                 blocks,
@@ -101,6 +119,7 @@ impl fmt::Display for Handler {
                 transactions.len()
             ),
             Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Handler::TreeRoots { count } => format!("TreeRoots {{ count: {count} }}"),
         })
     }
 }
@@ -116,13 +135,15 @@ impl Handler {
             Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks => "FindBlocks".into(),
+            Handler::FindBlocks { .. } => "FindBlocks".into(),
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
+            Handler::CompactBlock { .. } => "CompactBlock".into(),
             Handler::TransactionsById { .. } => "TransactionsById".into(),
 
             Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
+            Handler::TreeRoots { .. } => "TreeRoots".into(),
         }
     }
 
@@ -137,6 +158,7 @@ impl Handler {
     /// Taking ownership of the message means that we can pass ownership of its
     /// contents to responses without additional copies.  If the message is not
     /// interpretable as a response, we return ownership to the caller.
+    /// Singleton block inventories also go to inbound gossip, because they can be adverts.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
     ///
@@ -377,19 +399,16 @@ impl Handler {
             // from a valid singleton reply. Keep accepting these replies.
             // An empty inventory can be a late mempool reply after cancellation.
             // Zebra and zcashd send no message for an empty getblocks result.
-            (Handler::FindBlocks, Message::Inv(items))
-                if !items.is_empty()
-                    && items
-                        .iter()
-                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
-            {
-                // Truncate rather than reject: zcashd can add one extra hash to a full
-                // 500-hash response, and a peer can always send 500 junk hashes anyway.
-                Handler::Finished(Ok(Response::BlockHashes(
-                    block_hashes(&items[..])
-                        .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
-                        .collect(),
-                )))
+            (Handler::FindBlocks { .. }, Message::Inv(items)) if is_block_inventory(&items) => {
+                let hashes = block_hashes(&items)
+                    .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
+                    .collect();
+                if items.len() == 1 {
+                    // A singleton can be an advert racing discovery. Return it and also forward it,
+                    // because inbound admission can drop the advert while the syncer can fetch it.
+                    ignored_msg = Some(Message::Inv(items));
+                }
+                Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
@@ -403,6 +422,20 @@ impl Handler {
                 Handler::Finished(Ok(Response::TransactionIds(
                     transaction_ids(&items).collect(),
                 )))
+            }
+
+            (Handler::TreeRoots { count }, Message::TreeRoots(roots)) => {
+                // u32 fits in usize on all supported platforms.
+                if roots
+                    .as_ref()
+                    .is_some_and(|roots| roots.len() > count as usize)
+                {
+                    Handler::Finished(Err(PeerError::Serialization(SerializationError::Parse(
+                        "treeroots response has more entries than requested",
+                    ))))
+                } else {
+                    Handler::Finished(Ok(Response::TreeRoots(roots)))
+                }
             }
 
             // By default, messages are not responses.
@@ -533,7 +566,7 @@ where
 {
     /// The metadata for the connected peer `service`.
     ///
-    /// This field is used for debugging.
+    /// Includes negotiated permissions for serving and classifying early block responses.
     pub connection_info: Arc<ConnectionInfo>,
 
     /// The state of this connection's current request or response.
@@ -578,6 +611,14 @@ where
     /// Receives block adverts independently of the current request's response.
     pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<BlockAdvert>,
 
+    /// Selected receive sources share three permits, released on demotion before notifying the peer.
+    pub(super) compact_receive_rx:
+        tokio::sync::watch::Receiver<Option<Arc<tokio::sync::Semaphore>>>,
+    compact_receive_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    /// Permit decoding recovery responses only for the live request and its deadline.
+    pub(super) compact_recovery:
+        Option<tokio::sync::watch::Sender<Option<(block::Hash, tokio::time::Instant)>>>,
+
     /// Live authorization, rechecked immediately before request and advert writes.
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
@@ -617,6 +658,9 @@ where
     /// service to a request from this connection,
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
+
+    /// Negotiated compact transport and globally bounded, expiring body retention.
+    compact: compact_relay::CompactRelay,
 }
 
 impl<S, Tx, C> fmt::Debug for Connection<S, Tx, C>
@@ -645,9 +689,10 @@ where
     /// Return a new connection from its channels, services, shared state, and metadata.
     pub(crate) fn new(
         inbound_service: S,
-        (client_rx, block_advert_rx, minimum_peer_version, bans_receiver): (
+        (client_rx, block_advert_rx, compact_receive_rx, minimum_peer_version, bans_receiver): (
             futures::channel::mpsc::Receiver<ClientRequest>,
             tokio::sync::mpsc::Receiver<BlockAdvert>,
+            tokio::sync::watch::Receiver<Option<Arc<tokio::sync::Semaphore>>>,
             MinimumPeerVersion<C>,
             tokio::sync::watch::Receiver<crate::BanList>,
         ),
@@ -668,6 +713,9 @@ where
             svc: inbound_service,
             client_rx: client_rx.into(),
             block_advert_rx,
+            compact_receive_rx,
+            compact_receive_permit: None,
+            compact_recovery: None,
             minimum_peer_version,
             bans_receiver,
             error_slot,
@@ -676,6 +724,7 @@ where
             metrics_label,
             last_metrics_state: None,
             last_overload_time: None,
+            compact: compact_relay::CompactRelay::default(),
         }
     }
 }
@@ -695,6 +744,14 @@ where
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
+        if self.connection_info.early_block_relay {
+            let permit = self
+                .compact_receive_rx
+                .borrow_and_update()
+                .as_ref()
+                .and_then(|slots| slots.clone().try_acquire_owned().ok());
+            self.set_compact_receive(permit).await;
+        }
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
         // as a response to a pending client request, and if not, interpret them as a
@@ -713,10 +770,63 @@ where
         // an incoming request, whichever comes first.
         //
         // If there is a pending request, peer messages can complete it. Block adverts use a
-        // separate channel in either state because they do not expect a response.
+        // separate channel, except while compact recovery needs its shorter response deadline.
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
+
+        // Keep reading recovery replies without letting unrelated service calls or writes hide
+        // the deadline. Both limits include every deferred message, in peer order.
+        const MAX_DEFERRED_MESSAGES: usize = 64;
+        const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
+        let sizing_codec = Codec::builder()
+            .for_version(self.connection_info.negotiated_version)
+            .finish();
+        let mut deferred_peer_messages = VecDeque::new();
+        let mut deferred_peer_bytes = 0;
         loop {
+            self.compact.expire();
+            if self.compact.barrier_timed_out() {
+                self.fail_with(PeerError::ConnectionReceiveTimeout).await;
+                break;
+            }
+            let recovering = matches!(
+                self.state,
+                State::AwaitingResponse {
+                    handler: Handler::CompactBlock { .. },
+                    ..
+                }
+            );
+            if !recovering
+                && !matches!(
+                    self.state,
+                    State::Failed
+                        | State::AwaitingResponse {
+                            handler: Handler::Finished(_),
+                            ..
+                        }
+                )
+            {
+                if let Some((message, bytes)) = deferred_peer_messages.pop_front() {
+                    deferred_peer_bytes -= bytes;
+                    self.handle_message_as_request(message).await;
+                    continue;
+                }
+            }
+            let compact_expiry = self.compact.expiry();
+            let receive_slots = self.compact_receive_rx.borrow_and_update().clone();
+            if !recovering && receive_slots.is_none() && self.compact_receive_permit.is_some() {
+                self.set_compact_receive(None).await;
+            }
+            let receive_slot = async {
+                match receive_slots {
+                    Some(slots) => slots
+                        .acquire_owned()
+                        .await
+                        .expect("receive slots stay open"),
+                    None => futures::future::pending().await,
+                }
+            };
+            tokio::pin!(receive_slot);
             self.update_state_metrics(None);
 
             match self.state {
@@ -763,6 +873,13 @@ where
                     // the request completes (or times out).
                     let incoming = tokio::select! {
                         biased;
+                        _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
+                        Ok(()) = self.compact_receive_rx.changed() => continue,
+                        permit = &mut receive_slot, if self.connection_info.early_block_relay
+                            && self.compact_receive_permit.is_none() => {
+                            self.set_compact_receive(Some(permit)).await;
+                            continue;
+                        }
                         msg = peer_rx.next() => Either::Left(msg),
                         // A closed advert channel disables only this branch.
                         Some(hash) = self.block_advert_rx.recv() => {
@@ -777,6 +894,7 @@ where
                         }
                         Either::Left(Some(Err(e))) => self.fail_with(e).await,
                         Either::Left(Some(Ok(msg))) => {
+                            self.compact.divert_retired_discovery(&msg);
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
                             if let Some(unhandled_msg) = unhandled_msg {
@@ -826,6 +944,14 @@ where
                         ..
                     } = tmp_state
                     {
+                        let response = match response {
+                            Ok(Response::Blocks(blocks))
+                                if self.connection_info.early_block_relay =>
+                            {
+                                Ok(Response::EarlyBlocks(blocks))
+                            }
+                            response => response,
+                        };
                         if let Ok(response) = response.as_ref() {
                             debug!(%response, "finished receiving peer response to Zebra request");
                             // Add a metric for inbound responses to outbound requests.
@@ -846,13 +972,15 @@ where
                     self.state = State::AwaitingRequest;
                 }
 
-                // We're awaiting a response to a client request,
-                // so also wait on cancellation, timeout, and response-free block adverts.
+                // We're awaiting a response to a client request. Compact recovery defers unrelated
+                // writes rather than cancelling and restarting a potentially partial framed write.
                 State::AwaitingResponse {
+                    ref handler,
                     ref span,
                     ref mut tx,
                     ..
                 } => {
+                    let is_tree_roots = matches!(handler, Handler::TreeRoots { .. });
                     // we have to get rid of the span reference so we can tamper with the state
                     let span = span.clone();
                     trace!(parent: &span, "awaiting response to client request");
@@ -883,38 +1011,45 @@ where
                         _ = tx.cancellation() => {
                             // The canceled response receiver no longer needs a result.
                             trace!(parent: &span, "client request was cancelled");
+                            // Root replies have no request ID, so a delayed reply must never be
+                            // mistaken for the response to a later range on this byte stream.
+                            if is_tree_roots {
+                                self.shutdown_async(PeerError::ConnectionDropped).await;
+                                continue;
+                            }
+                            self.clear_compact_recovery();
                             self.state = State::AwaitingRequest;
                             continue;
                         }
                         _ = timer_ref => {
+                            if is_tree_roots {
+                                self.shutdown_async(PeerError::ConnectionReceiveTimeout).await;
+                                continue;
+                            }
+                            if let State::AwaitingResponse { handler: Handler::CompactBlock { reconstruction, .. }, .. } = &self.state {
+                                let hash = reconstruction.block_hash();
+                                self.fallback_compact(hash).await;
+                                continue;
+                            }
                             trace!(parent: &span, "client request timed out");
-                            let e = PeerError::ConnectionReceiveTimeout;
-
-                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
-                                // Ping timeouts fail the connection, not just the request.
-                                State::AwaitingResponse {
-                                    handler: Handler::Ping { .. },
-                                    tx,
-                                    ..
-                                } => {
-                                    let e = SharedPeerError::from(e);
-                                    let _ = tx.send(Err(e.clone()));
-                                    self.fail_with(e).await;
-                                    State::Failed
-                                }
-                                State::AwaitingResponse { tx, .. } => {
-                                    let _ = tx.send(Err(e.into()));
-                                    State::AwaitingRequest
-                                }
-                                _ => unreachable!(
-                                    "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
-                                    self.client_rx
-                                ),
-                            };
+                            if let Err(error) = Self::expire_pending_request(
+                                &mut self.state,
+                                &mut self.request_timer,
+                            ) {
+                                self.fail_with(error).await;
+                            }
+                            continue;
+                        }
+                        _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
+                        Ok(()) = self.compact_receive_rx.changed() => continue,
+                        permit = &mut receive_slot, if !recovering
+                            && self.connection_info.early_block_relay
+                            && self.compact_receive_permit.is_none() => {
+                            self.set_compact_receive(Some(permit)).await;
                             continue;
                         }
                         msg = peer_rx.next() => msg,
-                        Some(hash) = self.block_advert_rx.recv() => {
+                        Some(hash) = self.block_advert_rx.recv(), if !recovering => {
                             self.send_block_advert(hash).await;
                             continue;
                         }
@@ -935,22 +1070,49 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = match self.state {
-                                State::AwaitingResponse {
-                                    ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
-                                _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
-                                                  self.state,
-                                                  peer_msg,
-                                                  self.client_rx,
-                                ),
+                            let request_msg = if self.compact.divert_retired_discovery(&peer_msg) {
+                                Some(peer_msg)
+                            } else {
+                                match self.state {
+                                    State::AwaitingResponse {
+                                        ref mut handler, ..
+                                    } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
+                                    _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
+                                                      self.state,
+                                                      peer_msg,
+                                                      self.client_rx,
+                                    ),
+                                }
                             };
 
                             self.update_state_metrics(None);
 
-                            // If the message was not consumed as a response,
-                            // check whether it can be handled as a request.
+                            // Returned messages can be inbound requests, including block adverts
+                            // that also completed a FindBlocks response.
                             let unused_msg = if let Some(request_msg) = request_msg {
+                                if recovering
+                                    && !matches!(request_msg, Message::BlockTransactions(_))
+                                {
+                                    let bytes = match sizing_codec.wire_length(&request_msg) {
+                                        Ok(bytes) => bytes,
+                                        Err(error) => {
+                                            self.fail_with(error).await;
+                                            continue;
+                                        }
+                                    };
+                                    if deferred_peer_messages.len() >= MAX_DEFERRED_MESSAGES
+                                        || bytes > MAX_DEFERRED_BYTES - deferred_peer_bytes
+                                    {
+                                        self.fail_with(SerializationError::Parse(
+                                            "compact recovery receive buffer exceeded",
+                                        ))
+                                        .await;
+                                        continue;
+                                    }
+                                    deferred_peer_bytes += bytes;
+                                    deferred_peer_messages.push_back((request_msg, bytes));
+                                    continue;
+                                }
                                 // do NOT instrument with the request span, this is
                                 // independent work
                                 self.handle_message_as_request(request_msg).await
@@ -1000,52 +1162,146 @@ where
         self.shutdown_async(error).await;
     }
 
-    /// Acknowledge only completed local writes, after rechecking live authorization.
-    async fn send_block_advert(&mut self, advert: BlockAdvert) {
-        if advert.result.is_closed() {
-            metrics::counter!("peer.canceled").increment(1);
-            metrics::counter!(
-                "zebra.net.out.requests.canceled",
-                "command" => "AdvertiseBlock",
-            )
-            .increment(1);
-            return;
+    /// Keep a source slot until its disabling message is sent or the connection fails.
+    async fn set_compact_receive(&mut self, permit: Option<tokio::sync::OwnedSemaphorePermit>) {
+        let result = self
+            .peer_tx
+            .send(Message::SendCompact {
+                high_bandwidth: permit.is_some(),
+                version: 1,
+            })
+            .await;
+        if let Err(error) = result {
+            drop(permit);
+            self.fail_with(error).await;
+        } else {
+            self.compact_receive_permit = permit;
         }
+    }
 
+    /// Write dequeued adverts even if their callers have stopped waiting for the result.
+    ///
+    /// Acknowledge only completed local writes, after rechecking live authorization.
+    /// A stalled write must not extend an outstanding request's response deadline.
+    async fn send_block_advert(&mut self, advert: BlockAdvert) {
         metrics::counter!(
             "zebra.net.out.requests",
             "command" => "AdvertiseBlock",
         )
         .increment(1);
+        let mut compact_slot = None;
+        let message = if advert.compact_slots.available_permits() > 0 {
+            self.compact_advert(advert.hash).await.and_then(|message| {
+                compact_slot = advert.compact_slots.clone().try_acquire_owned().ok();
+                if compact_slot.is_some() {
+                    Some(message)
+                } else {
+                    self.compact.clear_sent();
+                    None
+                }
+            })
+        } else {
+            None
+        }
+        .unwrap_or_else(|| Message::Inv(vec![InventoryHash::Block(advert.hash)]));
 
+        let is_compact = matches!(message, Message::CompactBlock(_));
+        let compact = &self.compact;
+        let mut serving_authorized = true;
         let address = self.connection_info.connected_addr.get_transient_addr();
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let delivery = self
-            .peer_tx
-            .send_authorized(
-                Message::Inv(vec![InventoryHash::Block(advert.hash)]),
-                || {
-                    if version >= minimum.current()
-                        && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
-                    {
-                        Ok(())
-                    } else {
-                        Err(PeerError::AdvertAuthorizationRevoked)
+        let delivery = {
+            let delivery = self.peer_tx.send_authorized(message, || {
+                if version >= minimum.current()
+                    && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+                    && {
+                        serving_authorized = !is_compact || compact.advert_is_authorized();
+                        serving_authorized
                     }
-                },
-            )
-            .await;
+                {
+                    Ok(())
+                } else {
+                    Err(PeerError::AdvertAuthorizationRevoked)
+                }
+            });
+            tokio::pin!(delivery);
+            tokio::select! {
+                biased;
+                _ = Self::wait_for_response_deadline(&self.state, &mut self.request_timer) => {
+                    match Self::expire_pending_request(&mut self.state, &mut self.request_timer) {
+                        Ok(()) => {
+                            // Keep the same send alive, including any item or partial frame in the
+                            // sink.
+                            delivery.await
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                result = &mut delivery => result,
+            }
+        };
         match delivery {
             Ok(()) => {
+                if is_compact {
+                    self.compact.mark_sent();
+                }
+                if let Some(slot) = compact_slot {
+                    slot.forget();
+                }
                 let _ = advert.result.send(Ok(()));
             }
             Err(error) => {
+                drop(compact_slot);
+                if is_compact {
+                    self.compact.clear_sent();
+                }
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
-                self.fail_with(error).await;
+                if serving_authorized {
+                    // Do not await the stalled sink's close before notifying pending requests.
+                    self.shutdown(error);
+                }
             }
+        }
+    }
+
+    /// Waits for the outstanding response's deadline, or stays pending if no response is expected.
+    async fn wait_for_response_deadline(
+        state: &State,
+        request_timer: &mut Option<Pin<Box<Sleep>>>,
+    ) {
+        if matches!(state, State::AwaitingResponse { .. }) {
+            request_timer
+                .as_mut()
+                .expect("timeout must be set while awaiting response")
+                .await;
+        } else {
+            futures::future::pending::<()>().await;
+        }
+    }
+
+    /// Notifies the timed-out request and clears its state, returning an error if a Ping expired.
+    ///
+    /// The caller must shut down the connection on error, without delaying request notification.
+    fn expire_pending_request(
+        state: &mut State,
+        request_timer: &mut Option<Pin<Box<Sleep>>>,
+    ) -> Result<(), PeerError> {
+        let State::AwaitingResponse { handler, tx, .. } =
+            std::mem::replace(state, State::AwaitingRequest)
+        else {
+            unreachable!("the response timer only completes while awaiting a response")
+        };
+        *request_timer = None;
+        let _ = tx.send(Err(PeerError::ConnectionReceiveTimeout.into()));
+
+        if matches!(handler, Handler::Ping { .. }) {
+            *state = State::Failed;
+            Err(PeerError::ConnectionReceiveTimeout)
+        } else {
+            Ok(())
         }
     }
 
@@ -1096,7 +1352,7 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let authorized = || {
+        let mut authorized = || {
             if version < minimum.current()
                 || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
             {
@@ -1142,6 +1398,12 @@ where
                 .map(|()| Handler::Peers),
 
             (AwaitingRequest, Ping(nonce)) => {
+                // A heartbeat must never share the owned discovery barrier's nonce.
+                let nonce = if self.compact.is_barrier_nonce(nonce) {
+                    Nonce(nonce.0.wrapping_add(1))
+                } else {
+                    nonce
+                };
                 let ping_sent_at = Instant::now();
 
                 self
@@ -1151,14 +1413,11 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
-            (AwaitingRequest, BlockDownload { hash, .. }) => self
-                .peer_tx
-                .send_authorized(Message::GetData(vec![hash.into()]), authorized)
-                .await
-                .map(|()| Handler::BlocksByHash {
-                    blocks: Vec::with_capacity(1),
-                    pending_hashes: HashSet::from([hash]),
-                }),
+            (AwaitingRequest, BlockDownload { hash, .. }) => self.download_block(hash).await,
+            (AwaitingRequest, BlocksByHash(hashes)) if hashes.len() == 1 => {
+                let hash = *hashes.iter().next().expect("the set contains exactly one hash");
+                self.download_block(hash).await
+            }
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx
@@ -1188,13 +1447,22 @@ where
             }
 
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
-                self
-                    .peer_tx
-                    .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
-                    .await
-                    .map(|()|
-                         Handler::FindBlocks
-                    )
+                if let Some(hashes) = known_blocks
+                    .first()
+                    .filter(|_| stop.is_none())
+                    .and_then(|tip| self.compact.take_discovery(tip))
+                {
+                    authorized().map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+                } else {
+                    let extends = known_blocks.first().copied().filter(|_| stop.is_none());
+                    self
+                        .peer_tx
+                        .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
+                        .await
+                        .map(|()|
+                             Handler::FindBlocks { extends }
+                        )
+                }
             }
             (AwaitingRequest, FindHeaders { known_blocks, stop }) => {
                 self
@@ -1214,6 +1482,14 @@ where
                     .map(|()|
                          Handler::MempoolTransactionIds
                     )
+            }
+
+            (AwaitingRequest, TreeRoots { start_height, final_hash, count, .. }) => {
+                self
+                    .peer_tx
+                    .send_authorized(Message::GetTreeRoots { start_height, final_hash, count }, authorized)
+                    .await
+                    .map(|()| Handler::TreeRoots { count })
             }
 
             (AwaitingRequest, PushTransaction(transaction, _)) => {
@@ -1256,8 +1532,11 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _)) => {
+            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_, _)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
+            }
+            (AwaitingRequest, EarlyBlocksByHash(_) | RawBlocksByHash(_) | EarlyRawBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
+                Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
@@ -1271,8 +1550,14 @@ where
         // Update the connection state with a new handler, or fail with an error.
         match new_handler {
             Ok(handler) => {
+                let timer = sleep(compact_relay::response_timeout(&handler));
+                if let (Handler::CompactBlock { reconstruction, .. }, Some(recovery)) =
+                    (&handler, &self.compact_recovery)
+                {
+                    recovery.send_replace(Some((reconstruction.block_hash(), timer.deadline())));
+                }
                 self.state = AwaitingResponse { handler, span, tx };
-                self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+                self.request_timer = Some(Box::pin(timer));
             }
             Err(error) => {
                 let error = SharedPeerError::from(error);
@@ -1297,6 +1582,26 @@ where
         use InboundMessage::*;
 
         let req = match msg {
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                self.compact.send =
+                    self.connection_info.early_block_relay && high_bandwidth && version == 1;
+                Consumed
+            }
+            Message::CompactBlock(block) => {
+                self.receive_compact(block).await;
+                return None;
+            }
+            Message::GetBlockTransactions(request) => {
+                self.serve_compact_transactions(request).await;
+                return None;
+            }
+            Message::BlockTransactions(response) => {
+                self.receive_compact_transactions(response).await;
+                return None;
+            }
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
                 if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
@@ -1333,8 +1638,17 @@ where
                 debug!(%msg, "got block message unsolicited or from canceled request");
                 Unused
             }
+            // Raw blocks are only ever sent by Zebra: peers' block messages decode as `Block`.
+            Message::RawBlock(_) => {
+                debug!(%msg, "got raw block message, which the codec never decodes");
+                Unused
+            }
             Message::Headers(_) => {
                 debug!(%msg, "got headers message unsolicited or from canceled request");
+                Unused
+            }
+            Message::TreeRoots(_) => {
+                debug!(%msg, "got unsolicited treeroots message");
                 Unused
             }
             // These messages should never be sent by peers.
@@ -1391,7 +1705,10 @@ where
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(
                     *hash,
-                    self.connection_info.connected_addr.get_transient_addr(),
+                    self.connection_info
+                        .connected_addr
+                        .get_transient_addr()
+                        .map(|_| self.connection_info.clone()),
                 )
                 .into(),
 
@@ -1448,7 +1765,13 @@ where
                             break;
                         }
                     }
-                    Request::BlocksByHash(hashes).into()
+                    // Serve stored block bytes, rather than deserializing and reserializing them.
+                    if self.connection_info.early_block_relay {
+                        Request::EarlyRawBlocksByHash(hashes)
+                    } else {
+                        Request::RawBlocksByHash(hashes)
+                    }
+                    .into()
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::TransactionsById(transaction_ids(items).collect()).into()
@@ -1484,6 +1807,18 @@ where
             }
             .into(),
             Message::Mempool => Request::MempoolTransactionIds.into(),
+            // The codec rejects counts that are zero or above the limit.
+            Message::GetTreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => Request::TreeRoots {
+                start_height,
+                final_hash,
+                count,
+                excluded_peer: None,
+            }
+            .into(),
         };
 
         // Handle the request, and return unused messages.
@@ -1586,9 +1921,19 @@ where
         .increment(1);
         self.update_state_metrics(Some(format_args!("In::Rsp::{}", rsp.command())));
 
+        let authorization = match &rsp {
+            Response::AuthorizedBlocks { authorization, .. } => Some(authorization.clone()),
+            _ => None,
+        };
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
+            Response::EarlyBlocks(_)
+            | Response::ReconstructedBlock(..)
+            | Response::CompactBlockTransactions(_) => {
+                error!("inbound service returned an outbound-only early block response");
+                return;
+            }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
@@ -1621,7 +1966,30 @@ where
                     }
                 }
             }
-            Response::Blocks(blocks) => {
+            Response::RawBlocks(blocks) => {
+                // Like `Blocks`, but each block is sent from its stored bytes.
+                let mut missing_hashes = Vec::new();
+
+                for block in blocks.into_iter() {
+                    match block {
+                        Available(block) => {
+                            if let Err(e) = self.peer_tx.send(Message::RawBlock(block)).await {
+                                self.fail_with(e).await;
+                                return;
+                            }
+                        }
+                        Missing(hash) => missing_hashes.push(hash.into()),
+                    }
+                }
+
+                if !missing_hashes.is_empty() {
+                    if let Err(e) = self.peer_tx.send(Message::NotFound(missing_hashes)).await {
+                        self.fail_with(e).await;
+                        return;
+                    }
+                }
+            }
+            Response::Blocks(blocks) | Response::AuthorizedBlocks { blocks, .. } => {
                 // Generate one tx message per block,
                 // then a notfound message with all the missing block hashes.
                 let mut missing_hashes = Vec::new();
@@ -1629,7 +1997,55 @@ where
                 for block in blocks.into_iter() {
                     match block {
                         Available((block, _)) => {
-                            if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
+                            let result = if let Some(authorization) = &authorization {
+                                let snapshot = block.clone();
+                                let result = self
+                                    .peer_tx
+                                    .send_authorized(Message::Block(block), || {
+                                        if authorization.is_authorized(&snapshot) {
+                                            Ok(())
+                                        } else {
+                                            Err(PeerError::AdvertAuthorizationRevoked)
+                                        }
+                                    })
+                                    .await;
+                                if matches!(result, Err(PeerError::AdvertAuthorizationRevoked)) {
+                                    // A committed body can outlive its early-cache authorization.
+                                    // Requery the ordinary serving path, never the early cache.
+                                    let hash = snapshot.hash();
+                                    if self.svc.ready().await.is_err() {
+                                        self.fail_with(PeerError::ServiceShutdown).await;
+                                        return;
+                                    }
+                                    match self.svc.call(Request::BlocksByHash([hash].into())).await
+                                    {
+                                        Ok(Response::Blocks(blocks)) => {
+                                            match blocks.into_iter().next() {
+                                                Some(Available((committed, _))) => {
+                                                    self.peer_tx
+                                                        .send(Message::Block(committed))
+                                                        .await
+                                                }
+                                                Some(Missing(_)) => {
+                                                    missing_hashes.push(hash.into());
+                                                    continue;
+                                                }
+                                                _ => unreachable!("single-block serving responds"),
+                                            }
+                                        }
+                                        Ok(_) => unreachable!("ordinary serving returns blocks"),
+                                        Err(error) => {
+                                            debug!(?hash, %error, "committed block fallback failed");
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    result
+                                }
+                            } else {
+                                self.peer_tx.send(Message::Block(block)).await
+                            };
+                            if let Err(e) = result {
                                 self.fail_with(e).await;
                                 return;
                             }
@@ -1661,6 +2077,14 @@ where
                 if let Err(e) = self.peer_tx.send(Message::Headers(headers)).await {
                     self.fail_with(e).await
                 }
+            }
+            Response::TreeRoots(roots) => {
+                if let Err(e) = self.peer_tx.send(Message::TreeRoots(roots)).await {
+                    self.fail_with(e).await
+                }
+            }
+            Response::TreeRootsFromPeer(..) => {
+                unreachable!("peer-set attribution is never an inbound response")
             }
             Response::TransactionIds(hashes) => {
                 let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
@@ -1842,12 +2266,22 @@ where
         }
     }
 
+    /// Stop admitting compact recovery responses before dropping or replacing their handler.
+    fn clear_compact_recovery(&self) {
+        if let Some(recovery) = &self.compact_recovery {
+            recovery.send_replace(None);
+        }
+    }
+
     /// Marks the peer as having failed with `error`, and performs connection cleanup,
     /// including async channel closes.
     ///
     /// If the connection has errored already, re-use the original error.
     /// Otherwise, fail the connection with `error`.
     async fn shutdown_async(&mut self, error: impl Into<SharedPeerError>) {
+        // A failed connection cannot receive announcements, even if closing its sink stalls.
+        self.compact_receive_permit = None;
+
         // Close async channels first, so other tasks can start shutting down.
         // There's nothing we can do about errors while shutting down, and some errors are expected.
         //
@@ -1865,6 +2299,7 @@ where
     ///
     /// Call [`Self::shutdown_async()`] in async code, because it can shut down more channels.
     fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
+        self.clear_compact_recovery();
         let mut error = error.into();
 
         // Close channels first, so other tasks can start shutting down.
@@ -1958,6 +2393,14 @@ where
 /// v5 transactions use a witnessed transaction ID.
 fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTxId> + '_ {
     items.iter().filter_map(InventoryHash::unmined_tx_id)
+}
+
+/// Whether an inventory can be a non-empty block discovery response.
+fn is_block_inventory(items: &[InventoryHash]) -> bool {
+    !items.is_empty()
+        && items
+            .iter()
+            .all(|item| matches!(item, InventoryHash::Block(_)))
 }
 
 /// Map a list of inventory hashes to the corresponding block hashes.

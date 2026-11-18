@@ -2,7 +2,10 @@
 
 use tower::{service_fn, ServiceExt};
 
-use crate::{address_book_updater, peer_set::ActiveConnectionCounter};
+use crate::{
+    address_book_updater,
+    peer_set::{ActiveConnectionCounter, ConnectionTracker},
+};
 
 use super::super::*;
 
@@ -20,6 +23,9 @@ fn serialization_error_metric_labels_ignore_details() {
         );
     }
 }
+
+/// The height advertised by the scripted remote peer.
+const REMOTE_START_HEIGHT: block::Height = block::Height(2_500_000);
 
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
 /// message advertising `remote_services`, then a verack.
@@ -52,7 +58,7 @@ fn spawn_remote_peer(
             address_from: AddrInVersion::new(listen_addr, remote_services),
             nonce: Nonce::default(),
             user_agent: "/test-remote/".to_string(),
-            start_height: block::Height(0),
+            start_height: REMOTE_START_HEIGHT,
             relay: false,
         };
 
@@ -73,8 +79,8 @@ fn spawn_remote_peer(
 }
 
 /// Negotiates a handshake with a scripted remote peer advertising `remote_services`,
-/// on a connection with the given `connected_addr` direction, with the local node's sync
-/// state taken from `chain_tip`.
+/// on a connection with the given `connected_addr` direction and `connection_tracker`, with the
+/// local node's sync state taken from `chain_tip`.
 ///
 /// [`NoChainTip`] means the local node is still syncing; use a
 /// [`MockChainTip`](zebra_chain::chain_tip::mock::MockChainTip) with an estimated distance of
@@ -83,6 +89,7 @@ async fn negotiate_with_remote_services(
     connected_addr: ConnectedAddr,
     remote_services: PeerServices,
     chain_tip: impl ChainTip + Clone + Send + 'static,
+    connection_tracker: &mut ConnectionTracker,
 ) -> Result<Arc<ConnectionInfo>, HandshakeError> {
     let network = Network::Mainnet;
     let config = Config {
@@ -103,6 +110,7 @@ async fn negotiate_with_remote_services(
         negotiate_version(
             &mut local_conn,
             &connected_addr,
+            connection_tracker,
             config,
             Arc::new(futures::lock::Mutex::new(IndexSet::new())),
             "/test-local/".to_string(),
@@ -138,8 +146,13 @@ async fn outbound_direct_rejects_non_serving_peer_while_syncing() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::empty(),
+        NoChainTip,
+        &mut ActiveConnectionCounter::new_counter().track_connection(),
+    )
+    .await;
 
     assert!(
         matches!(
@@ -160,8 +173,13 @@ async fn outbound_proxy_rejects_non_serving_peer_while_syncing() {
         "127.0.0.1:9050".parse().unwrap(),
         "127.0.0.1:32000".parse().unwrap(),
     );
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::empty(),
+        NoChainTip,
+        &mut ActiveConnectionCounter::new_counter().track_connection(),
+    )
+    .await;
 
     assert!(
         matches!(
@@ -228,26 +246,74 @@ async fn isolated_accepts_non_serving_peer() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_isolated();
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::empty(),
+        NoChainTip,
+        &mut ActiveConnectionCounter::new_counter().track_connection(),
+    )
+    .await;
 
     result.expect("isolated handshake with a non-serving peer succeeds");
 }
 
-/// At or near the network tip, outbound handshakes must accept peers that don't advertise
-/// `NODE_NETWORK`, so Zebra can peer with pruned nodes that serve recent blocks.
+/// At or near the network tip, non-serving outbound peers can only fill
+/// `peerset_initial_target_size` outbound slots, so the other slots stay reserved for serving
+/// peers.
 #[tokio::test]
-async fn outbound_direct_accepts_non_serving_peer_at_tip() {
+async fn outbound_non_serving_peers_are_limited_at_tip() {
     let _init_guard = zebra_test::init();
 
     let (chain_tip, _sender) = chain_tip_at_network_tip();
     let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::empty(), chain_tip).await;
+    let non_serving_limit = Config::default().peerset_initial_target_size;
+    let mut outbound_connections = ActiveConnectionCounter::new_counter();
 
-    let connection_info =
-        result.expect("outbound handshake with a non-serving peer at the network tip succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    let mut non_serving_connections = Vec::new();
+    for _ in 0..non_serving_limit {
+        let mut connection_tracker = outbound_connections.track_connection();
+        negotiate_with_remote_services(
+            connected_addr,
+            PeerServices::empty(),
+            chain_tip.clone(),
+            &mut connection_tracker,
+        )
+        .await
+        .expect("non-serving peers can fill the non-serving outbound slots");
+        non_serving_connections.push(connection_tracker);
+    }
+
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::empty(),
+        chain_tip.clone(),
+        &mut outbound_connections.track_connection(),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(HandshakeError::MissingRequiredServices { .. })),
+        "expected MissingRequiredServices once the non-serving slots are full, got: {result:?}",
+    );
+
+    negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::NODE_NETWORK,
+        chain_tip.clone(),
+        &mut outbound_connections.track_connection(),
+    )
+    .await
+    .expect("serving peers can use the reserved outbound slots");
+
+    // Closing a non-serving connection frees its slot.
+    non_serving_connections.pop();
+    negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::empty(),
+        chain_tip,
+        &mut outbound_connections.track_connection(),
+    )
+    .await
+    .expect("a closed non-serving connection frees its outbound slot");
 }
 
 /// Outbound handshakes must accept peers that advertise `NODE_NETWORK`.
@@ -256,18 +322,260 @@ async fn outbound_direct_accepts_serving_peer() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::NODE_NETWORK, NoChainTip)
-            .await;
+    let result = negotiate_with_remote_services(
+        connected_addr,
+        PeerServices::NODE_NETWORK,
+        NoChainTip,
+        &mut ActiveConnectionCounter::new_counter().track_connection(),
+    )
+    .await;
 
     let connection_info = result.expect("outbound handshake with a serving peer succeeds");
     assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
 }
 
-/// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
-/// handshake: the rejection only applies while syncing, and storing non-serving services would
-/// permanently exclude the peer from outbound connections, so it could never be dialed once
-/// the node reaches the network tip. The crawler records a plain retryable failure instead.
+/// Successful handshakes publish the remote start height for inbound and outbound peers.
+#[tokio::test]
+async fn handshake_records_start_height() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let book_addr: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    for connected_addr in [
+        ConnectedAddr::new_inbound_direct(book_addr),
+        ConnectedAddr::new_outbound_direct(book_addr),
+    ] {
+        let (address_book_tx, mut address_book_rx) = address_book_updater::change_channel(10);
+        let handshake = Handshake::builder()
+            .with_config(Config {
+                network: network.clone(),
+                ..Config::default()
+            })
+            .with_inbound_service(service_fn(|_req| async move {
+                Ok::<Response, BoxError>(Response::Nil)
+            }))
+            .with_latest_chain_tip(NoChainTip)
+            .with_address_book_updater(address_book_tx)
+            .finish()
+            .expect("provided mandatory builder parameters");
+        let (local_stream, remote_stream) = tokio::io::duplex(65536);
+        let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::NODE_NETWORK);
+        let client = timeout(
+            TEST_TIMEOUT,
+            handshake.oneshot(HandshakeRequest {
+                data_stream: local_stream,
+                connected_addr,
+                connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+            }),
+        )
+        .await
+        .expect("handshake must not time out")
+        .expect("serving peer handshake succeeds");
+
+        let update = timeout(TEST_TIMEOUT, address_book_rx.recv())
+            .await
+            .expect("address book update must not time out")
+            .expect("successful handshake publishes an address book update")
+            .into_change()
+            .expect("handshake publishes a peer change");
+        let now = Utc::now();
+        let instant = std::time::Instant::now();
+        let initial = MetaAddr::new_initial_peer(book_addr)
+            .into_new_meta_addr(instant, now.try_into().unwrap());
+        for previous in [None, Some(initial)] {
+            let peer = update
+                .apply_to_meta_addr(previous, instant, now)
+                .expect("successful handshake updates new and existing peers");
+            assert_eq!(peer.start_height(), Some(REMOTE_START_HEIGHT));
+        }
+
+        drop(client);
+        remote_peer.abort();
+    }
+}
+
+/// Both actual version messages must opt in; configuration and user agents cannot substitute.
+#[tokio::test]
+async fn early_block_relay_requires_bilateral_handshake() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for (local_setting, local_enabled) in [
+            ("", true),
+            ("compact_block_relay = false", false),
+            ("compact_block_relay = true", true),
+        ] {
+            for remote_enabled in [false, true] {
+                for isolated in [false, true] {
+                    let config: Config = toml::from_str(local_setting).unwrap();
+                    // Exercise the serialized operator configuration, not just a Rust field.
+                    let config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+                    let remote_config = Config {
+                        compact_block_relay: remote_enabled,
+                        ..Config::default()
+                    };
+                    let (local, remote) = tokio::io::duplex(65536);
+                    let network = Network::Mainnet;
+                    let codec = || Codec::builder().for_network(&network).finish();
+                    let mut local = Framed::new(local, codec());
+                    let mut remote = Framed::new(remote, codec());
+                    let address = "127.0.0.1:8233".parse().unwrap();
+                    let local_addr = if isolated {
+                        ConnectedAddr::Isolated
+                    } else {
+                        ConnectedAddr::new_outbound_direct(address)
+                    };
+                    let remote_addr = ConnectedAddr::new_inbound_direct(address);
+                    let mut local_tracker =
+                        ActiveConnectionCounter::new_counter().track_connection();
+                    let mut remote_tracker =
+                        ActiveConnectionCounter::new_counter().track_connection();
+                    let (local_info, remote_info) = tokio::try_join!(
+                        negotiate_version(
+                            &mut local,
+                            &local_addr,
+                            &mut local_tracker,
+                            config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                        negotiate_version(
+                            &mut remote,
+                            &remote_addr,
+                            &mut remote_tracker,
+                            remote_config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                    )
+                    .expect("both peers support this network version");
+                    let bit = PeerServices::NODE_COMPACT_BLOCKS;
+                    assert_eq!(local_info.remote.services.contains(bit), remote_enabled);
+                    assert_eq!(
+                        remote_info.remote.services.contains(bit),
+                        local_enabled && !isolated
+                    );
+                    let negotiated = local_enabled && remote_enabled && !isolated;
+                    assert_eq!(local_info.early_block_relay, negotiated);
+                    assert_eq!(remote_info.early_block_relay, negotiated);
+                }
+            }
+        }
+    })
+    .await
+    .expect("bilateral handshakes must complete within the test deadline");
+}
+
+/// The version and sender address use the same capabilities for archive and pruned nodes.
+#[tokio::test]
+async fn local_version_advertises_configured_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for archive in [false, true] {
+            let mut config = Config {
+                listen_addr: "127.0.0.1:8233".parse().unwrap(),
+                ..Config::default()
+            };
+            if !archive {
+                config.local_services.remove(PeerServices::NODE_NETWORK);
+            }
+            // Compact block relay is on by default and advertised beside the storage services.
+            let expected = config.local_services | PeerServices::NODE_COMPACT_BLOCKS;
+            let listen_addr = config.listen_addr;
+            let codec = Codec::builder().for_network(&config.network).finish();
+            let handshake = Handshake::builder()
+                .with_config(config)
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .finish()
+                .expect("the config and inbound service are set");
+            let (local, remote) = tokio::io::duplex(65536);
+            let mut remote = Framed::new(remote, codec);
+            let (client, ()) = tokio::join!(
+                handshake.oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: ConnectedAddr::new_outbound_direct(listen_addr.into()),
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                }),
+                async {
+                    let Message::Version(mut version) = remote.next().await.unwrap().unwrap()
+                    else {
+                        panic!("the handshake starts with a version message");
+                    };
+                    assert_eq!(version.services, expected);
+                    assert_eq!(
+                        version.address_from,
+                        AddrInVersion::new(listen_addr, expected),
+                    );
+                    version.services.insert(PeerServices::NODE_NETWORK);
+                    version.nonce = Nonce::default();
+                    remote.send(Message::Version(version)).await.unwrap();
+                    remote.send(Message::Verack).await.unwrap();
+                    assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+                },
+            );
+            let _client = client.expect("the remote peer advertises archive service");
+        }
+    })
+    .await
+    .expect("service capability handshakes must finish within the test deadline");
+}
+
+/// Cached alternate listeners retain the service mask received in the version address.
+#[tokio::test]
+async fn alternate_listener_cache_preserves_advertised_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for services in [PeerServices::empty(), PeerServices::NODE_NETWORK] {
+            let network = Network::Mainnet;
+            let handshake = Handshake::builder()
+                .with_config(Config {
+                    network: network.clone(),
+                    ..Config::default()
+                })
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .finish()
+                .expect("the config and inbound service are set");
+            let (local, remote) = tokio::io::duplex(65536);
+            let _remote_peer =
+                AbortOnDropHandle::new(spawn_remote_peer(remote, &network, services));
+            let mut client = handshake
+                .oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: ConnectedAddr::new_inbound_direct(
+                        "127.0.0.2:41234".parse().unwrap(),
+                    ),
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                })
+                .await
+                .expect("inbound handshakes accept pruned peers");
+            // Keep the client alive: dropping it shuts down the connection before the reply.
+            let response = client.ready().await.unwrap().call(Request::Peers).await;
+            let Response::Peers(peers) = response.unwrap() else {
+                panic!("peer requests return cached listener addresses");
+            };
+
+            // Both the canonical listener and the TCP-IP-derived listener keep the services.
+            assert_eq!(peers.len(), 2);
+            for peer in peers {
+                assert_eq!(peer.services(), Some(services));
+            }
+        }
+    })
+    .await
+    .expect("cached listener requests must finish within the test deadline");
+}
+
+/// A rejected non-serving outbound peer must not have its advertised services recorded by the
+/// handshake; the crawler records a plain retryable failure instead.
 #[tokio::test]
 async fn rejected_non_serving_peer_is_not_recorded_with_services() {
     let _init_guard = zebra_test::init();

@@ -29,9 +29,9 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_block, any_transaction, any_utxo, block, block_and_size, block_header, block_info,
-    mined_transaction, spent_outputs_for_block, transaction_hashes_for_any_block,
-    transaction_hashes_for_block, unspent_utxo,
+    any_block, any_raw_transaction, any_transaction, any_utxo, block, block_and_size, block_header,
+    block_info, known_transaction, mined_transaction, raw_block, spent_outputs_for_block,
+    transaction_hashes_for_any_block, transaction_hashes_for_block, unspent_output, unspent_utxo,
 };
 
 #[cfg(feature = "indexer")]
@@ -43,8 +43,8 @@ pub use find::{
     non_finalized_state_contains_block_hash, tip, tip_with_value_balance,
 };
 pub use tree::{
-    any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_subtrees, ironwood_tree,
-    orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree,
+    any_ironwood_tree, any_orchard_tree, any_sapling_tree, fast_sync_tree_roots, ironwood_subtrees,
+    ironwood_tree, orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree,
 };
 
 #[cfg(test)]

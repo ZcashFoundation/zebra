@@ -66,6 +66,7 @@ fn config_round_trips_through_toml() {
     // A configured command round-trips.
     let configured = Config {
         block_notify_command: Some("touch /tmp/zebra-%s".to_string()),
+        zmqpubhashblock: Some("tcp://127.0.0.1:28332".to_string()),
     };
     let toml = toml::to_string(&configured).expect("config serializes");
     let parsed: Config = toml::from_str(&toml).expect("config deserializes");
@@ -77,6 +78,15 @@ fn config_rejects_unknown_fields() {
     // `deny_unknown_fields` guards against typos in the config file.
     let result: Result<Config, _> = toml::from_str("block_notify_comand = \"echo\"\n");
     assert!(result.is_err(), "unknown field should be rejected");
+}
+
+#[test]
+fn zmq_config_requires_feature() {
+    let mut config = Config::default();
+    assert!(config.zmqpubhashblock.is_none());
+    assert!(config.validate().is_ok());
+    config.zmqpubhashblock = Some("tcp://127.0.0.1:28332".to_string());
+    assert_eq!(config.validate().is_ok(), cfg!(feature = "zmq"));
 }
 
 /// Spawning a notify command runs the shell with `%s` substituted, detached from the caller, and

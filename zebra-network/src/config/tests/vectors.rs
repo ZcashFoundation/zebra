@@ -12,8 +12,40 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    types::PeerServices,
     Config,
 };
+
+#[test]
+fn compact_block_relay_configuration() {
+    assert!(Config::default().compact_block_relay);
+    let omitted: Config = toml::from_str("").unwrap();
+    assert!(omitted.compact_block_relay);
+    for enabled in [false, true] {
+        let config: Config = toml::from_str(&format!("compact_block_relay = {enabled}")).unwrap();
+        assert_eq!(config.compact_block_relay, enabled);
+        let serialized = toml::to_string(&config).unwrap();
+        let fields: toml::Value = toml::from_str(&serialized).unwrap();
+        assert_eq!(fields["compact_block_relay"].as_bool(), Some(enabled));
+        let restored: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.compact_block_relay, enabled);
+    }
+    assert!(toml::from_str::<Config>("experimental_early_block_relay = true").is_err());
+}
+
+#[test]
+fn local_services_are_runtime_only() {
+    let defaults = PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS;
+    let mut config = Config::default();
+    assert_eq!(config.local_services, defaults);
+    config.local_services.remove(PeerServices::NODE_NETWORK);
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(!serialized.contains("local_services"));
+    let restored: Config = toml::from_str(&serialized).unwrap();
+    assert_eq!(restored.local_services, defaults);
+    assert!(toml::from_str::<Config>("local_services = 0").is_err());
+}
 
 #[test]
 fn parse_config_listen_addr() {
@@ -733,4 +765,51 @@ fn initial_peer_metric_labels_only_name_default_seeders() {
     ] {
         assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
     }
+}
+
+/// Persistent targets keep operator order, deduplicate entries, and survive both config conversions.
+#[test]
+fn persistent_peers_round_trip_preserves_order_and_uniqueness() {
+    let config: Config = toml::from_str(
+        "persistent_peers = ['edge.internal:8233', '[::1]:18233', 'edge.internal:8233']",
+    )
+    .unwrap();
+    assert_eq!(
+        config
+            .persistent_peers
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["edge.internal:8233", "[::1]:18233"],
+    );
+    let restored: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(config, restored);
+    assert!(Config::default().persistent_peers.is_empty());
+}
+
+/// Targets must have usable ports and must not consume every ordinary outbound slot.
+#[test]
+fn persistent_peers_validate_targets_and_reserved_capacity() {
+    for peer in [
+        "edge",
+        "edge:0",
+        "edge:65536",
+        ":8233",
+        "[::1]",
+        "[::1]:0",
+        "edge/path:1",
+    ] {
+        assert!(toml::from_str::<Config>(&format!("persistent_peers = [{peer:?}]")).is_err());
+    }
+    let two: Config = toml::from_str(
+        "peerset_initial_target_size = 1\npersistent_peers = ['edge-a:1', 'edge-b:1']",
+    )
+    .unwrap();
+    assert_eq!(two.ordinary_outbound_connection_limit(), 1);
+    let full = "peerset_initial_target_size = 1\n\
+                persistent_peers = ['edge-a:1', 'edge-b:1', 'edge-c:1']";
+    assert!(toml::from_str::<Config>(full).is_err());
+    let mut programmatic = two;
+    programmatic.persistent_peers.insert("edge-c:1".into());
+    assert!(programmatic.validate_persistent_peers().is_err());
 }

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Serialize each transaction once when building verbose transaction objects for `getblock` verbosity 2 and 3 and verbose `getrawtransaction`, without changing their output.'
+time: 2026-11-17T12:16:44.000000000Z

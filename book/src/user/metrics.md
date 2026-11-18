@@ -228,6 +228,32 @@ failure, so it logs `waiting to restart sync` at INFO instead. The `chain update
 warning includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
 `oldest_in_flight_secs`.
 
+## Block writer metrics
+
+The state's block writer times the sub-phases of committing a semantically verified block to the
+non-finalized state.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `state.block_writer.phase.duration_seconds` | Summary | `phase` | Seconds spent in one sub-phase of a block commit, by `phase`. |
+
+| `phase` | Measures |
+| --- | --- |
+| `transparent_spend` | The transparent spend checks, including UTXO reads from the database. |
+| `anchor_reads` | The Sapling and Orchard anchor checks and the Sprout treestate reads. |
+| `pickup` | The wait for a rayon thread to start the job that copies the parent chain. |
+| `chain_clone` | Copying the parent chain before adding the block to it. |
+| `trees` | The note commitment tree appends and root calculations. |
+| `chain_updates` | The chain's other indexes and value pools. |
+| `history` | The history tree update, which needs the new tree roots. |
+
+The sub-phases are recorded once a block is committed, so rejected blocks have none. They are not
+recorded for block proposals, or for mined blocks committed from an already validated proposal. At
+startup they include blocks restored from the non-finalized state backup. The `trees` sub-phase runs
+in parallel with the sub-phases before `history`, so the sub-phases don't add up to the whole
+commit. A `zebra-rpc` trusted chain sync, which follows another node's chain without a block
+writer, also records the sub-phases.
+
 ## Memory metrics
 
 These metrics show how much memory `zebrad` uses, and how large the non-finalized state is.
@@ -290,3 +316,45 @@ is one of the default DNS seeders that Zebra ships, such as
 `dnsseed.z.cash:8233`. Every other entry, including a custom host name or an IP
 address and port, has the value `custom`, so private peer addresses don't reach
 metrics in Prometheus or [Sentry](tracing.md#sentry-production-monitoring).
+
+## Mining metrics
+
+Prometheus replaces dots in metric names with underscores. The RPC dashboard includes mining
+outcomes and mean build and announcement durations.
+Zebra exports duration metrics as Prometheus summaries, with quantiles plus `_sum` and `_count` series.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `rpc.submitblock.outcomes.total` | Counter | `outcome` | Submission results: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
+| `rpc.getblocktemplate.build.duration_seconds` | Summary | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | Summary | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
+| `sync.mined.block.announcement.outcomes.total` | Counter | `outcome` | Mined-block announcement attempts: `completed` or `failed`. |
+| `sync.mined.block.announcement.duration_seconds` | Summary | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
+
+Submission labels follow the zcashd-compatible result, with `accepted` representing JSON `null`.
+Operational JSON-RPC errors remain in `rpc.errors.total`; they are not consensus rejections.
+Some result variants are reserved by the response type and are not currently returned.
+
+Build timing covers the shared constructor used by background and fallback builders, not state or
+mempool reads, executor scheduling, long-poll waits, or cache hits. It records each completed build,
+including work superseded before a miner requests it.
+
+First-template latency uses the state's monotonic publication time, not the block header timestamp or
+the time the RPC notices a change. It records once per tip transition across RPC clones; repeated
+requests do not add samples. Tips with no served template and templates on uncommitted candidates are
+excluded. Returning to an earlier tip after a reorg starts a new interval. At startup, timing begins
+when the state publishes its loaded tip. The measurement ends when the RPC returns the template,
+before network delivery or pool job distribution; it also includes time until a miner requests work.
+
+Announcement completion means every selected connection completed its local write, not that peers
+received, validated, or relayed the block. Failed attempts include write errors and timeouts.
+Successful durations include peer-readiness waits. While waiting for ready peers, a bounded number of
+mined blocks are kept, and the oldest is replaced without a sample when that queue is full. A failed
+announcement is retried once; each attempt records its outcome, and a successful retry's duration
+starts when gossip first received the block. Early adverts before commit and ordinary tip adverts
+are excluded.
+No peer count is exported because the broadcast response does not carry one.
+
+Watch increases in rejected submissions and failed announcements alongside rising announcement
+durations. A successful local write is not proof against stale blocks, and a stalled attempt has no
+completion sample yet. These metrics do not measure network-wide propagation or stale-block rates.

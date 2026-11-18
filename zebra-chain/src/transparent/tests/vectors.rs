@@ -1,16 +1,55 @@
 use std::sync::Arc;
 
 use crate::{
+    amount::{Amount, MAX_MONEY},
     block::{Block, Height},
     parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto},
     transaction,
-    transparent::Input,
+    transparent::{Address, Input, Output, Script},
 };
 use hex::FromHex;
 use zcash_script::{opcode::Evaluable, pattern};
 
 use zebra_test::prelude::*;
+
+#[test]
+fn tex_addresses_require_bech32m() {
+    use crate::{parameters::NetworkKind, transparent::Address};
+
+    let _init_guard = zebra_test::init();
+
+    assert!("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9rtaywm"
+        .parse::<Address>()
+        .is_err());
+    assert!("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte"
+        .parse::<Address>()
+        .is_ok());
+
+    for (network_kind, hrp) in [
+        (
+            NetworkKind::Mainnet,
+            zcash_address::constants::mainnet::HRP_TEX_ADDRESS,
+        ),
+        (
+            NetworkKind::Testnet,
+            zcash_address::constants::testnet::HRP_TEX_ADDRESS,
+        ),
+        (
+            NetworkKind::Regtest,
+            zcash_address::constants::regtest::HRP_TEX_ADDRESS,
+        ),
+    ] {
+        let hrp = bech32::Hrp::parse(hrp).unwrap();
+        let bech32 = bech32::encode::<bech32::Bech32>(hrp, &[0; 20]).unwrap();
+        let bech32m = bech32::encode::<bech32::Bech32m>(hrp, &[0; 20]).unwrap();
+        assert!(bech32.parse::<Address>().is_err());
+        assert_eq!(
+            bech32m.parse::<Address>().unwrap(),
+            Address::from_tex(network_kind, [0; 20]),
+        );
+    }
+}
 
 /// Builds a serialized transparent input wire-format with a null prevout (coinbase) and the given
 /// `script_sig` bytes. Used to exercise [`Input::zcash_deserialize`] directly.
@@ -256,4 +295,80 @@ fn get_transparent_output_address_with_blocks_for_network(network: Network) {
     }
     // Make sure we didn't accidentally skip all vectors
     assert!(valid_addresses > 0);
+}
+
+#[test]
+fn output_address_edge_cases_without_allocating() {
+    let _init_guard = zebra_test::init();
+    let hash = [0x7e; 20]; // Disabled opcodes in pushed data are not executed.
+    for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
+        for address in [
+            Address::from_pub_key_hash(network.t_addr_kind(), hash),
+            Address::from_script_hash(network.t_addr_kind(), hash),
+        ] {
+            let script = address.script();
+            let bytes = script.as_raw_bytes();
+            let push_index = if bytes.len() == 25 { 2 } else { 1 };
+            let check = |script: &[u8], expected| {
+                for value in [Amount::new(0), Amount::new(MAX_MONEY)] {
+                    let output = Output::new(value, Script::new(script));
+                    assert_eq!(super::assert_output_address(&output, &network), expected);
+                }
+            };
+            check(bytes, Some(address));
+
+            // Empty and every truncated prefix, including incomplete payloads and missing suffixes.
+            for len in 0..bytes.len() {
+                check(&bytes[..len], None);
+            }
+            for opcode in [0x51, 0x7e, 0xff] {
+                check(&[bytes, &[opcode]].concat(), None);
+                check(&[&[opcode], bytes].concat(), None);
+            }
+
+            // Wrong envelope opcodes, including disabled opcodes.
+            for index in (0..=push_index).chain(push_index + 21..bytes.len()) {
+                for opcode in [0x00, 0x51, 0x7e, 0xff] {
+                    let mut wrong = bytes.to_vec();
+                    wrong[index] = opcode;
+                    check(&wrong, None);
+                }
+            }
+
+            // Correctly encoded pushes of the wrong payload length.
+            for length in [19u8, 21] {
+                let mut wrong = bytes[..push_index].to_vec();
+                wrong.push(length);
+                wrong.extend(vec![0x7e; usize::from(length)]);
+                wrong.extend_from_slice(&bytes[push_index + 21..]);
+                check(&wrong, None);
+            }
+
+            // Nonminimal PUSHDATA1/2/4 aliases must not become destinations.
+            for push in [&[0x4c, 20][..], &[0x4d, 20, 0], &[0x4e, 20, 0, 0, 0]] {
+                let nonminimal = [&bytes[..push_index], push, &bytes[push_index + 1..]].concat();
+                check(&nonminimal, None);
+            }
+
+            // Truncated length prefixes and declared payloads exceeding the remaining bytes.
+            for malformed in [
+                &[0x4c][..],
+                &[0x4c, 20],
+                &[0x4d],
+                &[0x4d, 20],
+                &[0x4d, 20, 0],
+                &[0x4e],
+                &[0x4e, 20, 0, 0],
+                &[0x4e, 0xff, 0xff, 0xff, 0xff],
+            ] {
+                check(&[&bytes[..push_index], malformed].concat(), None);
+            }
+
+            // Other standard script kinds: P2PK, multisig, and OP_RETURN.
+            let pubkey = [vec![0x21, 0x02], vec![1; 32]].concat();
+            check(&[&pubkey[..], &[0xac]].concat(), None);
+            check(&[&[0x51], &pubkey[..], &[0x51, 0xae]].concat(), None);
+            check(&[0x6a, 0x01, 0x00], None);
+        }
+    }
 }

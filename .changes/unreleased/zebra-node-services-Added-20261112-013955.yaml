@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: Added
+body: Added `compact::ReconstructedBlock`, a block with its serialized size and transaction hashes. Its constructor rejects blocks without transactions, sizes above the block limit, duplicate transactions, and transactions that do not match the header's Merkle root, and trusts that the size is exact ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)).
+time: 2026-11-12T01:39:55.590361078+01:00

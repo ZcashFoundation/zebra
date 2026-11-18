@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Follow [ZIP 2009](https://zips.z.cash/zip-2009) by requiring the original ZIP 317 fees until next-block height 3,590,000 on Mainnet or 4,465,026 on public Testnet. Transactions paying the reduced 1,000-zatoshi fee per logical action, which current released versions accept, stop relaying and mining until those activation heights. Reduced fees and higher mining weights apply from height 1 on Regtest and custom testnets.
+time: 2026-11-04T06:08:32.582997111+01:00

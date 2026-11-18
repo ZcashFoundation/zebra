@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Flush proof and signature batches after 5 ms of idle input while preserving the 100 ms maximum batch latency ([#11673](https://github.com/ZcashFoundation/zebra/pull/11673)).
+time: 2026-10-14T10:43:00.524152966+02:00

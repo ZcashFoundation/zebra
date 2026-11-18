@@ -34,6 +34,10 @@ pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
 /// How long we wait for chain tip updates before skipping them.
 pub const CHAIN_TIP_UPDATE_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
+/// The mining candidate lifetime of test states: long enough that only commits, rejections, or
+/// withdrawal end their candidates.
+pub(crate) const TEST_MINING_CANDIDATE_LIFETIME: Duration = Duration::from_secs(60);
+
 #[derive(Debug)]
 pub struct PreparedChainTree {
     chain: Arc<SummaryDebug<Vec<SemanticallyVerifiedBlock>>>,
@@ -231,6 +235,41 @@ pub async fn populated_state_with_debug(
     LatestChainTip,
     ChainTipChange,
 ) {
+    new_populated_state(
+        blocks,
+        network,
+        debug_skip_format_upgrades,
+        TEST_MINING_CANDIDATE_LIFETIME,
+    )
+    .await
+}
+
+/// Like [`populated_state`], with mining candidates that compute and stay published for at most
+/// `mining_candidate_lifetime`.
+pub async fn populated_state_with_mining_candidate_lifetime(
+    blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: &Network,
+    mining_candidate_lifetime: Duration,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    new_populated_state(blocks, network, false, mining_candidate_lifetime).await
+}
+
+async fn new_populated_state(
+    blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: &Network,
+    debug_skip_format_upgrades: bool,
+    mining_candidate_lifetime: Duration,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
     let blocks: Vec<CheckpointVerifiedBlock> = blocks.into_iter().map(Into::into).collect();
     let tip_height = blocks.iter().map(|block| block.height).max();
     let requests = blocks
@@ -239,14 +278,16 @@ pub async fn populated_state_with_debug(
 
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
-    let (state, read_state, latest_chain_tip, mut chain_tip_change) = StateService::new_with_debug(
-        Config::ephemeral(),
-        network,
-        Height::MAX,
-        0,
-        debug_skip_format_upgrades,
-    )
-    .await;
+    let (mut state, read_state, latest_chain_tip, mut chain_tip_change) =
+        StateService::new_with_debug(
+            Config::ephemeral(),
+            network,
+            Height::MAX,
+            0,
+            debug_skip_format_upgrades,
+        )
+        .await;
+    state.mining_candidate_lifetime = mining_candidate_lifetime;
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();

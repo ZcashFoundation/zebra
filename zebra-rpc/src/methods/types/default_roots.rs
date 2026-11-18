@@ -44,7 +44,7 @@ pub struct DefaultRoots {
     pub(crate) auth_data_root: AuthDataRoot,
 
     /// The block commitment for the new block's header.
-    /// This hash covers `chain_history_root` and `auth_data_root`.
+    /// Before NU5, this is `chain_history_root`; from NU5, it also commits to `auth_data_root`.
     ///
     /// `merkle_root` has its own field in the block header.
     #[serde(rename = "blockcommitmentshash")]
@@ -88,11 +88,8 @@ impl DefaultRoots {
                 .collect(),
             chain_history_root,
             auth_data_root,
-            block_commitments_hash: if NetworkUpgrade::current(net, height)
-                == NetworkUpgrade::Heartwood
-                && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-            {
-                block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+            block_commitments_hash: if NetworkUpgrade::current(net, height) < NetworkUpgrade::Nu5 {
+                <[u8; 32]>::from(chain_history_root).into()
             } else {
                 ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                     &chain_history_root,

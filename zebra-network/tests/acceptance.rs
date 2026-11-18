@@ -24,6 +24,7 @@ fn connection_info_types_are_public() {
     // Each struct field must have its type explicitly listed here
     let connected_addr: ConnectedAddr = ConnectedAddr::OutboundDirect { addr: fake_addr };
     let negotiated_version: Version = fake_version;
+    let early_block_relay: bool = false;
 
     let remote = VersionMessage {
         version: fake_version,
@@ -41,5 +42,6 @@ fn connection_info_types_are_public() {
         connected_addr,
         remote,
         negotiated_version,
+        early_block_relay,
     });
 }

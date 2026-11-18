@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblock`, `getblockheader`, and lightwalletd compact blocks report stored tree sizes and roots for fast-synced heights. `z_gettreestate`, lightwalletd `GetTreeState`, and `GetLatestTreeState` return an explicit "tree state unavailable: fast-synced height" error rather than missing or empty trees at those heights.'
+time: 2026-11-12T02:14:28.508621682+01:00

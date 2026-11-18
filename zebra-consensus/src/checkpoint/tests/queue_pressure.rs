@@ -17,11 +17,11 @@ async fn replacement_at_byte_limit_preserves_other_requests() -> Result<(), Repo
     )
     .map_err(|e| eyre!(e))?;
 
-    let mut original = verifier.queue_block(chain[4].clone())?;
-    let mut unrelated = verifier.queue_block(chain[6].clone())?;
+    let mut original = verifier.queue_block(chain[4].clone(), None)?;
+    let mut unrelated = verifier.queue_block(chain[6].clone(), None)?;
     verifier.max_queued_bytes = verifier.queued_bytes;
     let replacement = Arc::new((*chain[4]).clone());
-    let mut replacement_response = verifier.queue_block(replacement.clone())?;
+    let mut replacement_response = verifier.queue_block(replacement.clone(), None)?;
 
     assert!(matches!(
         original.try_recv(),
@@ -56,7 +56,7 @@ async fn recovered_children_use_bounded_checkpoint_admission() -> Result<(), Rep
     )
     .map_err(|e| eyre!(e))?;
 
-    let mut recovered = verifier.queue_block(chain[4].clone())?;
+    let mut recovered = verifier.queue_block(chain[4].clone(), None)?;
     let child = verifier
         .queued
         .remove(&block::Height(4))
@@ -64,7 +64,7 @@ async fn recovered_children_use_bounded_checkpoint_admission() -> Result<(), Rep
         .pop()
         .expect("the height contains the child");
     verifier.queued_bytes -= child.bytes;
-    let mut later = verifier.queue_block(chain[6].clone())?;
+    let mut later = verifier.queue_block(chain[6].clone(), None)?;
     verifier.max_queued_bytes = verifier.queued_bytes;
     verifier.requeue_child(child);
     assert!(verifier.queued_bytes <= verifier.max_queued_bytes);
@@ -96,10 +96,10 @@ async fn recovery_tip_and_drop_release_queued_bodies() -> Result<(), Report> {
 
     let earlier = Arc::new((*chain[4]).clone());
     let earlier_body = Arc::downgrade(&earlier);
-    let mut earlier_response = verifier.queue_block(earlier)?;
+    let mut earlier_response = verifier.queue_block(earlier, None)?;
     let later = Arc::new((*chain[6]).clone());
     let later_body = Arc::downgrade(&later);
-    let mut later_response = verifier.queue_block(later)?;
+    let mut later_response = verifier.queue_block(later, None)?;
     let later_bytes = verifier.queued[&block::Height(6)][0].bytes;
 
     verifier.reset_progress(Some(checkpoints[1]));

@@ -55,6 +55,9 @@ pub struct Chain {
     /// The internal state of this chain.
     inner: ChainInner,
 
+    /// In-memory tie-break preference for this tip, cleared when extending or forking the chain.
+    pub(super) precious_rank: Option<u64>,
+
     // Diagnostics
     //
     /// The last height this chain forked at. Diagnostics only.
@@ -87,6 +90,12 @@ pub struct Chain {
     ///
     /// It is not checked for equality.
     pub(crate) index_removals_since_rebuild: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many chains this thread has forked with [`Chain::fork`].
+    pub(super) static FORK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Spending transaction id type when the `indexer` feature is selected.
@@ -329,6 +338,7 @@ impl Chain {
         let mut chain = Self {
             network: network.clone(),
             inner,
+            precious_rank: None,
             last_fork_height: None,
             detached_index_entries: Default::default(),
             index_removals_since_rebuild: 0,
@@ -355,7 +365,7 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn eq_internal_state(&self, other: &Chain) -> bool {
-        self.inner == other.inner
+        self.inner == other.inner && self.precious_rank == other.precious_rank
     }
 
     /// Returns the last fork height if that height is still in the non-finalized state.
@@ -395,8 +405,41 @@ impl Chain {
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, Arc::new(block));
+        self.precious_rank = None;
 
         Ok(self)
+    }
+
+    /// Pushes `block` onto this chain as the new tip, with its note commitment `trees` and
+    /// `history_tree`, which were computed in parallel with the rest of the block's updates.
+    ///
+    /// The chain must already have the block's other updates, from
+    /// [`Chain::update_chain_tip_with_block_except_trees`].
+    ///
+    /// # Panics
+    ///
+    /// If the chain doesn't have the block's other updates.
+    #[instrument(level = "debug", skip_all, fields(block = %block.block))]
+    pub(crate) fn push_with_trees(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+        trees: NoteCommitmentTrees,
+        history_tree: Arc<HistoryTree>,
+    ) -> Chain {
+        assert_eq!(
+            self.height_by_hash.get(&block.hash),
+            Some(&block.height),
+            "the chain must already have the block's other updates",
+        );
+
+        self.add_note_commitment_trees(block.height, trees);
+        self.add_history_tree(block.height, history_tree);
+
+        tracing::debug!(block = %block.block, "adding block to chain");
+        self.blocks.insert(block.height, Arc::new(block));
+        self.precious_rank = None;
+
+        self
     }
 
     /// Pops the lowest height block of the non-finalized portion of a chain,
@@ -478,7 +521,11 @@ impl Chain {
             return None;
         }
 
+        #[cfg(test)]
+        FORK_COUNT.with(|count| count.set(count.get() + 1));
+
         let mut forked = self.clone();
+        forked.precious_rank = None;
 
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
@@ -1423,6 +1470,58 @@ impl Chain {
         }
     }
 
+    /// Returns the note commitment trees of the tip of this [`Chain`], with the subtrees completed
+    /// at the tip.
+    pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
+            ironwood: self.ironwood_note_commitment_tree_for_tip(),
+            ironwood_subtree: self.ironwood_subtree_for_tip(),
+        }
+    }
+
+    /// Adds the note commitment trees in `nct` to the tree and anchor indexes at `height`, and
+    /// their completed subtrees to the subtree indexes.
+    fn add_note_commitment_trees(&mut self, height: Height, nct: NoteCommitmentTrees) {
+        self.add_sprout_tree_and_anchor(height, nct.sprout);
+        self.add_sapling_tree_and_anchor(height, nct.sapling);
+        self.add_orchard_tree_and_anchor(height, nct.orchard);
+        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
+
+        if let Some(subtree) = nct.sapling_subtree {
+            self.sapling_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.orchard_subtree {
+            self.orchard_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.ironwood_subtree {
+            self.ironwood_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+    }
+
+    /// Returns `history_tree` with `block` pushed onto it, committing to the note commitment tree
+    /// `roots` after `block`.
+    pub(crate) fn history_tree_with_block(
+        network: &Network,
+        mut history_tree: Arc<HistoryTree>,
+        block: Arc<block::Block>,
+        roots: BlockCommitmentTreeRoots,
+    ) -> Result<Arc<HistoryTree>, ValidateContextError> {
+        let history_tree_mut = Arc::make_mut(&mut history_tree);
+        history_tree_mut
+            .push(network, block, roots)
+            .map_err(Arc::new)?;
+
+        Ok(history_tree)
+    }
+
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
@@ -1736,7 +1835,7 @@ impl Chain {
     }
 
     /// Returns the number of entries in the transaction, spend, and nullifier indexes.
-    fn shared_map_entry_count(&self) -> usize {
+    pub(super) fn shared_map_entry_count(&self) -> usize {
         self.tx_loc_by_hash.len()
             + self.spent_utxos.len()
             + self.sprout_nullifiers.len()
@@ -1998,15 +2097,7 @@ impl Chain {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
-        let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree_for_tip(),
-            sapling: self.sapling_note_commitment_tree_for_tip(),
-            sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_note_commitment_tree_for_tip(),
-            orchard_subtree: self.orchard_subtree_for_tip(),
-            ironwood: self.ironwood_note_commitment_tree_for_tip(),
-            ironwood_subtree: self.ironwood_subtree_for_tip(),
-        };
+        let mut nct = self.note_commitment_trees_for_tip();
 
         let mut tree_result = None;
         let mut partial_result = None;
@@ -2015,55 +2106,36 @@ impl Chain {
         // - sprout, sapling, and orchard tree updates and root calculations
         // - the rest of the Chain updates
         rayon::in_place_scope_fifo(|scope| {
-            // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
-
             scope.spawn_fifo(|_scope| {
                 partial_result =
                     Some(self.update_chain_tip_with_block_except_trees(contextually_valid));
             });
+
+            // Spawns a separate rayon task for each note commitment tree
+            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
         });
 
         tree_result.expect("scope has already finished")?;
         partial_result.expect("scope has already finished")?;
 
         // Update the note commitment trees in the chain.
-        self.add_sprout_tree_and_anchor(height, nct.sprout);
-        self.add_sapling_tree_and_anchor(height, nct.sapling);
-        self.add_orchard_tree_and_anchor(height, nct.orchard);
-        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
-
-        if let Some(subtree) = nct.sapling_subtree {
-            self.sapling_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.orchard_subtree {
-            self.orchard_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.ironwood_subtree {
-            self.ironwood_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
+        self.add_note_commitment_trees(height, nct);
 
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let mut history_tree = self.history_block_commitment_tree();
-        let history_tree_mut = Arc::make_mut(&mut history_tree);
-        history_tree_mut
-            .push(
-                &self.network,
-                contextually_valid.block.clone(),
-                BlockCommitmentTreeRoots {
-                    sapling: &sapling_root,
-                    orchard: &orchard_root,
-                    ironwood: &ironwood_root,
-                },
-            )
-            .map_err(Arc::new)?;
+        let history_tree = Self::history_tree_with_block(
+            &self.network,
+            self.history_block_commitment_tree(),
+            contextually_valid.block.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &ironwood_root,
+            },
+        )?;
 
         self.add_history_tree(height, history_tree);
 
@@ -2079,7 +2151,7 @@ impl Chain {
         fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
     )]
     #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with_block_except_trees(
+    pub(super) fn update_chain_tip_with_block_except_trees(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
@@ -2490,11 +2562,12 @@ impl Ord for Chain {
     /// Chain order for the [`NonFinalizedState`][1]'s `chain_set`.
     ///
     /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`].
-    /// Ties are broken by preferring the chain whose tip block was received
-    /// first (the earlier [`received_time`][3] stamp set by the block verifier),
-    /// implementing the consensus rule
-    /// quoted below. Sibling blocks on Zcash always have equal work (`nBits`
-    /// is fully determined by their ancestors), so without first-received
+    /// Equal-work ties first prefer the tip most recently marked by `preciousblock`, treating
+    /// it as received before other tips. This local preference is not persisted and is cleared
+    /// when the chain is extended or forked; it never overrides cumulative work.
+    /// Remaining ties prefer the earlier [`received_time`][3] stamp set by the block verifier,
+    /// implementing the consensus rule quoted below. Sibling blocks on Zcash always have equal work
+    /// (`nBits` is fully determined by their ancestors), so without first-received
     /// preference, an already-adopted tip could be displaced by an equal-work
     /// sibling arriving arbitrarily later.
     ///
@@ -2530,13 +2603,12 @@ impl Ord for Chain {
     /// interior mutability. The tip block's `received_time` is set by the block verifier
     /// before the block is pushed onto a chain, and is never modified afterwards.
     ///
-    /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
-    /// the tip hash match. Two chains with the same tip hash share the stored tip
-    /// block (and therefore its receipt time), so they always compare equal. The
-    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
-    /// attempt to insert a chain that compares equal to an existing entry is a
-    /// no-op rather than a process-fatal panic. Callers that need to replace
-    /// such a chain must remove the existing entry first.
+    /// Precious ranks must only change after removing a chain from
+    /// [`NonFinalizedState::chain_set`][2], followed by reinsertion.
+    ///
+    /// `cmp` returns [`Ordering::Equal`] only when cumulative work, precious rank,
+    /// receipt time, and tip hash match. Inserting an equal chain is a no-op;
+    /// callers replacing an existing chain must remove it first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
@@ -2544,6 +2616,7 @@ impl Ord for Chain {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cumulative_work
             .cmp(&other.partial_cumulative_work)
+            .then_with(|| self.precious_rank.cmp(&other.precious_rank))
             .then_with(|| {
                 let self_tip = self
                     .tip_block()
@@ -2572,11 +2645,8 @@ impl PartialOrd for Chain {
 }
 
 impl PartialEq for Chain {
-    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
-    /// work, then the tip block's receipt time, then the tip block hash.
-    ///
-    /// Two chains with the same cumulative work and tip hash are equal; the
-    /// `chain_set` uses this to keep tip hashes unique.
+    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of work,
+    /// precious rank, the tip block's receipt time, then the tip block hash.
     ///
     /// [1]: super::NonFinalizedState::chain_set
     fn eq(&self, other: &Self) -> bool {

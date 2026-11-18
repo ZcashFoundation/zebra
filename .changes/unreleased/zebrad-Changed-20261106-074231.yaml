@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Peers that send a block over the maximum block size are now penalized like peers that send other invalid blocks ([#12289](https://github.com/ZcashFoundation/zebra/pull/12289)).
+time: 2026-11-06T07:42:31.3477964+01:00

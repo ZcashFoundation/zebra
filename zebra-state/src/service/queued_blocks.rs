@@ -16,23 +16,27 @@ use crate::{
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
     request::new_outputs_retained_bytes,
-    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
-    SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
+    KnownBlock, MinedBlockNotifications, NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// A queued checkpoint verified block, and its corresponding [`Result`] channel.
+/// A queued checkpoint-verified block, its result channel, and optional mined notifications.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
+    Option<MinedBlockNotifications>,
 );
 
-/// A queued semantically verified block, and its corresponding [`Result`] channel.
+/// A queued semantic block, its result channel, optional cached verdict, and mined notifications.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
+    // During queueing, the first field owns the cached result's new outputs.
+    Option<Box<ContextuallyVerifiedBlock>>,
+    Option<MinedBlockNotifications>,
 );
 
 /// The maximum number of blocks in a [`QueuedBlocks`].
@@ -81,6 +85,8 @@ impl KnownUtxos {
             *owners -= 1;
             if *owners == 0 {
                 self.0.remove(outpoint);
+                // Removed payload charges must not leave the cache's high-water allocation behind.
+                self.0.shrink_to_fit();
             }
         }
     }
@@ -116,8 +122,13 @@ impl QueuedBlocks {
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        // Count the block, and the copy of its outputs in `known_utxos`.
-        let bytes = new.0.retained_bytes() + new_outputs_retained_bytes(&new.0.new_outputs);
+        // Count the block, the copy of its outputs in `known_utxos`, and any cached verdict.
+        let bytes = new.0.retained_bytes()
+            + new_outputs_retained_bytes(&new.0.new_outputs)
+            + new
+                .2
+                .as_ref()
+                .map_or(0, |contextual| contextual.contextual_data_retained_bytes());
         self.queued_bytes += bytes;
         self.blocks.insert(new_hash, (new, bytes));
         self.by_height
@@ -150,11 +161,15 @@ impl QueuedBlocks {
                 .rev()
                 .flatten()
                 .find(|hash| {
-                    self.blocks[*hash].0 .1.is_closed() && !self.by_parent.contains_key(*hash)
+                    let (queued, _) = &self.blocks[*hash];
+                    // The state owns a mined block's notifications after its caller drops.
+                    queued.1.is_closed()
+                        && queued.3.is_none()
+                        && !self.by_parent.contains_key(*hash)
                 })
                 .or_else(|| self.by_height.values().next_back()?.iter().next())
                 .expect("a queue over its limits has blocks");
-            let (_block, rsp_tx) = self.remove(&hash);
+            let (_block, rsp_tx, _, _) = self.remove(&hash);
 
             // The caller might have stopped waiting for the block.
             let _ = rsp_tx.send(Err(CommitBlockError::OrphanQueueFull.into()));
@@ -243,7 +258,7 @@ impl QueuedBlocks {
             }
 
             for hash in lowest.remove() {
-                let (expired_block, expired_sender) = self.remove(&hash);
+                let (expired_block, expired_sender, _, _) = self.remove(&hash);
 
                 // we don't care if the receiver was dropped
                 let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
@@ -357,12 +372,14 @@ impl SentHashes {
     /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
     /// is available in the state.
     ///
-    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
-    /// for efficient pruning.
+    /// Blocks may be added in any height order.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
         self.add_outputs(block.hash, block.height, block.new_outputs.iter());
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     /// Stores borrowed block metadata without materializing another verified block.
     fn add_outputs<'a>(
         &mut self,
@@ -381,8 +398,7 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((hash, height));
-        self.insert_sent(hash, outpoints);
+        self.insert_sent(hash, height, outpoints);
 
         self.update_metrics_for_block(height);
     }
@@ -393,8 +409,7 @@ impl SentHashes {
     /// Used for checkpoint verified blocks close to the final checkpoint, so the semantic block verifier can look up
     /// their UTXOs.
     ///
-    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
-    /// for efficient pruning.
+    /// Blocks may be added in any height order.
     ///
     /// For more details see `add()`.
     pub fn add_finalized(&mut self, block: &CheckpointVerifiedBlock) {
@@ -410,14 +425,27 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((block.hash, block.height));
-        self.insert_sent(block.hash, outpoints);
+        self.insert_sent(block.hash, block.height, outpoints);
 
         self.update_metrics_for_block(block.height);
     }
 
-    /// Records `hash` as sent, releasing the outpoints of any earlier entry for the same hash.
-    fn insert_sent(&mut self, hash: block::Hash, outpoints: Vec<transparent::OutPoint>) {
+    /// Records `hash` in a height-ordered batch, releasing its earlier outpoint ownership.
+    fn insert_sent(
+        &mut self,
+        hash: block::Hash,
+        height: block::Height,
+        outpoints: Vec<transparent::OutPoint>,
+    ) {
+        if self
+            .curr_buf
+            .back()
+            .is_some_and(|&(_, last_height)| last_height > height)
+        {
+            self.finish_batch();
+        }
+        self.curr_buf.push_back((hash, height));
+
         if let Some(old_outpoints) = self.sent.insert(hash, outpoints) {
             for outpoint in &old_outpoints {
                 self.known_utxos.remove(outpoint);
@@ -455,9 +483,6 @@ impl SentHashes {
     /// Prunes sent blocks at or below `height_bound`.
     ///
     /// Finishes the batch if `finish_batch()` hasn't been called already.
-    ///
-    /// Assumes that blocks will be added in order of their heights between each `finish_batch()` call,
-    /// so that blocks can be efficiently and reliably removed by height.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
         self.finish_batch();
 

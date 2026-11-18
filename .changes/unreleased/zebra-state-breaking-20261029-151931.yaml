@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `Request::PreciousBlock` and `Response::Precious` to prefer an equal-work tip until it changes or the node restarts; exhaustive request and response matches must handle the new variants.
+time: 2026-10-29T15:19:31.743607766-05:00

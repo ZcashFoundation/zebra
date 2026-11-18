@@ -108,10 +108,24 @@ pub fn standard_verified_unmined_tx_strategy() -> BoxedStrategy<VerifiedUnminedT
             standardize_transaction(&mut transaction);
 
             let unmined_tx = UnminedTx::from(std::sync::Arc::new(transaction));
-            let miner_fee = unmined_tx.conventional_fee;
+            let network = zebra_chain::parameters::Network::Mainnet;
+            let height = zebra_chain::block::Height(0);
+            let miner_fee = zebra_chain::transaction::zip317::conventional_fee(
+                unmined_tx.conventional_actions,
+                &network,
+                height,
+            );
 
-            VerifiedUnminedTx::new(unmined_tx, miner_fee, 0, 0, std::sync::Arc::new(vec![]))
-                .expect("standardized transaction should pass ZIP-317 checks")
+            VerifiedUnminedTx::new(
+                unmined_tx,
+                miner_fee,
+                0,
+                0,
+                std::sync::Arc::new(vec![]),
+                &network,
+                height,
+            )
+            .expect("standardized transaction should pass ZIP-317 checks")
         })
         .boxed()
 }

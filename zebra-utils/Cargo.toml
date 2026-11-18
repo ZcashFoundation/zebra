@@ -32,8 +32,17 @@ name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
 
+[[bin]]
+name = "miner-poll"
+path = "src/bin/miner-poll/main.rs"
+required-features = ["miner-poll"]
+
+[[bin]]
+name = "zebra-embedded-trees"
+path = "src/bin/zebra-embedded-trees/main.rs"
+
 [features]
-default = []
+default = ["miner-poll"]
 
 # Each binary has a feature that activates the extra dependencies it needs
 
@@ -46,6 +55,11 @@ zebra-checkpoints = [
 
 search-issue-refs = [
     "regex",
+    "reqwest",
+    "tokio"
+]
+
+miner-poll = [
     "reqwest",
     "tokio"
 ]
@@ -66,16 +80,29 @@ zebra-chain = { path = "../zebra-chain", version = "16.0.0" }
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "20.0.0" }
 
+# These crates are needed for the zebra-embedded-trees binary
+zebra-state = { path = "../zebra-state", version = "17.0.0" }
+
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { workspace = true, optional = true }
+
+# These crates are needed for the search-issue-refs and miner-poll binaries
 # Avoid default openssl dependency to reduce the dependency tree and security alerts.
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 
-# These crates are needed for the zebra-checkpoints and search-issue-refs binaries
+# These crates are needed for the zebra-checkpoints, search-issue-refs, and miner-poll binaries
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"], optional = true }
+
+[dev-dependencies]
+sapling-crypto = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true }
+
+zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test" }
 
 [lints]
 workspace = true

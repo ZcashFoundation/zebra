@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `BlockHeader` to carry a retained header and its hash-bound best-chain successor in state responses.
+time: 2026-11-05T06:44:20.922448654+01:00

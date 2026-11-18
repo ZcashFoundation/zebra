@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: Changed
+body: '`commands::StartCmd` supervises `zebra_consensus::router::BackgroundTaskHandles::checkpoint_commit_handle`, so a checkpoint commit panic stops `zebrad start` even after the requesting verifier future was cancelled ([#12287](https://github.com/ZcashFoundation/zebra/pull/12287)).'
+time: 2026-11-17T11:18:12.779816157+01:00

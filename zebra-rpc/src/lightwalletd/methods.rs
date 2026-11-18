@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
 };
 
-use futures::{future::OptionFuture, Stream};
+use futures::{future::OptionFuture, Stream, StreamExt};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tower::util::ServiceExt;
@@ -19,7 +19,7 @@ use zebra_chain::{
     transaction, transparent,
 };
 use zebra_node_services::mempool::{self, MempoolService};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
+use zebra_state::{BlockReadError, HashOrHeight, ReadRequest, ReadResponse, ReadState};
 
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
@@ -178,11 +178,7 @@ where
             }
             Ok(ReadResponse::AnyChainTransaction(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => {
-                return Err(Status::internal(format!(
-                    "failed to read transaction: {error}"
-                )));
-            }
+            Err(error) => return Err(body_read_error_to_status(error, "transaction")),
         };
 
         let mempool_response = self
@@ -421,7 +417,7 @@ where
             .await
             .map_err(rpc_error_to_status)?;
 
-        Ok(Response::new(treestate_to_proto(&self.network, treestate)))
+        Ok(Response::new(treestate_to_proto(&self.network, treestate)?))
     }
 
     async fn get_latest_tree_state(
@@ -441,7 +437,7 @@ where
             .await
             .map_err(rpc_error_to_status)?;
 
-        Ok(Response::new(treestate_to_proto(&self.network, treestate)))
+        Ok(Response::new(treestate_to_proto(&self.network, treestate)?))
     }
 
     async fn get_subtree_roots(
@@ -648,9 +644,7 @@ async fn compact_block<ReadStateService: ReadState>(
         Ok(ReadResponse::Block(Some(block))) => block,
         Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => {
-            return Err(Status::internal(format!("failed to read block: {error}")));
-        }
+        Err(error) => return Err(body_read_error_to_status(error, "block")),
     };
 
     let hash = block.hash();
@@ -677,21 +671,18 @@ async fn compact_block<ReadStateService: ReadState>(
             .clone()
             .oneshot(ReadRequest::OrchardTree(hash.into()));
         let ironwood_request: OptionFuture<_> = is_ironwood_active
-            .then(|| read_state.oneshot(ReadRequest::IronwoodTree(hash.into())))
+            .then(|| {
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::IronwoodTree(hash.into()))
+            })
             .into();
 
         let (sapling_response, orchard_response, ironwood_response) =
             futures::join!(sapling_request, orchard_request, ironwood_request);
 
-        // A missing tree is not an empty tree: serving zero would tell the client no
-        // notes exist as of this block, corrupting every position derived from it.
         let sapling_tree_size = match sapling_response {
-            Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::SaplingTree(None)) => {
-                return Err(Status::aborted(
-                    "sapling tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::SaplingTree(tree)) => tree.map(|tree| tree.count()),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -701,12 +692,7 @@ async fn compact_block<ReadStateService: ReadState>(
         };
 
         let orchard_tree_size = match orchard_response {
-            Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::OrchardTree(None)) => {
-                return Err(Status::aborted(
-                    "orchard tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::OrchardTree(tree)) => tree.map(|tree| tree.count()),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -717,13 +703,8 @@ async fn compact_block<ReadStateService: ReadState>(
 
         let ironwood_tree_size = match ironwood_response {
             // The read is only skipped before NU6.3, where zero is the correct size.
-            None => 0,
-            Some(Ok(ReadResponse::IronwoodTree(Some(tree)))) => tree.count(),
-            Some(Ok(ReadResponse::IronwoodTree(None))) => {
-                return Err(Status::aborted(
-                    "ironwood tree not found for this block, it may have been reorged",
-                ));
-            }
+            None => Some(0),
+            Some(Ok(ReadResponse::IronwoodTree(tree))) => tree.map(|tree| tree.count()),
             Some(Ok(_)) => unreachable!("unexpected response type from ReadStateService"),
             Some(Err(error)) => {
                 return Err(Status::internal(format!(
@@ -732,7 +713,31 @@ async fn compact_block<ReadStateService: ReadState>(
             }
         };
 
-        (sapling_tree_size, orchard_tree_size, ironwood_tree_size)
+        match (sapling_tree_size, orchard_tree_size, ironwood_tree_size) {
+            (Some(sapling), Some(orchard), Some(ironwood)) => (sapling, orchard, ironwood),
+            // Fast checkpoint sync stores only the sizes of the trees it skipped.
+            _ => match read_state
+                .oneshot(ReadRequest::FastSyncTreeRoots(hash.into()))
+                .await
+            {
+                Ok(ReadResponse::FastSyncTreeRoots(Some(roots))) => {
+                    (roots.sapling_size, roots.orchard_size, roots.ironwood_size)
+                }
+                // A missing tree is not an empty tree: serving zero would tell the client no
+                // notes exist as of this block, corrupting every position derived from it.
+                Ok(ReadResponse::FastSyncTreeRoots(None)) => {
+                    return Err(Status::aborted(
+                        "note commitment tree not found for this block, it may have been reorged",
+                    ));
+                }
+                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                Err(error) => {
+                    return Err(Status::internal(format!(
+                        "failed to read fast sync tree sizes: {error}"
+                    )));
+                }
+            },
+        }
     };
 
     Ok(CompactBlock::from_block(
@@ -770,8 +775,7 @@ fn block_range_stream<ReadStateService: ReadState>(
     let start = range_height(block_range.start, "start block")?;
     let end = range_height(block_range.end, "end block")?;
 
-    let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-    let response_stream = ReceiverStream::new(response_receiver);
+    let (response_sender, terminal_sender, response_stream) = response_channel();
 
     tokio::spawn(async move {
         let heights: Box<dyn Iterator<Item = u32> + Send> = if start <= end {
@@ -789,9 +793,16 @@ fn block_range_stream<ReadStateService: ReadState>(
                 nullifiers_only,
             )
             .await;
-            let is_err = response.is_err();
-
-            if !send_bounded(&response_sender, response).await || is_err {
+            let response = match response {
+                Ok(response) => response,
+                Err(status) => {
+                    let _ = terminal_sender.send(status);
+                    return;
+                }
+            };
+            if !send_bounded(&response_sender, Ok(response)).await {
+                let _ =
+                    terminal_sender.send(Status::deadline_exceeded("stream consumer timed out"));
                 return;
             }
         }
@@ -840,8 +851,7 @@ where
         .await
         .map_err(rpc_arg_error_to_status)?;
 
-    let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-    let response_stream = ReceiverStream::new(response_receiver);
+    let (response_sender, terminal_sender, response_stream) = response_channel();
 
     tokio::spawn(async move {
         for txid in txids {
@@ -851,9 +861,16 @@ where
                     "transaction ids must be valid hex strings",
                 )),
             };
-            let is_err = response.is_err();
-
-            if !send_bounded(&response_sender, response).await || is_err {
+            let response = match response {
+                Ok(response) => response,
+                Err(status) => {
+                    let _ = terminal_sender.send(status);
+                    return;
+                }
+            };
+            if !send_bounded(&response_sender, Ok(response)).await {
+                let _ =
+                    terminal_sender.send(Status::deadline_exceeded("stream consumer timed out"));
                 return;
             }
         }
@@ -878,9 +895,7 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
         }),
         Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => Err(Status::internal(format!(
-            "failed to read transaction: {error}"
-        ))),
+        Err(error) => Err(body_read_error_to_status(error, "transaction")),
     }
 }
 
@@ -1087,6 +1102,24 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
         .collect()
 }
 
+/// Keeps a terminal error outside the bounded data queue, without parking a producer on a
+/// backpressured client. Buffered data is delivered before the terminal error.
+pub(super) fn response_channel<T: Send + 'static>() -> (
+    tokio::sync::mpsc::Sender<Result<T, Status>>,
+    tokio::sync::oneshot::Sender<Status>,
+    ResponseStream<T>,
+) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+    let (terminal_sender, terminal_receiver) = tokio::sync::oneshot::channel();
+    let terminal = futures::stream::once(async { terminal_receiver.await.ok().map(Err) })
+        .filter_map(futures::future::ready);
+    (
+        sender,
+        terminal_sender,
+        Box::pin(ReceiverStream::new(receiver).chain(terminal)),
+    )
+}
+
 /// Sends `item` to a response stream, returning false if the client disconnected or
 /// stopped reading.
 ///
@@ -1126,23 +1159,59 @@ async fn send_raw_mempool_tx(
 }
 
 /// Converts a [`GetTreestateResponse`] into a lightwalletd [`TreeState`].
-fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> TreeState {
-    let final_state_hex =
-        |commitments: &Option<Vec<u8>>| commitments.as_ref().map(hex::encode).unwrap_or_default();
+///
+/// Returns an error if a pool is active at the block, but its tree is missing, for example because
+/// fast checkpoint sync committed the block without its trees. Clients read an empty tree string as
+/// the empty tree, so serving one would corrupt every note position they derive from it.
+fn treestate_to_proto(
+    network: &Network,
+    treestate: GetTreestateResponse,
+) -> Result<TreeState, Status> {
+    let height = treestate.height();
+    let final_state_hex = |upgrade, commitments: &Option<Vec<u8>>| match commitments {
+        Some(commitments) => Ok(hex::encode(commitments)),
+        None if NetworkUpgrade::current(network, height) >= upgrade => Err(Status::unavailable(
+            "the note commitment trees of this block are not stored",
+        )),
+        // An empty tree is the correct answer before the pool activates.
+        None => Ok(String::new()),
+    };
 
-    TreeState {
+    Ok(TreeState {
         network: network.bip70_network_name(),
-        height: treestate.height().0.into(),
+        height: height.0.into(),
         hash: treestate.hash().to_string(),
         time: treestate.time(),
-        sapling_tree: final_state_hex(treestate.sapling().commitments().final_state()),
-        orchard_tree: final_state_hex(treestate.orchard().commitments().final_state()),
+        sapling_tree: final_state_hex(
+            NetworkUpgrade::Sapling,
+            treestate.sapling().commitments().final_state(),
+        )?,
+        orchard_tree: final_state_hex(
+            NetworkUpgrade::Nu5,
+            treestate.orchard().commitments().final_state(),
+        )?,
         // Absent before NU6.3, where an empty tree is the correct answer.
         ironwood_tree: treestate
             .ironwood()
             .as_ref()
-            .map(|ironwood| final_state_hex(ironwood.commitments().final_state()))
+            .map(|ironwood| {
+                final_state_hex(NetworkUpgrade::Nu6_3, ironwood.commitments().final_state())
+            })
+            .transpose()?
             .unwrap_or_default(),
+    })
+}
+
+/// Reports known pruned bodies with their unavailable height, preserving other read failures.
+fn body_read_error_to_status(error: tower::BoxError, object: &str) -> Status {
+    match error.downcast_ref::<BlockReadError>() {
+        Some(BlockReadError::BlockBodyUnavailable { height }) => {
+            Status::failed_precondition(format!(
+                "{object} not available at height {} (pruned data)",
+                height.0
+            ))
+        }
+        _ => Status::internal(format!("failed to read {object}: {error}")),
     }
 }
 
@@ -1153,6 +1222,7 @@ fn rpc_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
     // zcashd's `INVALID_ADDRESS_OR_KEY` (-5) and `INVALID_PARAMETER` (-8) error codes.
     match error.code() {
         -5 | -8 => Status::not_found(error.message().to_string()),
+        -20 => Status::unavailable(error.message().to_string()),
         _ => Status::internal(error.message().to_string()),
     }
 }

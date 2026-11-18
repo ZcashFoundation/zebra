@@ -11,8 +11,10 @@ use tokio::time;
 use zebra_chain::{
     amount::Amount,
     at_least_one,
+    block::Height,
     fmt::{DisplayToDebug, SummaryDebug},
     orchard,
+    parameters::Network,
     primitives::{Groth16Proof, ZkSnarkProof},
     sapling,
     serialization::{AtLeastOne, ZcashDeserialize},
@@ -78,7 +80,7 @@ proptest! {
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
             let id_to_accept = transaction_to_accept.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None, &mut HashSet::new()), Ok(id_to_accept));
 
             // Make unique IDs by converting the index to bytes, and writing it to each ID
             let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -102,7 +104,7 @@ proptest! {
             // - transaction_to_accept, or
             // - a rejection from rejections
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new(), None),
+                storage.insert(transaction_to_reject, Vec::new(), None, &mut HashSet::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -154,13 +156,13 @@ proptest! {
             if i < transactions.len() - 1 {
                 // The initial transactions should be successful
                 prop_assert_eq!(
-                    storage.insert(transaction.clone(), Vec::new(), None),
+                    storage.insert(transaction.clone(), Vec::new(), None, &mut HashSet::new()),
                     Ok(tx_id)
                 );
             } else {
                 // The final transaction will cause a random eviction,
                 // which might return an error if this transaction is chosen
-                let result = storage.insert(transaction.clone(), Vec::new(), None);
+                let result = storage.insert(transaction.clone(), Vec::new(), None, &mut HashSet::new());
 
                 if result.is_ok() {
                     prop_assert_eq!(
@@ -298,10 +300,10 @@ proptest! {
             let id_to_accept = transaction_to_accept.transaction.id;
             let id_to_reject = transaction_to_reject.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None, &mut HashSet::new()), Ok(id_to_accept));
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new(), None),
+                storage.insert(transaction_to_reject, Vec::new(), None, &mut HashSet::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -349,19 +351,19 @@ proptest! {
             let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(
-                storage.insert(first_transaction_to_accept, Vec::new(), None),
+                storage.insert(first_transaction_to_accept, Vec::new(), None, &mut HashSet::new()),
                 Ok(first_id_to_accept)
             );
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new(), None),
+                storage.insert(transaction_to_reject, Vec::new(), None, &mut HashSet::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
             prop_assert!(storage.contains_rejected(&id_to_reject));
 
             prop_assert_eq!(
-                storage.insert(second_transaction_to_accept, Vec::new(), None),
+                storage.insert(second_transaction_to_accept, Vec::new(), None, &mut HashSet::new()),
                 Ok(second_id_to_accept)
             );
 
@@ -388,7 +390,7 @@ proptest! {
             .filter_map(|transaction| {
                 let id = transaction.transaction.id;
 
-                storage.insert(transaction.clone(), Vec::new(), None).ok().map(|_| id)
+                storage.insert(transaction.clone(), Vec::new(), None, &mut HashSet::new()).ok().map(|_| id)
             })
             .collect();
 
@@ -540,6 +542,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -549,6 +553,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
         )
@@ -577,6 +583,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -586,6 +594,8 @@ impl SpendConflictTestInput {
                 0,
                 0,
                 std::sync::Arc::new(vec![]),
+                &Network::Mainnet,
+                Height::MAX,
             )
             .expect("verification should pass"),
         )
@@ -1191,16 +1201,5 @@ proptest! {
             prop_assert_eq!(e.len(), 0);
             Ok::<_, TestCaseError>(())
         })?;
-    }
-
-    /// Check if EvictionList panics if entries are added multiple times.
-    #[test]
-    #[should_panic]
-    fn eviction_list_refresh(
-        txid in any::<UnminedTxId>()
-    ) {
-        let mut e = EvictionList::new(2, EVICTION_MEMORY_TIME);
-        e.insert(txid.mined_id());
-        e.insert(txid.mined_id());
     }
 }

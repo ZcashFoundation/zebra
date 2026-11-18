@@ -129,7 +129,7 @@ impl ConfiguredFundingStreamRecipient {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredLockboxDisbursement {
-    /// The expected address for the lockbox disbursement output
+    /// The expected P2SH or P2PKH address for the lockbox disbursement output.
     pub address: String,
     /// The expected disbursement amount
     pub amount: Amount<NonNegative>,
@@ -993,6 +993,21 @@ impl ParametersBuilder {
         self
     }
 
+    fn check_lockbox_disbursements(&self) -> Result<(), ParametersBuilderError> {
+        for (address, _) in &self.lockbox_disbursements {
+            if !matches!(
+                address.parse::<transparent::Address>(),
+                Ok(transparent::Address::PayToScriptHash { .. }
+                    | transparent::Address::PayToPublicKeyHash { .. })
+            ) {
+                return Err(ParametersBuilderError::InvalidLockboxDisbursementAddress {
+                    address: address.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn validate_halving_interval(&self, network: &Network) -> Result<(), ParametersBuilderError> {
         if height_for_halving(1, network).is_none()
             || (!self.funding_streams.is_empty()
@@ -1115,9 +1130,10 @@ impl ParametersBuilder {
     /// genesis subsidy is excluded. Reissuance also requires a post-NU7 halving interval no
     /// greater than [`LN2_SCALED`],
     /// so its integer coefficient is nonzero.
-    /// Effective funding stream ranges must not overlap, and non-deferred recipients must use
-    /// P2SH or P2PKH addresses.
+    /// Effective funding stream ranges must not overlap. Non-deferred funding stream recipients
+    /// and lockbox disbursements must use P2SH or P2PKH addresses.
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
+        self.check_lockbox_disbursements()?;
         self.check_nsm_reissuance_height()?;
         let mut network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
@@ -1288,7 +1304,7 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     /// Returns an error for overlapping effective funding stream ranges or unsupported
-    /// non-deferred recipient addresses, as on configured Testnets.
+    /// non-deferred funding stream or lockbox recipient addresses, as on configured Testnets.
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
@@ -1333,6 +1349,7 @@ impl Parameters {
         }
 
         parameters.check_nsm_reissuance_height()?;
+        parameters.check_lockbox_disbursements()?;
         check_funding_streams(&parameters.funding_streams)?;
 
         Self {
@@ -1539,7 +1556,8 @@ impl Parameters {
             .iter()
             .map(|(addr, amount)| {
                 (
-                    addr.parse().expect("hard-coded address must deserialize"),
+                    addr.parse()
+                        .expect("validated lockbox address must deserialize"),
                     *amount,
                 )
             })

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added the `transparent_spend`, `anchor_reads`, `pickup`, `chain_clone`, `trees`, `chain_updates` and `history` sub-phases of each committed block to the `state.block_writer.phase.duration_seconds` histograms.
+time: 2026-11-03T07:37:41-05:00

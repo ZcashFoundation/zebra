@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added Pasta assembly to default release builds on AArch64 and supported x86_64 targets, with runtime BMI2/ADX detection, portable fallback on older x86_64 CPUs, and a startup log naming the selected backend.
+time: 2026-10-25T02:02:31.3520244+02:00

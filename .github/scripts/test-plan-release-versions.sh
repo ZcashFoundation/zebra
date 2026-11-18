@@ -41,6 +41,9 @@ projects:
     - label: zebrad
       key: zebrad
       changelog: CHANGELOG.md
+    - label: zebrad Rust APIs
+      key: zebrad-api
+      changelog: zebrad/CHANGELOG.md
     - label: zebra-chain
       key: zebra-chain
       changelog: zebra-chain/CHANGELOG.md
@@ -114,6 +117,16 @@ expect_plan_failure() {
 
 expect_plan "no fragments, no release" ""
 
+fragment zebrad-api breaking 1
+fragment zebrad-api Added 2
+expect_plan "technical-only changes wait for an actual zebrad release" ""
+
+fragment zebrad Fixed 1
+fragment zebrad-api breaking 2
+fragment zebrad-api Added 3
+expect_plan "technical breaks do not change the operator version or add a Cargo package" \
+  "zebrad	6.4.3"
+
 fragment zebra-chain Fixed 1
 expect_plan "a patch fragment releases a patch, and dependents keep a compatible requirement" \
   "zebra-chain	13.0.1"
@@ -170,6 +183,15 @@ git -C "$fixture" update-ref refs/tags/base HEAD
 fragment zebrad Fixed 1
 expect_plan "a prerelease graduates" \
   "zebrad	7.0.0"
+
+fragment zebrad-api breaking 1
+expect_plan "technical-only changes do not graduate a prerelease" ""
+
+fragment zebrad-api Unknown 1
+expect_plan_failure "an unknown technical kind"
+
+fragment zebrad-api network-upgrade 1
+expect_plan_failure "technical notes cannot declare an operator network upgrade"
 
 fragment zebra-chain Unknown 1
 expect_plan_failure "an unknown kind"

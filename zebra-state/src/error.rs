@@ -43,21 +43,21 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// A known finalized block cannot be read as a complete block.
+/// A known finalized block or transaction cannot be read completely.
 ///
-/// Unknown blocks and incomplete secondary views return `Ok(None)` instead. Missing primary bodies
-/// indicate corruption until historical body pruning is supported.
+/// Unknown objects and torn secondary views return `Ok(None)` instead. Missing non-genesis bodies
+/// below the actual retained-body floor are unavailable; missing retained data is corruption.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BlockReadError {
-    /// Some or all transaction rows are missing from a known block.
-    #[error("block body unavailable at height {height:?}: stored transactions are incomplete")]
+    /// Transaction bytes are missing from a known block below the retained-body floor.
+    #[error("block body unavailable at height {height:?}: pruned data")]
     BlockBodyUnavailable {
         /// The height of the known block.
         height: block::Height,
     },
 
-    /// The retained header or transaction-location index is inconsistent.
-    #[error("corrupt block metadata at height {height:?}")]
+    /// A retained body, header, or transaction-location index is inconsistent.
+    #[error("corrupt block data at height {height:?}")]
     CorruptBlock {
         /// The height of the known block.
         height: block::Height,
@@ -71,6 +71,38 @@ pub enum BlockReadError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum StateInitError {
+    /// An existing database path could not be inspected, read, or moved.
+    #[error("cannot access state database at {path:?}: {source}")]
+    DatabaseAccess {
+        /// The database path whose operation failed.
+        path: PathBuf,
+        /// The underlying filesystem, database, or format-version error.
+        source: BoxError,
+    },
+
+    /// Both archive and pruned directories exist for the current or previous major.
+    #[error(
+        "both archive and pruned state directories exist in this cache. \
+         Stop Zebra and select the intended database in a separate cache directory; \
+         Zebra will not choose, merge, or overwrite either database"
+    )]
+    ConflictingStateDirectories,
+
+    /// Existing archive state requires an explicit stopped-node move before pruning activation.
+    #[error(
+        "cannot enable pruning for archive state: first complete any normal format upgrades \
+         with pruning disabled. Stop Zebra and all direct primary/secondary database readers, \
+         keep an archive backup outside the cache, then move the complete current-format archive \
+         from {archive_path:?} to the absent {pruned_path:?} before enabling pruning. \
+         Never merge directories or overwrite an existing destination"
+    )]
+    PruningRequiresIsolatedState {
+        /// The current-format archive directory to move after a clean shutdown.
+        archive_path: PathBuf,
+        /// The isolated destination, which must not already exist.
+        pruned_path: PathBuf,
+    },
+
     /// A read-only state was requested, but the configured cache directory is
     /// missing or unreadable.
     ///
@@ -105,6 +137,16 @@ pub enum StateInitError {
         path: PathBuf,
     },
 
+    /// An older-major database cannot be reused read-only until its format transition completes.
+    #[error(
+        "cannot reuse read-only state at {path:?}: its format transition requires a writable Zebra \
+         start to complete before read-only reuse"
+    )]
+    ReadOnlyDatabaseNeedsUpgrade {
+        /// The older-major database that must finish its format transition.
+        path: PathBuf,
+    },
+
     /// A read-only state was requested together with an ephemeral database.
     ///
     /// A read-only secondary follows another process's primary database and must
@@ -116,6 +158,60 @@ pub enum StateInitError {
          delete it; set `ephemeral = false`, or do not request a read-only state"
     )]
     ReadOnlyEphemeralConflict,
+
+    /// The configured retention window is below the network's safe minimum.
+    #[error(
+        "invalid state.prune_blocks_older_than value {configured}: minimum is {minimum}. \
+         Omit this setting for archive operation"
+    )]
+    InvalidPruningRetention {
+        /// The requested number of retained finalized block bodies.
+        configured: u32,
+        /// The minimum number of retained finalized block bodies for this network.
+        minimum: u32,
+    },
+
+    /// A body prefix is unavailable, but pruning is disabled for this writable state.
+    #[error(
+        "cannot open pruned state at {path:?} with pruning disabled: bodies below \
+         {lowest_retained_height:?} are unavailable except genesis. \
+         Enable state.prune_blocks_older_than, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
+    )]
+    PrunedDatabase {
+        /// The database with unavailable historical bodies.
+        path: PathBuf,
+        /// The lowest height of the complete retained suffix.
+        lowest_retained_height: block::Height,
+    },
+
+    /// A pruned database cannot reconstruct indexes for a different build's spending-index mode.
+    #[error(
+        "cannot open pruned state at {path:?}: changing spending-index mode from \
+         indexer={disk_indexer} to indexer={running_indexer} requires unavailable block history. \
+         Use a build with the existing indexer mode, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
+    )]
+    PrunedIndexModeMismatch {
+        /// The database whose spending-index layout cannot be converted.
+        path: PathBuf,
+        /// Whether the stored state includes spending indexes.
+        disk_indexer: bool,
+        /// Whether this build writes spending indexes.
+        running_indexer: bool,
+    },
+
+    /// Historical body availability could not be read or its retained suffix was invalid.
+    #[error(
+        "cannot read historical storage capabilities at {path:?}: {source}. \
+         Restore a valid snapshot or fully resync in a separate cache directory"
+    )]
+    HistoryRead {
+        /// The database whose historical body availability could not be determined.
+        path: PathBuf,
+        /// The storage error or invalid body-index invariant.
+        source: BoxError,
+    },
 }
 
 /// An error describing why a block could not be queued to be committed to the state.
@@ -138,6 +234,14 @@ pub enum CommitBlockError {
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
     WriteTaskExited,
+
+    /// The bounded mined-block notification channel has no free slot before committing.
+    #[error("mined block notification channel is full; block was not committed")]
+    MinedBlockNotificationFull,
+
+    /// The mined-block notification consumer closed its channel before committing.
+    #[error("mined block notification channel is closed; block was not committed")]
+    MinedBlockNotificationClosed,
 
     /// The queue of blocks waiting for their parent blocks was full, so the state dropped this
     /// block. It might be valid.
@@ -164,7 +268,9 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => false,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -179,7 +285,9 @@ impl CommitBlockError {
             }
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => false,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -192,7 +300,9 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => 0,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => 0,
         }
     }
 }
@@ -235,18 +345,48 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 /// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
 #[derive(Debug, Error, Clone)]
 #[error("could not commit checkpoint-verified block")]
-pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+pub struct CommitCheckpointVerifiedError {
+    #[source]
+    source: CommitBlockError,
+    targeted_body_recovery: bool,
+}
 
 impl CommitCheckpointVerifiedError {
     /// Returns the [`CommitBlockError`] describing why the commit failed.
     pub fn inner(&self) -> &CommitBlockError {
-        &self.0
+        &self.source
+    }
+
+    /// Returns `true` if the fast-sync writer requested an exact replacement for this body.
+    ///
+    /// Unlike an ordinary commit failure, the writer retains authenticated descendants and
+    /// accepts the same checkpoint-certified hash without resetting their queue. The underlying
+    /// authorizing-data error and its supplier's misbehavior score remain available via [`Self::inner`].
+    pub fn is_targeted_body_recovery(&self) -> bool {
+        self.targeted_body_recovery
+    }
+
+    /// Marks an authorizing-data rejection after its targeted writer request was published.
+    pub(crate) fn targeted_body_recovery(source: ValidateContextError) -> Self {
+        Self {
+            source: CommitBlockError::ValidateContextError(Box::new(source)),
+            targeted_body_recovery: true,
+        }
+    }
+}
+
+impl From<CommitBlockError> for CommitCheckpointVerifiedError {
+    fn from(source: CommitBlockError) -> Self {
+        Self {
+            source,
+            targeted_body_recovery: false,
+        }
     }
 }
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
-        Self(CommitBlockError::ValidateContextError(Box::new(value)))
+        CommitBlockError::ValidateContextError(Box::new(value)).into()
     }
 }
 
@@ -307,6 +447,30 @@ pub enum ReconsiderError {
     /// validation.
     #[error("replaying a previously invalidated block failed contextual validation: {0}")]
     ReplayFailed(#[source] ValidateContextError),
+}
+
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+/// An error describing why a `PreciousBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PreciousError {
+    /// The block hash was not found in the finalized or non-finalized state.
+    #[error("Block not found")]
+    MissingBlock(block::Hash),
+
+    /// The state is checkpointing blocks and cannot change non-finalized chain preferences.
+    #[error("cannot prefer blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the precious block request to the block write task failed.
+    #[error("failed to send precious block request to block write task")]
+    SendPreciousRequestFailed,
+
+    /// The precious block request was dropped before processing.
+    #[error("precious block request was unexpectedly dropped")]
+    PreciousRequestDropped,
 }
 
 /// An error describing why an `AwaitUtxo` request failed.

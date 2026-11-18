@@ -70,6 +70,15 @@ where
     }
 }
 
+/// Store already serialized bytes without copying them before insertion into the write batch.
+impl<'a> IntoDisk for &'a [u8] {
+    type Bytes = &'a [u8];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self
+    }
+}
+
 impl<T> IntoDisk for Arc<T>
 where
     T: IntoDisk,
@@ -134,6 +143,11 @@ impl RawBytes {
     /// Mainly for use in tests.
     pub fn raw_bytes(&self) -> &Vec<u8> {
         &self.0
+    }
+
+    /// Consumes the raw bytes, returning the inner data without copying it.
+    pub fn into_raw_bytes(self) -> Vec<u8> {
+        self.0
     }
 }
 
