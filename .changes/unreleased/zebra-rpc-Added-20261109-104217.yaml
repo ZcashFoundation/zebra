@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `client::GetBlockchainInfoBalance::nsm`, which builds the Network Sustainability Mechanism (NSM) value balance entry for a network and height, and the `client::GetBlockchainInfoResponse::nsm_value_balance` and `methods::BlockObject::nsm_value_balance` accessors for the `nsmValueBalance` field of `getblockchaininfo` and verbose `getblock` responses. The accessors return `None` for responses from nodes that do not report `nsmValueBalance`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))
+time: 2026-11-09T10:42:17.077978519-07:00
