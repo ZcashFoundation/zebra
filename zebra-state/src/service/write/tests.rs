@@ -15,8 +15,11 @@ use crate::{
 
 use super::*;
 
+mod awake;
 mod finalization;
 mod prepared;
+mod recent_headers;
+mod tip_reads;
 /// Returns a roots cache without embedded trees, so the writer never fast syncs.
 fn no_fast_tree_sync() -> TreeRootsCache {
     TreeRootsCache::new(None, Height(0))

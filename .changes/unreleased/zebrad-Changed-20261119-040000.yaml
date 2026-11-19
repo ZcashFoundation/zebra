@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed the `submit block accepted` log line. A separate task writes it, so it can appear after later log lines, and its new `accepted_at` field has the time the block was accepted ([#12548](https://github.com/ZcashFoundation/zebra/pull/12548)).'
+time: 2026-11-19T04:00:00.000000000-05:00

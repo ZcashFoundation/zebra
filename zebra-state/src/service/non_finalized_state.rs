@@ -823,19 +823,32 @@ impl NonFinalizedState {
         }
         let parent_hash = contextual.block.header.previous_block_hash;
         let (height, hash) = (contextual.height, contextual.hash);
-        let parent_chain = if parent_hash == finalized_state.finalized_tip_hash() {
-            Arc::new(Chain::new(
-                &self.network,
-                finalized_state
-                    .finalized_tip_height()
-                    .expect("a successful proposal has a finalized parent"),
-                finalized_state.note_commitment_trees_for_tip(),
-                finalized_state.history_tree(),
-                finalized_state.finalized_value_pool(),
-            ))
-        } else {
-            self.parent_chain(parent_hash)?
-        };
+        // Only the block write task commits a prevalidated block, and its chains only hold
+        // blocks above the finalized tip. So a parent in a chain isn't the finalized tip, and
+        // finding that out from the chains saves reading the tip from the database.
+        let parent_is_non_finalized = self.any_chain_contains(&parent_hash);
+        #[cfg(test)]
+        if parent_is_non_finalized {
+            assert_ne!(
+                ZebraDb::uncounted_tip_read(|| finalized_state.finalized_tip_hash()),
+                parent_hash,
+                "non-finalized chains only hold blocks above the finalized tip",
+            );
+        }
+        let parent_chain =
+            if !parent_is_non_finalized && parent_hash == finalized_state.finalized_tip_hash() {
+                Arc::new(Chain::new(
+                    &self.network,
+                    finalized_state
+                        .finalized_tip_height()
+                        .expect("a successful proposal has a finalized parent"),
+                    finalized_state.note_commitment_trees_for_tip(),
+                    finalized_state.history_tree(),
+                    finalized_state.finalized_value_pool(),
+                ))
+            } else {
+                self.parent_chain(parent_hash)?
+            };
         if let Some(notifications) = notifications {
             if contextual
                 .block

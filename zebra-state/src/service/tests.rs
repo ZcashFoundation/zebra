@@ -50,9 +50,12 @@ use crate::{
 };
 
 mod header;
+mod in_memory_reads;
 mod mining_candidate;
 pub(super) mod mining_rejection;
 mod prepare_commit;
+mod queue_on_task;
+mod queue_tip_reads;
 mod tree_roots_admission;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -802,12 +805,16 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
             blocker
                 .await
                 .expect("the blocking-pool occupant should exit");
-            // This read queues behind the cancelled computation on the single blocking thread.
+            // The sole blocking thread runs the cancelled computation before this task. The read
+            // below is answered from memory, so it doesn't wait for that thread.
+            tokio::task::spawn_blocking(|| ())
+                .await
+                .expect("the blocking queue should drain after release");
             assert!(matches!(
                 read_state
                     .oneshot(ReadRequest::MiningCandidate)
                     .await
-                    .expect("the blocking queue should drain after release"),
+                    .expect("the state should answer a mining candidate read"),
                 ReadResponse::MiningCandidate(None)
             ));
             assert_eq!(

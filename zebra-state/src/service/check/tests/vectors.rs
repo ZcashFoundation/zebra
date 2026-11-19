@@ -760,3 +760,168 @@ fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError>
 
     Ok(())
 }
+
+/// Runs the contextual checks with the database's finalized tip height, as callers do for a state
+/// that isn't behind the database.
+fn contextual_validity_at_tip(
+    db: &ZebraDb,
+    non_finalized_state: &NonFinalizedState,
+    block: &SemanticallyVerifiedBlock,
+    recent_headers: Option<&RecentHeaders>,
+) -> Result<RecentHeaders, ValidateContextError> {
+    contextual_validity(
+        db,
+        non_finalized_state,
+        block,
+        recent_headers,
+        db.finalized_tip_height(),
+    )
+}
+
+/// Returns a child of `parent` with its own difficulty threshold and time.
+fn distinct_child(parent: &Arc<Block>, index: u32) -> Arc<Block> {
+    use crate::tests::FakeChainHelper;
+
+    let mut child = parent.make_fake_child().set_work(u128::from(index) + 1);
+    Arc::make_mut(&mut Arc::make_mut(&mut child).header).time += chrono::Duration::seconds(75);
+
+    child
+}
+
+/// The recent headers kept from a block's parent must be the ones a read from the state returns,
+/// for chains shorter and longer than a difficulty adjustment span.
+#[test]
+fn recent_headers_kept_from_a_parent_match_a_read_from_the_state() {
+    use crate::{arbitrary::Prepare, tests::setup::new_state_with_mainnet_genesis};
+
+    let _init_guard = zebra_test::init();
+    let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+    let db = &finalized_state.db;
+    let network = non_finalized_state.network.clone();
+    let mut tip = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    non_finalized_state
+        .commit_new_chain(tip.clone().prepare(), db)
+        .unwrap();
+
+    let span = pow_adjustment_block_span(&network, block::Height(2));
+    let mut kept = RecentHeaders::read(&non_finalized_state, db, tip.hash(), span)
+        .expect("the block is in the state");
+    assert_eq!(kept.headers.len(), 2, "the block and the genesis block");
+    assert!(
+        kept.covers(span),
+        "a chain's headers down to genesis are all its headers"
+    );
+
+    for index in 0..u32::try_from(span).unwrap() + 3 {
+        let child = distinct_child(&tip, index);
+        non_finalized_state
+            .commit_block(child.clone().prepare(), db)
+            .unwrap();
+        kept = kept.with_child(&child.clone().prepare());
+
+        let span = pow_adjustment_block_span(&network, (kept.tip_height + 1).unwrap());
+        let read = RecentHeaders::read(&non_finalized_state, db, child.hash(), span)
+            .expect("the block is in the state");
+        assert!(kept.covers(span));
+        assert_eq!((kept.tip, kept.tip_height), (read.tip, read.tip_height));
+        assert_eq!(kept.headers[..read.headers.len()], read.headers[..]);
+        assert!(
+            read.headers.windows(2).all(|pair| pair[0] != pair[1]),
+            "the test blocks have distinct headers, so their order is checked",
+        );
+
+        tip = child;
+    }
+    assert!(kept.headers.len() > span);
+    assert!(kept.headers.len() <= MAX_POW_ADJUSTMENT_BLOCK_SPAN);
+
+    // Headers that stop short of the block span, and of the genesis block, aren't all the
+    // headers a read returns, so the checks read them again.
+    let child = distinct_child(&tip, 0).prepare();
+    let short = RecentHeaders::read(&non_finalized_state, db, tip.hash(), 3)
+        .expect("the block is in the state");
+    assert!(!short.covers(span));
+    let reads = || RECENT_HEADERS_READS.with(std::cell::Cell::get);
+    let before = reads();
+    let from_short = contextual_validity_at_tip(db, &non_finalized_state, &child, Some(&short));
+    assert_eq!(reads(), before + 1);
+    let from_kept = contextual_validity_at_tip(db, &non_finalized_state, &child, Some(&kept));
+    assert_eq!(reads(), before + 1);
+    assert_eq!(from_short, from_kept);
+    assert_eq!(
+        from_short,
+        contextual_validity_at_tip(db, &non_finalized_state, &child, None),
+    );
+}
+
+/// Kept recent headers must only replace a read from the state for the block's own parent, while
+/// that parent is in a chain.
+#[test]
+fn only_the_recent_headers_of_a_parent_in_a_chain_replace_a_read() {
+    use crate::{arbitrary::Prepare, tests::setup::new_state_with_mainnet_genesis};
+
+    let reads = || RECENT_HEADERS_READS.with(std::cell::Cell::get);
+
+    let _init_guard = zebra_test::init();
+    let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+    let db = &finalized_state.db;
+    let root = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let span = pow_adjustment_block_span(&non_finalized_state.network, block::Height(2));
+    let genesis_headers =
+        RecentHeaders::read(&non_finalized_state, db, genesis.hash, span).expect("in the state");
+
+    // The parent is the finalized tip, which isn't in a chain, so its headers are read.
+    let before = reads();
+    let root_headers = contextual_validity_at_tip(
+        db,
+        &non_finalized_state,
+        &root.clone().prepare(),
+        Some(&genesis_headers),
+    )
+    .expect("a child of the finalized tip is valid");
+    assert_eq!(reads(), before + 1);
+    non_finalized_state
+        .commit_new_chain(root.clone().prepare(), db)
+        .unwrap();
+
+    // The parent's own headers replace the read.
+    let child = distinct_child(&root, 0).prepare();
+    let before = reads();
+    let child_headers =
+        contextual_validity_at_tip(db, &non_finalized_state, &child, Some(&root_headers))
+            .expect("a child of the chain tip is valid");
+    assert_eq!(reads(), before);
+    assert_eq!(child_headers, root_headers.with_child(&child));
+
+    // Another block's headers don't, and the result is the same.
+    let before = reads();
+    assert_eq!(
+        contextual_validity_at_tip(db, &non_finalized_state, &child, Some(&child_headers),),
+        Ok(child_headers.clone()),
+    );
+    assert_eq!(
+        contextual_validity_at_tip(db, &non_finalized_state, &child, None),
+        Ok(child_headers),
+    );
+    assert_eq!(reads(), before + 2);
+
+    // Kept headers don't hide a wrong height: the parent's height comes with them.
+    let mut non_sequential = child.clone();
+    non_sequential.height = block::Height(3);
+    assert!(matches!(
+        contextual_validity_at_tip(
+            db,
+            &non_finalized_state,
+            &non_sequential,
+            Some(&root_headers),
+        ),
+        Err(ValidateContextError::NonSequentialBlock {
+            candidate_height: block::Height(3),
+            parent_height: block::Height(1),
+        })
+    ));
+}

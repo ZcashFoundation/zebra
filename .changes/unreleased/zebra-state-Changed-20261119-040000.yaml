@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Changed `ReadRequest::Tip`, `ReadRequest::ChainInfo` and `Request::CommitSemanticallyVerifiedBlock` to use blocking threads less often ([#12548](https://github.com/ZcashFoundation/zebra/pull/12548)).'
+time: 2026-11-19T04:00:00.000000000-05:00

@@ -3566,7 +3566,20 @@ where
             // - Inconclusive: check if the block is on a side-chain
             // The difference is important to miners, because they want to mine on the best chain.
             Ok(hash) => {
-                tracing::info!(?hash, ?height, "submit block accepted");
+                // Writing a log line takes longer than everything else this arm does, so it is
+                // left to another task, and the response doesn't wait for it. That task can run
+                // before or after the response is sent, and after later lines are logged, so the
+                // line carries the time the block was accepted. The line is lost if Zebra shuts
+                // down before the task runs.
+                let accepted_at = Utc::now();
+                tokio::spawn(
+                    async move {
+                        let accepted_at =
+                            accepted_at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+                        tracing::info!(?hash, ?height, %accepted_at, "submit block accepted")
+                    }
+                    .in_current_span(),
+                );
 
                 return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }

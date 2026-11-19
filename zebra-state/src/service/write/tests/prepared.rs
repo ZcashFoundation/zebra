@@ -8,7 +8,7 @@ use zebra_chain::serialization::ZcashDeserializeInto;
 use super::*;
 
 /// Returns a state whose only non-finalized block is Mainnet block 1, and that block.
-fn root_state() -> (FinalizedState, NonFinalizedState, Arc<Block>) {
+pub(super) fn root_state() -> (FinalizedState, NonFinalizedState, Arc<Block>) {
     let (finalized, mut state, _genesis) = new_state_with_mainnet_genesis();
     let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()
@@ -21,7 +21,7 @@ fn root_state() -> (FinalizedState, NonFinalizedState, Arc<Block>) {
 }
 
 /// Runs a block write task over `messages` on this thread, and returns the state it published.
-fn run_writer(
+pub(super) fn run_writer(
     finalized: FinalizedState,
     state: NonFinalizedState,
     messages: Vec<NonFinalizedWriteMessage>,

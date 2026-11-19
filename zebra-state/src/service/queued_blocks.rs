@@ -105,7 +105,7 @@ impl QueuedBlocks {
     /// Queue a block for eventual verification and commit.
     ///
     /// The queue can go over its limits until the caller calls [`Self::prune_overflow`].
-    #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
+    #[instrument(level = "debug", skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
@@ -206,8 +206,13 @@ impl QueuedBlocks {
         queued
     }
 
+    /// Returns `true` if no blocks are queued.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
     /// Returns `true` if there are any queued children of `parent_hash`.
-    #[instrument(skip(self), fields(%parent_hash))]
+    #[instrument(level = "debug", skip(self), fields(%parent_hash))]
     pub fn has_queued_children(&self, parent_hash: block::Hash) -> bool {
         self.by_parent.contains_key(&parent_hash)
     }
@@ -218,14 +223,14 @@ impl QueuedBlocks {
     }
 
     /// Returns `true` if there is a block with the provided hash present.
-    #[instrument(skip(self), fields(%hash))]
+    #[instrument(level = "debug", skip(self), fields(%hash))]
     pub fn has(&self, hash: block::Hash) -> bool {
         self.blocks.contains_key(&hash)
     }
 
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
-    #[instrument(skip(self), fields(%parent_hash))]
+    #[instrument(level = "debug", skip(self), fields(%parent_hash))]
     pub fn dequeue_children(
         &mut self,
         parent_hash: block::Hash,
@@ -250,7 +255,7 @@ impl QueuedBlocks {
 
     /// Remove all queued blocks whose height is less than or equal to the given
     /// `finalized_tip_height`.
-    #[instrument(skip(self))]
+    #[instrument(level = "debug", skip(self))]
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
         while let Some(lowest) = self.by_height.first_entry() {
             if *lowest.key() > finalized_tip_height {
@@ -489,26 +494,36 @@ impl SentHashes {
 
     /// Prunes sent blocks at or below `height_bound`.
     ///
-    /// Finishes the batch if `finish_batch()` hasn't been called already.
+    /// The current batch is pruned in place. Finishing it here would make a batch of every block
+    /// sent between two prunes, and each batch is a separate allocation to visit.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
-        self.finish_batch();
+        let Self {
+            bufs,
+            curr_buf,
+            sent,
+            known_utxos,
+            ..
+        } = self;
 
-        // Iterates over each buf in `sent_bufs`, removing sent blocks until reaching
-        // the first block with a height above the `height_bound`.
-        self.bufs.retain_mut(|buf| {
+        // Removes sent blocks from the front of a batch, until reaching the first block with a
+        // height above the `height_bound`. Returns `false` if the batch is now empty.
+        let mut prune = |buf: &mut VecDeque<(block::Hash, block::Height)>| {
             while let Some((hash, height)) = buf.pop_front() {
                 if height > height_bound {
                     buf.push_front((hash, height));
                     return true;
-                } else if let Some(expired_outpoints) = self.sent.remove(&hash) {
+                } else if let Some(expired_outpoints) = sent.remove(&hash) {
                     for outpoint in expired_outpoints.iter() {
-                        self.known_utxos.remove(outpoint);
+                        known_utxos.remove(outpoint);
                     }
                 }
             }
 
             false
-        });
+        };
+
+        bufs.retain_mut(&mut prune);
+        prune(curr_buf);
 
         self.sent.shrink_to_fit();
         self.known_utxos.0.shrink_to_fit();

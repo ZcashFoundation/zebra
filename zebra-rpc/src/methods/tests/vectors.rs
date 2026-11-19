@@ -5,7 +5,7 @@ mod work_authorization;
 use std::{
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -6984,6 +6984,126 @@ fn rpc_submitblock_inline_decode_boundary() {
             .await
             .expect("decoding boundary checks must finish");
         });
+}
+
+/// The log line for an accepted block must be written by another task, so the response to the
+/// miner doesn't wait for it. The line must carry the time the block was accepted, because the
+/// task can write it later.
+#[tokio::test]
+async fn rpc_submitblock_logs_an_accepted_block_without_delaying_its_response() {
+    /// Counts the events that say a submitted block was accepted, and keeps the time they give
+    /// for it, in microseconds.
+    struct CountAccepted(Arc<AtomicUsize>, Arc<AtomicI64>);
+
+    impl tracing::Subscriber for CountAccepted {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Message<'a>(&'a AtomicUsize, &'a AtomicI64);
+
+            impl tracing::field::Visit for Message<'_> {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    let value = format!("{value:?}");
+                    if field.name() == "message" && value.contains("submit block accepted") {
+                        self.0.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if field.name() == "accepted_at" {
+                        let accepted_at = chrono::DateTime::parse_from_rfc3339(&value)
+                            .expect("the acceptance time is an RFC 3339 time");
+                        self.1
+                            .store(accepted_at.timestamp_micros(), Ordering::SeqCst);
+                    }
+                }
+            }
+
+            event.record(&mut Message(&self.0, &self.1));
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    let _init_guard = zebra_test::init();
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let expected_hash = block.hash();
+    let state = tower::service_fn(move |request| {
+        match request {
+            zebra_state::Request::PrepareCommit(block) if block.hash() == expected_hash => {}
+            request => panic!("unexpected state request: {request:?}"),
+        }
+        std::future::ready(Ok::<_, BoxError>(zebra_state::Response::PreparingCommit))
+    });
+    let verifier = tower::service_fn(move |request: zebra_consensus::Request| {
+        assert_eq!(request.block().hash(), expected_hash);
+        std::future::ready(Ok::<_, BoxError>(expected_hash))
+    });
+    let (_logs, logs) = watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        false,
+        "0.0.1",
+        "RPC accepted log test",
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        state,
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        verifier,
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        logs,
+        None,
+    );
+
+    let accepted_logs = Arc::new(AtomicUsize::new(0));
+    let accepted_at = Arc::new(AtomicI64::new(0));
+    let _subscriber =
+        tracing::subscriber::set_default(CountAccepted(accepted_logs.clone(), accepted_at.clone()));
+
+    let submitted = Utc::now().timestamp_micros();
+    let reply = rpc
+        .submit_block(
+            HexData(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+            None,
+        )
+        .await
+        .unwrap();
+    let replied = Utc::now().timestamp_micros();
+    assert_eq!(reply, SubmitBlockResponse::Accepted);
+    assert_eq!(
+        accepted_logs.load(Ordering::SeqCst),
+        0,
+        "the response doesn't wait for the log line",
+    );
+
+    // The logging task runs when this task lets it, which is some time after the response here.
+    // Its line still gives the time the block was accepted.
+    std::thread::sleep(Duration::from_millis(100));
+    tokio::task::yield_now().await;
+    assert_eq!(accepted_logs.load(Ordering::SeqCst), 1);
+    let accepted_at = accepted_at.load(Ordering::SeqCst);
+    // The system clock can be adjusted between these readings, so they are compared with a
+    // margin. The margin is shorter than the pause before the line was written.
+    let margin = 50_000;
+    assert!(
+        ((submitted - margin)..=(replied + margin)).contains(&accepted_at),
+        "accepted at {accepted_at}, submitted at {submitted}, replied at {replied}",
+    );
+    queue.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]

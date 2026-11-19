@@ -36,7 +36,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     diagnostic::CodeTimer,
     parallel::tree::MAX_TREE_ROOTS_PER_REQUEST,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
     transparent,
@@ -1067,10 +1067,12 @@ impl StateService {
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (semantically_verified, rsp_tx, contextual, notifications);
-        if self.block_write_sender.finalized.is_none()
-            && self.block_write_sender.non_finalized.is_some()
-            && self.can_fork_chain_at(&parent_hash)
-        {
+        // The parent is looked up once. If that reads the finalized tip from the database, the
+        // tip is kept for pruning the queues below.
+        let mut finalized_tip = None;
+        let can_fork_chain_at_parent = self.block_write_sender.finalized.is_none()
+            && self.can_fork_chain_at(&parent_hash, &mut finalized_tip);
+        if can_fork_chain_at_parent && self.block_write_sender.non_finalized.is_some() {
             // Immediately dispatched blocks need only the sent-hash indexes.
             ready = Some(queued);
         } else {
@@ -1102,14 +1104,15 @@ impl StateService {
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if self.block_write_sender.finalized.is_none()
-            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
-        {
+        } else if can_fork_chain_at_parent {
             self.send_ready_non_finalized(parent_hash, ready);
 
-            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
+            let finalized_tip_height = finalized_tip
+                .unwrap_or_else(|| self.read_service.db.tip())
+                .map(|(height, _hash)| height)
+                .expect(
+                    "Finalized state must have at least one block before committing non-finalized state",
+                );
 
             self.non_finalized_state_queued_blocks
                 .prune_by_height(finalized_tip_height);
@@ -1124,6 +1127,15 @@ impl StateService {
         self.non_finalized_state_queued_blocks.prune_overflow();
 
         rsp_rx
+    }
+
+    /// Returns `true` if a semantically verified block would be queued alone: no other block is
+    /// waiting for its parent, and the checkpoint verified blocks' queue has ended.
+    ///
+    /// Then queueing the block can't release other blocks.
+    fn queues_block_alone(&self) -> bool {
+        self.block_write_sender.finalized.is_none()
+            && self.non_finalized_state_queued_blocks.is_empty()
     }
 
     /// Returns `true` if checkpoint verified blocks are written up to the final checkpoint,
@@ -1180,10 +1192,27 @@ impl StateService {
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
-    fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.non_finalized_block_write_sent_hashes
+    ///
+    /// The finalized tip is only read from the database if no sent block has that hash. It is
+    /// then stored in `finalized_tip`, so the caller doesn't have to read it again.
+    fn can_fork_chain_at(
+        &self,
+        hash: &block::Hash,
+        finalized_tip: &mut Option<Option<(block::Height, block::Hash)>>,
+    ) -> bool {
+        if self
+            .non_finalized_block_write_sent_hashes
             .can_fork_chain_at(hash)
-            || &self.read_service.db.finalized_tip_hash() == hash
+        {
+            return true;
+        }
+
+        let tip = self.read_service.db.tip();
+        *finalized_tip = Some(tip);
+
+        // An empty database has the genesis block's previous hash as its tip hash.
+        let tip_hash = tip.map_or(GENESIS_PREVIOUS_BLOCK_HASH, |(_height, hash)| hash);
+        &tip_hash == hash
     }
 
     /// Returns `true` if `queued_height` is near the final checkpoint.
@@ -1241,8 +1270,6 @@ impl StateService {
                     new_parents.push(hash);
                 }
             }
-
-            self.non_finalized_block_write_sent_hashes.finish_batch();
         };
     }
 
@@ -1443,6 +1470,32 @@ impl ReadStateService {
         read::tip(self.latest_best_chain(), &self.db)
     }
 
+    /// Returns the published mining candidate's template context, if the candidate is still
+    /// current and extends the tip that `best_tip` returns.
+    ///
+    /// `best_tip` is only called for a candidate that is otherwise current, after the candidate
+    /// is read.
+    fn published_mining_candidate(
+        &self,
+        best_tip: impl FnOnce() -> Option<(block::Height, block::Hash)>,
+    ) -> Option<Arc<crate::GetBlockTemplateChainInfo>> {
+        let candidate = self.mining_candidate.borrow().clone();
+        candidate.and_then(|(parent, info, cancelled, deadline)| {
+            (!cancelled.is_closed()
+                && tokio::time::Instant::now() < deadline
+                && self.mining_candidate_is_allowed(info.tip_hash)
+                && best_tip().map(|(_, hash)| hash) == Some(parent.header.previous_block_hash))
+            .then_some(info)
+        })
+    }
+
+    /// Returns the best tip if it is a non-finalized block, without reading the database or
+    /// cloning the chain.
+    fn non_finalized_best_tip(&self) -> Option<(block::Height, block::Hash)> {
+        self.non_finalized_state_receiver
+            .borrow_mapped(|state| state.best_chain().map(|chain| chain.non_finalized_tip()))
+    }
+
     /// Returns whether rejection tracking permits speculative work on this block.
     pub(crate) fn mining_candidate_is_allowed(&self, hash: block::Hash) -> bool {
         self.early_relay.allows_early_relay(hash)
@@ -1627,32 +1680,30 @@ impl Service<Request> for StateService {
                 };
                 let state = self.read_service.clone();
                 let mut tip_change = self.latest_chain_tip.clone();
+                let permit = Arc::new(permit);
                 // Published work reserves the slot until verification ends, even after expiry.
-                let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
+                let (cancelled, guard) = watch::channel(Some(permit.clone()));
                 let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
+                let compute_state = state.clone();
+                let candidate_block = block.clone();
+                // The computation is started here rather than by the task below, so it doesn't
+                // wait for that task to run first: a miner's next template waits for its result.
+                //
+                // Queued or running blocking work keeps its own permit through cancellation
+                // or timeout.
+                let compute = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    if !compute_state.mining_candidate_is_allowed(hash) {
+                        return None;
+                    }
+                    read::difficulty::mining_candidate_chain_info(
+                        &compute_state.latest_non_finalized_state(),
+                        &compute_state.db,
+                        &compute_state.network,
+                        block,
+                    )
+                });
                 tokio::spawn(async move {
-                    let compute_state = state.clone();
-                    let candidate_block = block.clone();
-                    let parent = block.header.previous_block_hash;
-                    // Queued or running blocking work keeps its own permit through cancellation
-                    // or timeout.
-                    let compute_permit = cancelled
-                        .borrow()
-                        .as_ref()
-                        .expect("the newly admitted candidate owns its slot")
-                        .clone();
-                    let compute = tokio::task::spawn_blocking(move || {
-                        let _permit = compute_permit;
-                        if !compute_state.mining_candidate_is_allowed(hash) {
-                            return None;
-                        }
-                        read::difficulty::mining_candidate_chain_info(
-                            &compute_state.latest_non_finalized_state(),
-                            &compute_state.db,
-                            &compute_state.network,
-                            block,
-                        )
-                    });
                     // Drop the guard's permit reference before notifying waiting receivers.
                     let info = tokio::select! {
                         biased;
@@ -1724,18 +1775,8 @@ impl Service<Request> for StateService {
                 self.pending_utxos
                     .check_against_ordered(&semantically_verified.new_outputs);
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while blocks are being verified
-                // and written to disk. But wait for the blocks to finish committing,
-                // so that `StateService` multi-block queries always observe a consistent state.
-                //
-                // Since each block is spawned into its own task,
-                // there shouldn't be any other code running in the same task,
-                // so we don't need to worry about blocking it:
-                // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
-
-                let rsp_rx = tokio::task::block_in_place(move || {
+                let queues_alone = self.queues_block_alone();
+                let queue = move || {
                     span.in_scope(|| {
                         self.queue_and_commit_to_non_finalized_state(
                             semantically_verified,
@@ -1743,7 +1784,12 @@ impl Service<Request> for StateService {
                             notifications,
                         )
                     })
-                });
+                };
+                let rsp_rx = if queues_alone {
+                    queue()
+                } else {
+                    tokio::task::block_in_place(queue)
+                };
 
                 // TODO:
                 //   - check for panics in the block write task here,
@@ -2105,6 +2151,44 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", level = "debug", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
+
+        // A non-finalized best tip is read from memory, and so is the mining candidate that
+        // must extend it. So these requests are answered here, without waiting for a blocking
+        // thread: a block template for a new tip makes them on its way to the miner. Only a tip
+        // that is in the database is left to a blocking thread.
+        //
+        // The chain info for a template is computed here too, once the best chain holds every
+        // header it reads: that takes less time than a blocking thread takes to start and to
+        // answer. It is computed from a clone of the chain's `Arc`, so it doesn't hold the
+        // channel that the block write task publishes its chains to.
+        match &req {
+            ReadRequest::ChainInfo => {
+                let info = self.latest_best_chain().and_then(|chain| {
+                    read::difficulty::chain_info_from_chain(&chain, &self.network)
+                });
+                if let Some(info) = info {
+                    return async move { info.map(ReadResponse::ChainInfo) }.boxed();
+                }
+            }
+            ReadRequest::Tip => {
+                if let Some(tip) = self.non_finalized_best_tip() {
+                    return async move { Ok(ReadResponse::Tip(Some(tip))) }.boxed();
+                }
+            }
+            ReadRequest::MiningCandidate => {
+                let mut tip_is_in_database = false;
+                let candidate = self.published_mining_candidate(|| {
+                    let tip = self.non_finalized_best_tip();
+                    tip_is_in_database = tip.is_none();
+                    tip
+                });
+                if !tip_is_in_database {
+                    return async move { Ok(ReadResponse::MiningCandidate(candidate)) }.boxed();
+                }
+            }
+            _ => {}
+        }
+
         let timer = CodeTimer::start_desc(req.variant_name());
         let span = Span::current();
         let timed_span = TimedSpan::new(timer, span);
@@ -2202,19 +2286,9 @@ impl Service<ReadRequest> for ReadStateService {
                 .ok_or("compact body does not extend the committed best tip")?;
                 Ok(ReadResponse::ValidBestTipBlockCommitments)
             }
-            ReadRequest::MiningCandidate => {
-                let candidate = state.mining_candidate.borrow().clone();
-                Ok(ReadResponse::MiningCandidate(candidate.and_then(
-                    |(parent, info, cancelled, deadline)| {
-                        (!cancelled.is_closed()
-                            && tokio::time::Instant::now() < deadline
-                            && state.mining_candidate_is_allowed(info.tip_hash)
-                            && state.best_tip().map(|(_, hash)| hash)
-                                == Some(parent.header.previous_block_hash))
-                        .then_some(info)
-                    },
-                )))
-            }
+            ReadRequest::MiningCandidate => Ok(ReadResponse::MiningCandidate(
+                state.published_mining_candidate(|| state.best_tip()),
+            )),
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.cached_size())),
 

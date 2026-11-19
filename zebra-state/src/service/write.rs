@@ -22,7 +22,7 @@ use zebra_chain::{
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
-        check,
+        check::{self, RecentHeaders},
         fast_tree_sync::{CheckpointCommit, FastTreeSyncWriter, TreeRootsCache},
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{NonFinalizedState, ValidatedChain},
@@ -66,34 +66,148 @@ pub(crate) fn validate_and_commit_non_finalized(
     non_finalized_state: &mut NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared)?;
-    non_finalized_state.insert_validated(validated);
+    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    let parent_hash = prepared.block.header.previous_block_hash;
 
-    Ok(())
+    // `non_finalized_state` can be a published copy of the block write task's state, which can
+    // still hold blocks that the database has finalized since. So only the database can tell
+    // whether the parent is the finalized tip.
+    if finalized_state.finalized_tip_hash() == parent_hash {
+        non_finalized_state.commit_new_chain(prepared, finalized_state)
+    } else {
+        non_finalized_state.commit_block(prepared, finalized_state)
+    }
 }
 
-/// Runs contextual validation on the prepared block, without changing the non-finalized state.
+/// Runs contextual validation on the prepared block for the block write task, without changing
+/// the non-finalized state.
 ///
-/// Returns the chain with the block, for [`NonFinalizedState::insert_validated`].
+/// Only the block write task's own non-finalized state can be validated on this way: it never
+/// holds a block that the database has finalized, so its chains tell where the finalized tip is.
+///
+/// `recent_headers` can be the recent headers of any block: they are used if that block is the
+/// prepared block's parent.
+///
+/// Returns the chain with the block, for [`NonFinalizedState::insert_validated`], and the block's
+/// recent headers, for validating its children.
+#[tracing::instrument(
+    level = "debug",
+    skip(finalized_state, non_finalized_state, prepared, recent_headers),
+    fields(
+        height = ?prepared.height,
+        hash = %prepared.hash,
+        chains = non_finalized_state.chain_count()
+    )
+)]
 fn validate_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
-) -> Result<ValidatedChain, ValidateContextError> {
-    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    recent_headers: Option<&RecentHeaders>,
+) -> Result<(ValidatedChain, RecentHeaders), ValidateContextError> {
+    // Every non-finalized chain starts at the block after the finalized tip, so the tip's height
+    // only needs a database read while there are no chains.
+    let finalized_tip_height = non_finalized_state
+        .root_height()
+        .and_then(|root_height| root_height.previous().ok())
+        .or_else(|| finalized_state.finalized_tip_height());
+    #[cfg(test)]
+    {
+        let database_height =
+            ZebraDb::uncounted_tip_read(|| finalized_state.finalized_tip_height());
+        if non_finalized_state.root_height().is_some() && database_height.is_some() {
+            assert_eq!(
+                finalized_tip_height, database_height,
+                "non-finalized chains start at the block after the finalized tip",
+            );
+        }
+    }
+
+    let recent_headers = check::contextual_validity(
+        finalized_state,
+        non_finalized_state,
+        &prepared,
+        recent_headers,
+        finalized_tip_height,
+    )?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
-    if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state.validate_new_chain(prepared, finalized_state)
-    } else {
-        non_finalized_state.validate_block(prepared, finalized_state)
+    // Chains only hold blocks above the finalized tip, so a parent in a chain isn't the finalized
+    // tip. Finding that out from the chains saves reading the tip from the database.
+    let parent_is_non_finalized = non_finalized_state.any_chain_contains(&parent_hash);
+    #[cfg(test)]
+    if parent_is_non_finalized {
+        assert_ne!(
+            ZebraDb::uncounted_tip_read(|| finalized_state.finalized_tip_hash()),
+            parent_hash,
+            "non-finalized chains only hold blocks above the finalized tip",
+        );
     }
+
+    let validated =
+        if !parent_is_non_finalized && finalized_state.finalized_tip_hash() == parent_hash {
+            non_finalized_state.validate_new_chain(prepared, finalized_state)
+        } else {
+            non_finalized_state.validate_block(prepared, finalized_state)
+        }?;
+
+    Ok((validated, recent_headers))
 }
 
 #[cfg(test)]
 thread_local! {
     /// The number of prepared blocks that a block write task running on this thread committed.
     static PREPARED_COMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+
+    /// The number of messages that [`recv_after_prepare`] received on this thread without
+    /// sleeping.
+    static AWAKE_RECEIVE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How long the block write task keeps looking for its next message after it has prepared a
+/// block's commit, before it sleeps until a message arrives.
+///
+/// A block that verifies quickly gets its commit request about when it has been prepared, and
+/// waking this thread for that request would take longer than the rest of its commit.
+///
+/// The task yields between checks, so it only uses a CPU that no other thread is waiting for,
+/// and for no longer than this. Only blocks that a miner submits over RPC are prepared.
+const PREPARED_COMMIT_AWAKE_TIME: std::time::Duration = std::time::Duration::from_micros(500);
+
+/// The fewest CPUs the machine needs for the block write task to stay awake for
+/// [`PREPARED_COMMIT_AWAKE_TIME`]. With fewer, the block's verification needs the CPU more.
+const MIN_CPUS_TO_STAY_AWAKE: usize = 4;
+
+/// Returns `true` if the block write task stays awake after it has prepared a block's commit.
+fn stays_awake_after_prepare() -> bool {
+    std::thread::available_parallelism().is_ok_and(|cpus| cpus.get() >= MIN_CPUS_TO_STAY_AWAKE)
+}
+
+/// Receives the block write task's next message, checking for it without sleeping until
+/// `awake_until`, and sleeping until it arrives after that.
+///
+/// The task yields between checks: while a block's proofs are being verified on every CPU, it
+/// lets the thread that is waiting for its CPU run instead.
+///
+/// Returns `None` if the channel is closed and empty.
+fn recv_after_prepare(
+    receiver: &mut UnboundedReceiver<NonFinalizedWriteMessage>,
+    awake_until: Instant,
+) -> Option<NonFinalizedWriteMessage> {
+    use tokio::sync::mpsc::error::TryRecvError;
+
+    loop {
+        match receiver.try_recv() {
+            Ok(message) => {
+                #[cfg(test)]
+                AWAKE_RECEIVE_COUNT.with(|count| count.set(count.get() + 1));
+                return Some(message);
+            }
+            Err(TryRecvError::Disconnected) => return None,
+            Err(TryRecvError::Empty) if Instant::now() < awake_until => std::thread::yield_now(),
+            Err(TryRecvError::Empty) => return receiver.blocking_recv(),
+        }
+    }
 }
 
 /// A block that was contextually validated before its commit request arrived.
@@ -104,6 +218,9 @@ struct PreparedCommit {
 
     /// The chain with the block.
     validated: ValidatedChain,
+
+    /// The block's recent headers.
+    recent_headers: RecentHeaders,
 
     /// How long the validation took.
     validation: std::time::Duration,
@@ -118,6 +235,7 @@ fn prepare_commit(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
     block: Arc<Block>,
+    recent_headers: Option<&RecentHeaders>,
 ) -> Option<PreparedCommit> {
     // Callers check the coinbase height, but a missing one must not stop the block write task.
     block.coinbase_height()?;
@@ -144,13 +262,19 @@ fn prepare_commit(
         return None;
     }
 
-    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared)
-        .inspect_err(|error| tracing::debug!(?error, "could not prepare a block's commit"))
-        .ok()?;
+    let (validated, recent_headers) = validate_non_finalized(
+        finalized_state,
+        non_finalized_state,
+        prepared,
+        recent_headers,
+    )
+    .inspect_err(|error| tracing::debug!(?error, "could not prepare a block's commit"))
+    .ok()?;
 
     Some(PreparedCommit {
         block,
         validated,
+        recent_headers,
         validation: validation_start.elapsed(),
     })
 }
@@ -887,7 +1011,26 @@ impl WriteBlockWorkerTask {
         // validated on the state as it was then, so every other message discards it.
         let mut prepared_commit: Option<PreparedCommit> = None;
 
-        while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+        // The recent headers of the last block this task committed. The next block is usually
+        // its child, and then its contextual checks don't have to read them from the state.
+        let mut recent_headers: Option<RecentHeaders> = None;
+
+        let stays_awake_after_prepare = stays_awake_after_prepare();
+
+        loop {
+            // The commit request of a prepared block usually arrives within the time it takes to
+            // wake this thread, so the thread looks for it before it sleeps.
+            let msg = if prepared_commit.is_some() && stays_awake_after_prepare {
+                recv_after_prepare(
+                    non_finalized_block_write_receiver,
+                    Instant::now() + PREPARED_COMMIT_AWAKE_TIME,
+                )
+            } else {
+                non_finalized_block_write_receiver.blocking_recv()
+            };
+            let Some(msg) = msg else {
+                break;
+            };
             let prepared = prepared_commit.take();
 
             let queued_child_and_rsp_tx = match msg {
@@ -897,8 +1040,12 @@ impl WriteBlockWorkerTask {
                 NonFinalizedWriteMessage::Prepare(block) => {
                     // The children of a rejected block are rejected without validating them.
                     if !parent_error_map.contains_key(&block.header.previous_block_hash) {
-                        prepared_commit =
-                            prepare_commit(&finalized_state.db, non_finalized_state, block);
+                        prepared_commit = prepare_commit(
+                            &finalized_state.db,
+                            non_finalized_state,
+                            block,
+                            recent_headers.as_ref(),
+                        );
                     }
                     continue;
                 }
@@ -990,13 +1137,20 @@ impl WriteBlockWorkerTask {
                 let result = if let Some(mut contextual) = contextual {
                     // A replaced identical body keeps its first receipt time.
                     contextual.received_time = queued_child.received_time;
-                    non_finalized_state.commit_prevalidated_contextual(
-                        *contextual,
-                        &finalized_state.db,
-                        notifications.as_ref(),
-                    )
+                    non_finalized_state
+                        .commit_prevalidated_contextual(
+                            *contextual,
+                            &finalized_state.db,
+                            notifications.as_ref(),
+                        )
+                        .map(|()| {
+                            recent_headers = recent_headers
+                                .as_ref()
+                                .and_then(|headers| headers.of_child(&queued_child));
+                        })
                 } else if let Some(PreparedCommit {
                     mut validated,
+                    recent_headers: block_headers,
                     validation,
                     ..
                 }) =
@@ -1009,14 +1163,20 @@ impl WriteBlockWorkerTask {
                     prepared_validation = validation;
                     validated.set_received_time(queued_child.received_time);
                     non_finalized_state.insert_validated(validated);
+                    recent_headers = Some(block_headers);
                     Ok(())
                 } else {
                     tracing::trace!(?child_hash, "validating queued child");
-                    validate_and_commit_non_finalized(
+                    validate_non_finalized(
                         &finalized_state.db,
                         non_finalized_state,
                         queued_child,
+                        recent_headers.as_ref(),
                     )
+                    .map(|(validated, block_headers)| {
+                        non_finalized_state.insert_validated(validated);
+                        recent_headers = Some(block_headers);
+                    })
                 };
                 metrics::histogram!(
                     "state.block_writer.phase.duration_seconds",

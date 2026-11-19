@@ -313,7 +313,9 @@ fn timed_out_mining_candidate_keeps_queued_computation_bounded() {
 
             release.send(()).unwrap();
             blocker.await.unwrap();
-            // This read drains the expired computation on the sole blocking thread.
+            // The sole blocking thread runs the expired computation before this task. The read
+            // below is answered from memory, so it doesn't wait for that thread.
+            tokio::task::spawn_blocking(|| ()).await.unwrap();
             assert_eq!(
                 read.clone()
                     .oneshot(ReadRequest::MiningCandidate)
@@ -339,4 +341,70 @@ fn timed_out_mining_candidate_keeps_queued_computation_bounded() {
         .await
         .expect("candidate timeout must bound queued work without retaining failed admission");
     });
+}
+
+/// A candidate's computation must be queued when the candidate is requested, not when the task
+/// that publishes its result first runs.
+#[test]
+fn candidate_computation_is_queued_by_the_request() {
+    let _init_guard = zebra_test::init();
+
+    // The state is created on its own runtime: committing its blocks needs blocking threads,
+    // and a multi-threaded runtime.
+    let setup = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut state, read, block) = setup.block_on(async {
+        let (state, read) = state(false).await;
+        let block = candidate(&read, false, 0).await;
+        (state, read, block)
+    });
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            // Keep the only blocking thread busy, so a queued computation stays queued.
+            let (started, started_rx) = oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let busy = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            });
+            started_rx.await.unwrap();
+
+            let _changes = subscribe(&read).await;
+            let Response::MiningCandidate(Some(guard)) = state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::MiningCandidate(block))
+                .await
+                .unwrap()
+            else {
+                panic!("a child of the best tip is admitted");
+            };
+
+            // The computation holds its own reference to the candidate's slot until it ends.
+            let slot_references = || guard.0.borrow().as_ref().map(Arc::strong_count);
+            assert_eq!(slot_references(), Some(2));
+
+            // This task doesn't let any other task run until the computation has ended, so only
+            // the request can have queued it.
+            drop(release);
+            let waiting_since = std::time::Instant::now();
+            while slot_references() != Some(1) {
+                assert!(
+                    waiting_since.elapsed() < Duration::from_secs(10),
+                    "the computation was not queued by the request",
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+
+            busy.await.unwrap();
+        });
+    drop(setup);
 }
