@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Pruned nodes advertise `NODE_NETWORK_LIMITED` when they retain the complete 2,304-block window, rather than `NODE_NETWORK | NODE_PRUNED` as in #12521; older block requests receive `notfound`.'
-time: 2026-11-18T23:35:28.35976755+01:00

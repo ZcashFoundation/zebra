@@ -1,0 +1,7 @@
+project: zebrad-api
+kind: Added
+body: >-
+  Added `components::sync::Config::pin_parallel_cpu_threads` to pin Rayon verification workers
+  to physical CPU cores on Linux
+  ([#12533](https://github.com/ZcashFoundation/zebra/pull/12533)).
+time: 2026-11-18T17:42:01.000000000+01:00

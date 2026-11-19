@@ -1,4 +1,7 @@
 project: zebrad-api
 kind: breaking
-body: Added `sync::Config::pin_parallel_cpu_threads`; struct literals must specify this field or use `..Config::default()`.
+body: >-
+  Set the new `components::sync::Config::pin_parallel_cpu_threads` field in
+  `components::sync::Config` struct literals, or use `..Config::default()`
+  ([#12533](https://github.com/ZcashFoundation/zebra/pull/12533)).
 time: 2026-11-18T17:42:00.824038038+01:00
