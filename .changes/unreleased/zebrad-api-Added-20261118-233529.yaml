@@ -1,0 +1,7 @@
+project: zebrad-api
+kind: Added
+body: >-
+  Added `components::inbound::Inbound::with_limited_tip`, which answers `notfound` for
+  requested blocks more than 2,304 blocks below the given tip
+  ([#12537](https://github.com/ZcashFoundation/zebra/pull/12537)).
+time: 2026-11-18T23:35:29.000000000+01:00
