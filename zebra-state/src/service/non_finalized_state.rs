@@ -972,6 +972,9 @@ impl NonFinalizedState {
     /// precedes the tree update cancels it if that check fails. The history tree update needs the
     /// new tree roots, so it runs after them. The commit returns the same result as running these
     /// steps in series: the first error in that order.
+    ///
+    /// A block without note commitments has no tree updates, so its steps do run in series, on
+    /// this thread.
     #[tracing::instrument(
         level = "debug",
         skip(self, finalized_state, new_chain, prepared),
@@ -1050,11 +1053,24 @@ impl NonFinalizedState {
             tree_duration = phase_start.elapsed();
         };
 
-        rayon::in_place_scope_fifo(|scope| {
-            scope.spawn_fifo(|_scope| check_block_commitment());
-            scope.spawn_fifo(|_scope| update_except_trees());
+        // A block without note commitments has no tree updates for its other steps to run beside,
+        // so starting a scope and waking rayon threads would only delay them.
+        let has_note_commitments = block.sprout_note_commitments().next().is_some()
+            || block.sapling_note_commitments().next().is_some()
+            || block.orchard_note_commitments().next().is_some()
+            || block.ironwood_note_commitments().next().is_some();
+
+        if has_note_commitments {
+            rayon::in_place_scope_fifo(|scope| {
+                scope.spawn_fifo(|_scope| check_block_commitment());
+                scope.spawn_fifo(|_scope| update_except_trees());
+                update_trees();
+            });
+        } else {
+            update_except_trees();
+            check_block_commitment();
             update_trees();
-        });
+        }
 
         // Return the first error that a commit running these steps in series would return.
         let NonTreeUpdate {
