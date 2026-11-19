@@ -1691,7 +1691,6 @@ impl Chain {
     }
 
     /// Returns the non-finalized length of this chain.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.blocks.len()
     }

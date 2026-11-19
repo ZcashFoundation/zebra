@@ -2484,3 +2484,113 @@ async fn coinbase_precomputation_respects_the_shared_build_permit() {
     .unwrap();
     assert!(cache.get(Height(2_000_000), Amount::zero(), None).is_some());
 }
+
+/// A template without transactions is built on the caller's task if its coinbase transaction is
+/// already built, and on a blocking thread otherwise, where the transaction can be proved.
+#[test]
+fn only_a_template_with_a_built_coinbase_is_assembled_without_a_blocking_thread() {
+    type State = zebra_test::mock_service::MockService<
+        zebra_state::ReadRequest,
+        zebra_state::ReadResponse,
+        zebra_test::mock_service::PanicAssertion,
+        zebra_state::BoxError,
+    >;
+    type Mempool = zebra_test::mock_service::MockService<
+        zebra_node_services::mempool::Request,
+        zebra_node_services::mempool::Response,
+        zebra_test::mock_service::PanicAssertion,
+        zebra_state::BoxError,
+    >;
+
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .expect("hard-coded transparent address is valid"),
+    );
+    let tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("Nu5 is active on the test network");
+    let chain_info = Arc::new(GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        tip_height,
+        tip_hash: block::Hash([0xab; 32]),
+        cur_time: DateTime32::from(1654008617),
+        min_time: DateTime32::from(1654008606),
+        max_time: DateTime32::from(1654008719),
+        chain_history_root: fake_history_tree(&net).hash(),
+        chain_value_pools: Default::default(),
+    });
+    let height = tip_height.next().expect("test height is below the maximum");
+    let built = CoinbaseCache::default();
+    built.select(height, nsm_value_balance_for_next_block(&net, &chain_info));
+    built.store(
+        height,
+        Amount::zero(),
+        nsm_value_balance_for_next_block(&net, &chain_info),
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
+            .expect("test parameters produce a valid coinbase"),
+    );
+    let unbuilt = CoinbaseCache::default();
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            // Keep the only blocking thread busy.
+            let (started, started_rx) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let busy = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            });
+            started_rx.await.unwrap();
+
+            let build_with = |cache: &CoinbaseCache| {
+                let (net, miner_params, cache, chain_info) = (
+                    net.clone(),
+                    miner_params.clone(),
+                    cache.clone(),
+                    chain_info.clone(),
+                );
+                async move {
+                    let state: State =
+                        zebra_test::mock_service::MockService::build().for_unit_tests();
+                    build(
+                        &net,
+                        &miner_params,
+                        &cache,
+                        state,
+                        None::<Mempool>,
+                        Some(chain_info),
+                        None,
+                    )
+                    .await
+                }
+            };
+
+            let (template, _mempool_tx_ids) =
+                tokio::time::timeout(Duration::from_secs(5), build_with(&built))
+                    .await
+                    .expect("a template with a built coinbase needs no blocking thread")
+                    .expect("the template is valid")
+                    .expect("a coinbase-only template doesn't depend on the mempool");
+            assert_eq!(template.previous_block_hash, chain_info.tip_hash);
+            assert!(template.transactions.is_empty());
+
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), build_with(&unbuilt))
+                    .await
+                    .is_err(),
+                "a coinbase transaction is built on a blocking thread",
+            );
+
+            drop(release);
+            busy.await.unwrap();
+        });
+}

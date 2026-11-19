@@ -22,6 +22,7 @@ use crate::{
             difficulty_threshold_and_time_are_valid, AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
+        non_finalized_state::Chain,
         read::{
             self, find::calculate_median_time_past, tree::history_tree,
             FINALIZED_STATE_QUERY_RETRIES,
@@ -82,6 +83,49 @@ pub fn get_block_template_chain_info(
         chain_value_pools,
         DateTime32::now(),
     )
+}
+
+/// Returns the [`GetBlockTemplateChainInfo`] for the tip of `chain`, using only the chain's own
+/// data, so the caller doesn't need a thread that can wait for the database.
+///
+/// Returns `None` if the chain doesn't hold every header that the next block's difficulty
+/// adjustment reads. The finalized state has the rest, and
+/// [`get_block_template_chain_info()`] reads them.
+///
+/// Also returns `None` if the chain's tip is at the maximum block height, so there is no next
+/// block. [`get_block_template_chain_info()`] returns the error for that.
+pub(crate) fn chain_info_from_chain(
+    chain: &Chain,
+    network: &Network,
+) -> Option<Result<GetBlockTemplateChainInfo, BoxError>> {
+    let (tip_height, tip_hash, chain_value_pools) = chain.non_finalized_tip_with_value_balance();
+    let block_span = pow_adjustment_block_span(network, tip_height.next().ok()?);
+    if chain.len() < block_span {
+        return None;
+    }
+
+    let relevant_chain = chain
+        .blocks
+        .values()
+        .rev()
+        .take(block_span)
+        .map(|block| {
+            (
+                block.block.header.difficulty_threshold,
+                block.block.header.time,
+            )
+        })
+        .collect();
+
+    Some(difficulty_time_and_history_tree(
+        relevant_chain,
+        tip_height,
+        tip_hash,
+        network,
+        chain.history_block_commitment_tree(),
+        chain_value_pools,
+        DateTime32::now(),
+    ))
 }
 
 /// Checks a parent in the published snapshot, contextual rules, and history/body commitments.

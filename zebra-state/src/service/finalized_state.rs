@@ -86,6 +86,8 @@ pub use disk_format::{
     shielded::FastSyncTreeRoots, FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex,
     TransactionLocation, MAX_ON_DISK_HEIGHT,
 };
+#[cfg(test)]
+pub(crate) use zebra_db::block::FINALIZED_TIP_READS;
 pub(crate) use zebra_db::history::{PruningWitness, MAX_PRUNING_BATCH_HEIGHTS};
 pub use zebra_db::ZebraDb;
 

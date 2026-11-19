@@ -1339,9 +1339,24 @@ where
         phase.store(BUILD_STARTED, Ordering::Release);
     }
 
-    // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
-    // a shielded coinbase takes seconds to prove, so keep them off the async executor.
-    tokio::task::spawn_blocking(move || {
+    // A template without transactions whose coinbase transaction is already built only has its
+    // roots left to compute. That takes less time than moving the work to a blocking thread and
+    // back.
+    //
+    // The built transaction is still there when the template reads it: the coinbase cache is
+    // only changed by a builder that holds the build permit, which this call holds, and by the
+    // template updater's own task, which is the task that makes this call. A caller on another
+    // task would have to build its templates on a blocking thread, where a missing coinbase
+    // transaction can be proved.
+    let has_built_coinbase = mempool_txs.is_empty()
+        && chain_info.tip_height.next().is_ok_and(|height| {
+            coinbase_cache.holds(
+                height,
+                Amount::zero(),
+                nsm_value_balance_for_next_block(&network, &chain_info),
+            )
+        });
+    let assemble = move || {
         let _build_guard = build_guard;
         BlockTemplateResponse::from_mempool(
             &network,
@@ -1353,11 +1368,18 @@ where
             mempool_tx_deps,
         )
         .map(|template| Some((template, mempool_tx_ids)))
-    })
-    .await
-    .map_misc_error()
-    .and_then(|result| result)
-    .map_err(|error| (error_tip, error))
+    };
+    if has_built_coinbase {
+        return assemble().map_err(|error| (error_tip, error));
+    }
+
+    // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
+    // a shielded coinbase takes seconds to prove, so keep them off the async executor.
+    tokio::task::spawn_blocking(assemble)
+        .await
+        .map_misc_error()
+        .and_then(|result| result)
+        .map_err(|error| (error_tip, error))
 }
 
 /// Predicts the post-commit selection without publishing work based on unverified transactions.

@@ -54,6 +54,26 @@ use crate::request::Spend;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+thread_local! {
+    /// The number of times this thread read the finalized tip from a database.
+    pub(crate) static FINALIZED_TIP_READS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+impl ZebraDb {
+    /// Returns the output of `read` without counting its finalized tip reads, for the checks
+    /// that only test builds make.
+    pub(crate) fn uncounted_tip_read<T>(read: impl FnOnce() -> T) -> T {
+        let reads = FINALIZED_TIP_READS.with(std::cell::Cell::get);
+        let output = read();
+        FINALIZED_TIP_READS.with(|counted| counted.set(reads));
+
+        output
+    }
+}
+
 impl ZebraDb {
     // Read block methods
 
@@ -71,6 +91,9 @@ impl ZebraDb {
     //       move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
+        #[cfg(test)]
+        FINALIZED_TIP_READS.with(|reads| reads.set(reads.get() + 1));
+
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.zs_last_key_value(&hash_by_height)
     }

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Changed `submitblock` to write its `submit block accepted` log line from a separate task, with an `accepted_at` field for the time the block was accepted ([#12548](https://github.com/ZcashFoundation/zebra/pull/12548)).'
+time: 2026-11-19T04:00:00.000000000-05:00

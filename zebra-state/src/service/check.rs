@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 
 use zebra_chain::{
     block::{
@@ -15,8 +15,8 @@ use zebra_chain::{
 
 use crate::{
     service::{
-        block_iter::{any_chain_ancestor_iter, Iter},
-        check::difficulty::pow_adjustment_block_span,
+        block_iter::any_chain_ancestor_iter,
+        check::difficulty::{pow_adjustment_block_span, MAX_POW_ADJUSTMENT_BLOCK_SPAN},
         finalized_state::ZebraDb,
         non_finalized_state::NonFinalizedState,
     },
@@ -50,46 +50,110 @@ mod tests;
 
 pub(crate) use difficulty::AdjustedDifficulty;
 
+#[cfg(test)]
+thread_local! {
+    /// The number of times this thread read a block's recent headers from the state.
+    pub(crate) static RECENT_HEADERS_READS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// The difficulty thresholds and times of a block and its most recent ancestors: the header
+/// fields that the contextual checks of the block's children use.
+///
+/// Reading them from the state visits each of those blocks. A block's recent headers are its
+/// own fields followed by its parent's recent headers, so a caller that validates a chain block
+/// by block can keep them instead.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RecentHeaders {
+    /// The hash of the newest block.
+    tip: block::Hash,
+
+    /// The height of the newest block.
+    tip_height: block::Height,
+
+    /// The difficulty threshold and time of the newest block and its ancestors, newest first.
+    ///
+    /// Holds at most [`MAX_POW_ADJUSTMENT_BLOCK_SPAN`] blocks.
+    headers: Vec<(CompactDifficulty, DateTime<Utc>)>,
+}
+
+impl RecentHeaders {
+    /// Reads the recent headers of the block with the hash `tip` from the state: `block_span`
+    /// blocks, or fewer if the state has no more headers.
+    ///
+    /// Returns `None` if the state doesn't have that block's header.
+    pub(crate) fn read(
+        non_finalized_state: &NonFinalizedState,
+        finalized_state: &ZebraDb,
+        tip: block::Hash,
+        block_span: usize,
+    ) -> Option<Self> {
+        #[cfg(test)]
+        RECENT_HEADERS_READS.with(|reads| reads.set(reads.get() + 1));
+
+        let relevant_chain =
+            any_chain_ancestor_iter::<block::Header>(non_finalized_state, finalized_state, tip);
+        let tip_height = relevant_chain.height?;
+        let headers: Vec<_> = relevant_chain
+            .take(block_span)
+            .map(|header| (header.difficulty_threshold, header.time))
+            .collect();
+
+        (!headers.is_empty()).then_some(Self {
+            tip,
+            tip_height,
+            headers,
+        })
+    }
+
+    /// Returns `true` if these are all the headers that a read of `block_span` blocks returns:
+    /// that many blocks, or every block down to the genesis block.
+    fn covers(&self, block_span: usize) -> bool {
+        self.headers.len() >= block_span || self.headers.len() > self.tip_height.as_usize()
+    }
+
+    /// Returns the recent headers of `child`, or `None` if it isn't a child of this newest block.
+    pub(crate) fn of_child(&self, child: &SemanticallyVerifiedBlock) -> Option<Self> {
+        (child.block.header.previous_block_hash == self.tip).then(|| self.with_child(child))
+    }
+
+    /// Returns the recent headers of `child`, which must be a child of this newest block.
+    fn with_child(&self, child: &SemanticallyVerifiedBlock) -> Self {
+        let mut headers = Vec::with_capacity(MAX_POW_ADJUSTMENT_BLOCK_SPAN);
+        headers.push((
+            child.block.header.difficulty_threshold,
+            child.block.header.time,
+        ));
+        headers.extend(
+            self.headers
+                .iter()
+                .take(MAX_POW_ADJUSTMENT_BLOCK_SPAN - 1)
+                .copied(),
+        );
+
+        Self {
+            tip: child.hash,
+            tip_height: child.height,
+            headers,
+        }
+    }
+}
+
 /// Check that the semantically verified block is contextually valid for `network`,
-/// based on the `finalized_tip_height` and `relevant_chain`.
+/// based on the recent headers of its parent.
 ///
 /// This function performs checks that require a small number of recent headers,
 /// including previous height and block difficulty.
-///
-/// The relevant chain is an iterator over the ancestor headers of `block`, starting
-/// with its parent. Its initial height comes from the parent hash's state index.
-#[tracing::instrument(skip(semantically_verified, finalized_tip_height, relevant_chain))]
-pub(crate) fn block_is_valid_for_recent_chain(
+#[tracing::instrument(skip(semantically_verified, parent_headers))]
+fn block_is_valid_for_recent_chain(
     semantically_verified: &SemanticallyVerifiedBlock,
     network: &Network,
-    finalized_tip_height: Option<block::Height>,
-    relevant_chain: Iter<block::Header>,
+    parent_headers: &RecentHeaders,
 ) -> Result<(), ValidateContextError> {
-    let finalized_tip_height = finalized_tip_height
-        .expect("finalized state must contain at least one block to do contextual validation");
-    check::block_is_not_orphaned(finalized_tip_height, semantically_verified.height)?;
-
-    // ZIP 218 makes the averaging window, and so the block span, depend on the block's height.
-    let block_span = pow_adjustment_block_span(network, semantically_verified.height);
-
-    let parent_height = relevant_chain.height;
-    let relevant_data: Vec<_> = relevant_chain
-        .take(block_span)
-        .map(|header| (header.difficulty_threshold, header.time))
-        .collect();
-
-    if relevant_data.is_empty() {
-        warn!(
-            ?semantically_verified,
-            ?finalized_tip_height,
-            "state must contain parent block to do contextual validation"
-        );
-
-        return Err(ValidateContextError::NotReadyToBeCommitted);
-    }
-
-    let parent_height = parent_height.expect("a parent header has an indexed height");
-    check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
+    check::height_one_more_than_parent_height(
+        parent_headers.tip_height,
+        semantically_verified.height,
+    )?;
 
     // skip this check during tests if we don't have enough blocks in the chain
     // process_queued also checks the chain length, so we can skip this assertion during testing
@@ -97,19 +161,15 @@ pub(crate) fn block_is_valid_for_recent_chain(
     //
     // TODO: accept a NotReadyToBeCommitted error in those tests instead
     #[cfg(test)]
-    if relevant_data.len() < block_span {
+    if parent_headers.headers.len()
+        < pow_adjustment_block_span(network, semantically_verified.height)
+    {
         return Ok(());
     }
 
-    // In production, blocks without enough context are invalid.
+    // Recent headers always hold the parent's, so there is some context for the block.
     //
-    // The BlockVerifierRouter makes sure that the first 1 million blocks (or more) are
-    // checkpoint verified. The state queues and block write task make sure that blocks are
-    // committed in strict height order. But this function is only called on semantically
-    // verified blocks, so there will be at least 1 million blocks in the state when it is
-    // called. So this error should never happen on Mainnet or the default Testnet.
-    //
-    // It's okay to use a relevant chain of fewer than `block_span` blocks, because
+    // It's okay to use a relevant chain of fewer than the block span, because
     // the MedianTime function uses height 0 if passed a negative height by the ActualTimespan function:
     // > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
     // > MedianTime(height : N) := median([[ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to height − 1 ]])
@@ -118,13 +178,11 @@ pub(crate) fn block_is_valid_for_recent_chain(
     // > ([ToTarget(nBits(𝑖)) for 𝑖 from height−PoWAveragingWindow up to height−1]) otherwise
     //
     // See the 'Difficulty Adjustment' section (page 132) in the Zcash specification.
-    #[cfg(not(test))]
-    if relevant_data.is_empty() {
-        return Err(ValidateContextError::NotReadyToBeCommitted);
-    }
-
-    let difficulty_adjustment =
-        AdjustedDifficulty::new_from_block(&semantically_verified.block, network, relevant_data);
+    let difficulty_adjustment = AdjustedDifficulty::new_from_block(
+        &semantically_verified.block,
+        network,
+        parent_headers.headers.iter().copied(),
+    );
     check::difficulty_threshold_and_time_are_valid(
         semantically_verified.block.header.difficulty_threshold,
         difficulty_adjustment,
@@ -427,23 +485,79 @@ pub(crate) fn initial_contextual_validity(
     non_finalized_state: &NonFinalizedState,
     semantically_verified: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    let relevant_chain = any_chain_ancestor_iter::<block::Header>(
-        non_finalized_state,
+    // `non_finalized_state` can be a published copy of the block write task's state, which can
+    // still hold blocks that the database has finalized since. So the finalized tip's height and
+    // the block's ancestors are read from the state.
+    contextual_validity(
         finalized_state,
-        semantically_verified.block.header.previous_block_hash,
-    );
+        non_finalized_state,
+        semantically_verified,
+        None,
+        finalized_state.finalized_tip_height(),
+    )
+    .map(|_recent_headers| ())
+}
+
+/// Runs the checks of [`initial_contextual_validity`] with the height of the finalized tip that
+/// `non_finalized_state` builds on.
+///
+/// The headers of the block's ancestors are taken from `recent_headers` if they are the recent
+/// headers of the block's parent, and read from the state otherwise.
+///
+/// Returns the block's own recent headers, for the checks of its children.
+pub(crate) fn contextual_validity(
+    finalized_state: &ZebraDb,
+    non_finalized_state: &NonFinalizedState,
+    semantically_verified: &SemanticallyVerifiedBlock,
+    recent_headers: Option<&RecentHeaders>,
+    finalized_tip_height: Option<block::Height>,
+) -> Result<RecentHeaders, ValidateContextError> {
+    let finalized_tip_height = finalized_tip_height
+        .expect("finalized state must contain at least one block to do contextual validation");
+    // A block at or below the finalized tip is rejected before its ancestors are read.
+    check::block_is_not_orphaned(finalized_tip_height, semantically_verified.height)?;
+
+    let parent_hash = semantically_verified.block.header.previous_block_hash;
+    // ZIP 218 makes the averaging window, and so the block span, depend on the block's height.
+    let block_span =
+        pow_adjustment_block_span(&non_finalized_state.network, semantically_verified.height);
+
+    // A read only finds the headers of a parent that is in the state, so kept headers are only
+    // used for a parent that is still in a chain.
+    let kept_headers = recent_headers.filter(|recent_headers| {
+        recent_headers.tip == parent_hash
+            && recent_headers.covers(block_span)
+            && non_finalized_state.any_chain_contains(&parent_hash)
+    });
+    let read_headers = match kept_headers {
+        Some(_) => None,
+        None => RecentHeaders::read(
+            non_finalized_state,
+            finalized_state,
+            parent_hash,
+            block_span,
+        ),
+    };
+    let Some(parent_headers) = kept_headers.or(read_headers.as_ref()) else {
+        warn!(
+            ?semantically_verified,
+            ?finalized_tip_height,
+            "state must contain parent block to do contextual validation"
+        );
+
+        return Err(ValidateContextError::NotReadyToBeCommitted);
+    };
 
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         semantically_verified,
         &non_finalized_state.network,
-        finalized_state.finalized_tip_height(),
-        relevant_chain,
+        parent_headers,
     )?;
 
     check::nullifier::no_duplicates_in_finalized_chain(semantically_verified, finalized_state)?;
 
-    Ok(())
+    Ok(parent_headers.with_child(semantically_verified))
 }
 
 /// Checks the block subsidy, funding streams, and miner fees paid by `contextual`'s coinbase
