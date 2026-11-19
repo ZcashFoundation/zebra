@@ -136,7 +136,7 @@ async fn opted_in_nodes_use_compact_blocks_and_ordinary_peers_receive_full_block
             ..Default::default()
         });
         let mut config = os_assigned_rpc_port_config(false, &network)?;
-        config.network.experimental_early_block_relay = true;
+        config.network.compact_block_relay = true;
         config.network.max_connections_per_ip = 4;
         config.network.crawl_new_peer_interval = Duration::from_secs(3600);
         config.mempool.debug_enable_at_height = Some(0);
@@ -180,7 +180,7 @@ async fn opted_in_nodes_use_compact_blocks_and_ordinary_peers_receive_full_block
 
         let (link_c, wire_c, proxy_c) = observe(p2p_a).await?;
         config.network.initial_testnet_peers = [link_c.to_string()].into();
-        config.network.experimental_early_block_relay = false;
+        config.network.compact_block_relay = false;
         let mut node_c = testdir()?
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;

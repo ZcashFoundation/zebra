@@ -159,7 +159,7 @@ async fn compact_relay_sends_the_first_download_to_the_advertiser() {
 
     for _ in 0..20 {
         assert_eq!(
-            first_download_peer(PeerServices::NODE_EARLY_BLOCK_RELAY).await,
+            first_download_peer(PeerServices::NODE_COMPACT_BLOCKS).await,
             2,
         );
     }
@@ -182,7 +182,7 @@ async fn compact_relay_does_not_prefer_a_failed_advertiser() {
 
     let services = [
         PeerServices::NODE_NETWORK,
-        PeerServices::NODE_EARLY_BLOCK_RELAY,
+        PeerServices::NODE_COMPACT_BLOCKS,
     ];
     let (discovered_peers, addrs, mut handles) = mock_peers_with_services(&services);
     let (minimum_peer_version, _best_tip) =

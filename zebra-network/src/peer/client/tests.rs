@@ -356,9 +356,7 @@ where
             connected_addr: self.connected_addr.unwrap_or(ConnectedAddr::Isolated),
             negotiated_version,
             // A test peer that advertises compact block relay has negotiated it.
-            early_block_relay: remote
-                .services
-                .contains(PeerServices::NODE_EARLY_BLOCK_RELAY),
+            early_block_relay: remote.services.contains(PeerServices::NODE_COMPACT_BLOCKS),
             remote,
         });
 

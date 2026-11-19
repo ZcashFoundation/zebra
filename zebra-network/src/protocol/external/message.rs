@@ -205,7 +205,7 @@ pub enum Message {
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
     Block(Arc<Block>),
 
-    /// Provisional compact relay opt-in; requires both peers to set the experimental service bit.
+    /// Compact relay opt-in; requires both peers to set the compact block relay service bit.
     SendCompact {
         /// Whether to push high-bandwidth announcements.
         high_bandwidth: bool,
