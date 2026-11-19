@@ -606,7 +606,15 @@ async fn same_effects_variants_share_pending_slot_per_peer() {
         ));
 
         match outcome {
-            "failure" => download.respond_error("download failed".into()),
+            "failure" => {
+                download.respond_error("download failed".into());
+                for _ in 0..GOSSIP_DOWNLOAD_RETRIES {
+                    peer_set
+                        .expect_request(zn::Request::TransactionsByIdFromAdvertisers(variant_id))
+                        .await
+                        .respond_error("no other announcer served the transaction".into());
+                }
+            }
             "cancellation" => {
                 downloads.cancel(&[variant_id.mined_id()].into());
                 assert!(matches!(
@@ -742,6 +750,12 @@ async fn unverified_witnessed_id_does_not_reserve_other_sources() {
             assert_eq!(verified.0.transaction.id, txid);
 
             attack.respond_error("notfound".into());
+            for _ in 0..GOSSIP_DOWNLOAD_RETRIES {
+                peer_set
+                    .expect_request(zn::Request::TransactionsByIdFromAdvertisers(fabricated_id))
+                    .await
+                    .respond_error("no other announcer served the fabricated ID".into());
+            }
             let failed = tokio::time::timeout(Duration::from_secs(1), downloads.next())
                 .await
                 .expect("failed download completes")
@@ -756,4 +770,146 @@ async fn unverified_witnessed_id_does_not_reserve_other_sources() {
             assert_eq!(downloads.in_flight(), 0);
         }
     }
+}
+
+/// Fake inventory cannot exceed the per-peer queue cap or create unbounded retry work.
+#[tokio::test(start_paused = true)]
+async fn failed_gossip_downloads_have_bounded_retries_and_queue_slots() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let first_requests = Arc::new(AtomicUsize::new(0));
+    let first_calls = first_requests.clone();
+    let calls = attempts.clone();
+    let mut downloads = Downloads::new(
+        service_fn(move |request| {
+            let first_calls = first_calls.clone();
+            let calls = calls.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                match request {
+                    zn::Request::TransactionsById(_) => {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                    }
+                    zn::Request::TransactionsByIdFromAdvertisers(_) => {}
+                    request => panic!("unexpected request: {request:?}"),
+                }
+                Err::<zn::Response, BoxError>("announcer did not serve its transaction".into())
+            }
+        }),
+        service_fn(|_| async { panic!("missing transactions cannot be verified") }),
+        service_fn(|request| async move {
+            Ok(match request {
+                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
+                _ => unreachable!("downloads only query transaction membership and the tip"),
+            })
+        }),
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
+    );
+    let source = "127.0.0.1:8233".parse().unwrap();
+    for index in 0..=MAX_INBOUND_CONCURRENCY_PER_PEER {
+        let mut id = [0; 32];
+        id[0] = u8::try_from(index).unwrap();
+        let result = downloads.download_if_needed_and_verify(
+            Gossip::Id(UnminedTxId::Legacy(transaction::Hash(id))),
+            Some(source),
+            None,
+        );
+        if index < MAX_INBOUND_CONCURRENCY_PER_PEER {
+            result.expect("the peer's first five advertisements are admitted");
+        } else {
+            assert!(matches!(result, Err(MempoolError::FullQueue)));
+        }
+    }
+    for _ in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        let (_id, error, _) = *tokio::time::timeout(Duration::from_secs(3), downloads.next())
+            .await
+            .expect("all three attempts finish well before the timeout")
+            .expect("each admitted ID has a result")
+            .expect("the task did not time out")
+            .expect_err("unserved IDs fail to download");
+        assert!(matches!(
+            error,
+            TransactionDownloadVerifyError::DownloadFailed(_)
+        ));
+    }
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        MAX_INBOUND_CONCURRENCY_PER_PEER * (GOSSIP_DOWNLOAD_RETRIES + 1)
+    );
+    assert_eq!(
+        first_requests.load(Ordering::SeqCst),
+        MAX_INBOUND_CONCURRENCY_PER_PEER
+    );
+    assert_eq!(downloads.in_flight(), 0);
+}
+
+/// A successful retry is verified once, and a verification failure never triggers another download.
+#[tokio::test(start_paused = true)]
+async fn gossiped_id_retry_stops_after_receiving_transaction() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let tx = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("the vector contains a transaction")
+        .transaction;
+    let id = tx.id;
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let calls = attempts.clone();
+    let source = "127.0.0.1:8233".parse().unwrap();
+    let mut downloads = Downloads::new(
+        service_fn(move |request| {
+            let tx = tx.clone();
+            let calls = calls.clone();
+            async move {
+                match calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => {
+                        assert_eq!(request, zn::Request::TransactionsById(HashSet::from([id])));
+                        Err::<zn::Response, BoxError>("notfound".into())
+                    }
+                    1 => {
+                        assert_eq!(request, zn::Request::TransactionsByIdFromAdvertisers(id));
+                        Ok(zn::Response::Transactions(vec![
+                            zn::InventoryResponse::Available((
+                                tx,
+                                Some(PeerSocketAddr::from(source)),
+                            )),
+                        ]))
+                    }
+                    _ => panic!("a verification failure must not retry the download"),
+                }
+            }
+        }),
+        service_fn(|_| async {
+            Err::<tx::MempoolResponse, BoxError>("transaction rejected".into())
+        }),
+        service_fn(|request| async move {
+            Ok(match request {
+                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
+                _ => unreachable!("downloads only query membership and the tip"),
+            })
+        }),
+        Network::Mainnet.fee_reduction_height(),
+        Arc::new(Notify::new()),
+    );
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(id), Some(source), None)
+        .unwrap();
+    let (_, error, _) = *tokio::time::timeout(Duration::from_secs(3), downloads.next())
+        .await
+        .expect("the retry completes")
+        .expect("the download returns its result")
+        .expect("the task did not time out")
+        .expect_err("verification fails after download");
+    assert!(matches!(
+        error,
+        TransactionDownloadVerifyError::Invalid { .. }
+    ));
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
 }

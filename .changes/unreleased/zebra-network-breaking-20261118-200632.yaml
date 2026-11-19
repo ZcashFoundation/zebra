@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Matching on every `Request` variant must handle the new `TransactionsByIdFromAdvertisers` variant.
+time: 2026-11-18T20:06:32.880780433+01:00

@@ -213,6 +213,12 @@ pub enum Request {
     /// Returns [`Response::Transactions`](super::Response::Transactions).
     TransactionsById(HashSet<UnminedTxId>),
 
+    /// Retry one gossiped transaction using only connected peers that advertised its ID.
+    ///
+    /// The peer set translates this to [`Self::TransactionsById`] before sending it to a peer.
+    /// If no eligible advertiser becomes ready, the request fails without trying unrelated peers.
+    TransactionsByIdFromAdvertisers(UnminedTxId),
+
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
     ///
@@ -425,6 +431,9 @@ impl fmt::Display for Request {
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
             Request::CheckCompactBlock(..) => "CheckCompactBlock".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
+            Request::TransactionsByIdFromAdvertisers(_) => {
+                "TransactionsByIdFromAdvertisers".to_string()
+            }
 
             Request::FindBlocks { known_blocks, stop } => format!(
                 "FindBlocks {{ known_blocks: {}, stop: {} }}",
@@ -476,6 +485,7 @@ impl Request {
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Request::CheckCompactBlock(..) => "CheckCompactBlock",
             Request::TransactionsById(_) => "TransactionsById",
+            Request::TransactionsByIdFromAdvertisers(_) => "TransactionsByIdFromAdvertisers",
 
             Request::FindBlocks { .. } => "FindBlocks",
             Request::FindHeaders { .. } => "FindHeaders",
@@ -499,6 +509,7 @@ impl Request {
                 | Request::BlocksByHash(_)
                 | Request::EarlyBlocksByHash(_)
                 | Request::TransactionsById(_)
+                | Request::TransactionsByIdFromAdvertisers(_)
         )
     }
 
@@ -515,10 +526,10 @@ impl Request {
 
     /// Returns the transaction ID inventory downloads from the request, if any.
     pub fn transaction_id_inventory(&self) -> HashSet<UnminedTxId> {
-        if let Request::TransactionsById(transaction_ids) = self {
-            transaction_ids.clone()
-        } else {
-            HashSet::new()
+        match self {
+            Request::TransactionsById(ids) => ids.clone(),
+            Request::TransactionsByIdFromAdvertisers(id) => HashSet::from([*id]),
+            _ => HashSet::new(),
         }
     }
 }

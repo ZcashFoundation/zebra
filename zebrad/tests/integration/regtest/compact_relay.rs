@@ -189,23 +189,10 @@ async fn default_nodes_use_compact_blocks_and_disabled_peers_receive_full_blocks
 
         let transaction = spend(&coinbase, false, 10_001)?;
         send(&b, &transaction).await?;
-        // Ordinary gossip may beat the RPC, or skip a peer busy syncing. If A queued B's gossip
-        // first, it drops the RPC copy, and doesn't retry a download that went to C, which doesn't
-        // have the transaction: only A's 73-second mempool crawler would fetch it again. So resend
-        // the full transaction until A's mempool has it, rather than depending on gossip.
+        // A must obtain the transaction through gossip, including when an initial download
+        // reaches C (which has not seen it), before its 73-second crawler interval.
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                if let Err(error) = send(&a, &transaction).await {
-                    assert!(
-                        [
-                            "transaction already exists in mempool",
-                            "transaction dropped because it is already queued for download"
-                        ]
-                        .iter()
-                        .any(|message| error.to_string().contains(message)),
-                        "unexpected transaction admission error: {error:?}",
-                    );
-                }
                 let pool: HashSet<String> = a
                     .json_result_from_call("getrawmempool", "[]")
                     .await
@@ -213,7 +200,7 @@ async fn default_nodes_use_compact_blocks_and_disabled_peers_receive_full_blocks
                 if pool.contains(&transaction.hash().to_string()) {
                     return Ok::<_, color_eyre::Report>(());
                 }
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await??;

@@ -1446,6 +1446,11 @@ where
                              pending_ids: ids,
                          })
             }
+            // The peer set must choose an announcer and convert this to a normal download first.
+            (AwaitingRequest, TransactionsByIdFromAdvertisers(_)) => {
+                Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
+            }
+
 
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
                 if let Some(hashes) = known_blocks

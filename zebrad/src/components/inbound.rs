@@ -832,6 +832,9 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
             zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
+            zn::Request::TransactionsByIdFromAdvertisers(_) =>
+                unreachable!("the peer set handles advertiser-only transaction retries"),
+
 
             zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }

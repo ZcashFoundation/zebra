@@ -1395,7 +1395,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
 
     let (
         mut mempool,
-        _peer_set,
+        mut peer_set,
         _state_service,
         _chain_tip_change,
         mut tx_verifier,
@@ -1459,6 +1459,20 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
             .unbox_mempool_error(),
         MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
+
+    // The same rejected ID, when announced by a peer, must not start a download or a retry.
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![rejected_tx.transaction.id.into()],
+            source: "127.0.0.1:8233".parse()?,
+        })
+        .await
+        .unwrap();
+    assert_eq!(mempool.tx_downloads().in_flight(), 0);
+    peer_set.expect_no_requests().await;
 
     let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
         .await
