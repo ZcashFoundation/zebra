@@ -20,7 +20,8 @@ body: >-
   Pruned nodes never advertise `NODE_NETWORK` or `NODE_PRUNED`, and advertise
   `NODE_NETWORK_LIMITED` (bit 10) only once they hold the full 2,304-block window ending at
   their tip; Regtest retention below 2,304 advertises neither. Zebra 7.1.0 and zcashd don't recognize
-  bit 10, so they treat pruned nodes as unable to serve blocks. Pruning rejects zcashd sidecars.
+  bit 10: zcashd never downloads blocks from pruned nodes, and Zebra 7.1.0 asks them only for blocks
+  they announced or that no archive peer can provide. Pruning rejects zcashd sidecars.
   Limited nodes answer `notfound` for blocks more than 2,304 below their tip, and pruned nodes
   for unavailable bodies; block inventory stops at missing history while headers remain
   available. Pruning retains a restart witness and waits without deleting bodies when
