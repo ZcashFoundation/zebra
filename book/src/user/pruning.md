@@ -183,11 +183,10 @@ For historical queries:
 See the [RPC migration guide](zcashd-api-migration-guide.md#pruned-history) and
 [API history contract](../api.md#historical-data-availability) for compatibility details.
 
-Pruned nodes never advertise `NODE_NETWORK` or the experimental `NODE_PRUNED` bit introduced
-in #12521; this change reverses that advertising policy. Nodes that retain at least 2,304
-recent blocks and have the complete window above their current tip advertise
-`NODE_NETWORK_LIMITED` (bit 10) instead. If a restored pruned database has not yet synced
-the window, new peer handshakes gain the limited bit only after it catches up. Regtest
+Pruned nodes never advertise `NODE_NETWORK` or the experimental `NODE_PRUNED` bit. Nodes that
+retain at least 2,304 recent blocks and have the complete window ending at their current tip
+advertise `NODE_NETWORK_LIMITED` (bit 10) instead. If a restored pruned database has not yet
+synced the window, new peer handshakes gain the limited bit only after it catches up. Regtest
 retention below 2,304 (including the minimum 1,001) advertises neither block-serving bit.
 Zebra still recognizes Zakura's `NODE_NETWORK | NODE_PRUNED` advertisements as non-archive.
 
