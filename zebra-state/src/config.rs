@@ -102,8 +102,9 @@ pub struct Config {
     /// Catch-up pruning compacts deleted bodies after clearing the backlog;
     /// normal RocksDB compaction handles ongoing deletion.
     ///
-    /// Enabling pruning adds the experimental `NODE_PRUNED` service bit to the advertised
-    /// `NODE_NETWORK` service, and is incompatible with zcashd sidecars.
+    /// Enabling pruning stops advertising `NODE_NETWORK`, and is incompatible with zcashd
+    /// sidecars. A pruned node advertises `NODE_NETWORK_LIMITED` only while retention is at least
+    /// 2,304 blocks and it holds the complete 2,304-block window ending at its tip.
     pub prune_blocks_older_than: Option<u32>,
 
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
