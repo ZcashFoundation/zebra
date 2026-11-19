@@ -146,6 +146,9 @@ pub enum Response {
     /// Dropping the guard withdraws early work.
     MiningCandidate(Option<MiningCandidateGuard>),
 
+    /// Response to [`Request::PrepareCommit`]. The block write task prepares the block if it can.
+    PreparingCommit,
+
     /// Response to a block commit request indicating successful insertion into the state.
     ///
     /// For [`Request::CommitMinedBlock`] and [`Request::CommitMinedCheckpointVerifiedBlock`],

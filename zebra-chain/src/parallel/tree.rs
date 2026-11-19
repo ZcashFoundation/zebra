@@ -154,6 +154,16 @@ impl NoteCommitmentTrees {
         NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
+        // Starting a scope costs more than everything else a block without note commitments
+        // needs here.
+        if sprout_note_commitments.is_empty()
+            && sapling_note_commitments.is_empty()
+            && orchard_note_commitments.is_empty()
+            && ironwood_note_commitments.is_empty()
+        {
+            return Ok(true);
+        }
+
         let mut sprout_result = None;
         let mut sapling_result = None;
         let mut orchard_result = None;

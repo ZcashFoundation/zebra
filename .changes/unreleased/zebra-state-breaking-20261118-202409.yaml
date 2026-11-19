@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Exhaustive matches on `Request` and `Response` must handle the new `Request::PrepareCommit` and `Response::PreparingCommit` variants ([#12542](https://github.com/ZcashFoundation/zebra/pull/12542)).'
+time: 2026-11-18T20:24:09.000000000-05:00

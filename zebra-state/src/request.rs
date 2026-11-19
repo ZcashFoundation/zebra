@@ -1208,6 +1208,25 @@ pub enum Request {
     /// 1 second.
     MiningCandidate(Arc<Block>),
 
+    /// Asks the block write task to contextually validate a block before its commit request
+    /// arrives, so that the commit request only has to publish the validated chain.
+    ///
+    /// The prepared chain is used by a commit request for the same `Arc<Block>`, and only if no
+    /// other request reached the block write task in between. So the block doesn't have to be
+    /// semantically valid yet, but the caller must:
+    /// - only commit that `Arc<Block>` after fully verifying it, and
+    /// - only send blocks that passed the block verifier's checks of the coinbase height, the
+    ///   difficulty threshold and filter, the transaction Merkle root, the coinbase position,
+    ///   transparent double spends and the shielded action limits. Contextual validation relies
+    ///   on them. It doesn't rely on the Equihash solution, time, subsidy or transaction checks.
+    ///
+    /// Only local block submissions may send this request: a prepared block costs the block
+    /// write task a contextual validation before its proof of work is fully checked. Never
+    /// expose it through a peer request.
+    ///
+    /// Returns [`Response::PreparingCommit`] immediately.
+    PrepareCommit(Arc<Block>),
+
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
@@ -1623,6 +1642,7 @@ impl Request {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Request::MiningCandidate(_) => "mining_candidate",
+            Request::PrepareCommit(_) => "prepare_commit",
             Request::EarlyRelay { .. } => "early_relay",
             Request::AuthenticateEarlyRelay(_) => "authenticate_early_relay",
             Request::RejectBlock(_) => "reject_block",
@@ -2369,6 +2389,7 @@ impl TryFrom<Request> for ReadRequest {
             | Request::CommitMinedBlock { .. }
             | Request::CommitMinedCheckpointVerifiedBlock { .. }
             | Request::MiningCandidate(_)
+            | Request::PrepareCommit(_)
             | Request::EarlyRelay { .. }
             | Request::AuthenticateEarlyRelay(_)
             | Request::RejectBlock(_)

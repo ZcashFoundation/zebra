@@ -191,6 +191,34 @@ impl RejectedBlocks {
     }
 }
 
+/// A chain whose tip is a block that passed contextual validation, before it is added to the
+/// chain set.
+#[derive(Clone, Debug)]
+pub(crate) struct ValidatedChain {
+    /// The chain that ends at the block.
+    chain: Arc<Chain>,
+
+    /// The block's parent, if it is a non-finalized block. A chain in the chain set that ends at
+    /// the parent is replaced by `chain`.
+    parent_hash: Option<block::Hash>,
+
+    /// The block's height.
+    height: block::Height,
+
+    /// The block's hash.
+    hash: block::Hash,
+
+    /// How long the phases of the block's validation took, if the state counts metrics.
+    phases: Option<CommitPhases>,
+}
+
+impl ValidatedChain {
+    /// Sets the time the block verifier received the block.
+    pub(crate) fn set_received_time(&mut self, received_time: Option<Instant>) {
+        Arc::make_mut(&mut self.chain).set_tip_received_time(received_time);
+    }
+}
+
 /// The state of the chains in memory, including queued blocks.
 ///
 /// Clones of the non-finalized state contain independent copies of the chains.
@@ -665,6 +693,21 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let validated = self.validate_block(prepared, finalized_state)?;
+        self.insert_validated(validated);
+
+        Ok(())
+    }
+
+    /// Contextually validates `prepared` on top of an existing chain's tip or a newly forked
+    /// chain, without changing the chain set.
+    ///
+    /// Returns the chain with the block, for [`Self::insert_validated`].
+    pub(crate) fn validate_block(
+        &self,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<ValidatedChain, ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -672,19 +715,49 @@ impl NonFinalizedState {
 
         // If the block is invalid, return the error,
         // and drop the cloned parent Arc, or newly created chain fork.
-        let modified_chain = self.validate_and_commit(parent_chain, prepared, finalized_state)?;
+        let (modified_chain, phases) =
+            self.validate_and_commit(parent_chain, prepared, finalized_state)?;
 
-        // If the block is valid:
-        // - add the new chain fork or updated chain to the set of recent chains
-        // - remove the parent chain, if it was in the chain set
-        //   (if it was a newly created fork, it won't be in the chain set)
-        self.insert_with(modified_chain, |chain_set| {
-            chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
-        });
+        Ok(ValidatedChain {
+            chain: modified_chain,
+            parent_hash: Some(parent_hash),
+            height,
+            hash,
+            phases,
+        })
+    }
+
+    /// Adds a chain from [`Self::validate_block`] or [`Self::validate_new_chain`] to the chain
+    /// set.
+    ///
+    /// The chain set must not have changed since the chain was validated.
+    pub(crate) fn insert_validated(&mut self, validated: ValidatedChain) {
+        let ValidatedChain {
+            chain,
+            parent_hash,
+            height,
+            hash,
+            phases,
+        } = validated;
+
+        // A block that is validated but never committed records no phases.
+        if let Some(phases) = phases {
+            phases.record();
+        }
+
+        match parent_hash {
+            // If the block is valid:
+            // - add the new chain fork or updated chain to the set of recent chains
+            // - remove the parent chain, if it was in the chain set
+            //   (if it was a newly created fork, it won't be in the chain set)
+            Some(parent_hash) => self.insert_with(chain, |chain_set| {
+                chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+            }),
+            // If the block is valid, add the new chain fork to the set of recent chains.
+            None => self.insert(chain),
+        }
 
         self.update_metrics_for_committed_block(height, hash);
-
-        Ok(())
     }
 
     // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
@@ -932,6 +1005,22 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let validated = self.validate_new_chain(prepared, finalized_state)?;
+        self.insert_validated(validated);
+
+        Ok(())
+    }
+
+    /// Contextually validates `prepared` as a new chain where its parent is the finalized tip,
+    /// without changing the chain set.
+    ///
+    /// Returns the chain with the block, for [`Self::insert_validated`].
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn validate_new_chain(
+        &self,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<ValidatedChain, ValidateContextError> {
         let finalized_tip_height = finalized_state.finalized_tip_height();
 
         // TODO: fix tests that don't initialize the finalized state
@@ -951,13 +1040,16 @@ impl NonFinalizedState {
         let (height, hash) = (prepared.height, prepared.hash);
 
         // If the block is invalid, return the error, and drop the newly created chain fork
-        let chain = self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
+        let (chain, phases) =
+            self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
 
-        // If the block is valid, add the new chain fork to the set of recent chains.
-        self.insert(chain);
-        self.update_metrics_for_committed_block(height, hash);
-
-        Ok(())
+        Ok(ValidatedChain {
+            chain,
+            parent_hash: None,
+            height,
+            hash,
+            phases,
+        })
     }
 
     /// Contextually validate `prepared` using `finalized_state`.
@@ -972,6 +1064,12 @@ impl NonFinalizedState {
     /// precedes the tree update cancels it if that check fails. The history tree update needs the
     /// new tree roots, so it runs after them. The commit returns the same result as running these
     /// steps in series: the first error in that order.
+    ///
+    /// A block without note commitments has no tree updates, so its steps do run in series, on
+    /// this thread.
+    ///
+    /// Returns the chain with the block, and how long the phases took if the state counts
+    /// metrics. The caller records them once the block is committed.
     #[tracing::instrument(
         level = "debug",
         skip(self, finalized_state, new_chain, prepared),
@@ -982,7 +1080,7 @@ impl NonFinalizedState {
         new_chain: Arc<Chain>,
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
+    ) -> Result<(Arc<Chain>, Option<CommitPhases>), ValidateContextError> {
         if self.is_block_invalidated(prepared.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
@@ -1007,40 +1105,40 @@ impl NonFinalizedState {
 
         // The jobs are spawned as the scope starts.
         let spawned_at = Instant::now();
-        rayon::in_place_scope_fifo(|scope| {
-            scope.spawn_fifo(|_scope| {
-                let result = check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
+        let mut check_block_commitment = || {
+            let result = check::block_commitment_is_valid_for_chain_history(
+                block.clone(),
+                network,
+                &parent_history_tree,
+                None,
+            );
+            if result.is_err() {
+                cancel_tree_update.store(true, Ordering::Release);
+            }
+            block_commitment_result = Some(result);
+        };
+
+        let update_except_trees = || {
+            let result = span.in_scope(|| {
+                Self::validate_and_update_except_trees(
                     network,
-                    &parent_history_tree,
-                    None,
-                );
-                if result.is_err() {
-                    cancel_tree_update.store(true, Ordering::Release);
-                }
-                block_commitment_result = Some(result);
+                    new_chain,
+                    prepared,
+                    finalized_state,
+                    spawned_at,
+                    &cancel_tree_update,
+                )
             });
+            if result.is_err() {
+                cancel_tree_update.store(true, Ordering::Release);
+                #[cfg(test)]
+                tests::record_early_check_failure();
+            }
+            non_tree_result = Some(result);
+        };
 
-            scope.spawn_fifo(|_scope| {
-                let result = span.in_scope(|| {
-                    Self::validate_and_update_except_trees(
-                        network,
-                        new_chain,
-                        prepared,
-                        finalized_state,
-                        spawned_at,
-                        &cancel_tree_update,
-                    )
-                });
-                if result.is_err() {
-                    cancel_tree_update.store(true, Ordering::Release);
-                    #[cfg(test)]
-                    tests::record_early_check_failure();
-                }
-                non_tree_result = Some(result);
-            });
-
-            // The costliest tree updates run on this thread, and the rest on rayon threads.
+        // The costliest tree updates run on this thread, and the rest on rayon threads.
+        let mut update_trees = || {
             let phase_start = Instant::now();
             #[cfg(test)]
             tests::wait_for_early_check_failure_before_tree_update();
@@ -1048,7 +1146,26 @@ impl NonFinalizedState {
                 cancel_tree_update.load(Ordering::Acquire)
             }));
             tree_duration = phase_start.elapsed();
-        });
+        };
+
+        // A block without note commitments has no tree updates for its other steps to run beside,
+        // so starting a scope and waking rayon threads would only delay them.
+        let has_note_commitments = block.sprout_note_commitments().next().is_some()
+            || block.sapling_note_commitments().next().is_some()
+            || block.orchard_note_commitments().next().is_some()
+            || block.ironwood_note_commitments().next().is_some();
+
+        if has_note_commitments {
+            rayon::in_place_scope_fifo(|scope| {
+                scope.spawn_fifo(|_scope| check_block_commitment());
+                scope.spawn_fifo(|_scope| update_except_trees());
+                update_trees();
+            });
+        } else {
+            update_except_trees();
+            check_block_commitment();
+            update_trees();
+        }
 
         // Return the first error that a commit running these steps in series would return.
         let NonTreeUpdate {
@@ -1086,20 +1203,17 @@ impl NonFinalizedState {
 
         let chain = chain.push_with_trees(contextual, trees, history_tree);
 
-        if self.should_count_metrics() {
-            CommitPhases {
-                transparent_spend,
-                anchor_reads,
-                pickup,
-                chain_clone,
-                trees: tree_duration,
-                chain_updates,
-                history,
-            }
-            .record();
-        }
+        let phases = self.should_count_metrics().then_some(CommitPhases {
+            transparent_spend,
+            anchor_reads,
+            pickup,
+            chain_clone,
+            trees: tree_duration,
+            chain_updates,
+            history,
+        });
 
-        Ok(Arc::new(chain))
+        Ok((Arc::new(chain), phases))
     }
 
     /// Checks the transparent spends, anchors and value balances of `prepared` against
