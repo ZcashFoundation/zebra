@@ -194,7 +194,7 @@ fn remaining_transaction_value_scales_linearly() {
         block: block.clone(),
         hash: block.hash(),
         height: Height(1),
-        new_outputs: HashMap::new(),
+        new_outputs: Arc::new(HashMap::new()),
         transaction_hashes: vec![transaction::Hash([0; 32]); TX_COUNT + 1].into(),
         received_time: None,
     };

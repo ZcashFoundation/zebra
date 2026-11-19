@@ -8,7 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     io::{self, Write},
     num::NonZeroUsize,
@@ -1109,10 +1109,12 @@ where
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
 
-            let known_utxos = Arc::new(transparent::new_ordered_outputs(
-                &block,
-                &transaction_hashes,
-            ));
+            let known_utxos = Arc::new(
+                transparent::new_ordered_outputs(&block, &transaction_hashes)
+                    .into_iter()
+                    .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                    .collect::<HashMap<_, _>>(),
+            );
             let mut batch_flush = None;
             // Move the verifier in: borrowing it across awaits would need `V: Sync`.
             let transaction_verifier = transaction_verifier;
@@ -1236,20 +1238,17 @@ where
             }
 
             // Finally, submit the block for contextual verification.
-            // Transaction services can retain requests after returning their responses.
-            let new_outputs = Arc::try_unwrap(known_utxos).unwrap_or_else(|shared| {
+            if Arc::strong_count(&known_utxos) > 1 {
                 tracing::warn!(
                     ?hash,
                     "transaction verifier retained outputs after verification"
                 );
-                (*shared).clone()
-            });
-
+            }
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs,
+                new_outputs: known_utxos,
                 transaction_hashes,
                 received_time: Some(received_time),
             };

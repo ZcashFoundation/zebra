@@ -403,7 +403,7 @@ fn mock_transparent_transaction(
     lock_time: LockTime,
 ) -> (
     Transaction,
-    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) {
     let (transaction_version, network_upgrade) =
         sanitize_transaction_version(network, transaction_version, block_height);
@@ -480,7 +480,7 @@ fn mock_transparent_transfers(
 ) -> (
     Vec<transparent::Input>,
     Vec<transparent::Output>,
-    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) {
     let transfer_count = relative_source_heights.len();
     let mut inputs = Vec::with_capacity(transfer_count);
@@ -559,7 +559,7 @@ fn mock_funded_transparent_transaction(
     lock_time: LockTime,
 ) -> (
     Transaction,
-    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) {
     let (transaction_version, network_upgrade) =
         sanitize_transaction_version(network, transaction_version, block_height);
@@ -603,7 +603,7 @@ fn mock_funded_transparent_transaction(
 
 /// Returns a mock read service using `known_utxos` as the entire best chain UTXO set.
 fn mock_state_service(
-    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    known_utxos: HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
     next_median_time_past: DateTime32,
 ) -> impl tower::Service<
     zs::ReadRequest,
@@ -646,7 +646,7 @@ fn validate_mempool(
     transaction: Transaction,
     height: block::Height,
     next_median_time_past: DateTime<Utc>,
-    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    known_utxos: HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
     network: Network,
 ) -> Result<transaction::MempoolResponse, TransactionError> {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -680,7 +680,7 @@ fn validate_with_state(
     transaction: Transaction,
     height: block::Height,
     block_time: DateTime<Utc>,
-    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    known_utxos: HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
     network: Network,
 ) -> Result<transaction::BlockResponse, TransactionError> {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -729,7 +729,7 @@ fn validate(
     transaction: Transaction,
     height: block::Height,
     block_time: DateTime<Utc>,
-    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    known_utxos: HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
     network: Network,
 ) -> Result<transaction::BlockResponse, TransactionError> {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {

@@ -58,16 +58,20 @@ impl PendingUtxos {
 
     /// Check the list of pending UTXO requests against the supplied
     /// [`transparent::OrderedUtxo`] index.
-    pub fn check_against_ordered(
+    pub fn check_against_ordered<U: std::borrow::Borrow<transparent::OrderedUtxo>>(
         &mut self,
-        ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        ordered_utxos: &HashMap<transparent::OutPoint, U>,
     ) {
         if self.0.is_empty() {
             return;
         }
 
         for (outpoint, ordered_utxo) in ordered_utxos.iter() {
-            self.respond(outpoint, || ordered_utxo.utxo.clone())
+            self.respond(outpoint, || {
+                let ordered_utxo: &transparent::OrderedUtxo =
+                    std::borrow::Borrow::borrow(ordered_utxo);
+                ordered_utxo.utxo.clone()
+            })
         }
     }
 

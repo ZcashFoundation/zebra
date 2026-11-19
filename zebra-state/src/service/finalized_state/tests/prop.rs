@@ -159,7 +159,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                 };
 
                 let utxos = utxos_from_ordered_utxos(
-                    chain.iter().flat_map(|block| block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone()))),
+                    chain.iter().flat_map(|block| block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))),
                 );
 
                 let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();

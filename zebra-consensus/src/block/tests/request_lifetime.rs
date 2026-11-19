@@ -70,7 +70,10 @@ async fn semantic_verification_retains_transaction_request() {
             unreachable!("the expected request commits a semantically verified block")
         };
         assert_eq!(committed.hash, hash);
-        assert_eq!(committed.new_outputs, *retained_request.known_utxos);
+        assert!(Arc::ptr_eq(
+            &committed.new_outputs,
+            &retained_request.known_utxos,
+        ));
         commit.respond(zebra_state::Response::Committed(hash));
 
         assert_eq!(

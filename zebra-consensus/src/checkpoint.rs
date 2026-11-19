@@ -1813,9 +1813,14 @@ where
                     // Sending can fail only when the verifier is being dropped,
                     // and then it doesn't matter anymore.
                     if error.is_unchecked_commit_failure() {
-                        child.new_outputs = transparent::new_ordered_outputs(
-                            &child.block,
-                            &child.transaction_hashes,
+                        child.new_outputs = Arc::new(
+                            transparent::new_ordered_outputs(
+                                &child.block,
+                                &child.transaction_hashes,
+                            )
+                            .into_iter()
+                            .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                            .collect(),
                         );
                         let (tx, child_rx) = oneshot::channel();
                         let failure = CommitFailure {

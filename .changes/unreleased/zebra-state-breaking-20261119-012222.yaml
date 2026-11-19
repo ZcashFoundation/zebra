@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Semantically verified blocks now share `new_outputs` through `Arc<HashMap<OutPoint, Arc<OrderedUtxo>>>` instead of owning a `HashMap`; callers constructing these blocks must wrap the map and its values in `Arc`.
+time: 2026-11-19T01:22:22+01:00

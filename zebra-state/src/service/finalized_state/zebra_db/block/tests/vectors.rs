@@ -139,7 +139,12 @@ fn test_block_db_round_trip_with(
                 block: original_block.clone(),
                 hash,
                 height: Height(0),
-                new_outputs,
+                new_outputs: Arc::new(
+                    new_outputs
+                        .into_iter()
+                        .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                        .collect(),
+                ),
                 transaction_hashes,
                 received_time: None,
             })

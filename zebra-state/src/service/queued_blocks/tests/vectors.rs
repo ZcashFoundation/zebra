@@ -673,7 +673,7 @@ fn sent_hashes_prune_out_of_order_blocks() -> Result<()> {
         assert!(!sent.contains(&prepared_low.hash));
         assert!(sent.utxo(outpoint).is_none());
         assert!(sent.contains(&prepared_high.hash));
-        for (outpoint, ordered_utxo) in &prepared_high.new_outputs {
+        for (outpoint, ordered_utxo) in prepared_high.new_outputs.iter() {
             assert_eq!(sent.utxo(outpoint), Some(ordered_utxo.utxo.clone()));
         }
     }

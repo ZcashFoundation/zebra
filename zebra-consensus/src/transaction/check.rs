@@ -621,7 +621,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
     network: &Network,
     tx: &Transaction,
     height: Height,
-    block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+    block_new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), TransactionError> {
     // The restriction depends only on the transaction, network and height, so compute it once:
