@@ -813,14 +813,10 @@ where
                 // Checking the encoded threshold is constant work, not an Equihash verification.
                 check::difficulty_threshold_is_valid(&block.header, &network, &height, &hash)?;
             } else {
-                let header = block.header.clone();
-                let pow_network = network.clone();
-                run_blocking(blocking_checks.clone(), move || {
-                    check::difficulty_is_valid(&header, &pow_network, &height, &hash)?;
-                    check::equihash_solution_is_valid(&header)?;
-                    Ok::<_, VerifyBlockError>(())
-                })
-                .await?;
+                // Checking a solution takes less time than moving the check to a blocking thread
+                // and waiting for its result.
+                check::difficulty_is_valid(&block.header, &network, &height, &hash)?;
+                check::equihash_solution_is_valid(&block.header)?;
             }
 
             // # Security
