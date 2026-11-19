@@ -1,6 +1,4 @@
 project: zebrad
 kind: Added
-body: >-
-  Optional ZMQ `hashblock` notifications for mining pools, configured with
-  `notify.zmqpubhashblock` in builds using the `zmq` Cargo feature.
+body: 'Added optional ZMQ `hashblock` notifications for mining pools, configured with `notify.zmqpubhashblock`. They need a `zebrad` built with the `zmq` Cargo feature, which release binaries and Docker images don''t include; other builds don''t start when the option is set.'
 time: 2026-10-24T20:20:40.701694578+02:00
