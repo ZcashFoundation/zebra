@@ -1007,40 +1007,40 @@ impl NonFinalizedState {
 
         // The jobs are spawned as the scope starts.
         let spawned_at = Instant::now();
-        rayon::in_place_scope_fifo(|scope| {
-            scope.spawn_fifo(|_scope| {
-                let result = check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
+        let mut check_block_commitment = || {
+            let result = check::block_commitment_is_valid_for_chain_history(
+                block.clone(),
+                network,
+                &parent_history_tree,
+                None,
+            );
+            if result.is_err() {
+                cancel_tree_update.store(true, Ordering::Release);
+            }
+            block_commitment_result = Some(result);
+        };
+
+        let update_except_trees = || {
+            let result = span.in_scope(|| {
+                Self::validate_and_update_except_trees(
                     network,
-                    &parent_history_tree,
-                    None,
-                );
-                if result.is_err() {
-                    cancel_tree_update.store(true, Ordering::Release);
-                }
-                block_commitment_result = Some(result);
+                    new_chain,
+                    prepared,
+                    finalized_state,
+                    spawned_at,
+                    &cancel_tree_update,
+                )
             });
+            if result.is_err() {
+                cancel_tree_update.store(true, Ordering::Release);
+                #[cfg(test)]
+                tests::record_early_check_failure();
+            }
+            non_tree_result = Some(result);
+        };
 
-            scope.spawn_fifo(|_scope| {
-                let result = span.in_scope(|| {
-                    Self::validate_and_update_except_trees(
-                        network,
-                        new_chain,
-                        prepared,
-                        finalized_state,
-                        spawned_at,
-                        &cancel_tree_update,
-                    )
-                });
-                if result.is_err() {
-                    cancel_tree_update.store(true, Ordering::Release);
-                    #[cfg(test)]
-                    tests::record_early_check_failure();
-                }
-                non_tree_result = Some(result);
-            });
-
-            // The costliest tree updates run on this thread, and the rest on rayon threads.
+        // The costliest tree updates run on this thread, and the rest on rayon threads.
+        let mut update_trees = || {
             let phase_start = Instant::now();
             #[cfg(test)]
             tests::wait_for_early_check_failure_before_tree_update();
@@ -1048,6 +1048,12 @@ impl NonFinalizedState {
                 cancel_tree_update.load(Ordering::Acquire)
             }));
             tree_duration = phase_start.elapsed();
+        };
+
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| check_block_commitment());
+            scope.spawn_fifo(|_scope| update_except_trees());
+            update_trees();
         });
 
         // Return the first error that a commit running these steps in series would return.
