@@ -96,17 +96,18 @@ parameters change for blocks already in the cache.
 
 ### Testing compact block relay
 
-Compact block relay is experimental and off by default. To try it between two
-Zebra nodes, set this option on both of them:
+Compact block relay is off by default. To try it between two Zebra nodes, set
+this option on both of them:
 
 ```toml
 [network]
-experimental_early_block_relay = true
+compact_block_relay = true
 ```
 
-Nodes with the option advertise a temporary experimental service bit, and use
-compact relay only on connections where both peers advertise it. Other peers
-keep ordinary inventory announcements and full blocks.
+Nodes with the option advertise the service bit that the [draft Compact Block
+Relay ZIP](https://github.com/zcash/zips/pull/1429) assigns, and use compact
+relay only on connections where both peers advertise it. Other peers keep
+ordinary inventory announcements and full blocks.
 
 On those connections, each peer asks for compact announcements with
 `sendcmpct`, and a newly committed block is announced as a `cmpctblock`: the

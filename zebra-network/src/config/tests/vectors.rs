@@ -734,3 +734,27 @@ fn initial_peer_metric_labels_only_name_default_seeders() {
         assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
     }
 }
+
+/// Compact block relay is negotiated with the option name and service bit that Zebra
+/// 7.2.0-beta.1 and the draft Compact Block Relay ZIP use, and it is off by default.
+///
+/// Zebra rejects unknown configuration fields, and peers ignore service bits they don't know, so
+/// another name or bit would stop this node negotiating compact relay with those nodes.
+#[test]
+fn compact_block_relay_uses_the_zip_service_bit_and_option_name() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(
+        crate::protocol::external::types::PeerServices::NODE_COMPACT_BLOCKS.bits(),
+        1 << 16,
+    );
+
+    assert!(!Config::default().compact_block_relay);
+
+    let config: Config =
+        toml::from_str("compact_block_relay = true").expect("the option has this name");
+    assert!(config.compact_block_relay);
+
+    toml::from_str::<Config>("experimental_early_block_relay = true")
+        .expect_err("the experimental option name is not accepted");
+}

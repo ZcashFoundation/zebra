@@ -108,16 +108,20 @@ pub struct Config {
     /// The network to connect to.
     pub network: Network,
 
-    /// Enable experimental compact block relay with peers that also opt in.
+    /// Enable compact block relay with peers that also support it.
     ///
     /// Disabled by default. Peers that both set this option announce newly committed blocks to
     /// each other as a header and short transaction IDs, and rebuild the block from their
     /// mempools instead of downloading its transactions again. Every rebuilt block is still
     /// fully verified, and relay to other peers is unchanged.
     ///
-    /// The option name and its temporary service bit match Zebra's experimental early block
-    /// relay, which uses the same compact encoding. A production allocation is pending.
-    pub experimental_early_block_relay: bool,
+    /// Nodes that set it advertise the service bit that the [draft Compact Block Relay ZIP]
+    /// assigns. The option name, the service bit and the messages are the ones Zebra 7.2.0-beta.1
+    /// uses, so the two negotiate compact relay with each other. That release enables the option
+    /// by default, and also relays blocks before it commits them, which this node doesn't do.
+    ///
+    /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+    pub compact_block_relay: bool,
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
@@ -591,7 +595,7 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
-            experimental_early_block_relay: false,
+            compact_block_relay: false,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             cache_dir: CacheDir::default(),
@@ -677,7 +681,7 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
-    experimental_early_block_relay: bool,
+    compact_block_relay: bool,
 
     /// Legacy testnet parameters, kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -699,7 +703,7 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
-            experimental_early_block_relay: config.experimental_early_block_relay,
+            compact_block_relay: config.compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
@@ -761,7 +765,7 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -795,7 +799,7 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -816,7 +820,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -899,7 +903,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
