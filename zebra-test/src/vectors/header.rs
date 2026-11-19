@@ -8,12 +8,12 @@
 /// These are serialized headers, without the transaction-count byte used in a
 /// P2P `headers` response. Decode them outside measured intervals.
 ///
-/// Retrieved on 2026-11-12 using Mainnet P2P `getheaders` from 38.49.217.54:8233
-/// (discovered through seeder.zec.rocks), at protocol version 170160. Locators
-/// were the existing genesis hash and the previous-block hash of the existing
-/// NU5 activation block. Request 160 headers, strip each trailing transaction
-/// count, and hex-encode each header on its own line. No network is needed to
-/// consume these fixtures.
+/// Retrieved on 2026-11-12 using Mainnet P2P `getheaders` from a peer
+/// discovered through `seeder.zec.rocks`, at protocol version 170160. Locators
+/// were the existing genesis hash and the previous-block hash of the first NU5
+/// header in these fixtures (1,687,106). Request 160 headers, strip each
+/// trailing transaction count, and hex-encode each header on its own line. No
+/// network is needed to consume these fixtures.
 ///
 /// Final hashes, in display order:
 /// - Sprout: `00005047b18afe99f684e12ae316f707882a6cd91107679f5c87248b2e3ffcd1`.

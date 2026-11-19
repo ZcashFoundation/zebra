@@ -66,8 +66,9 @@ runs for the performance claim.
 
 ## Benchmarking
 
-Zebra has [Criterion] benchmarks in `zebra-chain/benches/` and
-`zebra-consensus/benches/`. Run an individual target from the workspace root:
+Zebra has [Criterion] benchmarks in `zebra-chain/benches/`,
+`zebra-consensus/benches/`, and `zebra-state/benches/`. Run a target from the
+workspace root:
 
 | Crate | Target | Operation | Command |
 | --- | --- | --- | --- |
@@ -78,14 +79,26 @@ Zebra has [Criterion] benchmarks in `zebra-chain/benches/` and
 | `zebra-consensus` | `halo2` | Orchard Halo2 proof verification | `cargo bench --locked -p zebra-consensus --bench halo2` |
 | `zebra-consensus` | `sapling` | Sapling proof and signature verification | `cargo bench --locked -p zebra-consensus --bench sapling` |
 | `zebra-consensus` | `header` | Context-free Mainnet header verification | `cargo bench --locked -p zebra-consensus --bench header` |
+| `zebra-state` | `header_storage` | Mainnet header commits and readback | `cargo bench --locked -p zebra-state --bench header_storage` |
 
 The transaction target uses version 1 through 5 vectors; the Halo2 target uses
 pre-NU6.2 Orchard vectors and its verifying key. Add representative inputs for
 paths these benchmarks omit.
 
-The header target measures blocking/async Sprout/NU5 batches (1/16/160 headers);
-setup and validation are untimed. Set `RAYON_NUM_THREADS` for worker scaling;
-result IDs include the effective worker count. The target is not registered in CI.
+The header target measures blocking/async Sprout/NU5 batches (1/16/160 headers),
+plus four concurrent async batches. Setup is untimed; set `RAYON_NUM_THREADS`
+for worker scaling. IDs include the effective worker count. Neither header
+target is registered in CI.
+
+The storage target commits and reads 16/160 headers in a fresh database.
+Database setup and shutdown are untimed; preflight checks returned hashes.
+On Linux, profiling mode also writes `profile/storage-resources.txt` with
+allocated disk growth and aggregate read/write bytes, including shutdown:
+
+```sh
+CRITERION_HOME="$PWD/target/header-storage-profiles" \
+  cargo bench --locked -p zebra-state --bench header_storage -- --profile-time 1
+```
 
 To compare two revisions locally, save a Criterion baseline before changing
 the source:
