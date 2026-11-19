@@ -290,6 +290,11 @@ The block writer records these phases, in order:
 whose parent wasn't rejected, so both include rejected blocks. `update_latest_chain_channels` and
 `finalization` are recorded only for committed blocks.
 
+The writer validates a block submitted with `submitblock` while the block verifier is still
+verifying it, and keeps the result for the block's commit. The `contextual_commit` phase of such a
+block includes that earlier validation, so it can be longer than the block verifier's
+`state_commit` phase.
+
 The `contextual_commit` phase has these sub-phases:
 
 | `phase` | Measures |
@@ -306,8 +311,9 @@ The sub-phases are recorded once a block is committed, so rejected blocks have n
 recorded for block proposals, or for mined blocks committed from an already validated proposal. At
 startup they include blocks restored from the non-finalized state backup. The `trees` sub-phase runs
 in parallel with the sub-phases before `history`, so the sub-phases don't add up to the whole
-commit. A `zebra-rpc` trusted chain sync, which follows another node's chain without a block
-writer, also records the sub-phases.
+commit. A block without note commitments has no tree updates, so its sub-phases run in series on
+the writer's thread, and its `pickup` is close to zero. A `zebra-rpc` trusted chain sync, which
+follows another node's chain without a block writer, also records the sub-phases.
 
 ## Memory metrics
 
