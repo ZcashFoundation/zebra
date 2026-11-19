@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added `ValidateContextError::ChangeAddressBalance`, returned for a block that changes a transparent address balance by more than the money supply.'
+time: 2026-11-18T21:14:40.000000000-05:00

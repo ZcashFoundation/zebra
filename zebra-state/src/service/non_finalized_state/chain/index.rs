@@ -10,7 +10,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed},
+    amount::{self, Amount, NegativeAllowed},
     parameters::Network,
     transaction, transparent,
 };
@@ -47,10 +47,18 @@ pub(crate) struct AddressBlockTransfers {
 impl BlockTransparentTransfers {
     /// Builds the address changes of `block`.
     ///
+    /// Returns an error if the block changes an address balance by more than the money supply.
+    /// A block whose transactions are verified can't, but the state also validates blocks before
+    /// their transactions are verified.
+    ///
     /// # Panics
     ///
     /// If `block` is missing a created output, or outside tests, a spent output.
-    pub(crate) fn new(block: &ContextuallyVerifiedBlock, network: &Network) -> Self {
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn new(
+        block: &ContextuallyVerifiedBlock,
+        network: &Network,
+    ) -> Result<Self, amount::Error> {
         // Balances are summed in i128, so no partial sum can overflow.
         let mut by_address: HashMap<transparent::Address, (i128, AddressBlockTransfers)> =
             HashMap::new();
@@ -117,14 +125,13 @@ impl BlockTransparentTransfers {
         let by_address = by_address
             .into_iter()
             .map(|(address, (balance, mut transfers))| {
-                transfers.balance = Amount::try_from(balance)
-                    .expect("one block can't move more than the money supply for an address");
+                transfers.balance = Amount::try_from(balance)?;
                 transfers.spent.sort_unstable();
-                (address, transfers)
+                Ok((address, transfers))
             })
-            .collect();
+            .collect::<Result<_, amount::Error>>()?;
 
-        Self { by_address }
+        Ok(Self { by_address })
     }
 
     /// Returns the transfers of each of `addresses` that this block changes.
