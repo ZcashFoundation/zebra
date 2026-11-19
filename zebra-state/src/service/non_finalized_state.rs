@@ -191,6 +191,24 @@ impl RejectedBlocks {
     }
 }
 
+/// A chain whose tip is a block that passed contextual validation, before it is added to the
+/// chain set.
+#[derive(Clone, Debug)]
+pub(crate) struct ValidatedChain {
+    /// The chain that ends at the block.
+    chain: Arc<Chain>,
+
+    /// The block's parent, if it is a non-finalized block. A chain in the chain set that ends at
+    /// the parent is replaced by `chain`.
+    parent_hash: Option<block::Hash>,
+
+    /// The block's height.
+    height: block::Height,
+
+    /// The block's hash.
+    hash: block::Hash,
+}
+
 /// The state of the chains in memory, including queued blocks.
 ///
 /// Clones of the non-finalized state contain independent copies of the chains.
@@ -665,6 +683,21 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let validated = self.validate_block(prepared, finalized_state)?;
+        self.insert_validated(validated);
+
+        Ok(())
+    }
+
+    /// Contextually validates `prepared` on top of an existing chain's tip or a newly forked
+    /// chain, without changing the chain set.
+    ///
+    /// Returns the chain with the block, for [`Self::insert_validated`].
+    pub(crate) fn validate_block(
+        &self,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<ValidatedChain, ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -674,17 +707,39 @@ impl NonFinalizedState {
         // and drop the cloned parent Arc, or newly created chain fork.
         let modified_chain = self.validate_and_commit(parent_chain, prepared, finalized_state)?;
 
-        // If the block is valid:
-        // - add the new chain fork or updated chain to the set of recent chains
-        // - remove the parent chain, if it was in the chain set
-        //   (if it was a newly created fork, it won't be in the chain set)
-        self.insert_with(modified_chain, |chain_set| {
-            chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
-        });
+        Ok(ValidatedChain {
+            chain: modified_chain,
+            parent_hash: Some(parent_hash),
+            height,
+            hash,
+        })
+    }
+
+    /// Adds a chain from [`Self::validate_block`] or [`Self::validate_new_chain`] to the chain
+    /// set.
+    ///
+    /// The chain set must not have changed since the chain was validated.
+    pub(crate) fn insert_validated(&mut self, validated: ValidatedChain) {
+        let ValidatedChain {
+            chain,
+            parent_hash,
+            height,
+            hash,
+        } = validated;
+
+        match parent_hash {
+            // If the block is valid:
+            // - add the new chain fork or updated chain to the set of recent chains
+            // - remove the parent chain, if it was in the chain set
+            //   (if it was a newly created fork, it won't be in the chain set)
+            Some(parent_hash) => self.insert_with(chain, |chain_set| {
+                chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+            }),
+            // If the block is valid, add the new chain fork to the set of recent chains.
+            None => self.insert(chain),
+        }
 
         self.update_metrics_for_committed_block(height, hash);
-
-        Ok(())
     }
 
     // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
@@ -932,6 +987,22 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let validated = self.validate_new_chain(prepared, finalized_state)?;
+        self.insert_validated(validated);
+
+        Ok(())
+    }
+
+    /// Contextually validates `prepared` as a new chain where its parent is the finalized tip,
+    /// without changing the chain set.
+    ///
+    /// Returns the chain with the block, for [`Self::insert_validated`].
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn validate_new_chain(
+        &self,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<ValidatedChain, ValidateContextError> {
         let finalized_tip_height = finalized_state.finalized_tip_height();
 
         // TODO: fix tests that don't initialize the finalized state
@@ -953,11 +1024,12 @@ impl NonFinalizedState {
         // If the block is invalid, return the error, and drop the newly created chain fork
         let chain = self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
 
-        // If the block is valid, add the new chain fork to the set of recent chains.
-        self.insert(chain);
-        self.update_metrics_for_committed_block(height, hash);
-
-        Ok(())
+        Ok(ValidatedChain {
+            chain,
+            parent_hash: None,
+            height,
+            hash,
+        })
     }
 
     /// Contextually validate `prepared` using `finalized_state`.
