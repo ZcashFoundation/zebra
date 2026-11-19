@@ -28,9 +28,11 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                     panic!("state must return a mining subscription")
                 };
                 let admissions = Arc::new(AtomicUsize::new(0));
+                let admitted = Arc::new(tokio::sync::Notify::new());
                 let rejections = Arc::new(AtomicUsize::new(0));
                 let observed_state = state.map_response({
                     let admissions = admissions.clone();
+                    let admitted = admitted.clone();
                     let rejections = rejections.clone();
                     move |response: zs::Response| {
                         match &response {
@@ -38,11 +40,14 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                                 guard.is_none(),
                                 "without an early-relay subscriber ordinary validation has no guard"
                             ),
-                            zs::Response::MiningCandidate(Some(_)) => assert_eq!(
-                                admissions.fetch_add(1, Ordering::SeqCst),
-                                0,
-                                "a rejected replay must not reserve another mining candidate"
-                            ),
+                            zs::Response::MiningCandidate(Some(_)) => {
+                                assert_eq!(
+                                    admissions.fetch_add(1, Ordering::SeqCst),
+                                    0,
+                                    "a rejected replay must not reserve another mining candidate"
+                                );
+                                admitted.notify_one();
+                            }
                             zs::Response::Rejected(remembered) => {
                                 assert!(*remembered, "the genuine body must authenticate");
                                 rejections.fetch_add(1, Ordering::SeqCst);
@@ -87,6 +92,8 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                     }
                     if delivery == 0 {
                         changes.changed().await;
+                        // Publication can precede the response observer's admission callback.
+                        admitted.notified().await;
                         assert!(changes.is_current(hash));
                         assert!(Arc::ptr_eq(&changes.block(hash).unwrap(), &block));
                         assert!(matches!(
