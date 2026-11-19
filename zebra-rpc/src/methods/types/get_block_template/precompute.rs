@@ -1518,7 +1518,10 @@ fn candidate_mempool(
 }
 
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
-/// already built or another coinbase is still being built.
+/// already built or cached, or another coinbase is still being built.
+///
+/// A withdrawn or expired candidate can already have cached its child's coinbase. Proving it
+/// again would hold the shared build permit, delaying the template built when it commits.
 fn start_precomputing_coinbase(
     next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     network: &Network,
@@ -1536,6 +1539,9 @@ fn start_precomputing_coinbase(
             *precomputed_height == height || !task.is_finished()
         })
     {
+        return;
+    }
+    if coinbase_cache.holds(height, Amount::zero(), None) {
         return;
     }
     let Ok(build_guard) = coinbase_cache.build.clone().try_lock_owned() else {
