@@ -1,4 +1,4 @@
 project: zebra-rpc
-kind: Fixed
-body: Preserve consumed block-size evidence during ordinary `submitblock` decoding to avoid a redundant serialization pass ([#11989](https://github.com/ZcashFoundation/zebra/issues/11989)).
+kind: Changed
+body: Preserve consumed block-size evidence during ordinary `submitblock` decoding to avoid a redundant serialization pass ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)).
 time: 2026-10-24T04:24:41.727437759+02:00

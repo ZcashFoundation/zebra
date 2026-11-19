@@ -1,4 +1,4 @@
 project: zebra-chain
-kind: Fixed
-body: 'Avoid rebuilding transparent inputs and outputs when computing transaction value balances ([#11956](https://github.com/ZcashFoundation/zebra/issues/11956)).'
+kind: Changed
+body: 'Avoid rebuilding transparent inputs and outputs when computing transaction value balances ([#11982](https://github.com/ZcashFoundation/zebra/pull/11982)).'
 time: 2026-10-23T00:00:00Z

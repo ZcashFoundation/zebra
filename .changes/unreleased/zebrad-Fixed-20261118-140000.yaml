@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: 'Zebra no longer stalls its initial sync on pruned Zakura peers (Zakura 1.8.8 and later) that advertise `NODE_NETWORK` with `NODE_PRUNED`. It doesn''t use them as new outbound peers while syncing, or as a source of historic blocks.'
+body: 'Fixed initial sync stalls on pruned Zakura peers (Zakura 1.8.8 and later) that advertise `NODE_NETWORK` with `NODE_PRUNED`: Zebra doesn''t use them as new outbound peers while syncing, or as a source of historic blocks ([#12521](https://github.com/ZcashFoundation/zebra/pull/12521)).'
 time: 2026-11-18T14:00:00.000000000Z

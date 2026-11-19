@@ -1,4 +1,4 @@
 project: zebra-state
-kind: Fixed
-body: 'Avoid rebuilding transparent inputs during contextual spend checks ([#11956](https://github.com/ZcashFoundation/zebra/issues/11956)).'
+kind: Changed
+body: 'Avoid rebuilding transparent inputs during contextual spend checks ([#11982](https://github.com/ZcashFoundation/zebra/pull/11982)).'
 time: 2026-10-23T00:00:00Z
