@@ -2,8 +2,11 @@ project: zebrad
 kind: Changed
 body: >-
   Alternate listener addresses learned during handshakes are kept with their advertised
-  capabilities instead of dropping non-serving listeners. The `getnetworkinfo` response
-  reports this node's advertised services in `localservices`. Pruned listeners remain discoverable
+  capabilities instead of dropping non-serving listeners. The `getnetworkinfo` response's
+  `localservices` reports the services this node selected at startup instead of always
+  `NODE_NETWORK`. Handshakes can also advertise `NODE_COMPACT_BLOCKS`, and `NODE_NETWORK_LIMITED`
+  once a restored pruned node completes its recent 2,304-block window after startup;
+  `localservices` shows neither. Pruned listeners remain discoverable
   through gossip, but candidates that may serve archive history are dialed first and non-serving
   peers fill at most `peerset_initial_target_size` ordinary outbound connections (persistent peers
   excluded), keeping the other slots for serving peers.

@@ -1,4 +1,10 @@
 project: zebrad
 kind: Added
-body: Optional Linux CPU affinity for verification workers using distinct physical cores (`sync.pin_parallel_cpu_threads`).
+body: >-
+  Added `sync.pin_parallel_cpu_threads` (default `false`), which pins Rayon verification
+  workers to distinct physical CPU cores on Linux, one worker per core available to the
+  process. A nonzero `sync.parallel_cpu_threads` caps the worker count, and the core count
+  takes precedence over `RAYON_NUM_THREADS`. Workers stay unpinned on other systems or if the
+  core topology can't be detected
+  ([#12533](https://github.com/ZcashFoundation/zebra/pull/12533)).
 time: 2026-11-18T17:42:00.820119972+01:00

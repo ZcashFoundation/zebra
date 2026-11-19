@@ -1,4 +1,7 @@
 project: zebra-network
 kind: Added
-body: 'Added recognition of Zakura''s experimental `PeerServices::NODE_PRUNED` (bit 25) and `PeerServices::serves_full_history()`; Zebra pruned nodes advertise `NODE_NETWORK_LIMITED` instead.'
+body: >-
+  Added `PeerServices::NODE_PRUNED` (experimental bit 25, advertised by Zakura pruned peers
+  alongside `NODE_NETWORK`) and `PeerServices::serves_full_history()`, which returns true for
+  `NODE_NETWORK` without `NODE_PRUNED` ([#12521](https://github.com/ZcashFoundation/zebra/pull/12521)).
 time: 2026-11-18T14:00:00.000000000Z

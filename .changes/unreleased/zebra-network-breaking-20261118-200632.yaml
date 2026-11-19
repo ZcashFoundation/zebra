@@ -1,4 +1,6 @@
 project: zebra-network
 kind: breaking
-body: Matching on every `Request` variant must handle the new `TransactionsByIdFromAdvertisers` variant.
+body: >-
+  Handle the new `Request::TransactionsByIdFromAdvertisers` variant in exhaustive matches
+  ([#12532](https://github.com/ZcashFoundation/zebra/pull/12532)).
 time: 2026-11-18T20:06:32.880780433+01:00
