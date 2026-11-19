@@ -175,10 +175,15 @@ fn block_that_cannot_be_prepared_is_validated_by_its_commit() {
     // A block without a coinbase height can't be validated at all.
     let mut without_coinbase = Block::clone(&root);
     without_coinbase.transactions.clear();
+    // A chain can't index a block that repeats a transaction.
+    let mut repeated_transaction = Block::clone(&root.make_fake_child());
+    let repeated = repeated_transaction.transactions[0].clone();
+    repeated_transaction.transactions.push(repeated);
 
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
         NonFinalizedWriteMessage::Prepare(Arc::new(without_coinbase)),
+        NonFinalizedWriteMessage::Prepare(Arc::new(repeated_transaction)),
         NonFinalizedWriteMessage::Prepare(orphan.clone()),
         NonFinalizedWriteMessage::Commit(
             (orphan.clone().prepare(), rsp_tx, None, None),
@@ -191,4 +196,63 @@ fn block_that_cannot_be_prepared_is_validated_by_its_commit() {
     assert!(rsp_rx.try_recv().unwrap().is_err());
     assert_eq!(prepared_commits, 0);
     assert_eq!(state.best_tip().unwrap().1, root.hash());
+}
+
+#[test]
+fn commit_of_another_block_discards_the_prepared_block() {
+    let _init_guard = zebra_test::init();
+    let (finalized, state, root) = root_state();
+    let child = root.make_fake_child().set_work(1);
+    let sibling = root.make_fake_child().set_work(2);
+    assert_ne!(child.hash(), sibling.hash());
+
+    let (sibling_tx, mut sibling_rx) = oneshot::channel();
+    let (child_tx, mut child_rx) = oneshot::channel();
+    let messages = vec![
+        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Commit(
+            (sibling.clone().prepare(), sibling_tx, None, None),
+            Instant::now(),
+        ),
+        NonFinalizedWriteMessage::Commit(
+            (child.clone().prepare(), child_tx, None, None),
+            Instant::now(),
+        ),
+    ];
+
+    let (state, prepared_commits) = prepared_commits(|| run_writer(finalized, state, messages));
+
+    assert_eq!(sibling_rx.try_recv().unwrap().unwrap(), sibling.hash());
+    assert_eq!(child_rx.try_recv().unwrap().unwrap(), child.hash());
+    assert_eq!(
+        prepared_commits, 0,
+        "the child was prepared on a state without its sibling",
+    );
+    assert!(state.any_chain_contains(&child.hash()));
+    assert!(state.any_chain_contains(&sibling.hash()));
+}
+
+#[test]
+fn prepared_block_on_the_finalized_tip_starts_a_chain() {
+    let _init_guard = zebra_test::init();
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    let (rsp_tx, mut rsp_rx) = oneshot::channel();
+    let messages = vec![
+        NonFinalizedWriteMessage::Prepare(block1.clone()),
+        NonFinalizedWriteMessage::Commit(
+            (block1.clone().prepare(), rsp_tx, None, None),
+            Instant::now(),
+        ),
+    ];
+
+    let (state, prepared_commits) = prepared_commits(|| run_writer(finalized, state, messages));
+
+    assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), block1.hash());
+    assert_eq!(prepared_commits, 1);
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(state.best_tip().unwrap().1, block1.hash());
 }

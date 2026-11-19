@@ -1022,6 +1022,12 @@ const BLOCK_DECODE_LIMIT: usize = 8;
 static BLOCK_DECODES: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(BLOCK_DECODE_LIMIT);
 
+/// Returns a permit for work on a decoded block that the caller can skip, or `None` if as many
+/// blocks as can be decoded at once are already being worked on.
+pub(crate) fn try_block_work_permit() -> Option<tokio::sync::SemaphorePermit<'static>> {
+    BLOCK_DECODES.try_acquire().ok()
+}
+
 pub(crate) async fn decode_block(
     bytes: Vec<u8>,
     prepared: Option<PreparedBlockCache>,

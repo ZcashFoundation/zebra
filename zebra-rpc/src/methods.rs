@@ -3505,7 +3505,12 @@ where
         let network = self.network.clone();
         let proposals = self.prepared_blocks.clone();
         let state = self.state.clone();
-        tokio::spawn(async move {
+        // The task ends with this call, so a cancelled or finished submission isn't prepared.
+        let _prepare = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+            // Preparing is optional, so it is skipped when the node is busy decoding blocks.
+            let Some(_permit) = types::get_block_template::try_block_work_permit() else {
+                return;
+            };
             if prepared
                 .can_be_prepared_for_commit(&network, proposals.as_ref())
                 .await
@@ -3517,7 +3522,7 @@ where
                 )
                 .await;
             }
-        });
+        }));
 
         let (request, validated) = match self.gbt.mined_block_notifications() {
             Some((notifications, validated)) => (

@@ -1215,8 +1215,10 @@ pub enum Request {
     /// other request reached the block write task in between. So the block doesn't have to be
     /// semantically valid yet, but the caller must:
     /// - only commit that `Arc<Block>` after fully verifying it, and
-    /// - only send blocks that passed the block verifier's checks before early work on a block,
-    ///   apart from the Equihash solution check. Contextual validation relies on them.
+    /// - only send blocks that passed the block verifier's checks of the coinbase height, the
+    ///   difficulty threshold and filter, the transaction Merkle root, the coinbase position,
+    ///   transparent double spends and the shielded action limits. Contextual validation relies
+    ///   on them. It doesn't rely on the Equihash solution, time, subsidy or transaction checks.
     ///
     /// Only local block submissions may send this request: a prepared block costs the block
     /// write task a contextual validation before its proof of work is fully checked. Never

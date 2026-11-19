@@ -15,8 +15,10 @@ async fn prepare_commit_is_answered_for_any_block_and_its_commit_follows() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let (mut state, read) = state(true).await;
 
-        // Before its first non-finalized block, the block write task prepares nothing. After it,
-        // it prepares a child of a block it was sent, but not an orphan or a block it was sent.
+        // This sends a request down each path of the handler: before the first non-finalized
+        // block, for a child of a sent block, for an orphan, and for a block that was already
+        // sent. It can only observe the answers and the commits, not what the block write task
+        // prepared: `write/tests/prepared.rs` covers that.
         for _ in 0..3 {
             let block = candidate(&read, false, 0).await;
             let mut orphan = (*block).clone();

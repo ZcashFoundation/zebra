@@ -1,6 +1,7 @@
 //! Writing blocks to the finalized and non-finalized states.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
@@ -121,9 +122,31 @@ fn prepare_commit(
     // Callers check the coinbase height, but a missing one must not stop the block write task.
     block.coinbase_height()?;
 
+    // A block whose parent isn't in the state can't be validated yet.
+    let parent_hash = block.header.previous_block_hash;
+    if !non_finalized_state.any_chain_contains(&parent_hash)
+        && finalized_state.finalized_tip_hash() != parent_hash
+    {
+        return None;
+    }
+
     let validation_start = Instant::now();
     let prepared = SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash());
-    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared).ok()?;
+
+    // A chain needs unique transaction IDs. Callers check them with the block's Merkle root, but
+    // a repeated one must not stop the block write task either.
+    let mut transaction_hashes = HashSet::with_capacity(prepared.transaction_hashes.len());
+    if !prepared
+        .transaction_hashes
+        .iter()
+        .all(|hash| transaction_hashes.insert(hash))
+    {
+        return None;
+    }
+
+    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared)
+        .inspect_err(|error| tracing::debug!(?error, "could not prepare a block's commit"))
+        .ok()?;
 
     Some(PreparedCommit {
         block,
@@ -872,8 +895,11 @@ impl WriteBlockWorkerTask {
                     Some((queued_child, queued_at))
                 }
                 NonFinalizedWriteMessage::Prepare(block) => {
-                    prepared_commit =
-                        prepare_commit(&finalized_state.db, non_finalized_state, block);
+                    // The children of a rejected block are rejected without validating them.
+                    if !parent_error_map.contains_key(&block.header.previous_block_hash) {
+                        prepared_commit =
+                            prepare_commit(&finalized_state.db, non_finalized_state, block);
+                    }
                     continue;
                 }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {

@@ -6908,11 +6908,19 @@ fn rpc_submitblock_inline_decode_boundary() {
                     .unwrap();
                 let expected_hash = block.hash();
                 let state = tower::service_fn(move |request| {
-                    assert!(matches!(
-                        request,
-                        zebra_state::Request::KnownBlock(hash) if hash == expected_hash
-                    ));
-                    std::future::ready(Ok::<_, BoxError>(zebra_state::Response::KnownBlock(None)))
+                    let response = match request {
+                        zebra_state::Request::KnownBlock(hash) if hash == expected_hash => {
+                            zebra_state::Response::KnownBlock(None)
+                        }
+                        // `submitblock` also asks the state to prepare the block's commit.
+                        zebra_state::Request::PrepareCommit(block)
+                            if block.hash() == expected_hash =>
+                        {
+                            zebra_state::Response::PreparingCommit
+                        }
+                        request => panic!("unexpected state request: {request:?}"),
+                    };
+                    std::future::ready(Ok::<_, BoxError>(response))
                 });
                 let mut verifier: MockService<_, _, _, BoxError> =
                     MockService::build().for_unit_tests();

@@ -266,7 +266,7 @@ impl DecodedBlock {
     /// that the verifier has fully verified.
     ///
     /// The checks of a block that is too large to check on the caller's task run on a blocking
-    /// thread. Callers bound how many blocks they decode at once, which bounds these threads.
+    /// thread, so callers must bound how many blocks they check at once.
     pub async fn can_be_prepared_for_commit(
         &self,
         network: &Network,

@@ -109,8 +109,9 @@ fn commit_records_each_sub_phase_once_per_committed_block() {
     let (recorder, samples) = PhaseRecorder::new();
     let committed_blocks = 5;
 
-    // The jobs that measure the clone, trees and chain updates run on rayon threads, so this only
-    // passes if their durations are recorded on the committing thread.
+    // These blocks have no note commitments, so their commit steps run in series on this thread.
+    // For a block with note commitments, the jobs that measure the clone and chain updates run on
+    // rayon threads, and their durations are still recorded on the committing thread.
     metrics::with_local_recorder(&recorder, || {
         state
             .commit_new_chain(block1.clone().prepare(), &finalized.db)

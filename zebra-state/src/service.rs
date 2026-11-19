@@ -1584,13 +1584,17 @@ impl Service<Request> for StateService {
                 self.drain_non_finalized_rejected_hashes();
 
                 // The block write task only prepares non-finalized blocks. A block it was
-                // already sent has nothing left to prepare, and a block whose parent it wasn't
-                // sent can't be validated yet.
+                // already sent has nothing left to prepare, a block whose parent it wasn't sent
+                // can't be validated yet, and a rejected block isn't worth validating again.
+                // These checks only read memory: the first block after the finalized tip isn't
+                // prepared, because finding its parent would read the database on this task.
+                let hash = block.hash();
                 if self.block_write_sender.finalized.is_none()
-                    && !self
+                    && !self.non_finalized_block_write_sent_hashes.contains(&hash)
+                    && self
                         .non_finalized_block_write_sent_hashes
-                        .contains(&block.hash())
-                    && self.can_fork_chain_at(&block.header.previous_block_hash)
+                        .can_fork_chain_at(&block.header.previous_block_hash)
+                    && self.read_service.mining_candidate_is_allowed(hash)
                 {
                     if let Some(sender) = &self.block_write_sender.non_finalized {
                         // If the block write task has exited, there is nothing to prepare.

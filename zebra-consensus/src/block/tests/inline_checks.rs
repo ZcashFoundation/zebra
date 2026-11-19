@@ -261,10 +261,27 @@ async fn only_blocks_that_pass_quick_checks_can_be_prepared_for_commit() {
     Arc::make_mut(&mut double_spend.header).merkle_root = merkle_root(&double_spend);
     assert!(!can_be_prepared(double_spend).await);
 
+    // A block that doesn't start with a coinbase transaction has no height.
     let mut coinbase_last = Block::clone(&block);
     coinbase_last.transactions.reverse();
     Arc::make_mut(&mut coinbase_last.header).merkle_root = merkle_root(&coinbase_last);
     assert!(!can_be_prepared(coinbase_last).await);
+
+    // A different second coinbase transaction.
+    let second_coinbase = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(5)));
+    let mut two_coinbases = Block::clone(&block);
+    two_coinbases.transactions.push(Arc::new(
+        second_coinbase.transactions[0]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(Vec::new()),
+    ));
+    assert_ne!(
+        two_coinbases.transactions[0].hash(),
+        two_coinbases.transactions[2].hash()
+    );
+    Arc::make_mut(&mut two_coinbases.header).merkle_root = merkle_root(&two_coinbases);
+    assert!(!can_be_prepared(two_coinbases).await);
 }
 
 #[test]
