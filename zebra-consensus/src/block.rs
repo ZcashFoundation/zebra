@@ -137,6 +137,18 @@ struct PreparedProposal {
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
 const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
 
+/// The largest block whose Merkle root check and authorizing data digests run on the verifier's
+/// task.
+///
+/// Hashing a block within these bounds takes less time than moving the work to a blocking thread
+/// and waking the rayon threads that hash a larger block's digests in parallel.
+const MAX_INLINE_HASHING_BYTES: usize = 64 * 1024;
+
+/// The most transactions in a block that is hashed on the verifier's task.
+///
+/// See [`MAX_INLINE_HASHING_BYTES`].
+const MAX_INLINE_HASHING_TRANSACTIONS: usize = 32;
+
 /// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
 async fn cache_proposal(
     proposals: &watch::Sender<ProposalCache>,
@@ -901,8 +913,10 @@ where
             let transaction_hashes = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
-                // A trusted wire-size bound keeps small-body hashing cheaper than a worker hop.
-                let inline = size.is_some_and(|size| size <= 4 * 1024);
+                // Trusted wire-size and transaction count bounds keep small-body hashing cheaper
+                // than a worker hop, and than waking the rayon threads that hash the digests.
+                let inline = size.is_some_and(|size| size <= MAX_INLINE_HASHING_BYTES)
+                    && block.transactions.len() <= MAX_INLINE_HASHING_TRANSACTIONS;
                 let checks = move || {
                     if size.is_none() {
                         #[cfg(test)]

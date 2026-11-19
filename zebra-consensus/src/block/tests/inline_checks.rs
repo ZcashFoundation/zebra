@@ -23,12 +23,17 @@ fn network() -> Network {
 }
 
 fn spend(lock_time: LockTime, expiry_height: Height) -> Arc<Transaction> {
+    spend_from(0, lock_time, expiry_height)
+}
+
+/// Returns a transaction that spends output `index` of the transaction every [`spend`] spends.
+fn spend_from(index: u32, lock_time: LockTime, expiry_height: Height) -> Arc<Transaction> {
     Arc::new(Transaction::test_v5(
         NetworkUpgrade::Nu5,
         vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: [8; 32].into(),
-                index: 0,
+                index,
             },
             unlock_script: transparent::Script::new(&[0x51]),
             sequence: 0,
@@ -99,11 +104,41 @@ fn mock_state() -> State {
     }))
 }
 
+/// Verifies `block` while every blocking check slot is taken, and returns the verifier's result,
+/// or `None` if it was still waiting after a second.
+async fn verify_without_blocking_admission(
+    network: &Network,
+    block: &Arc<Block>,
+) -> Option<Result<block::Hash, VerifyBlockError>> {
+    let bytes = block.zcash_serialize_to_vec().unwrap();
+    let decoded = super::super::DecodedBlock::deserialize(&bytes).unwrap();
+    let state = mock_state();
+    let transactions = Buffer::new(transaction::BlockTxVerifier::new(network, state.clone()), 1);
+    let verifier = SemanticBlockVerifier::new(network, state, transactions);
+    let slots = u32::try_from(verifier.blocking_checks.available_permits())
+        .expect("the test verifier's blocking admission count fits u32");
+    let _slots = verifier
+        .blocking_checks
+        .clone()
+        .acquire_many_owned(slots)
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        verifier.oneshot(Request::CommitDecoded(decoded, None)),
+    )
+    .await
+    .ok()
+}
+
 #[tokio::test]
 async fn only_small_decoded_blocks_bypass_blocking_check_admission() {
     let _init_guard = zebra_test::init();
     let network = network();
-    for size in [4096, 4097] {
+    for size in [
+        super::super::MAX_INLINE_HASHING_BYTES,
+        super::super::MAX_INLINE_HASHING_BYTES + 1,
+    ] {
         let mut block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
         let block_mut = Arc::make_mut(&mut block);
         let mut outputs = block_mut.transactions[0].outputs();
@@ -126,34 +161,48 @@ async fn only_small_decoded_blocks_bypass_blocking_check_admission() {
         );
         Arc::make_mut(&mut block_mut.header).merkle_root =
             block_mut.transactions.iter().map(|tx| tx.hash()).collect();
-        let bytes = block.zcash_serialize_to_vec().unwrap();
-        assert_eq!(bytes.len(), size);
-        let decoded = super::super::DecodedBlock::deserialize(&bytes).unwrap();
-        let state = mock_state();
-        let transactions = Buffer::new(
-            transaction::BlockTxVerifier::new(&network, state.clone()),
-            1,
-        );
-        let verifier = SemanticBlockVerifier::new(&network, state, transactions);
-        let slots = u32::try_from(verifier.blocking_checks.available_permits())
-            .expect("the test verifier's blocking admission count fits u32");
-        let _slots = verifier
-            .blocking_checks
-            .clone()
-            .acquire_many_owned(slots)
-            .await
-            .unwrap();
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            verifier.oneshot(Request::CommitDecoded(decoded, None)),
-        )
-        .await;
-        if size == 4096 {
+        assert_eq!(block.zcash_serialized_size(), size);
+        let result = verify_without_blocking_admission(&network, &block).await;
+        if size == super::super::MAX_INLINE_HASHING_BYTES {
             assert_eq!(result.unwrap().unwrap(), block.hash());
         } else {
             assert!(
-                result.is_err(),
+                result.is_none(),
                 "large-body checks must wait for blocking admission"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn only_blocks_with_few_transactions_bypass_blocking_check_admission() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    for transactions in [
+        super::super::MAX_INLINE_HASHING_TRANSACTIONS,
+        super::super::MAX_INLINE_HASHING_TRANSACTIONS + 1,
+    ] {
+        let mut block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+        let block_mut = Arc::make_mut(&mut block);
+        // The candidate has a coinbase transaction and the spend of output 0.
+        for index in 1..transactions - 1 {
+            block_mut.transactions.push(spend_from(
+                u32::try_from(index).expect("the test's transaction count fits u32"),
+                LockTime::unlocked(),
+                Height(0),
+            ));
+        }
+        Arc::make_mut(&mut block_mut.header).merkle_root =
+            block_mut.transactions.iter().map(|tx| tx.hash()).collect();
+        assert_eq!(block.transactions.len(), transactions);
+        assert!(block.zcash_serialized_size() <= super::super::MAX_INLINE_HASHING_BYTES);
+        let result = verify_without_blocking_admission(&network, &block).await;
+        if transactions == super::super::MAX_INLINE_HASHING_TRANSACTIONS {
+            assert_eq!(result.unwrap().unwrap(), block.hash());
+        } else {
+            assert!(
+                result.is_none(),
+                "checks of a block with many transactions must wait for blocking admission"
             );
         }
     }
