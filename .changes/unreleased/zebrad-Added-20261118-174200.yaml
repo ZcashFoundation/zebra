@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Optional Linux CPU affinity for verification workers using distinct physical cores (`sync.pin_parallel_cpu_threads`).
+time: 2026-11-18T17:42:00.820119972+01:00
