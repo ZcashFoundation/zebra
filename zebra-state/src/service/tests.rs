@@ -1615,9 +1615,17 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
                 ),
                 "unexpected twin error: {twin_error:?}"
             );
-            // The write task drops the child after it sends the reset, so waiting for the child's
-            // response also guarantees the reset is queued before the checks below.
-            prop_assert!(child_rx.blocking_recv().is_err(), "dropped child gets no response");
+            // The writer drops a child already in its channel. If the reset reaches the state
+            // first, the state rejects the child before sending it to the writer instead.
+            // Either completion means the reset has been sent or applied before the checks below.
+            match child_rx.blocking_recv() {
+                Err(_) => {}
+                Ok(Err(error)) => prop_assert!(
+                    matches!(error.inner(), CommitBlockError::WriteTaskExited),
+                    "unexpected child error: {error:?}"
+                ),
+                Ok(Ok(hash)) => prop_assert!(false, "rejected twin's child committed: {hash:?}"),
+            }
             prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
 
             // The second child reaches the state after the reset, ahead of the reset height.
