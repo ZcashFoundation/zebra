@@ -1,4 +1,4 @@
 project: zebrad
-kind: Fixed
-body: '`z_gettreestate` returns "the requested block is not in the main chain" instead of empty trees when the block is invalidated, or reorged away and pruned, while the request is answered.'
+kind: Changed
+body: 'Changed `z_gettreestate` to return "the requested block is not in the main chain" instead of empty trees when the block is invalidated, or reorged away and pruned, while the request is answered.'
 time: 2026-11-17T19:00:00.000000000Z

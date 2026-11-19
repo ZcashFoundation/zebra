@@ -1,4 +1,11 @@
 project: zebra-network
 kind: Added
-body: Added `PeerServices::NODE_NETWORK_LIMITED` (bit 10), recent-chain `getblocks` routing, and known-height downloads of compact announcements from limited peers; `NODE_NETWORK | NODE_PRUNED` peers remain non-archive.
+body: >-
+  Added `PeerServices::NODE_NETWORK_LIMITED` (bit 10), `constants::NODE_NETWORK_LIMITED_BLOCKS`
+  (2,304), the runtime-only `Config::limited_service_from` tip height from which new handshakes
+  advertise the limited bit, and `Request::BlockDownloadAtHeight`. The peer set sends limited
+  peers `FindHeaders` requests and, while the estimated network tip is within 1,152 blocks,
+  `FindBlocks` requests extending the local tip and `BlockDownloadAtHeight` requests for blocks
+  they announced within 2,304 blocks of the local tip
+  ([#12537](https://github.com/ZcashFoundation/zebra/pull/12537)).
 time: 2026-11-18T23:35:28.356046354+01:00

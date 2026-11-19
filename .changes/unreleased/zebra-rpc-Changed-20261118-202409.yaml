@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: '`submitblock` asks the state to prepare a submitted block''s commit while the block verifier checks the block, by sending it `zebra_state::Request::PrepareCommit`. It ignores an error response, so a state service that doesn''t support the request can return one ([#12542](https://github.com/ZcashFoundation/zebra/pull/12542)).'
+body: 'Changed `submitblock` to send `zebra_state::Request::PrepareCommit` with the decoded block while the block verifier checks it. It ignores an error response, so a state service that doesn''t support the request still works ([#12542](https://github.com/ZcashFoundation/zebra/pull/12542)).'
 time: 2026-11-18T20:31:28.000000000-05:00

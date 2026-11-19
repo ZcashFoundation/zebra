@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: '`NoteCommitmentTrees::update_trees_parallel()` and `update_trees_parallel_with_cancel()` return without starting a rayon scope for a block that has no note commitments ([#12542](https://github.com/ZcashFoundation/zebra/pull/12542)).'
-time: 2026-11-18T20:31:28.000000000-05:00

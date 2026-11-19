@@ -23,9 +23,10 @@ an unmodified payout processor works with Zallet.
 ### Pruned history
 
 Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
-retention, isolated database kinds, monitoring, and recovery. Enabling pruning immediately adds
-the experimental `NODE_PRUNED` service bit to the advertised `NODE_NETWORK` service and rejects
-zcashd sidecars, even before deletion.
+retention, isolated database kinds, monitoring, and recovery. Enabling pruning immediately stops
+advertising `NODE_NETWORK` and rejects zcashd sidecars, even before deletion. Pruned nodes
+advertise `NODE_NETWORK_LIMITED` once they hold the most recent 2,304 blocks, as described in
+[RPC and peer behaviour](pruning.md#rpc-and-peer-behaviour).
 
 For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
 (`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.
