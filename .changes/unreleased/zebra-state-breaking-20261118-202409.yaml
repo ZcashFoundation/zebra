@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `Request::PrepareCommit` and `Response::PreparingCommit`, which ask the block write task to contextually validate a locally submitted block before its commit request arrives, so the commit only has to publish the validated chain. Code that matches on `Request` or `Response` needs new arms.'
+time: 2026-11-18T20:24:09.000000000-05:00

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'The block verifier checks proof of work, and hashes blocks of up to 64 kB and 32 transactions, on its own task instead of a blocking thread.'
+time: 2026-11-18T20:24:09.000000000-05:00

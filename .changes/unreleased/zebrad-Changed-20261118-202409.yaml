@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Zebra validates the chain context of a block submitted with `submitblock` while it verifies the block, instead of afterwards.'
+time: 2026-11-18T20:24:09.000000000-05:00

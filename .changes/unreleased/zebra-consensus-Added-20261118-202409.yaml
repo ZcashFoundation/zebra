@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: 'Added `DecodedBlock::can_be_prepared_for_commit()`, which returns whether the state can prepare a decoded local submission''s commit while the block is verified.'
+time: 2026-11-18T20:24:09.000000000-05:00
