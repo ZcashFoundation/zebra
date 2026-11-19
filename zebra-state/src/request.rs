@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     mem::{size_of, size_of_val},
-    ops::{Add, Deref, RangeInclusive},
+    ops::{Add, RangeInclusive},
     pin::Pin,
     sync::Arc,
     time::Instant,
@@ -309,7 +309,7 @@ pub struct SemanticallyVerifiedBlock {
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
 ///
-/// The wrapped block is immutable so a cached authorizing-data root cannot be paired with another
+/// The block is immutable so a cached authorizing-data root cannot be paired with another
 /// block body:
 ///
 /// ```compile_fail
@@ -323,7 +323,17 @@ pub struct SemanticallyVerifiedBlock {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointVerifiedBlock {
-    verified: SemanticallyVerifiedBlock,
+    pub(crate) block: Arc<Block>,
+    /// The hash of the block.
+    pub hash: block::Hash,
+    /// The height of the block.
+    pub height: block::Height,
+    /// New transparent outputs, retained in their original map for finalization.
+    pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    /// The hashes of the transactions in block order.
+    pub transaction_hashes: Arc<[transaction::Hash]>,
+    /// The local time at which the block verifier received this block.
+    pub received_time: Option<Instant>,
     auth_data_root: Option<AuthDataRoot>,
 }
 
@@ -469,11 +479,24 @@ impl FinalizedBlock {
         treestate: Treestate,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Self {
-        Self::from_semantically_verified(
-            SemanticallyVerifiedBlock::from(block),
+        let CheckpointVerifiedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+            ..
+        } = block;
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
             treestate,
             deferred_pool_balance_change,
-        )
+            fast_tree_sync: None,
+        }
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -757,7 +780,8 @@ impl CheckpointVerifiedBlock {
     /// Creates a [`CheckpointVerifiedBlock`] from [`Block`] with optional deferred balance and
     /// optional pre-computed hash.
     pub fn new(block: Arc<Block>, hash: Option<block::Hash>) -> Self {
-        Self::with_hash(block.clone(), hash.unwrap_or(block.hash()))
+        let hash = hash.unwrap_or_else(|| block.hash());
+        Self::with_hash(block, hash)
     }
     /// Creates a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
@@ -765,7 +789,42 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
+        let height = block
+            .coinbase_height()
+            .expect("semantically verified block should have a coinbase height");
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+            received_time: None,
+            auth_data_root: None,
+        }
+    }
+
+    /// Returns the immutable block body.
+    pub fn block(&self) -> &Arc<Block> {
+        &self.block
+    }
+
+    /// Returns an estimate of the memory this block keeps alive, in bytes.
+    pub fn retained_bytes(&self) -> usize {
+        let transactions = &self.block.transactions;
+        let mut bytes = self.block.zcash_serialized_size()
+            + transactions.capacity() * size_of::<Arc<transaction::Transaction>>()
+            + size_of_val(&*self.transaction_hashes)
+            + output_retained_bytes(&self.new_outputs);
+        for transaction in transactions {
+            bytes += size_of_val(transaction.as_ref());
+            if let Some(bundle) = transaction.transparent_bundle() {
+                bytes += size_of_val(bundle.vin.as_slice()) + size_of_val(bundle.vout.as_slice());
+            }
+        }
+        bytes
     }
 
     // Adapted from zakura-core/zakura
@@ -848,7 +907,7 @@ pub(crate) fn new_outputs_retained_bytes(
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        Self::from(SemanticallyVerifiedBlock::from(block))
+        Self::new(block, None)
     }
 }
 
@@ -857,7 +916,15 @@ impl From<Arc<Block>> for CheckpointVerifiedBlock {
 impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
     fn from(verified: SemanticallyVerifiedBlock) -> Self {
         Self {
-            verified,
+            block: verified.block,
+            hash: verified.hash,
+            height: verified.height,
+            new_outputs: Arc::unwrap_or_clone(verified.new_outputs)
+                .into_iter()
+                .map(|(outpoint, utxo)| (outpoint, Arc::unwrap_or_clone(utxo)))
+                .collect(),
+            transaction_hashes: verified.transaction_hashes,
+            received_time: verified.received_time,
             auth_data_root: None,
         }
     }
@@ -925,15 +992,20 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
 
 impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        checkpoint_verified.verified
-    }
-}
-
-impl Deref for CheckpointVerifiedBlock {
-    type Target = SemanticallyVerifiedBlock;
-
-    fn deref(&self) -> &Self::Target {
-        &self.verified
+        Self {
+            block: checkpoint_verified.block,
+            hash: checkpoint_verified.hash,
+            height: checkpoint_verified.height,
+            new_outputs: Arc::new(
+                checkpoint_verified
+                    .new_outputs
+                    .into_iter()
+                    .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                    .collect(),
+            ),
+            transaction_hashes: checkpoint_verified.transaction_hashes,
+            received_time: checkpoint_verified.received_time,
+        }
     }
 }
 
