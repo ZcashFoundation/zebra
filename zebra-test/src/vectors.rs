@@ -4,9 +4,11 @@ use hex::FromHex;
 use lazy_static::lazy_static;
 
 mod block;
+mod header;
 mod orchard_note_encryption;
 
 pub use block::*;
+pub use header::*;
 pub use orchard_note_encryption::*;
 
 /// A testnet transaction test vector
