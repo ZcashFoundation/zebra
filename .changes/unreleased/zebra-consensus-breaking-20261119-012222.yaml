@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: '`BlockRequest::known_utxos` now shares each `OrderedUtxo` through `Arc` so block verification can retain the created-output map without copying it, and `transaction::check::tx_transparent_coinbase_spends_maturity` takes `block_new_outputs` as `Arc<HashMap<OutPoint, Arc<OrderedUtxo>>>`; callers must wrap the map and its values in `Arc`.'
+time: 2026-11-19T01:22:22+01:00

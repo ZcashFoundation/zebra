@@ -175,7 +175,8 @@ pub struct BlockRequest {
     /// The transaction itself.
     pub transaction: Arc<Transaction>,
     /// Additional UTXOs which are known at the time of verification.
-    pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+    /// The map and its outputs are shared with semantic and contextual block metadata.
+    pub known_utxos: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
     /// The height of the block containing this transaction.
     pub height: block::Height,
     /// The time that the block was mined.
@@ -390,7 +391,7 @@ where
     /// Returns on the first state lookup error, cancelling the remaining lookups in the batch.
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
-        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+        known_utxos: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
         state: Timeout<ZS>,
     ) -> Result<
         (

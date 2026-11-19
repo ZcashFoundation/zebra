@@ -4568,7 +4568,7 @@ fn mock_transparent_transfer(
 ) -> (
     transparent::Input,
     transparent::Output,
-    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) {
     // A standard, signature-free P2SH input that the script interpreter accepts. The redeem
     // script is OP_TRUE, so the spend is valid without a signature, while the spent output is a
@@ -4628,7 +4628,7 @@ fn mock_transparent_transfer(
 
     // Cache the source of the fund so that it can be used during verification
     let mut known_utxos = HashMap::new();
-    known_utxos.insert(previous_outpoint, previous_utxo);
+    known_utxos.insert(previous_outpoint, Arc::new(previous_utxo));
 
     (input, output, known_utxos)
 }

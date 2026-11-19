@@ -323,6 +323,7 @@ async fn mined_orphan_survives_caller_drop_and_overflow() {
         );
         assert!(queue.has(child.hash()), "the mined orphan must stay queued");
         let queued = &queue.blocks[&child.hash()].0;
+        assert!(Arc::ptr_eq(&queued.0.new_outputs, &cached_outputs));
         assert!(Arc::ptr_eq(
             &queued.2.as_ref().unwrap().new_outputs,
             &cached_outputs,
@@ -342,7 +343,7 @@ async fn mined_orphan_survives_caller_drop_and_overflow() {
         // A duplicate replaces only the response and notification policy, not the accepted payload.
         let mut replacement = child.clone().prepare();
         replacement.height = Height::MAX;
-        replacement.new_outputs.clear();
+        Arc::make_mut(&mut replacement.new_outputs).clear();
         let response = state.queue_and_commit_to_non_finalized_state(replacement, None, None);
 
         assert_eq!(

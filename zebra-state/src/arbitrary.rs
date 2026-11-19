@@ -80,7 +80,11 @@ impl ContextuallyVerifiedBlock {
             .flat_map(Transaction::inputs)
             .flat_map(|input| input.outpoint())
             .map(|outpoint| {
-                let utxo = block.new_outputs.get(&outpoint).unwrap_or(&zero_utxo);
+                let utxo = block
+                    .new_outputs
+                    .get(&outpoint)
+                    .map(|utxo| utxo.as_ref())
+                    .unwrap_or(&zero_utxo);
                 (outpoint, utxo.clone())
             })
             .collect();
@@ -108,22 +112,22 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             received_time,
         } = block.into();
-        let new_outputs = Arc::new(new_outputs);
+        let spent_outputs = Arc::new(
+            new_outputs
+                .iter()
+                .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+                .collect(),
+        );
 
         Self {
             block,
             hash,
             height,
-            new_outputs: Arc::new(
-                new_outputs
-                    .iter()
-                    .map(|(outpoint, utxo)| (*outpoint, Arc::new(utxo.clone())))
-                    .collect(),
-            ),
+            new_outputs,
             // Just re-use the outputs we created in this block, even though that's incorrect.
             //
             // TODO: fix the tests, and stop adding unrelated inputs and outputs.
-            spent_outputs: new_outputs,
+            spent_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
             received_time,

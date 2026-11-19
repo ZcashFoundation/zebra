@@ -47,6 +47,7 @@ pub(super) fn spent_utxos(
             let utxo = block
                 .new_outputs
                 .get(&outpoint)
+                .map(Arc::as_ref)
                 .or_else(|| chain.created_ordered_utxo(&outpoint).map(Arc::as_ref))
                 .expect("generated spends refer to earlier outputs");
             (outpoint, utxo.clone())

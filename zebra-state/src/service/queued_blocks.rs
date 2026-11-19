@@ -374,7 +374,14 @@ impl SentHashes {
     ///
     /// Blocks may be added in any height order.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
-        self.add_outputs(block.hash, block.height, block.new_outputs.iter());
+        self.add_outputs(
+            block.hash,
+            block.height,
+            block
+                .new_outputs
+                .iter()
+                .map(|(outpoint, utxo)| (outpoint, utxo.as_ref())),
+        );
     }
 
     // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache

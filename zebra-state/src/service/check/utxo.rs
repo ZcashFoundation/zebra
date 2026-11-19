@@ -1,6 +1,6 @@
 //! Consensus rule checks for the finalized state.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     amount,
@@ -128,7 +128,7 @@ pub fn transparent_spend(
 fn transparent_spend_chain_order(
     spend: transparent::OutPoint,
     spend_tx_index_in_block: usize,
-    block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    block_new_outputs: &HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
     non_finalized_chain: &Chain,
     non_finalized_chain_spent_utxos: &imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
@@ -146,7 +146,7 @@ fn transparent_spend_chain_order(
             return Err(EarlyTransparentSpend { outpoint: spend });
         } else {
             // a unique spend of a previous transaction's output is ok
-            return Ok(output.clone());
+            return Ok(output.as_ref().clone());
         }
     }
 

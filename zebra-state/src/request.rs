@@ -263,6 +263,7 @@ pub struct SemanticallyVerifiedBlock {
     pub height: block::Height,
     /// New transparent outputs created in this block, indexed by
     /// [`OutPoint`](transparent::OutPoint).
+    /// Shared with contextual verification and cached proposal commits.
     ///
     /// Each output is tagged with its transaction index in the block.
     /// (The outputs of earlier transactions in a block can be spent by later
@@ -273,7 +274,7 @@ pub struct SemanticallyVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -498,7 +499,10 @@ impl FinalizedBlock {
             block: block.block,
             hash: block.hash,
             height: block.height,
-            new_outputs: block.new_outputs,
+            new_outputs: Arc::unwrap_or_clone(block.new_outputs)
+                .into_iter()
+                .map(|(outpoint, utxo)| (outpoint, Arc::unwrap_or_clone(utxo)))
+                .collect(),
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
@@ -602,8 +606,7 @@ impl ContextuallyVerifiedBlock {
     /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
     ///
     /// The caller must first verify solved proof of work, current time, serialized size, and exact
-    /// proposal equality except nonce and solution. Copies the shared output map into the queue
-    /// metadata.
+    /// proposal equality except nonce and solution. Shares the output map with queue metadata.
     pub fn into_mined_request(self, notifications: MinedBlockNotifications) -> Request {
         Request::CommitMinedBlock {
             block: self.clone().into(),
@@ -679,12 +682,7 @@ impl ContextuallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs: Arc::new(
-                    new_outputs
-                        .into_iter()
-                        .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
-                        .collect(),
-                ),
+                new_outputs,
                 spent_outputs: Arc::new(spent_outputs),
                 transaction_hashes,
                 chain_value_pool_change,
@@ -793,7 +791,12 @@ impl SemanticallyVerifiedBlock {
             .coinbase_height()
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs = Arc::new(
+            transparent::new_ordered_outputs(&block, &transaction_hashes)
+                .into_iter()
+                .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                .collect(),
+        );
 
         Self {
             block,
@@ -831,12 +834,15 @@ impl SemanticallyVerifiedBlock {
 
 /// Returns the memory used by `new_outputs`, including their scripts, in bytes.
 pub(crate) fn new_outputs_retained_bytes(
-    new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    new_outputs: &HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>,
 ) -> usize {
-    new_outputs.capacity() * size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()
+    new_outputs.capacity() * size_of::<(transparent::OutPoint, Arc<transparent::OrderedUtxo>)>()
         + new_outputs
             .values()
-            .map(|output| output.utxo.output.lock_script.as_raw_bytes().len())
+            .map(|output| {
+                size_of::<transparent::OrderedUtxo>()
+                    + output.utxo.output.lock_script.as_raw_bytes().len()
+            })
             .sum::<usize>()
 }
 
@@ -864,7 +870,12 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             .coinbase_height()
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs = Arc::new(
+            transparent::new_ordered_outputs(&block, &transaction_hashes)
+                .into_iter()
+                .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                .collect(),
+        );
 
         Self {
             block,
@@ -885,10 +896,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             block: valid.block,
             hash: valid.hash,
             height: valid.height,
-            new_outputs: Arc::unwrap_or_clone(valid.new_outputs)
-                .into_iter()
-                .map(|(outpoint, utxo)| (outpoint, Arc::unwrap_or_clone(utxo)))
-                .collect(),
+            new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
         }
@@ -901,7 +909,13 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             block: finalized.block,
             hash: finalized.hash,
             height: finalized.height,
-            new_outputs: finalized.new_outputs,
+            new_outputs: Arc::new(
+                finalized
+                    .new_outputs
+                    .into_iter()
+                    .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                    .collect(),
+            ),
             transaction_hashes: finalized.transaction_hashes,
             // The finalized state does not track receipt times, so there is no stamp.
             received_time: None,

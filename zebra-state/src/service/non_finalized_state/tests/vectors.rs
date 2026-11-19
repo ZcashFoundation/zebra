@@ -344,25 +344,62 @@ fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
             &cloned.spent_outputs
         ));
         let semantic = SemanticallyVerifiedBlock::from(cloned);
-        let unshared = |outputs: &std::collections::HashMap<
-            transparent::OutPoint,
-            Arc<transparent::OrderedUtxo>,
-        >| {
-            outputs
-                .iter()
-                .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
-                .collect::<std::collections::HashMap<_, _>>()
-        };
-        assert_eq!(semantic.new_outputs, unshared(&contextual.new_outputs));
+        assert!(Arc::ptr_eq(&semantic.new_outputs, &contextual.new_outputs));
+        drop(semantic);
         let unique = contextual;
-        let expected_outputs = unshared(&unique.new_outputs);
         assert_eq!(Arc::strong_count(&unique.new_outputs), 1);
-        assert_eq!(
-            SemanticallyVerifiedBlock::from(unique).new_outputs,
-            expected_outputs
-        );
+        let expected_outputs = unique.new_outputs.clone();
+        assert!(Arc::ptr_eq(
+            &SemanticallyVerifiedBlock::from(unique).new_outputs,
+            &expected_outputs,
+        ));
     }
     Ok(())
+}
+
+/// Compare the previous mined-commit output copy with sharing a large cached map.
+#[test]
+#[ignore = "micro-benchmark; run explicitly to measure copy avoidance"]
+#[allow(clippy::print_stdout)]
+fn mined_output_map_copy_benchmark() {
+    use std::{collections::HashMap, hint::black_box, time::Instant};
+
+    let utxo = transparent::OrderedUtxo::new(
+        transparent::Output::new(
+            Amount::try_from(1).unwrap(),
+            transparent::Script::new(&[0x51; 100]),
+        ),
+        Height(600_000),
+        1,
+    );
+    let outputs: Arc<HashMap<_, _>> = Arc::new(
+        (0..10_000)
+            .map(|index| {
+                (
+                    transparent::OutPoint {
+                        hash: zebra_chain::transaction::Hash([0; 32]),
+                        index,
+                    },
+                    Arc::new(utxo.clone()),
+                )
+            })
+            .collect(),
+    );
+    let start = Instant::now();
+    for _ in 0..100 {
+        let copied: HashMap<_, _> = outputs
+            .iter()
+            .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+            .collect();
+        black_box(copied);
+    }
+    let copied = start.elapsed();
+    let start = Instant::now();
+    for _ in 0..100 {
+        black_box(outputs.clone());
+    }
+    let shared = start.elapsed();
+    println!("10,000 outputs × 100 mined commits: owned copy {copied:?}, shared clone {shared:?}");
 }
 
 #[test]
@@ -1654,12 +1691,15 @@ fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     };
     let prepare_with_funding = |block: Arc<Block>, height: Height| {
         let mut prepared = block.prepare();
-        prepared
-            .new_outputs
-            .extend(funding_outpoints(height).map(|outpoint| {
+        Arc::make_mut(&mut prepared.new_outputs).extend(funding_outpoints(height).map(
+            |outpoint| {
                 let utxo = transparent::Utxo::new(funding_output(), height, false);
-                (outpoint, transparent::OrderedUtxo::from_utxo(utxo, 0))
-            }));
+                (
+                    outpoint,
+                    Arc::new(transparent::OrderedUtxo::from_utxo(utxo, 0)),
+                )
+            },
+        ));
         prepared
     };
 
@@ -3271,7 +3311,7 @@ fn chain_indexes_share_block_outputs() -> Result<()> {
     };
     let mut prepared = busy.clone().prepare();
     let unrelated = prepared.new_outputs.values().next().unwrap().clone();
-    prepared.new_outputs.insert(past_end, unrelated);
+    Arc::make_mut(&mut prepared.new_outputs).insert(past_end, unrelated);
     state.commit_block(prepared, &finalized_state)?;
 
     let chain = state.best_chain().unwrap();
