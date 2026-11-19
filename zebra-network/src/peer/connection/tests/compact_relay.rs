@@ -49,7 +49,11 @@ async fn screened_compact_discovery_cache_expires() {
                     .await
                     .respond(Response::Nil);
                 inbound
-                    .expect_request(Request::AdvertiseCompactBlock(block.hash(), None))
+                    .expect_request(Request::AdvertiseCompactBlock(
+                        block.hash(),
+                        None,
+                        block.header.previous_block_hash,
+                    ))
                     .await
                     .respond(Response::Nil);
             };
@@ -91,7 +95,11 @@ async fn connection_find_blocks_cached_compact_rechecks_ban() {
                 .await
                 .respond(Response::Nil);
             inbound
-                .expect_request(Request::AdvertiseCompactBlock(block.hash(), advertiser))
+                .expect_request(Request::AdvertiseCompactBlock(
+                    block.hash(),
+                    advertiser,
+                    block.header.previous_block_hash,
+                ))
                 .await
                 .respond(Response::Nil);
         };
@@ -213,6 +221,7 @@ async fn connection_find_blocks_inflight_compact_rechecks_authorization() {
                         .expect_request(Request::AdvertiseCompactBlock(
                             block.hash(),
                             Some(template.connection_info.clone()),
+                            block.header.previous_block_hash,
                         ))
                         .await;
                     revoke();
@@ -282,7 +291,11 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                 panic!("early discovery must place an owned ping after its getblocks")
             };
             inbound
-                .expect_request(Request::AdvertiseCompactBlock(block.hash(), None))
+                .expect_request(Request::AdvertiseCompactBlock(
+                    block.hash(),
+                    None,
+                    block.header.previous_block_hash,
+                ))
                 .await
                 .respond(Response::Nil);
             assert_eq!(
@@ -513,7 +526,11 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                         "compact header does not extend the committed best tip".into(),
                     );
                     inbound
-                        .expect_request(Request::AdvertiseBlock(block.hash(), advertiser.clone()))
+                        .expect_request(Request::AdvertiseCompactBlock(
+                            block.hash(),
+                            advertiser.clone(),
+                            block.header.previous_block_hash,
+                        ))
                         .await
                         .respond(Response::Nil);
                 } else {
@@ -528,6 +545,7 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                         .expect_request(Request::AdvertiseCompactBlock(
                             block.hash(),
                             advertiser.clone(),
+                            block.header.previous_block_hash,
                         ))
                         .await
                         .respond(Response::Nil);
@@ -680,6 +698,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 .expect_request(Request::AdvertiseCompactBlock(
                     block.hash(),
                     advertiser.clone(),
+                    block.header.previous_block_hash,
                 ))
                 .await
                 .respond(Response::Nil);
@@ -833,7 +852,7 @@ async fn unadmitted_compacts_are_throttled_without_retaining_slots() {
         let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
 
         for valid_header in [false, true] {
-            let (mut connection, _client, mut inbound, _outbound, _errors) =
+            let (mut connection, _client, mut inbound, _outbound, errors) =
                 new_test_connection::<PanicAssertion>();
             Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
             let advertiser = connection
@@ -857,6 +876,7 @@ async fn unadmitted_compacts_are_throttled_without_retaining_slots() {
                                 .expect_request(Request::AdvertiseCompactBlock(
                                     block.hash(),
                                     advertiser.clone(),
+                                    block.header.previous_block_hash,
                                 ))
                                 .await
                                 .respond_error("duplicate or over-capacity download".into());
@@ -864,12 +884,24 @@ async fn unadmitted_compacts_are_throttled_without_retaining_slots() {
                         }
                         check.respond_error("known header does not extend the best tip".into());
                     }
-                    inbound
-                        .expect_request(Request::AdvertiseBlock(block.hash(), advertiser.clone()))
-                        .await
-                        .respond(Response::Nil);
+                    let request = inbound
+                        .expect_request(Request::AdvertiseCompactBlock(
+                            block.hash(),
+                            advertiser.clone(),
+                            block.header.previous_block_hash,
+                        ))
+                        .await;
+                    if attempt == 1 {
+                        request.respond_error("duplicate compact announcement".into());
+                    } else {
+                        request.respond(Response::Nil);
+                    }
                 };
                 tokio::join!(receive, screen);
+                assert!(
+                    errors.try_get_error().is_none(),
+                    "a rejected compact does not disconnect"
+                );
                 assert!(!connection.compact.has_cached());
             }
         }

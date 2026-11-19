@@ -183,31 +183,36 @@ For historical queries:
 See the [RPC migration guide](zcashd-api-migration-guide.md#pruned-history) and
 [API history contract](../api.md#historical-data-availability) for compatibility details.
 
-Enabling pruning immediately adds the experimental `NODE_PRUNED` service bit (bit 25) to the
-`NODE_NETWORK` service the node advertises to peers, before any body is deleted. Zakura pruned
-nodes advertise the same `NODE_NETWORK | NODE_PRUNED` services. Keeping `NODE_NETWORK` lets
-peers discover, reconnect to, and download recent blocks from pruned nodes; `NODE_PRUNED`
-tells updated Zebra and Zakura peers not to rely on them for historic blocks. Bit 25 is in the
-range reserved for temporary experiments, so it may change before it is assigned by a ZIP.
-Older peers, such as Zebra 7.1.0 and earlier and zcashd, ignore the unknown bit and treat a pruned
-node as a full node, so they may ask it for deleted blocks. It answers `getdata` with `notfound`
-and leaves `getblocks` below its retained range unanswered, so those peers may disconnect it as
-stalled (they don't ban it), and their initial sync can be slower.
-The node still syncs, relays, and serves retained data and historical headers, but
-returns `notfound` for unavailable block bodies. Block inventory stops at missing history rather
-than skipping the gap. Do not use this node as an archive source for other peers or a
-zcashd sidecar.
-The `getnetworkinfo` response reports the same storage and service bits in `localservices`,
-except `NODE_COMPACT_BLOCKS`, which only the handshake adds.
-Pruned listeners remain discoverable through address gossip; syncing outbound handshakes still
-require an archive peer, which advertises `NODE_NETWORK` without `NODE_PRUNED`.
-Outside sync, ordinary outbound non-archive peers (persistent peers excluded) may occupy
-at most `network.peerset_initial_target_size` connection slots (25 of the default 75 outbound slots).
-The remaining slots are reserved for serving peers; inbound and isolated connections are exempt.
-When reconnecting, Zebra prefers the first ready candidate that may serve blocks
-(`NODE_NETWORK` without `NODE_PRUNED`, or unknown services), falling back to known non-serving
-candidates only when none are ready. Falling behind does not evict existing non-serving connections; reserved serving
-capacity remains available, and new syncing outbound handshakes require serving peers.
+Pruned nodes never advertise `NODE_NETWORK` or the experimental `NODE_PRUNED` bit introduced
+in #12521; this change reverses that advertising policy. Nodes that retain at least 2,304
+recent blocks and have the complete window above their current tip advertise
+`NODE_NETWORK_LIMITED` (bit 10) instead. If a restored pruned database has not yet synced
+the window, new peer handshakes gain the limited bit only after it catches up. Regtest
+retention below 2,304 (including the minimum 1,001) advertises neither block-serving bit.
+Zebra still recognizes Zakura's `NODE_NETWORK | NODE_PRUNED` advertisements as non-archive.
+
+Limited nodes return `notfound` for blocks more than 2,304 below their current best tip,
+even when their database still holds those blocks, to avoid disclosing their retention depth.
+They relay addresses as before. Zebra uses limited peers for `getblocks` extending its own
+tip, and can download a block from the limited peer that announced its compact header
+when the parent height is already known locally. Both require an estimated network
+tip within 1,152 blocks. Historical `getblocks`, unknown-height inventory announcements,
+and parent recoveries continue to use other peers. The estimate comes from Zebra's local
+best-tip timestamp, so its accuracy depends on timestamps and the local clock.
+Older nodes that do not recognize the limited bit may not use these peers for block sync.
+Pruned nodes continue to serve historical headers and their retained RPC data, but cannot
+serve as an archive source or zcashd sidecar.
+
+The `getnetworkinfo` response reports startup storage and service bits in `localservices`,
+except `NODE_COMPACT_BLOCKS`, which only the handshake adds. On a restored pruned node
+that finishes its window after startup, new handshakes gain `NODE_NETWORK_LIMITED`;
+`localservices` updates on restart. Pruned listeners remain discoverable through address
+gossip. Syncing outbound handshakes require an archive peer, including when a Zakura
+peer advertises `NODE_NETWORK | NODE_PRUNED`. Persistent, inbound and isolated connections
+are exempt. Outside sync, non-archive peers may occupy at most
+`network.peerset_initial_target_size` ordinary outbound slots (25 of the default 75);
+the remaining slots are reserved for archive peers. Reconnection likewise prefers archive
+candidates, falling back to non-archive candidates only when none are ready.
 
 ## Watch pruning converge
 

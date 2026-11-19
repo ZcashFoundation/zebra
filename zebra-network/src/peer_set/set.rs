@@ -133,7 +133,7 @@ use crate::{
     connection_metrics::network_kind_label,
     constants::{
         FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
-        MIN_PEER_SET_LOG_INTERVAL,
+        MIN_PEER_SET_LOG_INTERVAL, NODE_NETWORK_LIMITED_BLOCKS,
     },
     peer::{ConnectionInfo, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
@@ -396,6 +396,9 @@ where
     /// [`Self::retain_connected_keys`].
     serving_peer_keys: HashSet<D::Key>,
 
+    /// Connected limited-service peers, including busy peers.
+    limited_peer_keys: HashSet<D::Key>,
+
     /// Block requests that are waiting for a busy peer that might have the block, in the order
     /// they were made.
     ///
@@ -563,6 +566,7 @@ where
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
+            limited_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
             queued_inv_request_timer: None,
             queued_inv_requests_took_last_peer: false,
@@ -1030,6 +1034,15 @@ where
                     } else {
                         self.serving_peer_keys.remove(&key);
                     }
+                    if svc
+                        .remote_services()
+                        .contains(PeerServices::NODE_NETWORK_LIMITED)
+                        && !svc.remote_services().contains(PeerServices::NODE_NETWORK)
+                    {
+                        self.limited_peer_keys.insert(key);
+                    } else {
+                        self.limited_peer_keys.remove(&key);
+                    }
                     self.inventory_registry.clear_peer_failures(key);
                     if svc.connection_info().early_block_relay {
                         self.inventory_registry
@@ -1202,6 +1215,7 @@ where
         self.tree_root_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
+        self.limited_peer_keys.remove(key);
         self.block_advert_senders.send_modify(|peers| {
             peers.remove(key);
         });
@@ -1283,9 +1297,25 @@ where
         self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
     }
 
-    /// Rotates find requests across ready connections, restricting them to serving peers until
-    /// the queued wait expires, unless no serving peers are connected.
-    fn select_ready_find_peer(&mut self, allow_non_serving: bool) -> Option<D::Key> {
+    /// Returns whether the estimated network tip is within the limited-peer safety margin.
+    ///
+    /// The estimate uses local block timestamps, not an authenticated peer-reported height;
+    /// therefore block requests still require known heights, not just estimated proximity.
+    fn near_network_tip_for_limited_peers(&self) -> bool {
+        self.minimum_peer_version
+            .chain_tip()
+            .estimate_distance_to_network_chain_tip(&self.network)
+            .is_some_and(|(distance, _)| {
+                distance.unsigned_abs() <= u64::from(NODE_NETWORK_LIMITED_BLOCKS / 2)
+            })
+    }
+
+    /// Rotates find requests across eligible ready connections.
+    fn select_ready_find_peer(
+        &mut self,
+        allow_non_serving: bool,
+        allow_limited: bool,
+    ) -> Option<D::Key> {
         if self.ready_services.is_empty() {
             return None;
         }
@@ -1297,7 +1327,10 @@ where
             .enumerate()
             .find(|(_, (key, _))| {
                 self.ready_services.contains_key(key)
-                    && (!serving_only || self.serving_peer_keys.contains(key))
+                    && (!self.limited_peer_keys.contains(key) || allow_limited)
+                    && (!serving_only
+                        || self.serving_peer_keys.contains(key)
+                        || (allow_limited && self.limited_peer_keys.contains(key)))
             })?;
         let key = *key;
         self.find_peer_queue.rotate_left(index + 1);
@@ -1444,13 +1477,34 @@ where
             &req,
             Request::FindBlocks { .. } | Request::FindHeaders { .. }
         );
+        // The first locator must be our own tip: then `getblocks` asks only for newer blocks.
+        let allow_limited = match &req {
+            Request::FindBlocks { known_blocks, .. } => {
+                self.near_network_tip_for_limited_peers()
+                    && known_blocks.first()
+                        == self
+                            .minimum_peer_version
+                            .chain_tip()
+                            .best_tip_hash()
+                            .as_ref()
+            }
+            Request::FindHeaders { .. } => true,
+            _ => false,
+        };
         let peer_key = if is_find_request {
             // Fast empty responses must not gain a latency-based routing advantage.
-            self.select_ready_find_peer(false)
+            self.select_ready_find_peer(false, allow_limited)
+        } else if matches!(&req, Request::BlocksByHash(_)) {
+            let ready_archive_peers = self
+                .ready_services
+                .keys()
+                .filter(|key| self.serving_peer_keys.contains(key))
+                .copied()
+                .collect();
+            self.select_p2c_peer_from_list(&ready_archive_peers)
         } else {
             self.select_ready_p2c_peer()
         };
-
         if let Some(peer_key) = peer_key {
             if is_find_request && !self.serving_peer_keys.contains(&peer_key) {
                 metrics::counter!(
@@ -1469,7 +1523,7 @@ where
             if self.queued_find_requests.len() < MAX_QUEUED_FIND_REQUESTS {
                 return self.queue_find_request(req);
             }
-            if let Some(peer_key) = self.select_ready_find_peer(true) {
+            if let Some(peer_key) = self.select_ready_find_peer(true, allow_limited) {
                 metrics::counter!(
                     "zcash.net.peer_set.find_fallback",
                     "reason" => "queue_full",
@@ -1635,17 +1689,20 @@ where
             failed_peer_list.contains(addr) || served_peer_list.contains(addr)
         };
         let advertiser = match request {
-            Request::BlockDownload { advertiser, .. } => advertiser.as_ref().and_then(|info| {
-                let addr = info.connected_addr.get_transient_addr()?;
-                // A same-address replacement cannot inherit the announcing connection's preference.
-                // Registry advertisements already exclude missing peers; carried provenance must too.
-                (self.is_current_connection(addr, info)
-                    && !self
-                        .inventory_registry
-                        .missing_peers(hash)
-                        .any(|missing| *missing == addr))
-                .then_some(addr)
-            }),
+            Request::BlockDownload { advertiser, .. }
+            | Request::BlockDownloadAtHeight { advertiser, .. } => {
+                advertiser.as_ref().and_then(|info| {
+                    let addr = info.connected_addr.get_transient_addr()?;
+                    // A same-address replacement cannot inherit the announcing connection's preference.
+                    // Registry advertisements already exclude missing peers; carried provenance must too.
+                    (self.is_current_connection(addr, info)
+                        && !self
+                            .inventory_registry
+                            .missing_peers(hash)
+                            .any(|missing| *missing == addr))
+                    .then_some(addr)
+                })
+            }
             _ => None,
         };
 
@@ -1654,9 +1711,29 @@ where
             .advertising_peers(hash)
             .copied()
             .collect();
+        let is_block = matches!(hash, InventoryHash::Block(_));
+        // A validated parent gives us the requested block's height. Limited peers are eligible
+        // only when that height is inside our window and the exact announcing connection is
+        // still current, near the estimated network tip. Parent recovery and untrusted `inv`
+        // hashes carry no height and never gain limited-peer eligibility.
+        let limited_allowed = matches!(
+            request,
+            Request::BlockDownloadAtHeight { height, .. }
+                if self.near_network_tip_for_limited_peers()
+                    && self.minimum_peer_version.chain_tip().best_tip_height().is_some_and(|tip| {
+                        tip.0.saturating_sub(height.0) <= crate::constants::NODE_NETWORK_LIMITED_BLOCKS
+                    })
+        );
+        let eligible = |addr: &PeerSocketAddr| {
+            !is_block
+                || !self.limited_peer_keys.contains(addr)
+                || (limited_allowed && advertiser == Some(*addr))
+        };
         let advertising_peer_list = advertising_peers
             .iter()
-            .filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
+            .filter(|addr| {
+                self.ready_services.contains_key(addr) && !has_failed(addr) && eligible(addr)
+            })
             .copied()
             .collect();
 
@@ -1668,13 +1745,13 @@ where
 
         // Only block routing depends on peer services: non-serving peers can still serve
         // mempool transactions.
-        let is_block = matches!(hash, InventoryHash::Block(_));
         let ready_peers_with_services = |serving: bool| -> HashSet<PeerSocketAddr> {
             self.ready_services
                 .keys()
                 .filter(|addr| {
                     !missing_peer_list.contains(addr)
                         && !has_failed(addr)
+                        && eligible(addr)
                         && (!is_block || self.serving_peer_keys.contains(addr) == serving)
                 })
                 .copied()
@@ -1732,9 +1809,9 @@ where
         // A recovery carries the child's source, which need not have advertised the parent.
         // Prefer explicit parent inventory, but retain that source ahead of speculative peers.
         // Like an advertiser, it is skipped for repeats once it has returned the block.
-        if let Some(peer) =
-            advertiser.filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
-        {
+        if let Some(peer) = advertiser.filter(|addr| {
+            eligible(addr) && self.ready_services.contains_key(addr) && !has_failed(addr)
+        }) {
             tracing::trace!(?hash, ?peer, "routing to the carried block source");
             return InvRoute::Peer {
                 peer,
@@ -1746,8 +1823,9 @@ where
         // peer in that window can return notfound before it has even learned the new block.
         // Only the current announcing connection gets this short exclusive preference.
         if wait_for_advertiser
-            && advertiser
-                .is_some_and(|addr| self.cancel_handles.contains_key(&addr) && !has_failed(&addr))
+            && advertiser.is_some_and(|addr| {
+                eligible(&addr) && self.cancel_handles.contains_key(&addr) && !has_failed(&addr)
+            })
         {
             return InvRoute::Wait;
         }
@@ -1783,6 +1861,7 @@ where
             self.cancel_handles.keys().any(|key| {
                 !missing_peer_list.contains(key)
                     && has_failed(key) == failed
+                    && eligible(key)
                     && (failed || is_advertised || self.serving_peer_keys.contains(key))
             })
         };
@@ -1808,7 +1887,7 @@ where
         let failed_ready_peer_list = self
             .ready_services
             .keys()
-            .filter(|addr| has_failed(addr) && !missing_peer_list.contains(addr))
+            .filter(|addr| eligible(addr) && has_failed(addr) && !missing_peer_list.contains(addr))
             .copied()
             .collect();
         if let Some(peer) = self.select_p2c_peer_from_list(&failed_ready_peer_list) {
@@ -1983,8 +2062,23 @@ where
             }
 
             let expired = queued.deadline <= now;
-            if let Some(peer) = self.select_ready_find_peer(expired) {
-                if !self.serving_peer_keys.contains(&peer) {
+            let allow_limited = match &queued.request {
+                Request::FindBlocks { known_blocks, .. } => {
+                    self.near_network_tip_for_limited_peers()
+                        && known_blocks.first()
+                            == self
+                                .minimum_peer_version
+                                .chain_tip()
+                                .best_tip_hash()
+                                .as_ref()
+                }
+                Request::FindHeaders { .. } => true,
+                _ => false,
+            };
+            if let Some(peer) = self.select_ready_find_peer(expired, allow_limited) {
+                if !self.serving_peer_keys.contains(&peer)
+                    && !self.limited_peer_keys.contains(&peer)
+                {
                     let reason = if self.serving_peer_keys.is_empty() {
                         "no_serving_peer"
                     } else {
@@ -2044,11 +2138,17 @@ where
         let network = network_kind_label(&self.network);
         metrics::counter!("zcash.net.peer_set.inventory_queued", "network" => network).increment(1);
 
-        let deadline = (!matches!(request, Request::BlockDownload { .. }))
-            .then(|| tokio::time::Instant::now() + INVENTORY_BUSY_PEER_WAIT_TIMEOUT);
+        let deadline = (!matches!(
+            request,
+            Request::BlockDownload { .. } | Request::BlockDownloadAtHeight { .. }
+        ))
+        .then(|| tokio::time::Instant::now() + INVENTORY_BUSY_PEER_WAIT_TIMEOUT);
         let preference_deadline = matches!(
             request,
             Request::BlockDownload {
+                advertiser: Some(_),
+                ..
+            } | Request::BlockDownloadAtHeight {
                 advertiser: Some(_),
                 ..
             }
@@ -2117,8 +2217,10 @@ where
         // even when no connection or inventory event follows it.
         let now = tokio::time::Instant::now();
         self.queued_inv_requests.retain_mut(|queued| {
-            (matches!(queued.request, Request::BlockDownload { .. })
-                || queued.deadline.is_none_or(|deadline| deadline > now))
+            (matches!(
+                queued.request,
+                Request::BlockDownload { .. } | Request::BlockDownloadAtHeight { .. }
+            ) || queued.deadline.is_none_or(|deadline| deadline > now))
                 && queued.response_sender.poll_canceled(cx).is_pending()
         });
 
@@ -2547,6 +2649,11 @@ where
             &self.ready_services,
             &self.cancel_handles,
         );
+        Self::retain_connected_keys(
+            &mut self.limited_peer_keys,
+            &self.ready_services,
+            &self.cancel_handles,
+        );
         // Discovery gets newly ready serving peers before queued block downloads can take them.
         // Even without ready peers, poll deadlines and cancellations to keep the queue live.
         self.route_queued_find_requests(&mut peer_cx);
@@ -2635,7 +2742,9 @@ where
         let had_turn = std::mem::take(&mut self.queued_inv_requests_took_last_peer);
 
         let fut = match req {
-            Request::BlockDownload { hash, .. } => self.route_inv(req, hash.into()),
+            Request::BlockDownload { hash, .. } | Request::BlockDownloadAtHeight { hash, .. } => {
+                self.route_inv(req, hash.into())
+            }
             // Only do inventory-aware routing on individual items.
             Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());

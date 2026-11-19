@@ -85,8 +85,9 @@ impl Runnable for GenerateCmd {
 # in a separate cache directory. Check getblockchaininfo for actual availability.
 # Catch-up pruning compacts deleted bodies after clearing the backlog. Normal
 # compaction handles ongoing deletion. Retained indexes and validation state still grow.
-# Enabling pruning immediately adds the experimental NODE_PRUNED service bit to
-# NODE_NETWORK and rejects zcashd-compat sidecars, even before the first deletion.
+# Enabling pruning clears NODE_NETWORK and NODE_PRUNED. A node retaining and
+# holding at least 2304 recent blocks advertises NODE_NETWORK_LIMITED instead.
+# Pruning rejects zcashd-compat sidecars even before the first deletion.
 
 "
         .to_owned();

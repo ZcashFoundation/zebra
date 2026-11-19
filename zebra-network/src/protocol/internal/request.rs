@@ -120,10 +120,12 @@ pub enum Request {
     /// [`Response::AuthorizedBlocks`](super::Response::AuthorizedBlocks).
     EarlyBlocksByHash(HashSet<block::Hash>),
 
-    /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
+    /// Admits a compact advertisement to the ordinary bounded gossip downloader.
     ///
-    /// The second field is the advertising connection's metadata, as in
-    /// [`Request::AdvertiseBlock`].
+    /// The second field identifies the advertising connection. The third is the compact
+    /// header's parent hash; throttled compact announcements have not passed the best-tip
+    /// screening check. The downloader resolves parent height from validated local state,
+    /// never from the untrusted announcement.
     ///
     /// Returns [`super::Response::Nil`] only when a new download was queued. Duplicate hashes,
     /// exhausted global capacity, and the per-IP cap return errors; no compact body may be retained.
@@ -131,6 +133,7 @@ pub enum Request {
         block::Hash,
         #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
         Option<Arc<ConnectionInfo>>,
+        block::Hash,
     ),
 
     /// Screens a compact header before retaining its body, without querying the mempool.
@@ -191,6 +194,22 @@ pub enum Request {
         /// Shared metadata identifying the connection that supplied this block, or the child's
         /// source for a parent recovery, if known.
         #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        advertiser: Option<Arc<ConnectionInfo>>,
+    },
+
+    /// Download a block announced by the carried peer whose height was resolved from our
+    /// validated parent header. Only that announcing connection can receive this request when
+    /// it provides limited service, and only within the limited-service window near our tip.
+    /// Other peers are routed as for [`Request::BlockDownload`].
+    ///
+    /// Returns the same responses as [`Request::BlockDownload`].
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    BlockDownloadAtHeight {
+        /// The advertised block hash.
+        hash: block::Hash,
+        /// The height following its locally known parent.
+        height: block::Height,
+        /// The announcing connection, if it is still connected.
         advertiser: Option<Arc<ConnectionInfo>>,
     },
 
@@ -425,7 +444,9 @@ impl fmt::Display for Request {
             Request::EarlyRawBlocksByHash(hashes) => {
                 format!("EarlyRawBlocksByHash({})", hashes.len())
             }
-            Request::BlockDownload { .. } => "BlockDownload".to_string(),
+            Request::BlockDownload { .. } | Request::BlockDownloadAtHeight { .. } => {
+                "BlockDownload".to_string()
+            }
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
@@ -479,7 +500,9 @@ impl Request {
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::RawBlocksByHash(_) => "RawBlocksByHash",
             Request::EarlyRawBlocksByHash(_) => "EarlyRawBlocksByHash",
-            Request::BlockDownload { .. } => "BlockDownload",
+            Request::BlockDownload { .. } | Request::BlockDownloadAtHeight { .. } => {
+                "BlockDownload"
+            }
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
@@ -506,6 +529,7 @@ impl Request {
         matches!(
             self,
             Request::BlockDownload { .. }
+                | Request::BlockDownloadAtHeight { .. }
                 | Request::BlocksByHash(_)
                 | Request::EarlyBlocksByHash(_)
                 | Request::TransactionsById(_)
@@ -516,7 +540,9 @@ impl Request {
     /// Returns the block hash inventory downloads from the request, if any.
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
         match self {
-            Request::BlockDownload { hash, .. } => HashSet::from([*hash]),
+            Request::BlockDownload { hash, .. } | Request::BlockDownloadAtHeight { hash, .. } => {
+                HashSet::from([*hash])
+            }
             Request::BlocksByHash(block_hashes) | Request::EarlyBlocksByHash(block_hashes) => {
                 block_hashes.clone()
             }

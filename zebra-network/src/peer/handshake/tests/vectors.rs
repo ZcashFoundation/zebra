@@ -554,6 +554,74 @@ async fn local_version_advertises_configured_services() {
     .expect("service capability handshakes must finish within the test deadline");
 }
 
+/// Fresh handshakes acquire limited service only after the retained window is complete.
+#[tokio::test]
+async fn limited_service_handshakes_follow_tip_height() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        let (tip, tip_sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+        let listen_addr: SocketAddr = "127.0.0.1:8233".parse().unwrap();
+        let mut config = Config {
+            listen_addr,
+            ..Config::default()
+        };
+        config.local_services = PeerServices::NODE_TREE_ROOTS;
+        config.limited_service_from = Some(block::Height(2_304));
+
+        for (height, isolated, limited) in [
+            (2_303, false, false),
+            (2_304, false, true),
+            (2_305, false, true),
+            (2_305, true, false),
+        ] {
+            tip_sender.send_best_tip_height(block::Height(height));
+            let codec = Codec::builder().for_network(&config.network).finish();
+            let handshake = Handshake::builder()
+                .with_config(config.clone())
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .with_latest_chain_tip(tip.clone())
+                .finish()
+                .unwrap();
+            let (local, remote) = tokio::io::duplex(65536);
+            let mut remote = Framed::new(remote, codec);
+            let (client, ()) = tokio::join!(
+                handshake.oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: if isolated {
+                        ConnectedAddr::Isolated
+                    } else {
+                        ConnectedAddr::new_outbound_direct(listen_addr.into())
+                    },
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                }),
+                async {
+                    let Message::Version(mut version) = remote.next().await.unwrap().unwrap()
+                    else {
+                        panic!("the handshake starts with a version message");
+                    };
+                    assert_eq!(
+                        version
+                            .services
+                            .contains(PeerServices::NODE_NETWORK_LIMITED),
+                        limited
+                    );
+                    assert!(!version.services.contains(PeerServices::NODE_NETWORK));
+                    version.services.insert(PeerServices::NODE_NETWORK);
+                    version.nonce = Nonce::default();
+                    remote.send(Message::Version(version)).await.unwrap();
+                    remote.send(Message::Verack).await.unwrap();
+                    assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+                },
+            );
+            client.expect("an archive peer satisfies outbound service filtering");
+        }
+    })
+    .await
+    .expect("limited service handshakes must finish within the test deadline");
+}
+
 /// Cached alternate listeners retain the service mask received in the version address.
 #[tokio::test]
 async fn alternate_listener_cache_preserves_advertised_services() {

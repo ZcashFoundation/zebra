@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `PeerServices::NODE_NETWORK_LIMITED` (bit 10), recent-chain `getblocks` routing, and known-height downloads of compact announcements from limited peers; `NODE_NETWORK | NODE_PRUNED` peers remain non-archive.
+time: 2026-11-18T23:35:28.356046354+01:00

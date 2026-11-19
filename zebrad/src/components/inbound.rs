@@ -29,6 +29,7 @@ use zebra_state::{self as zs};
 
 use zebra_chain::{
     block::{self, Block, SerializedBlock},
+    chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
@@ -36,7 +37,8 @@ use zebra_chain::{
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
 use zebra_network::{
-    constants::GETDATA_MAX_BLOCK_COUNT, AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE,
+    constants::{GETDATA_MAX_BLOCK_COUNT, NODE_NETWORK_LIMITED_BLOCKS},
+    AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 use zebra_node_services::mempool;
 
@@ -243,6 +245,8 @@ pub struct Inbound {
 
     /// Bounds mempool scans and detached blocking checks across all peer connections.
     compact_checks: Arc<Semaphore>,
+    /// Set for a limited node, to enforce its advertised block-serving window.
+    limited_tip: Option<zs::LatestChainTip>,
 }
 
 impl Inbound {
@@ -261,6 +265,7 @@ impl Inbound {
             submitted_blocks: Default::default(),
             early_blocks: None,
             compact_relay: None,
+            limited_tip: None,
             compact_checks: Arc::new(Semaphore::new(3)),
         }
     }
@@ -284,6 +289,12 @@ impl Inbound {
     /// and the finalized state for serving tree roots.
     pub fn with_compact_relay(mut self, network: Network, state: zs::ReadStateService) -> Self {
         self.compact_relay = Some((network, state));
+        self
+    }
+
+    /// Restricts block replies to the limited-service window around the current tip.
+    pub fn with_limited_tip(mut self, tip: Option<zs::LatestChainTip>) -> Self {
+        self.limited_tip = tip;
         self
     }
 
@@ -555,6 +566,7 @@ impl Service<zn::Request> for Inbound {
                 let state = state.clone();
                 let submitted_blocks = self.submitted_blocks.clone();
                 let early_blocks = if early_relay { self.early_blocks.clone() } else { None };
+                let limited_tip = self.limited_tip.clone();
 
                 async move {
                     let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
@@ -570,11 +582,25 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let cached = submitted_blocks.get(&hash).or_else(|| {
-                            let block = early_blocks.as_ref()?.get(&hash)?;
+                        let submitted = submitted_blocks.get(&hash);
+                        let from_submitted = submitted.is_some();
+                        let cached = submitted
+                            .or_else(|| early_blocks.as_ref().and_then(|cache| cache.get(&hash)));
+                        if let Some(tip) = &limited_tip {
+                            let within_window = if let Some(block) = &cached {
+                                cached_block_in_limited_window(tip.best_tip_height(), block)
+                            } else {
+                                let response = state.clone().ready().await?.call(zs::Request::Depth(hash)).await?;
+                                matches!(response, zs::Response::Depth(Some(depth)) if depth <= NODE_NETWORK_LIMITED_BLOCKS)
+                            };
+                            if !within_window {
+                                blocks.push(Missing(hash));
+                                continue;
+                            }
+                        }
+                        if cached.is_some() && !from_submitted {
                             early_hashes.insert(hash);
-                            Some(block)
-                        });
+                        }
                         let response = if let Some(block) = cached {
                             zs::Response::Block(Some(block))
                         } else {
@@ -634,6 +660,7 @@ impl Service<zn::Request> for Inbound {
                 }
 
                 let state = state.clone();
+                let limited = self.limited_tip.is_some();
 
                 async move {
                     let mut blocks: Vec<InventoryResponse<Arc<SerializedBlock>, block::Hash>> = Vec::new();
@@ -643,6 +670,14 @@ impl Service<zn::Request> for Inbound {
                         // As above, check the limit after including at least one block.
                         if total_size >= GETDATA_SENT_BYTES_LIMIT {
                             break;
+                        }
+
+                        if limited {
+                            let response = state.clone().ready().await?.call(zs::Request::Depth(hash)).await?;
+                            if !matches!(response, zs::Response::Depth(Some(depth)) if depth <= NODE_NETWORK_LIMITED_BLOCKS) {
+                                blocks.push(Missing(hash));
+                                continue;
+                            }
                         }
 
                         let response = match state.clone().ready().await?.call(zs::Request::RawBlock(hash.into())).await {
@@ -787,9 +822,9 @@ impl Service<zn::Request> for Inbound {
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()
             }
-            zn::Request::AdvertiseCompactBlock(hash, advertiser) => {
+            zn::Request::AdvertiseCompactBlock(hash, advertiser, parent_hash) => {
                 let admitted = matches!(
-                    block_downloads.download_and_verify(hash, advertiser),
+                    block_downloads.download_and_verify_compact(hash, advertiser, parent_hash),
                     downloads::DownloadAction::AddedToQueue
                 );
                 async move {
@@ -831,14 +866,20 @@ impl Service<zn::Request> for Inbound {
             zn::Request::AdvertiseBlockToAll(_) | zn::Request::AdvertiseEarlyBlock(_, _) =>
                 unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
-            zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
+            zn::Request::BlockDownload { .. } | zn::Request::BlockDownloadAtHeight { .. } =>
+                unreachable!("peers never send outbound block downloads"),
             zn::Request::TransactionsByIdFromAdvertisers(_) =>
                 unreachable!("the peer set handles advertiser-only transaction retries"),
-
 
             zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
+}
+
+/// Checks the same advertised window for validated submitted and early-relay bodies.
+fn cached_block_in_limited_window(tip: Option<block::Height>, block: &Block) -> bool {
+    tip.zip(block.coinbase_height())
+        .is_some_and(|(tip, height)| tip.0.saturating_sub(height.0) <= NODE_NETWORK_LIMITED_BLOCKS)
 }
 
 /// Returns true if a block request would serve any uncommitted body from the submitted cache, or
