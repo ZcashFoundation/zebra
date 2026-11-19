@@ -758,6 +758,22 @@ impl CoinbaseCache {
         cache.transactions.get(&fee).cloned()
     }
 
+    /// Returns whether either cached context holds this fee variant.
+    fn holds(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> bool {
+        let cache = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let context = Some((height, parent_nsm_value_balance));
+        (cache.context == context && cache.transactions.contains_key(&fee))
+            || (cache.previous.0 == context && cache.previous.1.contains_key(&fee))
+    }
+
     /// Stores a completed build only if its height and parent balance are still selected.
     fn store(
         &self,

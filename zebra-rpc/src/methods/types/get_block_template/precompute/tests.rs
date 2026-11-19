@@ -555,6 +555,67 @@ async fn cached_coinbase_does_not_wait_for_a_redundant_proof() {
     proof.await.expect("the released proof finishes");
 }
 
+/// A withdrawn candidate's child already has a coinbase, but uncached heights still need proving.
+#[tokio::test]
+async fn cached_candidate_child_coinbase_is_not_proved_again() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .expect("hard-coded transparent address is valid"),
+    );
+    let height = Height(template().height);
+    let child_height = height.next().expect("test height is below the maximum");
+    let missing_height = child_height
+        .next()
+        .expect("test height is below the maximum");
+    let cache = CoinbaseCache::default();
+    cache.select(child_height, None);
+    cache.store(
+        child_height,
+        Amount::zero(),
+        None,
+        TransactionTemplate::new_coinbase(&net, child_height, &miner_params, Amount::zero())
+            .expect("test parameters produce a valid coinbase"),
+    );
+    cache.select(height, None);
+
+    // The tip's rebuild must not start a second proof for the candidate's cached child.
+    let mut next_coinbase = None;
+    start_precomputing_coinbase(
+        &mut next_coinbase,
+        &net,
+        &miner_params,
+        child_height,
+        &cache,
+    );
+    assert!(next_coinbase.is_none(), "the cached proof must not restart");
+
+    // A different, uncached height still gets precomputed and stored.
+    start_precomputing_coinbase(
+        &mut next_coinbase,
+        &net,
+        &miner_params,
+        missing_height,
+        &cache,
+    );
+    assert_eq!(
+        next_coinbase.as_ref().map(|(height, _)| *height),
+        Some(missing_height),
+        "an uncached coinbase must start"
+    );
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        store_precomputed_coinbase(&mut next_coinbase, missing_height, &cache),
+    )
+    .await
+    .expect("the needed precomputation must finish");
+    assert!(cache.get(missing_height, Amount::zero(), None).is_some());
+}
+
 /// Checks that a shielded miner address waits longer for a precomputed template than a transparent
 /// one, because falling back to an on-demand build runs a coinbase proof per request.
 #[test]
