@@ -14,7 +14,7 @@ use tokio::sync::{
 
 use tracing::Span;
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Block, Height},
     parallel::tree::NoteCommitmentTrees,
 };
 
@@ -87,6 +87,49 @@ fn validate_non_finalized(
     } else {
         non_finalized_state.validate_block(prepared, finalized_state)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The number of prepared blocks that a block write task running on this thread committed.
+    static PREPARED_COMMIT_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A block that was contextually validated before its commit request arrived.
+struct PreparedCommit {
+    /// The block. Only a commit request for this block object can use `validated`, because a
+    /// block hash doesn't identify a block's authorizing data.
+    block: Arc<Block>,
+
+    /// The chain with the block.
+    validated: ValidatedChain,
+
+    /// How long the validation took.
+    validation: std::time::Duration,
+}
+
+/// Contextually validates `block` on the current non-finalized state without changing it, for
+/// the commit request that follows if the block passes verification.
+///
+/// Returns `None` if the block can't be committed to the current state. Its commit request
+/// returns the error.
+fn prepare_commit(
+    finalized_state: &ZebraDb,
+    non_finalized_state: &NonFinalizedState,
+    block: Arc<Block>,
+) -> Option<PreparedCommit> {
+    // Callers check the coinbase height, but a missing one must not stop the block write task.
+    block.coinbase_height()?;
+
+    let validation_start = Instant::now();
+    let prepared = SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash());
+    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared).ok()?;
+
+    Some(PreparedCommit {
+        block,
+        validated,
+        validation: validation_start.elapsed(),
+    })
 }
 
 /// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`],
@@ -288,6 +331,9 @@ pub enum NonFinalizedWriteMessage {
     /// contextual validation and insertion into the non-finalized state,
     /// with the time it was sent to the writer.
     Commit(QueuedSemanticallyVerified, Instant),
+    /// A block to contextually validate before its [`Self::Commit`] arrives. See
+    /// [`Request::PrepareCommit`](crate::Request::PrepareCommit).
+    Prepare(Arc<Block>),
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
     Invalidate {
@@ -814,10 +860,21 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
+        // The chain of a block that was validated before its commit request arrived. It was
+        // validated on the state as it was then, so every other message discards it.
+        let mut prepared_commit: Option<PreparedCommit> = None;
+
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+            let prepared = prepared_commit.take();
+
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {
                     Some((queued_child, queued_at))
+                }
+                NonFinalizedWriteMessage::Prepare(block) => {
+                    prepared_commit =
+                        prepare_commit(&finalized_state.db, non_finalized_state, block);
+                    continue;
                 }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
@@ -903,6 +960,7 @@ impl WriteBlockWorkerTask {
             } else {
                 // Measure only commits here, not proposals or restored backup blocks.
                 let phase_start = Instant::now();
+                let mut prepared_validation = std::time::Duration::ZERO;
                 let result = if let Some(mut contextual) = contextual {
                     // A replaced identical body keeps its first receipt time.
                     contextual.received_time = queued_child.received_time;
@@ -911,6 +969,21 @@ impl WriteBlockWorkerTask {
                         &finalized_state.db,
                         notifications.as_ref(),
                     )
+                } else if let Some(PreparedCommit {
+                    mut validated,
+                    validation,
+                    ..
+                }) =
+                    prepared.filter(|prepared| Arc::ptr_eq(&prepared.block, &queued_child.block))
+                {
+                    tracing::debug!(?child_hash, "committing a prepared block");
+                    #[cfg(test)]
+                    PREPARED_COMMIT_COUNT.with(|count| count.set(count.get() + 1));
+                    // The block's contextual commit started when it was prepared.
+                    prepared_validation = validation;
+                    validated.set_received_time(queued_child.received_time);
+                    non_finalized_state.insert_validated(validated);
+                    Ok(())
                 } else {
                     tracing::trace!(?child_hash, "validating queued child");
                     validate_and_commit_non_finalized(
@@ -923,7 +996,7 @@ impl WriteBlockWorkerTask {
                     "state.block_writer.phase.duration_seconds",
                     "phase" => "contextual_commit"
                 )
-                .record(phase_start.elapsed().as_secs_f64());
+                .record((prepared_validation + phase_start.elapsed()).as_secs_f64());
                 result
             };
 

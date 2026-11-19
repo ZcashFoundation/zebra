@@ -160,3 +160,49 @@ fn commit_records_each_sub_phase_once_per_committed_block() {
         "a state that doesn't count metrics must not record commit phases",
     );
 }
+
+/// A block that is validated before it is committed records its sub-phases when it is committed,
+/// and a validated block that is never committed records none.
+#[test]
+fn validated_block_records_its_sub_phases_when_it_is_committed() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, mut state, _genesis) = new_state_with_mainnet_genesis();
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("block 1 test vector is valid");
+    state
+        .commit_new_chain(block1.clone().prepare(), &finalized.db)
+        .expect("block 1 is a valid child of genesis");
+
+    let (recorder, samples) = PhaseRecorder::new();
+
+    let validated = metrics::with_local_recorder(&recorder, || {
+        // This block is validated and dropped.
+        state
+            .validate_block(
+                block1.make_fake_child().set_work(2).prepare(),
+                &finalized.db,
+            )
+            .expect("a fake child of block 1 is valid");
+
+        state
+            .validate_block(block1.make_fake_child().prepare(), &finalized.db)
+            .expect("a fake child of block 1 is valid")
+    });
+    assert_eq!(
+        samples_by_phase(&samples),
+        BTreeMap::new(),
+        "validating a block must not record commit phases",
+    );
+
+    metrics::with_local_recorder(&recorder, || state.insert_validated(validated));
+    let recorded = samples_by_phase(&samples);
+    for phase in COMMIT_PHASES {
+        assert_eq!(
+            recorded.get(phase).map(Vec::len),
+            Some(1),
+            "phase {phase} must be recorded once for the committed block: {recorded:?}",
+        );
+    }
+}

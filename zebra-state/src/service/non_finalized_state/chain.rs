@@ -1672,6 +1672,19 @@ impl Chain {
         self.blocks.values().next_back().map(Arc::as_ref)
     }
 
+    /// Sets the time the block verifier received this chain's tip block.
+    ///
+    /// The chain must not be in a chain set: [`Chain::cmp`] uses the tip block's received time.
+    pub(crate) fn set_tip_received_time(&mut self, received_time: Option<std::time::Instant>) {
+        let Some(tip_height) = self.blocks.keys().next_back().copied() else {
+            return;
+        };
+
+        if let Some(tip) = self.blocks.get_mut(&tip_height) {
+            Arc::make_mut(tip).received_time = received_time;
+        }
+    }
+
     /// Returns true if the non-finalized part of this chain is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()

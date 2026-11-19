@@ -208,6 +208,65 @@ async fn only_blocks_with_few_transactions_bypass_blocking_check_admission() {
     }
 }
 
+#[tokio::test]
+async fn only_blocks_that_pass_quick_checks_can_be_prepared_for_commit() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let can_be_prepared = |block: Block| {
+        let network = network.clone();
+        async move {
+            let bytes = block.zcash_serialize_to_vec().unwrap();
+            super::super::DecodedBlock::deserialize(&bytes)
+                .unwrap()
+                .can_be_prepared_for_commit(&network, None)
+                .await
+        }
+    };
+    let merkle_root = |block: &Block| block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    assert!(can_be_prepared(Block::clone(&block)).await);
+
+    // A block that wasn't decoded from bytes has no size that is known to be within the limit.
+    assert!(
+        !super::super::DecodedBlock::from(block.clone())
+            .can_be_prepared_for_commit(&network, None)
+            .await
+    );
+
+    // The checks of a block past the inline bounds run on a blocking thread.
+    let mut many_transactions = Block::clone(&block);
+    for index in 1..=super::super::MAX_INLINE_HASHING_TRANSACTIONS {
+        many_transactions.transactions.push(spend_from(
+            u32::try_from(index).expect("the test's transaction count fits u32"),
+            LockTime::unlocked(),
+            Height(0),
+        ));
+    }
+    Arc::make_mut(&mut many_transactions.header).merkle_root = merkle_root(&many_transactions);
+    assert!(can_be_prepared(many_transactions).await);
+
+    let mut wrong_merkle_root = Block::clone(&block);
+    Arc::make_mut(&mut wrong_merkle_root.header).merkle_root = wrong_merkle_root.transactions[..1]
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+    assert!(!can_be_prepared(wrong_merkle_root).await);
+
+    // A different transaction that spends the same output.
+    let mut double_spend = Block::clone(&block);
+    double_spend
+        .transactions
+        .push(spend(LockTime::unlocked(), Height(4)));
+    Arc::make_mut(&mut double_spend.header).merkle_root = merkle_root(&double_spend);
+    assert!(!can_be_prepared(double_spend).await);
+
+    let mut coinbase_last = Block::clone(&block);
+    coinbase_last.transactions.reverse();
+    Arc::make_mut(&mut coinbase_last.header).merkle_root = merkle_root(&coinbase_last);
+    assert!(!can_be_prepared(coinbase_last).await);
+}
+
 #[test]
 fn inline_decoding_and_body_checks_do_not_wait_for_rayon() {
     const CHILD: &str = "ZEBRA_SMALL_BLOCK_RAYON_CHILD";

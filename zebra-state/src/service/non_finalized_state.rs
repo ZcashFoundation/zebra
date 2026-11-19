@@ -207,6 +207,16 @@ pub(crate) struct ValidatedChain {
 
     /// The block's hash.
     hash: block::Hash,
+
+    /// How long the phases of the block's validation took, if the state counts metrics.
+    phases: Option<CommitPhases>,
+}
+
+impl ValidatedChain {
+    /// Sets the time the block verifier received the block.
+    pub(crate) fn set_received_time(&mut self, received_time: Option<Instant>) {
+        Arc::make_mut(&mut self.chain).set_tip_received_time(received_time);
+    }
 }
 
 /// The state of the chains in memory, including queued blocks.
@@ -705,13 +715,15 @@ impl NonFinalizedState {
 
         // If the block is invalid, return the error,
         // and drop the cloned parent Arc, or newly created chain fork.
-        let modified_chain = self.validate_and_commit(parent_chain, prepared, finalized_state)?;
+        let (modified_chain, phases) =
+            self.validate_and_commit(parent_chain, prepared, finalized_state)?;
 
         Ok(ValidatedChain {
             chain: modified_chain,
             parent_hash: Some(parent_hash),
             height,
             hash,
+            phases,
         })
     }
 
@@ -725,7 +737,13 @@ impl NonFinalizedState {
             parent_hash,
             height,
             hash,
+            phases,
         } = validated;
+
+        // A block that is validated but never committed records no phases.
+        if let Some(phases) = phases {
+            phases.record();
+        }
 
         match parent_hash {
             // If the block is valid:
@@ -1022,13 +1040,15 @@ impl NonFinalizedState {
         let (height, hash) = (prepared.height, prepared.hash);
 
         // If the block is invalid, return the error, and drop the newly created chain fork
-        let chain = self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
+        let (chain, phases) =
+            self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
 
         Ok(ValidatedChain {
             chain,
             parent_hash: None,
             height,
             hash,
+            phases,
         })
     }
 
@@ -1047,6 +1067,9 @@ impl NonFinalizedState {
     ///
     /// A block without note commitments has no tree updates, so its steps do run in series, on
     /// this thread.
+    ///
+    /// Returns the chain with the block, and how long the phases took if the state counts
+    /// metrics. The caller records them once the block is committed.
     #[tracing::instrument(
         level = "debug",
         skip(self, finalized_state, new_chain, prepared),
@@ -1057,7 +1080,7 @@ impl NonFinalizedState {
         new_chain: Arc<Chain>,
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
+    ) -> Result<(Arc<Chain>, Option<CommitPhases>), ValidateContextError> {
         if self.is_block_invalidated(prepared.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
@@ -1180,20 +1203,17 @@ impl NonFinalizedState {
 
         let chain = chain.push_with_trees(contextual, trees, history_tree);
 
-        if self.should_count_metrics() {
-            CommitPhases {
-                transparent_spend,
-                anchor_reads,
-                pickup,
-                chain_clone,
-                trees: tree_duration,
-                chain_updates,
-                history,
-            }
-            .record();
-        }
+        let phases = self.should_count_metrics().then_some(CommitPhases {
+            transparent_spend,
+            anchor_reads,
+            pickup,
+            chain_clone,
+            trees: tree_duration,
+            chain_updates,
+            history,
+        });
 
-        Ok(Arc::new(chain))
+        Ok((Arc::new(chain), phases))
     }
 
     /// Checks the transparent spends, anchors and value balances of `prepared` against

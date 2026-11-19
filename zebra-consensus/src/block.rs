@@ -254,6 +254,80 @@ impl DecodedBlock {
     pub fn block(&self) -> Arc<block::Block> {
         self.block.clone()
     }
+
+    /// Returns `true` if the state can prepare this block's commit while the block is verified.
+    ///
+    /// The block must have been decoded from bytes within the consensus size limit, and pass
+    /// [`quick_checks`], which the state's contextual validation relies on. A block that can reuse
+    /// a validated proposal's verdict is never prepared: one that matched a proposal when it was
+    /// decoded, or whose header matches a proposal in `proposals`.
+    ///
+    /// Passing them doesn't make the block valid: the state must only commit a prepared block
+    /// that the verifier has fully verified.
+    ///
+    /// The checks of a block that is too large to check on the caller's task run on a blocking
+    /// thread. Callers bound how many blocks they decode at once, which bounds these threads.
+    pub async fn can_be_prepared_for_commit(
+        &self,
+        network: &Network,
+        proposals: Option<&PreparedBlockCache>,
+    ) -> bool {
+        let Some(size) = self.consumed_size else {
+            return false;
+        };
+        if self.matched.is_some()
+            || proposals.is_some_and(|proposals| proposals.has_proposal_for(&self.block.header))
+        {
+            return false;
+        }
+
+        let block = self.block.clone();
+        let check_network = network.clone();
+        let checks = move || quick_checks(&block, &check_network).is_ok();
+
+        if size <= MAX_INLINE_HASHING_BYTES
+            && self.block.transactions.len() <= MAX_INLINE_HASHING_TRANSACTIONS
+        {
+            checks()
+        } else {
+            AbortOnDropHandle::new(tokio::task::spawn_blocking(checks))
+                .await
+                .expect("quick checks return an error for an invalid block rather than panicking")
+        }
+    }
+}
+
+/// Runs the block checks that the state's contextual validation of a block relies on: its
+/// coinbase height, difficulty threshold and filter, transaction Merkle root, coinbase position,
+/// transparent double spends and shielded action limits.
+///
+/// They need no chain state, proof, signature or script. [`SemanticBlockVerifier`] runs each of
+/// them, and its other checks, before it asks the state for early work on a block. This function
+/// leaves out the Equihash solution, time and subsidy checks, which the state doesn't rely on.
+/// A check that the state comes to rely on must be added here as well.
+fn quick_checks(block: &block::Block, network: &Network) -> Result<(), BlockError> {
+    let hash = block.hash();
+    let height = block
+        .coinbase_height()
+        .ok_or(BlockError::MissingHeight(hash))?;
+    if height > block::Height::MAX {
+        return Err(BlockError::MaxHeight(height, hash, block::Height::MAX));
+    }
+
+    if network.disable_pow() {
+        check::difficulty_threshold_is_valid(&block.header, network, &height, &hash)?;
+    } else {
+        check::difficulty_is_valid(&block.header, network, &height, &hash)?;
+    }
+
+    check::coinbase_height_is_committed(block, height)?;
+    let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
+    check::merkle_root_validity(network, block, &hashes)?;
+    check::coinbase_is_first(block)?;
+    check::no_duplicate_transparent_spends(block)?;
+    check::shielded_action_limits_are_valid(block, network, height, hash)?;
+
+    Ok(())
 }
 
 impl From<Arc<block::Block>> for DecodedBlock {
@@ -293,6 +367,17 @@ impl Eq for DecodedBlock {}
 pub struct PreparedBlockCache(Arc<watch::Sender<ProposalCache>>);
 
 impl PreparedBlockCache {
+    /// Returns `true` if a validated proposal has `header`, apart from its nonce and solution.
+    ///
+    /// The verifier reuses that proposal's verdict for a block with the same transactions.
+    fn has_proposal_for(&self, header: &block::Header) -> bool {
+        let header = normalized_proposal_header(header);
+        self.0
+            .borrow()
+            .iter()
+            .any(|proposal| normalized_proposal_header(&proposal.block.header) == header)
+    }
+
     /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
     ///
     /// Transaction-section length and the header with only nonce and solution normalized select a
@@ -965,7 +1050,8 @@ where
                 .map_err(VerifyBlockError::Time)?;
 
             // Quick structure checks reject an invalid body before it is announced as early work
-            // or its transactions are verified.
+            // or its transactions are verified. The state relies on some of them when it prepares
+            // a local submission's commit: see `quick_checks`.
             let coinbase_tx = check::coinbase_is_first(&block)?;
             check::no_duplicate_transparent_spends(&block)?;
             rejection_candidate = (!request.is_proposal()).then(|| block.clone());

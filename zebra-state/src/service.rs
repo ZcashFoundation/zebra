@@ -1578,6 +1578,28 @@ impl Service<Request> for StateService {
                 let state = self.read_service.clone();
                 async move { Ok(Response::Rejected(state.reject_block(block).await)) }.boxed()
             }
+            Request::PrepareCommit(block) => {
+                // A block the write task rejected can be sent again, and its children can't be
+                // validated.
+                self.drain_non_finalized_rejected_hashes();
+
+                // The block write task only prepares non-finalized blocks. A block it was
+                // already sent has nothing left to prepare, and a block whose parent it wasn't
+                // sent can't be validated yet.
+                if self.block_write_sender.finalized.is_none()
+                    && !self
+                        .non_finalized_block_write_sent_hashes
+                        .contains(&block.hash())
+                    && self.can_fork_chain_at(&block.header.previous_block_hash)
+                {
+                    if let Some(sender) = &self.block_write_sender.non_finalized {
+                        // If the block write task has exited, there is nothing to prepare.
+                        let _ = sender.send(NonFinalizedWriteMessage::Prepare(block));
+                    }
+                }
+
+                async { Ok(Response::PreparingCommit) }.boxed()
+            }
             Request::MiningCandidate(block) => {
                 if self.read_service.mining_candidate.receiver_count() == 0 {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();

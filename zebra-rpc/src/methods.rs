@@ -177,6 +177,11 @@ mod tests;
 /// request was answered.
 const BLOCK_NOT_IN_MAIN_CHAIN: &str = "the requested block is not in the main chain";
 
+/// How long `submitblock` waits for the state to accept a request to prepare a block's commit.
+///
+/// The state answers the request without waiting for the block to be prepared.
+const PREPARE_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
@@ -3493,6 +3498,27 @@ where
             .coinbase_height()
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
+
+        // Let the state validate the block in its chain context while the verifier checks the
+        // rest, so the commit that follows a successful verification only has to publish it.
+        let prepared = decoded.clone();
+        let network = self.network.clone();
+        let proposals = self.prepared_blocks.clone();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            if prepared
+                .can_be_prepared_for_commit(&network, proposals.as_ref())
+                .await
+            {
+                // The state answers at once. If it is too busy to, preparing would be too late.
+                let _ = tokio::time::timeout(
+                    PREPARE_COMMIT_TIMEOUT,
+                    state.oneshot(zebra_state::Request::PrepareCommit(prepared.block())),
+                )
+                .await;
+            }
+        });
+
         let (request, validated) = match self.gbt.mined_block_notifications() {
             Some((notifications, validated)) => (
                 zebra_consensus::Request::CommitDecoded(decoded, Some(notifications)),
