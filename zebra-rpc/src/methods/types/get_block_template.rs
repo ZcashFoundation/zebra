@@ -361,8 +361,8 @@ impl BlockTemplateResponse {
             Vec<_>,
         ) = mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
 
-        // Transaction selection returns transactions in an arbitrary order,
-        // but Zebra's snapshot tests expect the same order every time.
+        // Transaction selection returns transactions by fee weight ratio, but Zebra's snapshot
+        // tests expect them by dependency depth and transaction ID.
         //
         // # Correctness
         //

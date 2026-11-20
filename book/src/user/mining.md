@@ -299,7 +299,7 @@ response contains a `result` object with these mining inputs:
 | --- | --- |
 | `height`, `previousblockhash` | Candidate height and parent block. |
 | `coinbasetxn.data` | Serialized coinbase transaction, including the configured reward destination. |
-| `transactions` | Selected non-coinbase transactions; `depends` uses 1-based positions in this array. |
+| `transactions` | Selected non-coinbase transactions. Transactions that spend no other transaction in the array are ordered by fee weight ratio and then transaction ID. A transaction that spends others in the array comes after all of them, whatever its own ratio. `depends` uses 1-based positions in this array. |
 | `defaultroots` | Header commitment roots for the supplied coinbase and transactions. |
 | `bits`, `target` | Compact and expanded difficulty targets. |
 | `mintime`, `curtime`, `maxtime` | Unix timestamps, in seconds, for the allowed range and suggested block time. |

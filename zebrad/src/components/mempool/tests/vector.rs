@@ -235,7 +235,8 @@ async fn mempool_grow_refreshes_stored_fee_parameters() {
         )
         .expect("transaction enters storage");
 
-    for (step, expected_ratio) in [(2, 1.0), (3, 5.0), (4, 5.0)] {
+    // The legacy fee is 12.5 times the reduced one.
+    for (step, expected_ratio) in [(2, 1.0), (3, 12.5), (4, 12.5)] {
         tip.previous_block_hash = tip.hash;
         tip.hash = block::Hash([step; 32]);
         tip.height = tip.height.next().expect("next height exists");
@@ -261,9 +262,9 @@ async fn mempool_fee_policy_follows_jumps_and_rollbacks() {
     let network = Network::Mainnet;
     let activation = network.fee_reduction_height();
     for (old_offset, new_offset, fee_per_action, expected_ratio) in [
-        (-3, 1, 5_000, Some(5.0)),
+        (-3, 1, 5_000, Some(12.5)),
         (1, -3, 5_000, Some(1.0)),
-        (1, -3, 1_000, None),
+        (1, -3, 400, None),
     ] {
         let (mut mempool, _peers, mut state, mut verifier, mut recent_syncs, mut tip_sender) =
             super::prop::setup(&network);

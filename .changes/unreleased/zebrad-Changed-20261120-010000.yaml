@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'From the fee reduction height, the mempool, block templates and `getstandardfee` use a marginal fee of 400 zatoshis per logical action, not the 1,000 zatoshis that [ZIP 2009](https://zips.z.cash/zip-2009) specifies. Nodes that apply ZIP 2009''s fee don''t relay or mine transactions that pay less than 1,000. The serialized-size fee floor of 100 zatoshis per 1,000 bytes is now capped at 400 zatoshis instead of 1,000, so it never rejects a transaction that pays its conventional fee ([#12560](https://github.com/ZcashFoundation/zebra/pull/12560)).'
+time: 2026-11-20T01:00:00.000000000-05:00

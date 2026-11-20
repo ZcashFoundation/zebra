@@ -111,21 +111,28 @@ These are mempool policy, not extra block-consensus rules.
 
 ### Fee policy and ZIP 317
 
-Zebra uses [ZIP 317][zip317]'s logical-action accounting with the
-[ZIP 2009][zip2009] fee reduction. The [marginal fee][fees] depends on the
+Zebra uses [ZIP 317][zip317]'s logical-action accounting with a fee reduction
+on [ZIP 2009][zip2009]'s schedule. The [marginal fee][fees] depends on the
 next block's height: 5,000 zatoshis per logical action before height 3,590,000
-on Mainnet or 4,465,026 on public Testnet, and 1,000 from that height. Regtest
-and custom testnets use 1,000 from height 1. The mempool, block templates, and
+on Mainnet or 4,465,026 on public Testnet, and 400 from that height. Regtest
+and custom testnets use 400 from height 1. The mempool, block templates, and
 the [`getstandardfee` recommendation](../user/rpc.md) follow this schedule.
+
+ZIP 2009 specifies 1,000 zatoshis from that height, not 400. A node that applies
+ZIP 2009's fee does not relay or mine a transaction that pays less than 1,000
+zatoshis per logical action.
 
 The conventional fee is the marginal fee times the greater of two and the
 transaction's logical-action count. The zero `BLOCK_UNPAID_ACTION_LIMIT` rejects
 unpaid actions, requiring at least this fee.
 
 The [fee checker][fees] also retains a serialized-size fee floor of
-`clamp(100 * size / 1000, 100, 1000)` zatoshis, using integer division and size in
-bytes. With the unpaid-action limit set to zero, this floor cannot reject a
-transaction that passed the conventional-fee check.
+`clamp(100 * size / 1000, 100, 400)` zatoshis, using integer division and size in
+bytes. This floor cannot reject a transaction that passed the conventional-fee
+check: the smallest conventional fee is 800 zatoshis, for two logical actions
+at the reduced marginal fee. `zcashd` caps its floor at 1,000 zatoshis, which
+is more than that fee for a transaction of 8,010 bytes or more, such as a
+two-action Orchard transaction of 9,165 bytes.
 
 ## Cost limit and eviction
 

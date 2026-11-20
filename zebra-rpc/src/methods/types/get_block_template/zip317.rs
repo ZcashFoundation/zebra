@@ -1,16 +1,13 @@
-//! The [ZIP-317 block production algorithm](https://zips.z.cash/zip-0317#block-production).
+//! Block template transaction selection, with the limits of the
+//! [ZIP-317 block production algorithm](https://zips.z.cash/zip-0317#block-production).
 //!
-//! This is recommended algorithm, so these calculations are not consensus-critical,
-//! or standardised across node implementations:
-//! > it is sufficient to use floating point arithmetic to calculate the argument to `floor`
-//! > when computing `size_target`, since there is no consensus requirement for this to be
-//! > exactly the same between implementations.
+//! Transactions are taken in a fixed order, not by ZIP 317's weighted random draws. ZIP 317's
+//! algorithm is a recommendation: transaction selection is not consensus-critical, or
+//! standardised across node implementations.
 
-use std::collections::{HashMap, HashSet};
-
-use rand::{
-    distr::{Distribution, Open01},
-    Rng,
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
 };
 
 use zebra_chain::{
@@ -43,11 +40,17 @@ type SelectedMempoolTx = (InBlockTxDependenciesDepth, VerifiedUnminedTx);
 #[cfg(not(test))]
 type SelectedMempoolTx = VerifiedUnminedTx;
 
-/// Selects mempool transactions for block production according to [ZIP-317].
+/// Selects mempool transactions for block production, within the limits of [ZIP-317] and in a
+/// fixed order instead of by its weighted random draws.
 ///
 /// Reserves the fee-independent coinbase resources without constructing a sizing proof.
 ///
-/// Returns selected transactions from `mempool_txs`.
+/// Returns selected transactions from `mempool_txs`, in the order they were taken. The order
+/// only depends on the transactions and their dependencies: transactions that spend no other
+/// mempool transaction are taken by fee weight ratio, highest first, then by transaction ID.
+/// A transaction that spends other mempool transactions is not ordered among them. It is tried
+/// right after the last transaction it spends is taken, in the same order among the others
+/// tried then.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
 pub fn select_mempool_transactions(
@@ -113,9 +116,9 @@ pub fn select_mempool_transactions(
     remaining_block_bytes = block_bytes;
     remaining_block_sigops = block_sigops;
 
-    // Draw all conventional-fee candidates before considering the low-fee tier.
+    // Take all conventional-fee candidates before considering the low-fee tier.
     for candidate_txs in [conventional_fee_txs, low_fee_txs] {
-        for candidate_tx in fee_weighted_order(candidate_txs, &mut rand::rng()) {
+        for candidate_tx in fee_weighted_order(candidate_txs) {
             checked_add_transaction(
                 candidate_tx,
                 &mut dependent_mempool_txs,
@@ -152,16 +155,15 @@ fn max_transaction_count_size() -> usize {
         .len()
 }
 
-/// Orders candidates by repeated fee-proportional draws without replacement in O(N log N).
+/// Orders candidates by their fee weight ratio, highest first.
 ///
-/// Efraimidis-Spirakis keys `ln(U) / weight`, sorted descending, are an exponential race:
-/// each next candidate wins with probability proportional to its remaining weight. Computing
-/// the order once therefore preserves ZIP 317's draws, including skipping candidates that don't fit.
+/// Candidates with the same ratio are ordered by transaction ID, so the order only depends on
+/// the candidates themselves: the same mempool gives the same template. ZIP 317 recommends
+/// repeated fee-proportional random draws instead, and lets a miner use another order.
 ///
 /// Zero-weight candidates are never chosen; invalid weights discard the candidate list.
 fn fee_weighted_order(
     mut transactions: Vec<VerifiedUnminedTx>,
-    rng: &mut impl Rng,
 ) -> impl Iterator<Item = VerifiedUnminedTx> {
     if transactions
         .iter()
@@ -170,19 +172,46 @@ fn fee_weighted_order(
         transactions.clear();
     }
 
-    let mut weighted_txs = Vec::with_capacity(transactions.len());
-    weighted_txs.extend(
-        transactions
-            .into_iter()
-            .filter(|tx| tx.fee_weight_ratio > 0.0)
-            .map(|tx| {
-                // Open01 excludes both endpoints, keeping the logarithm finite and nonzero.
-                let uniform: f64 = Open01.sample(rng);
-                (uniform.ln() / f64::from(tx.fee_weight_ratio), tx)
-            }),
-    );
-    weighted_txs.sort_unstable_by(|(left, _), (right, _)| right.total_cmp(left));
-    weighted_txs.into_iter().map(|(_, tx)| tx)
+    transactions.retain(|tx| tx.fee_weight_ratio > 0.0);
+    transactions.sort_unstable_by(|left, right| {
+        selection_order(
+            (left.fee_weight_ratio, left.transaction.id.mined_id()),
+            (right.fee_weight_ratio, right.transaction.id.mined_id()),
+        )
+    });
+    transactions.into_iter()
+}
+
+/// Compares two candidates by their fee weight ratio and transaction ID: the higher ratio comes
+/// first, then the lower transaction ID.
+fn selection_order(
+    (left_ratio, left_id): (f32, transaction::Hash),
+    (right_ratio, right_id): (f32, transaction::Hash),
+) -> Ordering {
+    right_ratio
+        .total_cmp(&left_ratio)
+        .then_with(|| left_id.cmp(&right_id))
+}
+
+/// Returns `dependents` in the order of [`selection_order()`].
+///
+/// A dependent that isn't in `dependent_txs` was already tried, and comes last.
+fn dependents_in_order(
+    dependents: HashSet<transaction::Hash>,
+    dependent_txs: &HashMap<transaction::Hash, VerifiedUnminedTx>,
+) -> Vec<transaction::Hash> {
+    let mut dependents: Vec<(f32, transaction::Hash)> = dependents
+        .into_iter()
+        .map(|id| {
+            let ratio = dependent_txs
+                .get(&id)
+                .map_or(f32::NEG_INFINITY, |tx| tx.fee_weight_ratio);
+            (ratio, id)
+        })
+        .collect();
+
+    dependents.sort_unstable_by(|left, right| selection_order(*left, *right));
+    dependents.into_iter().map(|(_ratio, id)| id).collect()
 }
 
 /// Checks if every item in `candidate_tx_deps` is present in `selected_txs`.
@@ -281,7 +310,8 @@ fn checked_add_transaction(
     while !current_level_dependents.is_empty() {
         let mut next_level_dependents = HashSet::new();
 
-        for dependent_tx_id in &current_level_dependents {
+        // Hash sets iterate in a different order each time, so order each level.
+        for dependent_tx_id in &dependents_in_order(current_level_dependents, dependent_txs) {
             // ## Note
             //
             // A necessary condition for adding the dependent tx is that it spends unmined outputs coming only from

@@ -55,33 +55,99 @@ fn transparent_candidates(count: usize) -> Vec<VerifiedUnminedTx> {
         .collect()
 }
 
+/// Candidates are ordered by their fee weight ratio, highest first, and by transaction ID
+/// within a ratio. The order of the candidate list doesn't change the result.
 #[test]
-fn weighted_order_first_pick_is_fee_proportional() {
-    let candidates = transparent_candidates(4);
-    let mut first_picks = [0u32; 4];
-    let runs = 50_000u32;
-    for seed in 0..u64::from(runs) {
-        let first = fee_weighted_order(candidates.clone(), &mut StdRng::seed_from_u64(seed))
-            .next()
-            .expect("positive-weight candidates are available");
-        let index = candidates
-            .iter()
-            .position(|tx| tx.transaction.id == first.transaction.id)
-            .expect("the selected transaction is a candidate");
-        first_picks[index] += 1;
-    }
-    let total_weight: f64 = candidates
-        .iter()
-        .map(|tx| f64::from(tx.fee_weight_ratio))
-        .sum();
-    for (tx, picks) in candidates.iter().zip(first_picks) {
-        let expected = f64::from(tx.fee_weight_ratio) / total_weight;
-        let observed = f64::from(picks) / f64::from(runs);
-        // One percentage point is more than four standard deviations for these probabilities.
+fn candidates_are_ordered_by_fee_weight_ratio_then_transaction_id() {
+    use rand::seq::SliceRandom;
+
+    // Four fee levels, three candidates at each.
+    let mut candidates = transparent_candidates(12);
+    let ordered: Vec<_> = fee_weighted_order(candidates.clone()).collect();
+
+    assert_eq!(ordered.len(), candidates.len());
+    for pair in ordered.windows(2) {
+        let [first, second] = pair else {
+            unreachable!("windows of two candidates");
+        };
         assert!(
-            (observed - expected).abs() < 0.01,
-            "first-pick frequency {observed} must match fee-weight probability {expected}"
+            first.fee_weight_ratio > second.fee_weight_ratio
+                || (first.fee_weight_ratio == second.fee_weight_ratio
+                    && first.transaction.id.mined_id() < second.transaction.id.mined_id()),
+            "a candidate comes before any with a lower ratio, or with the same ratio and a \
+             higher transaction ID",
         );
+    }
+    assert!(
+        ordered[0].fee_weight_ratio > ordered[11].fee_weight_ratio,
+        "the candidates have different ratios",
+    );
+
+    let ids = |transactions: &[VerifiedUnminedTx]| -> Vec<_> {
+        transactions.iter().map(|tx| tx.transaction.id).collect()
+    };
+    for seed in 0..20 {
+        candidates.shuffle(&mut StdRng::seed_from_u64(seed));
+        let reordered: Vec<_> = fee_weighted_order(candidates.clone()).collect();
+        assert_eq!(ids(&reordered), ids(&ordered));
+    }
+}
+
+/// Transactions that spend each other are taken in a fixed order too: each level of dependents
+/// by fee weight ratio and then transaction ID, whatever order their dependencies were added in.
+#[test]
+fn dependents_are_selected_in_a_fixed_order() {
+    use rand::seq::SliceRandom;
+
+    let candidates = transparent_candidates(13);
+    let id = |index: usize| candidates[index].transaction.id.mined_id();
+
+    // Candidate 0 spends no other candidate, 1 to 6 spend it, and 7 to 12 spend candidate 1.
+    let mut links: Vec<(usize, usize)> = (1..=6).map(|child| (child, 0)).collect();
+    links.extend((7..=12).map(|grandchild| (grandchild, 1)));
+
+    let in_order = |mut level: Vec<usize>| {
+        level.sort_by(|&left, &right| {
+            candidates[right]
+                .fee_weight_ratio
+                .total_cmp(&candidates[left].fee_weight_ratio)
+                .then_with(|| id(left).cmp(&id(right)))
+        });
+        level
+    };
+    let expected: Vec<_> = [
+        vec![0],
+        in_order((1..=6).collect()),
+        in_order((7..=12).collect()),
+    ]
+    .concat()
+    .into_iter()
+    .map(id)
+    .collect();
+
+    for seed in 0..10 {
+        links.shuffle(&mut StdRng::seed_from_u64(seed));
+        let mut mempool_tx_deps = TransactionDependencies::default();
+        for &(dependent, dependency) in &links {
+            mempool_tx_deps.add(
+                id(dependent),
+                vec![OutPoint::from_usize(id(dependency), dependent)],
+            );
+        }
+
+        let selected: Vec<_> = select_mempool_transactions(
+            &Network::Mainnet,
+            Height(2_000_000),
+            &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
+            candidates.clone(),
+            mempool_tx_deps,
+            None,
+        )
+        .into_iter()
+        .map(|(_depth, tx)| tx.transaction.id.mined_id())
+        .collect();
+
+        assert_eq!(selected, expected);
     }
 }
 
@@ -126,9 +192,8 @@ fn skips_zero_weights_and_rejects_invalid_weights() {
         for (tx, &weight) in candidates.iter_mut().zip(weights) {
             tx.fee_weight_ratio = weight;
         }
-        // Template selection recomputes weights from fees, so check the draw order directly.
-        let selected: Vec<_> =
-            fee_weighted_order(candidates, &mut StdRng::seed_from_u64(0)).collect();
+        // Template selection recomputes weights from fees, so check the order directly.
+        let selected: Vec<_> = fee_weighted_order(candidates).collect();
         assert_eq!(selected.len(), expected_count, "weights: {weights:?}");
         assert!(selected.iter().all(|tx| tx.fee_weight_ratio > 0.0));
     }
@@ -503,6 +568,7 @@ fn fee_activation_refreshes_template_candidates() {
             Some(Amount::zero()),
         );
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].1.fee_weight_ratio, 10.0);
+        // The fee is 125 times the reduced conventional fee, and the reduced policy has no cap.
+        assert_eq!(selected[0].1.fee_weight_ratio, 125.0);
     }
 }

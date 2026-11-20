@@ -190,7 +190,7 @@ The mempool holds verified transactions that have not yet been mined.
 | `getrawmempool` | Returns mempool transaction IDs, or transaction metadata with verbose output. |
 | `getrawtransaction` | Returns a transaction as hexadecimal data or a structured response, optionally restricted to a block. |
 | `sendrawtransaction` | Submits a signed transaction to the mempool and returns its transaction ID; `allowhighfees` is accepted but ignored. |
-| `getstandardfee` | Returns the recommended fee per logical action in zatoshis, with `version: 0`. For the next block, reports 5,000 before height 3,590,000 on Mainnet or 4,465,026 on public Testnet, and 1,000 from that height; Regtest and custom testnets report 1,000 from height 1. |
+| `getstandardfee` | Returns the recommended fee per logical action in zatoshis, with `version: 0`. For the next block, reports 5,000 before height 3,590,000 on Mainnet or 4,465,026 on public Testnet, and 400 from that height; Regtest and custom testnets report 400 from height 1. |
 
 ### Transparent address index
 

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: 'From the fee reduction height, `zip317::conventional_fee()` and `zip317::unpaid_actions()` use a marginal fee of 400 zatoshis per logical action, not the 1,000 zatoshis that ZIP 2009 specifies, and `zip317::conventional_fee_weight_ratio()` returns ratios without a cap. `zip317::MEMPOOL_TX_FEE_REQUIREMENT_CAP` is 400 zatoshis instead of 1,000 ([#12560](https://github.com/ZcashFoundation/zebra/pull/12560)).'
+time: 2026-11-20T01:00:00.000000000-05:00
