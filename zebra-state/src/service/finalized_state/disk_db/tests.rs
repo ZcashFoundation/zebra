@@ -267,6 +267,66 @@ fn secondary_disk_usage_tracks_primary_growth() {
     );
 }
 
+/// A read from the database's memory returns a value from the write buffers or the block cache,
+/// tells when a key is absent, and returns nothing when the answer takes a file read.
+#[test]
+fn zs_get_from_memory_only_reads_write_buffers_and_the_block_cache() {
+    use semver::Version;
+    use zebra_chain::{
+        block::{self, Height},
+        parameters::Network,
+    };
+
+    use crate::{
+        service::finalized_state::{disk_db::ReadDisk, disk_format::IntoDisk},
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let db = DiskDb::new(
+        &config,
+        "memory-read-test",
+        &Version::new(1, 0, 0),
+        &Network::Mainnet,
+        ["memory_read".to_owned()],
+        false,
+    )
+    .expect("the persistent database configuration is valid");
+    let cf = db
+        .cf_handle("memory_read")
+        .expect("the test column family was configured");
+
+    let key = Height(7);
+    let value = block::Hash([0xa5; 32]);
+    let from_memory = || db.zs_get_from_memory::<_, _, block::Hash>(&cf, &key);
+
+    assert_eq!(from_memory(), Some(None), "an empty database has no files");
+
+    db.put_cf(cf, key.as_bytes(), value.as_bytes())
+        .expect("the test column family is writable");
+    assert_eq!(from_memory(), Some(Some(value)), "the write buffer has it");
+
+    db.flush_cf(cf)
+        .expect("the test column family can be flushed");
+    assert_eq!(
+        from_memory(),
+        None,
+        "a value that is only in a file takes a file read",
+    );
+
+    assert_eq!(db.zs_get(&cf, &key), Some(value));
+    assert_eq!(
+        from_memory(),
+        Some(Some(value)),
+        "the block cache has a value that was read from its file",
+    );
+}
+
 /// Check that zs_iter_opts returns an upper bound one greater than provided inclusive end bounds.
 #[test]
 fn zs_iter_opts_increments_key_by_one() {

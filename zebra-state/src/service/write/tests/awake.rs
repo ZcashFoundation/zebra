@@ -80,7 +80,7 @@ fn only_a_prepared_block_keeps_the_block_write_task_awake() {
     let child = root.make_fake_child();
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Prepare(child.clone(), None),
         NonFinalizedWriteMessage::Commit(
             (child.clone().prepare(), rsp_tx, None, None),
             Instant::now(),
@@ -105,7 +105,7 @@ fn only_a_prepared_block_keeps_the_block_write_task_awake() {
     let orphan = child.make_fake_child();
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(orphan),
+        NonFinalizedWriteMessage::Prepare(orphan, None),
         NonFinalizedWriteMessage::Commit(
             (child.clone().prepare(), rsp_tx, None, None),
             Instant::now(),

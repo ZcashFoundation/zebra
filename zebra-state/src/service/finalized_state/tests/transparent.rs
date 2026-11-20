@@ -338,3 +338,106 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
         Some(OutputLocation::from_usize(height, 0, 1)),
     );
 }
+
+/// Reading a transparent output from the database's memory gives the same answer as a normal
+/// read, whenever it gives one: from the write buffers, and from the block cache once a normal
+/// read has put the output's block there.
+#[test]
+fn utxo_from_memory_matches_utxo() {
+    use crate::service::finalized_state::FinalizedState;
+
+    let _init_guard = zebra_test::init();
+
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let open = || {
+        FinalizedState::new_with_debug(&config, &network, true, false)
+            .expect("the persistent database configuration is valid")
+    };
+
+    let mut state = open();
+    state
+        .db
+        .update_format_version_on_disk(&state.db.format_version_in_code())
+        .expect("the format version can be written");
+
+    // Each coinbase output of the first blocks, an output index that no transaction has, and a
+    // transaction that isn't in the database. The genesis coinbase output is not spendable.
+    let mut outpoints = vec![OutPoint {
+        hash: transaction::Hash([8; 32]),
+        index: 0,
+    }];
+    let mut last_coinbase = None;
+    for (_, bytes) in zebra_test::vectors::MAINNET_BLOCKS.range(0..=3) {
+        let block = bytes
+            .zcash_deserialize_into::<Arc<Block>>()
+            .expect("test vector blocks are valid");
+        let coinbase = block.transactions[0].hash();
+        last_coinbase = Some(coinbase);
+        let outputs = u32::try_from(block.transactions[0].outputs().len())
+            .expect("a transaction's output count fits in u32");
+        outpoints.extend((0..=outputs).map(|index| OutPoint {
+            hash: coinbase,
+            index,
+        }));
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block).into(),
+                None,
+                "memory read test",
+            )
+            .expect("test vector blocks are valid");
+    }
+    let unspent = outpoints
+        .iter()
+        .filter(|outpoint| state.db.utxo(outpoint).is_some())
+        .count();
+    assert!(unspent >= 3 && unspent < outpoints.len());
+
+    // Everything is in the write buffers.
+    for outpoint in &outpoints {
+        assert_eq!(
+            state.db.utxo_from_memory(outpoint),
+            Some(state.db.utxo(outpoint)),
+            "{outpoint:?}",
+        );
+    }
+
+    // Everything is in files, and reopening the database empties the block cache.
+    state.db.flush().expect("the database can be flushed");
+    drop(state);
+    let state = open();
+
+    // An output whose transaction location is in the block cache, but whose own block is only
+    // in a file, still takes a file read.
+    let known = OutPoint {
+        hash: last_coinbase.expect("the vectors have blocks"),
+        index: 0,
+    };
+    assert_eq!(state.db.utxo_from_memory(&known), None);
+    assert!(state.db.transaction_location(known.hash).is_some());
+    assert_eq!(state.db.utxo_from_memory(&known), None);
+
+    let mut from_files = 0;
+    for outpoint in &outpoints {
+        let from_memory = state.db.utxo_from_memory(outpoint);
+        let expected = state.db.utxo(outpoint);
+        if from_memory.is_none() {
+            from_files += 1;
+        } else {
+            assert_eq!(from_memory, Some(expected.clone()), "{outpoint:?}");
+        }
+
+        // The normal read put the blocks it read into the block cache.
+        assert_eq!(
+            state.db.utxo_from_memory(outpoint),
+            Some(expected),
+            "{outpoint:?}",
+        );
+    }
+    assert!(from_files > 0, "some outputs were only in files");
+}

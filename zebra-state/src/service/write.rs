@@ -27,6 +27,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{NonFinalizedState, ValidatedChain},
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
+        read::difficulty::PreparedTip,
         ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
     },
     CheckpointVerifiedBlock, SemanticallyVerifiedBlock, ValidateContextError,
@@ -480,7 +481,11 @@ pub enum NonFinalizedWriteMessage {
     Commit(QueuedSemanticallyVerified, Instant),
     /// A block to contextually validate before its [`Self::Commit`] arrives. See
     /// [`Request::PrepareCommit`](crate::Request::PrepareCommit).
-    Prepare(Arc<Block>),
+    ///
+    /// If the block is valid on the block write task's state, the task sends the prepared tip
+    /// on the channel, if there is one, for the block's mining candidate. It drops the channel
+    /// if the block can't be prepared.
+    Prepare(Arc<Block>, Option<oneshot::Sender<PreparedTip>>),
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
     Invalidate {
@@ -1037,7 +1042,7 @@ impl WriteBlockWorkerTask {
                 NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {
                     Some((queued_child, queued_at))
                 }
-                NonFinalizedWriteMessage::Prepare(block) => {
+                NonFinalizedWriteMessage::Prepare(block, prepared_tip) => {
                     // The children of a rejected block are rejected without validating them.
                     if !parent_error_map.contains_key(&block.header.previous_block_hash) {
                         prepared_commit = prepare_commit(
@@ -1046,6 +1051,21 @@ impl WriteBlockWorkerTask {
                             block,
                             recent_headers.as_ref(),
                         );
+                        // The prepared tip is only built for a mining candidate that asked.
+                        if let Some(prepared_tip) = prepared_tip {
+                            let prepared = prepared_commit.as_ref().and_then(|prepared| {
+                                PreparedTip::new(
+                                    prepared.validated.chain(),
+                                    &prepared.block,
+                                    &non_finalized_state.network,
+                                    prepared.recent_headers.clone(),
+                                )
+                            });
+                            if let Some(prepared) = prepared {
+                                // The block's mining candidate may have ended already.
+                                let _ = prepared_tip.send(prepared);
+                            }
+                        }
                     }
                     continue;
                 }

@@ -1707,6 +1707,27 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::MiningCandidateChanges`].
     MiningCandidateChanges,
 
+    /// Starts computing the note commitment tree updates that the next block makes if it has
+    /// some of these transactions, so the state can validate that block without hashing its
+    /// trees again.
+    ///
+    /// The mempool sends the verified transactions it expects in the next block, the likeliest
+    /// last, each time that set can have changed and isn't empty. Each request replaces the
+    /// one before it. The updates are computed in the background, on the best chain tip at
+    /// that time, for the last
+    /// [`PRECOMPUTED_TREE_UPDATE_TRANSACTIONS`](crate::PRECOMPUTED_TREE_UPDATE_TRANSACTIONS)
+    /// transactions that have note commitments for each of the Orchard and Ironwood trees. A
+    /// transaction with more than
+    /// [`PRECOMPUTED_TREE_UPDATE_NOTE_COMMITMENTS`](crate::PRECOMPUTED_TREE_UPDATE_NOTE_COMMITMENTS)
+    /// note commitments for a tree has no updates for it. A request without transactions that
+    /// change those trees does nothing.
+    ///
+    /// This is a hint. A block is validated the same way with or without it, and it does
+    /// nothing while the best chain tip is only in the database.
+    ///
+    /// Returns [`ReadResponse::PrecomputingTreeUpdates`] at once.
+    PrecomputeTreeUpdates(Vec<UnminedTx>),
+
     /// Returns [`ReadResponse::EarlyRelayCache`], enabling early block retention while the cache
     /// or one of its subscribers is held, subject to its recipient restriction. Independent of mining.
     EarlyRelayCache,
@@ -2321,6 +2342,7 @@ impl ReadRequest {
             ReadRequest::ChainInfo => "chain_info",
             ReadRequest::MiningCandidate => "mining_candidate",
             ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
+            ReadRequest::PrecomputeTreeUpdates(_) => "precompute_tree_updates",
             ReadRequest::EarlyRelayCache => "early_relay_cache",
             ReadRequest::CheckBestTipHeader { .. } => "check_best_tip_header",
             ReadRequest::CheckBestTipBlockCommitments(_) => "check_best_tip_block_commitments",

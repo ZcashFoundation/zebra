@@ -1349,6 +1349,28 @@ impl DiskDb {
         })
     }
 
+    /// Returns the value for `key` in the column family `cf`, if the database can answer from
+    /// its memory: its write buffers and its block cache.
+    ///
+    /// Returns `Some(None)` if the database can tell from its memory that the key is absent, and
+    /// `None` if the answer takes a file read, which can block the calling thread. That is the
+    /// case for a key in a file whose block isn't in the block cache, or whose table isn't open.
+    pub(crate) fn zs_get_from_memory<C, K, V>(&self, cf: &C, key: &K) -> Option<Option<V>>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk,
+        V: FromDisk,
+    {
+        let mut options = ReadOptions::default();
+        options.set_read_tier(rocksdb::ReadTier::BlockCache);
+
+        match self.db.get_pinned_cf_opt(cf, key.as_bytes(), &options) {
+            Ok(value) => Some(value.map(V::from_bytes)),
+            Err(error) if error.kind() == ErrorKind::Incomplete => None,
+            Err(error) => panic!("unexpected database failure: {error:?}"),
+        }
+    }
+
     /// Returns the column family handle for `cf_name`.
     pub fn cf_handle(&self, cf_name: &str) -> Option<rocksdb::ColumnFamilyRef<'_>> {
         // Note: the lifetime returned by this method is subtly wrong. As of December 2023 it is

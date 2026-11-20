@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Reduced the time a long-poll `getblocktemplate` request waits for its template after a new chain tip ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-19T22:00:02.000000000-05:00

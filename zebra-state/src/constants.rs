@@ -170,3 +170,15 @@ lazy_static! {
     /// Regex that matches the panic when another process holds the state database lock.
     pub static ref LOCK_FILE_ERROR: Regex = Regex::new("is locked by another process").expect("regex is valid");
 }
+
+/// The most transactions that one of the Orchard and Ironwood note commitment trees has
+/// precomputed updates for.
+///
+/// These are the last transactions with note commitments for that tree in the last
+/// [`ReadRequest::PrecomputeTreeUpdates`](crate::ReadRequest::PrecomputeTreeUpdates). Every
+/// order of every one, two and three of three transactions is 15 updates.
+pub const PRECOMPUTED_TREE_UPDATE_TRANSACTIONS: usize = 3;
+
+/// The most note commitments one transaction can append to a tree for its updates to be
+/// precomputed.
+pub const PRECOMPUTED_TREE_UPDATE_NOTE_COMMITMENTS: usize = 64;

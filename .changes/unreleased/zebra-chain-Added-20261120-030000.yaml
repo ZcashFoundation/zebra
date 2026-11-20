@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'Added `parallel::tree::PrecomputedTreeUpdate`, `NoteCommitmentTrees::update_trees_parallel_with_precomputed()` and `NoteCommitmentTrees::has_update_work()`, for Orchard and Ironwood note commitment tree updates that are computed before the block that makes them ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T03:00:00.000000000-05:00

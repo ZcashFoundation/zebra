@@ -2594,3 +2594,258 @@ fn only_a_template_with_a_built_coinbase_is_assembled_without_a_blocking_thread(
             busy.await.unwrap();
         });
 }
+
+/// Publishing work without transactions must not wake the validation worker. There is nothing
+/// to check, and the wake would come after the wake of the long polls that are waiting for the
+/// work, which moves them out of the publishing thread's next-task slot.
+#[tokio::test]
+async fn only_work_with_transactions_wakes_the_validation_worker() {
+    let _init_guard = zebra_test::init();
+
+    let cache = TemplateCache::default();
+
+    cache.publish(template());
+    assert!(
+        futures::poll!(Box::pin(cache.queued.notified())).is_pending(),
+        "a coinbase-only template has nothing to check",
+    );
+
+    cache.publish(full_template(0));
+    assert!(
+        futures::poll!(Box::pin(cache.queued.notified())).is_ready(),
+        "a template with transactions is queued for its check",
+    );
+}
+
+/// Work without transactions replaces queued work without waking the validation worker. The
+/// worker must not check the replaced work when its parent becomes the chain tip afterwards.
+#[tokio::test]
+async fn replaced_queued_work_is_not_checked_when_its_parent_becomes_the_tip() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let full = full_template(0);
+        let parent = full.previous_block_hash;
+
+        // The tip watch hasn't reported the work's parent yet.
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(block::Hash([0xcd; 32]));
+        let (entered, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        let verifier = tower::buffer::Buffer::new(
+            tower::service_fn(move |request: VerifyRequest| {
+                let entered = entered.clone();
+                async move {
+                    entered.send(request.block()).unwrap();
+                    Ok::<_, zebra_consensus::BoxError>(request.block().hash())
+                }
+            }),
+            1,
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.clone(),
+            Network::Mainnet,
+            verifier,
+            tip,
+        ));
+
+        // The worker queues the work, and waits for its parent.
+        cache.publish(full);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(requests.try_recv().is_err());
+
+        // Coinbase-only work for the same parent replaces it, then the parent becomes the tip.
+        cache.publish(template());
+        tip_sender.send_best_tip_hash(parent);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            requests.try_recv().is_err(),
+            "the replaced work is not checked",
+        );
+
+        // Later work with transactions is still checked.
+        cache.publish(full_template(1));
+        let proposal = requests.recv().await.unwrap();
+        assert_eq!(proposal.header.previous_block_hash, parent);
+    })
+    .await
+    .expect("the validation worker keeps checking new work");
+}
+
+/// After the updater publishes the coinbase-only template for a new chain tip, it must yield
+/// before it asks the mempool for the next template's transactions, so a task that was waiting
+/// for the template gets to run in between.
+///
+/// This runs on a single thread, where every woken task waits for a yield. It doesn't show which
+/// task a worker of the multi-threaded runtime runs next.
+#[tokio::test]
+async fn waiting_long_polls_run_before_the_next_template_is_started() {
+    assert!(
+        another_task_runs_before_the_next_template_is_started(true).await,
+        "the waiting task ran before the mempool was asked",
+    );
+}
+
+/// With nothing waiting for the template, the updater must not yield before it asks the mempool
+/// for the next template's transactions: the yield would only delay that template. Its own
+/// subscription to the served templates doesn't count as a waiting task.
+#[tokio::test]
+async fn next_template_is_started_at_once_when_nothing_waits_for_the_first() {
+    assert!(
+        !another_task_runs_before_the_next_template_is_started(false).await,
+        "a task that wasn't waiting for the template only ran after the mempool was asked",
+    );
+}
+
+/// Runs the updater for a new chain tip beside one other task, and returns whether that task ran
+/// between the publication of the tip's coinbase-only template and the updater's request for the
+/// next template's mempool transactions.
+///
+/// If `waits_for_template` is set, the other task waits for the template, as a long poll does.
+/// Otherwise it is ready to run all the time, and looks for the template without subscribing.
+async fn another_task_runs_before_the_next_template_is_started(waits_for_template: bool) -> bool {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let tip_hash = block::Hash([2; 32]);
+    let now = DateTime32::now();
+    let chain_info = GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        tip_height: height,
+        tip_hash,
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+
+    // Whether the other task has run, and whether it had when the mempool was first asked for
+    // the next template's transactions: 0 until then, 1 if it hadn't, 2 if it had, and 3 if the
+    // tip's coinbase-only template wasn't served yet.
+    let waiter_ran = Arc::new(AtomicBool::new(false));
+    let ran_before_mempool = Arc::new(AtomicU8::new(0));
+
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, zebra_node_services::BoxError>(match request {
+            ReadRequest::Tip => ReadResponse::Tip(Some((height, tip_hash))),
+            ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+            ReadRequest::MiningCandidateChanges => {
+                ReadResponse::MiningCandidateChanges(Default::default())
+            }
+            other => panic!("unexpected state request: {other:?}"),
+        }))
+    });
+    let cache = TemplateCache::default();
+    let mempool = tower::service_fn({
+        let waiter_ran = waiter_ran.clone();
+        let ran_before_mempool = ran_before_mempool.clone();
+        let cache = cache.clone();
+        move |request| {
+            assert!(matches!(request, mempool::Request::FullTransactions));
+            let served = cache
+                .served
+                .borrow()
+                .as_ref()
+                .is_some_and(|state| state.template.is_some());
+            let _ = ran_before_mempool.compare_exchange(
+                0,
+                if served {
+                    1 + u8::from(waiter_ran.load(Ordering::SeqCst))
+                } else {
+                    3
+                },
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+                mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                },
+            ))
+        }
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(tip_hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let miner = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+
+    let waiter = tokio::spawn({
+        let waiter_ran = waiter_ran.clone();
+        let cache = cache.clone();
+        // A long poll subscribes before the template it waits for is published.
+        let mut changes = waits_for_template.then(|| cache.subscribe());
+        async move {
+            if let Some(changes) = changes.as_mut() {
+                changes.changed().await;
+            } else {
+                // This task wakes itself, so it is always in the run queue. Tasks that yield
+                // are woken newest first, so a task that only yielded would be queued behind
+                // an updater that yielded after it.
+                std::future::poll_fn(|cx| {
+                    let served = cache.served.borrow();
+                    if served
+                        .as_ref()
+                        .is_some_and(|state| state.template.is_some())
+                    {
+                        std::task::Poll::Ready(())
+                    } else {
+                        cx.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+            }
+            waiter_ran.store(true, Ordering::SeqCst);
+        }
+    });
+
+    let (_events, events) = broadcast::channel(1);
+    let updater = tokio::spawn(run(
+        network,
+        miner,
+        CoinbaseCache::default(),
+        cache.clone(),
+        mempool,
+        events,
+        read_state,
+        tip,
+        sync,
+        tower::service_fn(|_: VerifyRequest| {
+            std::future::pending::<Result<block::Hash, zebra_consensus::BoxError>>()
+        }),
+    ));
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while ran_before_mempool.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the new tip gets a template with mempool transactions");
+    tokio::time::timeout(Duration::from_secs(10), waiter)
+        .await
+        .expect("the other task gets the template")
+        .unwrap();
+    updater.abort();
+
+    let ran_before_mempool = ran_before_mempool.load(Ordering::SeqCst);
+    assert_ne!(
+        ran_before_mempool, 3,
+        "the tip's coinbase-only template is served before the mempool is asked",
+    );
+    ran_before_mempool == 2
+}

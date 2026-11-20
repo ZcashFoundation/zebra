@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added `ReadRequest::PrecomputeTreeUpdates`, which names the transactions a caller expects in the next block, with the limits `PRECOMPUTED_TREE_UPDATE_TRANSACTIONS` and `PRECOMPUTED_TREE_UPDATE_NOTE_COMMITMENTS`. The state computes the Orchard and Ironwood note commitment tree updates the next block can make with those transactions in the background, and validates a block that makes one of them with the precomputed tree ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T10:00:01.000000000-05:00

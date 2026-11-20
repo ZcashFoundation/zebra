@@ -291,15 +291,15 @@ fn full_orchard_tree() -> orchard::tree::NoteCommitmentTree {
 }
 
 /// A generated chain committed up to the parent of `block`, a block with Orchard note commitments.
-struct BeforeOrchardBlock {
-    state: NonFinalizedState,
-    finalized_state: FinalizedState,
-    block: SemanticallyVerifiedBlock,
+pub(super) struct BeforeOrchardBlock {
+    pub(super) state: NonFinalizedState,
+    pub(super) finalized_state: FinalizedState,
+    pub(super) block: SemanticallyVerifiedBlock,
 }
 
 impl BeforeOrchardBlock {
     /// Returns a test whose block also spends an output created by an earlier block.
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::from_chain(PreparedChain::default(), |block, _network| {
             Self::earlier_spend(block).is_some()
         })
@@ -315,7 +315,7 @@ impl BeforeOrchardBlock {
 
     /// Returns a test in a chain with valid block commitments, whose block's parent, and the block
     /// below that, have non-empty history trees.
-    fn with_history() -> Self {
+    pub(super) fn with_history() -> Self {
         let chain = PreparedChain::default()
             .with_ledger_strategy(heartwood_onward_ledger_strategy())
             .with_valid_commitments();
@@ -403,7 +403,7 @@ impl BeforeOrchardBlock {
     }
 
     /// Adds one of the block's Orchard nullifiers to the parent chain, so its chain update fails.
-    fn reveal_orchard_nullifier(&mut self) {
+    pub(super) fn reveal_orchard_nullifier(&mut self) {
         let nullifier = self
             .block
             .block
@@ -483,7 +483,7 @@ impl BeforeOrchardBlock {
     }
 
     /// Changes the block's commitment, so its block commitment check fails.
-    fn corrupt_block_commitment(&mut self) {
+    pub(super) fn corrupt_block_commitment(&mut self) {
         self.block = self
             .block
             .block
@@ -502,7 +502,7 @@ impl BeforeOrchardBlock {
 
     /// Commits the block, after making its anchors valid if `with_anchors` is true, and checks that
     /// a rejected block leaves the state unchanged.
-    fn commit(mut self, with_anchors: bool) -> Result<(), ValidateContextError> {
+    pub(super) fn commit(mut self, with_anchors: bool) -> Result<(), ValidateContextError> {
         if with_anchors {
             self.finalized_state
                 .populate_with_anchors(&self.block.block);

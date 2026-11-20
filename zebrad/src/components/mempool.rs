@@ -758,6 +758,10 @@ impl Service<Request> for Mempool {
             let mut invalidated_ids = HashSet::<_>::new();
             let mut mined_mempool_ids = HashSet::<_>::new();
 
+            // True if the transactions that are likeliest to be in the next block, among those
+            // that change the Orchard or Ironwood tree, can have changed.
+            let mut likeliest_changed = false;
+
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Clean up completed download tasks and add to mempool if successful.
@@ -772,12 +776,17 @@ impl Service<Request> for Mempool {
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
                             let tx_id = tx.transaction.id;
+                            let changes_tree =
+                                storage::changes_orchard_or_ironwood_tree(&tx.transaction);
+                            let evicted_before = invalidated_ids.len();
                             let insert_result = storage.insert(
                                 tx,
                                 spent_mempool_outpoints,
                                 best_tip_height,
                                 &mut invalidated_ids,
                             );
+                            // Any transaction can be evicted to make room for this one.
+                            likeliest_changed |= invalidated_ids.len() != evicted_before;
 
                             tracing::trace!(
                                 ?insert_result,
@@ -787,6 +796,7 @@ impl Service<Request> for Mempool {
                             if let Ok(inserted_id) = insert_result {
                                 // Save transaction ids that we will send to peers
                                 send_to_peers_ids.insert(inserted_id);
+                                likeliest_changed |= changes_tree;
                             } else {
                                 invalidated_ids.insert(tx_id);
                             }
@@ -886,6 +896,7 @@ impl Service<Request> for Mempool {
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
+                likeliest_changed = true;
                 *last_seen_tip = (block.hash, block.height);
                 let cleanup_start = std::time::Instant::now();
 
@@ -933,6 +944,25 @@ impl Service<Request> for Mempool {
                     );
 
                     invalidated_ids.extend(expired_transactions);
+                }
+            }
+
+            // Tell the state which transactions to expect in the next block, so it can compute
+            // the note commitment tree updates that block makes before the block arrives. The
+            // state replaces the transactions it was told before, so it is told each time they
+            // can have changed: when a transaction that changes a tree is accepted, and after a
+            // new tip, because the updates it has are for the tip before.
+            if likeliest_changed {
+                let expected_in_next_block = storage
+                    .likeliest_tree_update_transactions(zs::PRECOMPUTED_TREE_UPDATE_TRANSACTIONS);
+                if !expected_in_next_block.is_empty() {
+                    // The read state answers this where it is called. This is a hint, so it is
+                    // dropped if a service that wraps the read state doesn't.
+                    let _ = tower::ServiceExt::oneshot(
+                        self.read_state.clone(),
+                        zs::ReadRequest::PrecomputeTreeUpdates(expected_in_next_block),
+                    )
+                    .now_or_never();
                 }
             }
 

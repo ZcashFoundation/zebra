@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: '`ReadRequest::AnyChainUtxo`, and so `Request::AwaitUtxo` and `Request::AwaitUtxos`, are answered without a blocking thread when a non-finalized chain created the output or the database has it in its write buffers or block cache ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T04:00:00.000000000-05:00

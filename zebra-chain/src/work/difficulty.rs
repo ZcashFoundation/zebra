@@ -220,7 +220,8 @@ impl CompactDifficulty {
             // If m is non-zero, overflow. If m is zero, invalid.
             (_, e) if (e >= 32) => return None,
             // If m is larger than the remaining bytes, overflow.
-            // Otherwise, avoid overflows in base^exponent.
+            // Otherwise, move the exponent's extra bytes into the mantissa, so the exponent
+            // is at most 29.
             (m, e) if (e == 31 && m > u8::MAX.into()) => return None,
             (m, e) if (e == 31 && m <= u8::MAX.into()) => (m << 16, e - 2),
             (m, e) if (e == 30 && m > u16::MAX.into()) => return None,
@@ -234,11 +235,21 @@ impl CompactDifficulty {
         };
 
         // Now calculate the result: mantissa*base^exponent
-        // Earlier code should make sure all these values are in range.
+        //
+        // The base is one byte, so multiplying by base^exponent shifts the mantissa by that
+        // many bytes. The code above keeps the mantissa below 2^24 and the exponent at 29 or
+        // less, so the shift is at most 232 bits and the result fits in 256 bits.
+        const _: () = assert!(BASE == 1 << u8::BITS);
         let mantissa: U256 = mantissa.into();
-        let base: U256 = BASE.into();
-        let exponent: U256 = exponent.into();
-        let result = mantissa * base.pow(exponent);
+        let shift_bits =
+            u32::try_from(exponent).expect("normalized exponents aren't negative") * u8::BITS;
+        // A multiplication that overflows panics, but a shift drops the bits. So check the
+        // range that the code above keeps.
+        assert!(
+            mantissa.leading_zeros() >= shift_bits,
+            "normalized compact difficulties fit in 256 bits",
+        );
+        let result = mantissa << shift_bits;
 
         if result == U256::zero() {
             // zcashd rejects zero values, without comparing the hash

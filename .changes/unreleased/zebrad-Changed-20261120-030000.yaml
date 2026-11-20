@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Blocks with shielded transactions that the mempool had seen are validated faster. The note commitment tree updates those transactions make are computed in the background when the mempool accepts them, and again after each new block, for up to three transactions for each of the Orchard and Ironwood trees ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T03:00:00.000000000-05:00

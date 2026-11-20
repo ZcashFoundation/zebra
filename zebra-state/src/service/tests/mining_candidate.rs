@@ -17,9 +17,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{arbitrary::TEST_MINING_CANDIDATE_LIFETIME, StateService},
-    CheckpointVerifiedBlock, Config, MiningCandidateChanges, ReadRequest, ReadResponse,
-    ReadStateService, Request, Response,
+    service::{arbitrary::TEST_MINING_CANDIDATE_LIFETIME, read, StateService},
+    CheckpointVerifiedBlock, Config, GetBlockTemplateChainInfo, MiningCandidateChanges,
+    ReadRequest, ReadResponse, ReadStateService, Request, Response,
 };
 
 async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
@@ -405,6 +405,221 @@ fn candidate_computation_is_queued_by_the_request() {
             }
 
             busy.await.unwrap();
+        });
+    drop(setup);
+}
+
+/// The mining candidate of a block whose commit is being prepared must be published as soon as
+/// the block write task has validated a chain for the block, without waiting for the candidate's
+/// own computation. The context it publishes must be the one that the computation gives.
+#[test]
+fn prepared_block_candidate_builds_on_the_prepared_chain() {
+    let _init_guard = zebra_test::init();
+
+    let setup = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut state, read, block) = setup.block_on(async {
+        let (state, read) = state(false).await;
+        let block = candidate(&read, false, 0).await;
+        (state, read, block)
+    });
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            // Keep the only blocking thread busy, so the candidate's own computation can't end.
+            let (started, started_rx) = oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let busy = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            });
+            started_rx.await.unwrap();
+
+            let mut changes = subscribe(&read).await;
+            let prepare = state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::PrepareCommit(block.clone()))
+                .await
+                .unwrap();
+            assert!(matches!(prepare, Response::PreparingCommit));
+
+            let Response::MiningCandidate(Some(_guard)) = state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::MiningCandidate(block.clone()))
+                .await
+                .unwrap()
+            else {
+                panic!("a child of the best tip is admitted");
+            };
+            tokio::time::timeout(Duration::from_secs(10), changes.changed())
+                .await
+                .expect("a prepared block's candidate doesn't wait for its computation");
+            let published = changes
+                .0
+                .borrow()
+                .as_ref()
+                .map(|(_block, info, _cancelled, _deadline)| info.clone())
+                .expect("the candidate is published");
+
+            drop(release);
+            busy.await.unwrap();
+
+            let computed = read::difficulty::mining_candidate_chain_info(
+                &read.latest_non_finalized_state(),
+                &read.db,
+                &read.network,
+                block.clone(),
+            )
+            .expect("the block is a valid candidate");
+            // The latest block time allowed by the local clock is as old as the context.
+            let published = GetBlockTemplateChainInfo {
+                max_time: computed.max_time,
+                ..GetBlockTemplateChainInfo::clone(&published)
+            };
+            assert_eq!(published, computed);
+        });
+    drop(setup);
+}
+
+/// A mining candidate must not depend on the block write task: if the prepared tip never comes,
+/// or the block can't be prepared, the candidate's own computation publishes it.
+#[test]
+fn candidate_is_published_without_a_prepared_tip() {
+    let _init_guard = zebra_test::init();
+
+    let setup = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut state, read, block) = setup.block_on(async {
+        let (state, read) = state(false).await;
+        let block = candidate(&read, false, 0).await;
+        (state, read, block)
+    });
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let mut changes = subscribe(&read).await;
+
+            // The block write task hasn't answered, then drops the channel without answering.
+            for answers_later in [true, false] {
+                let (sender, prepared_tip) = oneshot::channel();
+                state.prepared_tip = Some((Arc::downgrade(&block), prepared_tip));
+                let _sender = answers_later.then_some(sender);
+
+                let Response::MiningCandidate(Some(guard)) = state
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(Request::MiningCandidate(block.clone()))
+                    .await
+                    .unwrap()
+                else {
+                    panic!("a child of the best tip is admitted");
+                };
+                tokio::time::timeout(Duration::from_secs(10), changes.changed())
+                    .await
+                    .expect("the candidate's own computation publishes it");
+                assert!(changes.is_current(block.hash()));
+
+                // Withdraw the candidate, so the next one is admitted.
+                drop(guard);
+                tokio::time::timeout(Duration::from_secs(10), changes.changed())
+                    .await
+                    .expect("a dropped guard withdraws the candidate");
+                assert!(!changes.is_current(block.hash()));
+            }
+        });
+    drop(setup);
+}
+
+/// A prepared tip must only be used for the block allocation that was prepared. A block hash
+/// doesn't identify a block's authorizing data, so another copy of the block gets its context
+/// from its own computation.
+///
+/// The fixture's chain is shorter than a difficulty adjustment reads, and test builds skip a
+/// prepared block's difficulty check on such a chain. So these tests use valid blocks.
+#[test]
+fn another_copy_of_a_prepared_block_does_not_use_its_prepared_tip() {
+    let _init_guard = zebra_test::init();
+
+    let setup = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut state, read, block) = setup.block_on(async {
+        let (state, read) = state(false).await;
+        let block = candidate(&read, false, 0).await;
+        (state, read, block)
+    });
+    let copy = Arc::new(Block::clone(&block));
+    assert_eq!(copy.hash(), block.hash());
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            // Keep the only blocking thread busy, so the candidate's own computation can't end.
+            let (started, started_rx) = oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let busy = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            });
+            started_rx.await.unwrap();
+
+            let mut changes = subscribe(&read).await;
+            state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::PrepareCommit(block.clone()))
+                .await
+                .unwrap();
+            assert!(state.prepared_tip.is_some());
+
+            let Response::MiningCandidate(Some(_guard)) = state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::MiningCandidate(copy.clone()))
+                .await
+                .unwrap()
+            else {
+                panic!("a child of the best tip is admitted");
+            };
+            assert!(
+                state.prepared_tip.is_none(),
+                "a prepared tip doesn't outlive the next candidate",
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), changes.changed())
+                    .await
+                    .is_err(),
+                "the copy's candidate waits for its own computation",
+            );
+
+            drop(release);
+            busy.await.unwrap();
+            tokio::time::timeout(Duration::from_secs(10), changes.changed())
+                .await
+                .expect("the copy's own computation publishes it");
+            assert!(changes.is_current(copy.hash()));
         });
     drop(setup);
 }

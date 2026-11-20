@@ -230,3 +230,121 @@ fn batch_merkle_bottom_maps_to_zero_like_scalar() {
         .iter()
         .all(|node| node.0 == scalar.unwrap_or(pallas::Base::zero())));
 }
+
+/// Precomputed updates that complete a subtree give a block the same trees and subtrees as the
+/// block's own updates, whether all of the block's updates are precomputed or only one of them.
+#[test]
+fn precomputed_updates_that_complete_a_subtree_match_the_computed_updates() {
+    use std::sync::Arc;
+
+    use proptest::{
+        arbitrary::Arbitrary,
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
+
+    use crate::{
+        block::{Block, Height},
+        parallel::tree::{NoteCommitmentTrees, PrecomputedTreeUpdate},
+        parameters::NetworkUpgrade,
+        LedgerState,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    const GENERATED_BLOCKS: usize = 32;
+
+    let mut rng = ChaChaRng::seed_from_u64(0x73756274726565);
+
+    // A tree whose next note commitment completes its first subtree.
+    let mut almost_complete_subtree = || {
+        let last_position = (1u64 << TRACKED_SUBTREE_HEIGHT) - 2;
+        let tree = NoteCommitmentTree {
+            inner: Frontier::from_parts(
+                last_position.into(),
+                Node(commitment(&mut rng)),
+                (0..last_position.count_ones())
+                    .map(|_| Node(commitment(&mut rng)))
+                    .collect(),
+            )
+            .expect("the ommer count equals the number of set position bits"),
+            cached_root: Default::default(),
+        };
+        let _ = tree.root();
+        Arc::new(tree)
+    };
+
+    let strategy = LedgerState::height_strategy(Height(1), NetworkUpgrade::Nu6_3, 6, false)
+        .prop_flat_map(Block::arbitrary_with);
+    let mut runner = TestRunner::deterministic();
+
+    let mut all_precomputed = 0;
+    let mut one_precomputed = 0;
+
+    for index in 0..GENERATED_BLOCKS {
+        let block = Arc::new(
+            strategy
+                .new_tree(&mut runner)
+                .expect("the block strategy generates blocks")
+                .current(),
+        );
+        let orchard: Vec<_> = block.orchard_note_commitments().collect();
+        let ironwood: Vec<_> = block.ironwood_note_commitments().collect();
+        if orchard.is_empty() && ironwood.is_empty() {
+            continue;
+        }
+
+        let trees = NoteCommitmentTrees {
+            orchard: almost_complete_subtree(),
+            ironwood: almost_complete_subtree(),
+            ..Default::default()
+        };
+        let precomputed: Vec<_> = [
+            (&trees.orchard, orchard.clone()),
+            (&trees.ironwood, ironwood.clone()),
+        ]
+        .into_iter()
+        .filter(|(_tree, note_commitments)| !note_commitments.is_empty())
+        .map(|(tree, note_commitments)| {
+            Arc::new(
+                PrecomputedTreeUpdate::new(tree.clone(), note_commitments)
+                    .expect("the tree has room"),
+            )
+        })
+        .collect();
+
+        let mut computed = trees.clone();
+        computed
+            .update_trees_parallel(&block)
+            .expect("the trees have room");
+        assert_eq!(computed.orchard_subtree.is_some(), !orchard.is_empty());
+        assert_eq!(computed.ironwood_subtree.is_some(), !ironwood.is_empty());
+
+        // All of the block's updates, and each one of them without the others.
+        let mut cases = vec![precomputed.clone()];
+        if precomputed.len() == 2 {
+            cases.extend(precomputed.iter().map(|update| vec![update.clone()]));
+        }
+
+        for precomputed in cases {
+            let mut reused = trees.clone();
+            let completed = reused
+                .update_trees_parallel_with_precomputed(&block, &precomputed, || false)
+                .expect("the trees have room");
+            assert!(completed);
+            assert_eq!(reused, computed, "generated block {index}");
+
+            if trees.has_update_work(&block, &precomputed) {
+                one_precomputed += 1;
+            } else {
+                all_precomputed += 1;
+            }
+        }
+    }
+
+    assert!(
+        all_precomputed > 0 && one_precomputed > 0,
+        "some generated blocks have Orchard and Ironwood note commitments: {all_precomputed} \
+         and {one_precomputed}",
+    );
+}

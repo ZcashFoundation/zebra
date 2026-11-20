@@ -66,7 +66,7 @@ fn only_a_block_on_another_parent_reads_its_recent_headers() {
     let (child_commit, mut child_result) = commit(&child);
     let (grandchild_commit, mut grandchild_result) = commit(&grandchild);
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Prepare(child.clone(), None),
         child_commit,
         grandchild_commit,
     ];
@@ -124,7 +124,7 @@ fn only_a_block_on_another_parent_reads_its_recent_headers() {
     let (sibling_commit, mut sibling_result) = commit(&sibling);
     let (child_commit, mut child_result) = commit(&child);
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Prepare(child.clone(), None),
         sibling_commit,
         child_commit,
     ];

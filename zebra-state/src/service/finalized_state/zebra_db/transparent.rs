@@ -163,6 +163,39 @@ impl ZebraDb {
         self.utxo_by_location(output_location)
     }
 
+    /// Returns the transparent output for a [`transparent::OutPoint`], if it is unspent in the
+    /// finalized state, like [`Self::utxo()`], but only if the database can answer from its
+    /// memory.
+    ///
+    /// Returns `None` if the answer takes a file read, which can block the calling thread.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn utxo_from_memory(
+        &self,
+        outpoint: &transparent::OutPoint,
+    ) -> Option<Option<transparent::OrderedUtxo>> {
+        let tx_loc_by_hash = self.db.cf_handle("tx_loc_by_hash").unwrap();
+        let transaction_location: Option<TransactionLocation> = self
+            .db
+            .zs_get_from_memory(&tx_loc_by_hash, &outpoint.hash)?;
+        let Some(transaction_location) = transaction_location else {
+            return Some(None);
+        };
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
+        let output = self
+            .db
+            .zs_get_from_memory(&utxo_by_out_loc, &output_location)?;
+
+        Some(output.map(|output| {
+            transparent::OrderedUtxo::new(
+                output,
+                output_location.height(),
+                output_location.transaction_index().as_usize(),
+            )
+        }))
+    }
+
     /// Returns the [`TransactionLocation`] of the transaction that spent the given
     /// [`transparent::OutPoint`], if it is unspent in the finalized state and its
     /// spending transaction hash has been indexed.

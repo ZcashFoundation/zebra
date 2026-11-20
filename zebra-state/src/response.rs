@@ -583,6 +583,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::MiningCandidateChanges`].
     MiningCandidateChanges(MiningCandidateChanges),
 
+    /// Response to [`ReadRequest::PrecomputeTreeUpdates`].
+    PrecomputingTreeUpdates,
+
     /// Shared authenticated early block retention, from [`ReadRequest::EarlyRelayCache`].
     EarlyRelayCache(crate::EarlyRelayCache),
 
@@ -882,6 +885,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ChainInfo(_)
             | ReadResponse::MiningCandidate(_)
             | ReadResponse::MiningCandidateChanges(_)
+            | ReadResponse::PrecomputingTreeUpdates
             | ReadResponse::EarlyRelayCache(_)
             | ReadResponse::ValidBestTipHeader
             | ReadResponse::ValidBestTipBlockCommitments
