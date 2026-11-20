@@ -93,12 +93,13 @@ impl GetBlockchainInfoBalance {
     }
 
     /// Creates a [`GetBlockchainInfoBalance`] for the Network Sustainability Mechanism (NSM)
-    /// value balance, `NSMValueBalance` (NU7), after the block at `height` on `network`.
-    ///
-    /// The balance is `monitored` if NU7 is active at `height`, also when the balance is zero.
+    /// value balance (NU7) after the block at `height` on `network`. `amount` and `delta` are
+    /// [ZIP 237]'s values. It is `monitored` from NU7 - 1, also when the balance is zero.
     ///
     /// The NSM value balance is not part of the issued supply, so it is not a value pool and
     /// is not counted in [`Self::chain_supply`].
+    ///
+    /// [ZIP 237]: https://zips.z.cash/zip-0237
     pub fn nsm(
         network: &zebra_chain::parameters::Network,
         height: zebra_chain::block::Height,
@@ -106,9 +107,14 @@ impl GetBlockchainInfoBalance {
         delta: Option<Amount<NegativeAllowed>>,
     ) -> Self {
         Self {
+            // The next block is at or after NU7 activation; `Height::MAX` has no next block.
             monitored: zebra_chain::parameters::NetworkUpgrade::Nu7
                 .activation_height(network)
-                .is_some_and(|activation_height| height >= activation_height),
+                .is_some_and(|activation_height| {
+                    height
+                        .next()
+                        .map_or(true, |next_height| next_height >= activation_height)
+                }),
             ..Self::new_internal("nsm", amount, delta)
         }
     }

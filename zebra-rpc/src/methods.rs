@@ -60,14 +60,14 @@ use tracing::Instrument;
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
         subsidy::{
             block_subsidy, founders_reward, funding_stream_address, funding_stream_values,
-            miner_subsidy, FundingStreamReceiver,
+            miner_subsidy, nsm_value_balance_before, FundingStreamReceiver,
         },
         ConsensusBranchId, Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH,
     },
@@ -1405,6 +1405,8 @@ where
             )
         };
 
+        // The fallback tip below has no balances, so it has no NSM value balance either.
+        let tip_pool_values_found = tip_pool_values_rsp.is_ok();
         let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
             use zebra_state::ReadResponse::*;
 
@@ -1507,12 +1509,9 @@ where
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
-            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
-                network,
-                tip_height,
-                value_balance.nsm_amount(),
-                None,
-            )),
+            nsm_value_balance: tip_pool_values_found.then(|| {
+                nsm_value_balance_entry(network, tip_height, value_balance.nsm_amount(), None)
+            }),
             upgrades,
             consensus,
             headers: tip_height,
@@ -1880,7 +1879,7 @@ where
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 nsm_value_balance: block_info.as_ref().map(|d| {
-                    GetBlockchainInfoBalance::nsm(
+                    nsm_value_balance_entry(
                         &network,
                         height,
                         d.value_pools().nsm_amount(),
@@ -4093,8 +4092,8 @@ pub struct GetBlockchainInfoResponse {
     value_pools: BlockchainValuePoolBalances,
 
     /// The Network Sustainability Mechanism (NSM) value balance (NU7). It is not part of the
-    /// chain supply, so it is not in `valuePools`. It is `monitored` from NU7 activation. It is
-    /// absent in responses from nodes that don't report it.
+    /// chain supply, so it is not in `valuePools`. It is `monitored` from the block before NU7
+    /// activation. It is absent in responses from nodes that don't report it.
     #[serde(
         rename = "nsmValueBalance",
         skip_serializing_if = "Option::is_none",
@@ -4704,16 +4703,11 @@ pub struct BlockObject {
 
     /// The Network Sustainability Mechanism (NSM) value balance (NU7) after this block, and the
     /// block's change to it. It is not part of the chain supply, so it is not in `valuePools`.
-    /// It is `monitored` from NU7 activation.
+    /// It is `monitored` from the block before NU7 activation.
     ///
-    /// At the NU7 activation block, the change includes `INITIAL_NSM_VALUE_BALANCE`: the block
-    /// subsidy and fees that coinbase transactions left unclaimed before NU6, when [ZIP 236] made
-    /// claiming them a consensus rule. [ZIP 237] credits this amount to the NSM value balance at
-    /// NU7 activation. On Mainnet it is 36,858,445,520 zatoshis (about 368.58 ZEC), so the change
-    /// at height 3,543,405 is this amount plus the block's other changes, and not fees burned in
-    /// that block.
+    /// At the block before NU7 activation, the balance and change are `INITIAL_NSM_VALUE_BALANCE`
+    /// as [ZIP 237] defines it, not fees burned in that block.
     ///
-    /// [ZIP 236]: https://zips.z.cash/zip-0236
     /// [ZIP 237]: https://zips.z.cash/zip-0237
     #[serde(
         rename = "nsmValueBalance",
@@ -5234,6 +5228,41 @@ impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }
+}
+
+/// Returns the `nsmValueBalance` entry for the block at `height`, converting the state's stored
+/// balance and change to [ZIP 237]'s. They differ only at NU7 - 1 and NU7: ZIP 237 sets the balance
+/// at NU7 - 1, but the state credits it in the NU7 block ([`nsm_value_balance_before`]).
+///
+/// [ZIP 237]: https://zips.z.cash/zip-0237
+//
+// TODO: credit the seed at NU7 - 1 in the state and remove this conversion (#12556)
+pub(crate) fn nsm_value_balance_entry(
+    network: &Network,
+    height: Height,
+    stored_balance: Amount<NonNegative>,
+    stored_change: Option<Amount<NegativeAllowed>>,
+) -> GetBlockchainInfoBalance {
+    // The part of `NSMValueBalance(height)` that the state credits in the next block instead.
+    let unstored_seed = |height: Height| match height.next() {
+        Ok(next) => nsm_value_balance_before(next, network, Amount::zero()),
+        Err(_) => Amount::zero(),
+    };
+
+    let balance = (stored_balance + unstored_seed(height))
+        .expect("the state stores a zero NSM value balance before NU7 activation");
+    // The balance before the genesis block is zero.
+    let parent_unstored_seed = height
+        .previous()
+        .map_or_else(|_| Amount::zero(), unstored_seed);
+
+    // A reorg between the state reads can put the change out of range; omit it then.
+    let change = stored_change.and_then(|stored_change| {
+        let change = (stored_change + unstored_seed(height).constrain().ok()?).ok()?;
+        (change - parent_unstored_seed.constrain().ok()?).ok()
+    });
+
+    GetBlockchainInfoBalance::nsm(network, height, balance, change)
 }
 
 /// Runs `read` against the address book on a blocking thread, so waiting on its
