@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.1.0] - 2026-11-20
+
+### Added
+
+- Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, and `metrics::LABELS`, which lists the label keys of each labelled metric.
+- Added the `zebra.net.block.decode.wait_seconds` and `zebra.net.block.decode.duration_seconds` histograms, which time decoding received block messages.
+
+### Changed
+
+- Changed the `zebra.net.connection.state` gauge updates to build each label with one string allocation instead of two. The gauge keeps its name, labels, and values.
+- Changed the `zcash.net.peers.missing_services` label from `remote_services`, the service bits the rejected peer sent, to `missing_service`, the required service it lacks, such as `NODE_NETWORK`. Removed the `cache` label, the peer cache file path, from `zcash.net.peers.initial` and `zcash.net.peers.cache`. The `seed` label of `zcash.net.peers.initial` now names only Zebra's default DNS seeders, and labels every other configured initial peer `custom`. Update dashboards and alerts that select on these labels.
+
 ## [16.0.0] - 2026-11-16
 
 ### Changed

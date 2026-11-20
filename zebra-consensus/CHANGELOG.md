@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [19.1.0] - 2026-11-20
+
+### Added
+
+- Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, `metrics::LABELS`, which lists the label keys of each labelled metric, and `metrics::register_failure_counters()`, which registers the signature and proof failure counters in `metrics::FAILURE_COUNTERS` at zero.
+- Added the `zebra.consensus.block.phase.duration_seconds` histogram, which the block verifier records for its block checks, transaction verification, and state commit phases, with a `phase` label. Block proposals are not recorded.
+
 ## [19.0.0] - 2026-11-16
 
 ### Breaking Changes

@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.1.0] - 2026-11-20
+
+### Added
+
+- Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, and `metrics::LABELS`, which lists the label keys of each labelled metric.
+- Added the `state.block_writer.phase.duration_seconds` histogram, which times each phase of committing a checkpoint-verified block, with a `phase` label. `LatestChainTip` now implements `ChainTip::best_tip_changed_at`.
+
 ## [17.0.0] - 2026-11-16
 
 ### Breaking Changes

@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.2.0) - 2026-11-20
+
+### Breaking Changes
+
+- Changed OpenTelemetry trace sampling to follow the OpenTelemetry specification. `OTEL_TRACES_SAMPLER_ARG` is now a ratio between 0.0 and 1.0, and applies only when `OTEL_TRACES_SAMPLER` is set, for example `OTEL_TRACES_SAMPLER=traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1` for 10% of traces. If you set `OTEL_TRACES_SAMPLER_ARG` to a percentage, set these two variables instead, or set `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT`, which still takes a percentage.
+
+### Added
+
+- `getblockchaininfo` and verbose `getblock` responses include `nsmValueBalance`, the Network Sustainability Mechanism (NSM) value balance from NU7, with the block's change to it in `getblock`. It is not part of `chainSupply` or `valuePools`. As [ZIP 237](https://zips.z.cash/zip-0237) defines it, the balance after the block before NU7 activation is `INITIAL_NSM_VALUE_BALANCE`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))
+- Added the standard Prometheus process metrics, such as `process_resident_memory_bytes`, `process_open_fds`, and `process_cpu_seconds_total`, which Zebra samples every 15 seconds when the metrics endpoint is open or Sentry is active, except on Windows.
+- Added a description and unit for every Zebra metric, which the Prometheus endpoint shows as `# HELP` lines, and the metric catalog in `docker/observability/metrics-catalog.json`, which lists each metric's kind, unit, description, labels, and Prometheus series names.
+- Added the `commit` label to `zebrad_build_info`, and metrics that time each phase of block verification, checkpoint commits, block decoding, gossiped block downloads, block template building, the first template after a new tip, mined block announcements, and mempool cleanup, with `submitblock` outcome counts. They are exported as Prometheus histograms, so they can be aggregated across nodes.
+- Added the `tracing.log_format` option. Set it to `"json"`, or set `ZEBRA_TRACING__LOG_FORMAT=json`, to write one JSON object per line, which log collectors such as Google Cloud Logging, Azure Monitor, Grafana Loki, and Datadog read without a custom parser. In JSON mode a panic is written to standard error as one JSON line, whether or not `SENTRY_DSN` is set.
+
+### Changed
+
+- Reduced the work Zebra does when Sentry is enabled: it no longer builds a Sentry span for every INFO-level span, such as one per inbound peer message. Zebra doesn't send Sentry traces, so these spans were never sent.
+- Stopped starting the Sentry session rotation and metrics flush threads when `SENTRY_DSN` is unset or the Sentry client is disabled.
+- Changed `rpc.request.duration_seconds` and `zcash.net.peer.handshake.duration_seconds` to Prometheus histograms: the endpoint now exports `_bucket` series for them instead of `quantile` series, so they can be aggregated across nodes. The supplied dashboards and alert rules already query the `_bucket` series.
+- Changed the `zcash.net.peers.missing_services` label from `remote_services`, the service bits the rejected peer sent, to `missing_service`, the required service it lacks, such as `NODE_NETWORK`. Removed the `cache` label, the peer cache file path, from `zcash.net.peers.initial` and `zcash.net.peers.cache`. The `seed` label of `zcash.net.peers.initial` now names only Zebra's default DNS seeders, and labels every other configured initial peer `custom`. Update dashboards and alerts that select on these labels.
+- Updated the `libz-sys` build dependency to 1.1.33, clearing RUSTSEC-2026-0544. Zebra isn't affected: zebrad only uses it at build time, through `vergen-git2`, and never calls `gzprintf`.
+- Changed the metrics sent to Sentry when `SENTRY_DSN` is set: Zebra now sends every metric that the Prometheus endpoint exports, instead of a fixed list, once a minute. Counters send their increase, gauges their latest value when it changes and at least every 5 minutes, and histograms up to 20 values per set of labels as distributions. Each minute sends at most 1,500 metrics and at most 256 sets of labels per metric, and sends none while the Sentry SDK is still sending earlier data, so metrics never fill the queue they share with events, logs, and sessions. The new `zebrad.sentry.metrics.dropped.total` counter counts the values left out. Metrics also carry `chain.near_tip`, which is `true` when the node is near the chain tip.
+- Added the `chain_network_upgrade` label to `zcash.chain.tip.block_delay_seconds`, the network upgrade at the block's height. Sentry still receives each value's block height as the `chain.height` attribute.
+
+### Fixed
+
+- Fixed verbose `getblock` responses reporting each whole value pool balance as the block's `valueDelta` and `valueDeltaZat` when the parent block's balances were not found, for example after a reorg during the request. These fields are now omitted in that case. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))
+- Fixed supplied Grafana panels, alert rules, and example queries that queried series Zebra doesn't export. The `ZebraHighErrorRate` alert now fires on block verification errors from `sync.block.error.count`, the errors dashboard shows signatures and shielded bundles in batches that failed verification, which the endpoint now exports at zero from startup so the first failures show in `rate()`, the observability README checks `zcash_chain_verified_block_height`, the `RPCHighLatency` alert ignores `getblocktemplate` long polls, and the `SlowHandshakes` alert fires when the p95 successful handshake takes over 2 seconds, below the 3 second handshake timeout. The RPC tracing dashboard now queries the span metrics that the supplied Jaeger configuration exports, so its panels are no longer empty, and its error panels show zero for methods with requests but no errors.
+- Fixed OpenTelemetry tracing, which exported either every span or none from each node, because the process-long global span was the root of every trace. Each peer connection attempt, handshake, peer request, checkpoint verification, and RPC or gRPC request now starts its own trace, with any inbound or mempool request it makes inside it, and only WARN and ERROR log events are attached to spans. Long-running spans, such as the syncer and the peer crawler, are no longer exported.
+
 ## [Zebra 7.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.1.0) - 2026-11-16
 
 This release fixes several security issues that let peers or RPC clients exhaust a node's memory or stall its initial sync. All node operators should upgrade. It is supported until around 10 December 2026; upgrade to the next release before then.

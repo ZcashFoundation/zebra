@@ -7491,7 +7491,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "14.0.1"
+version = "14.0.0"
 dependencies = [
  "jsonrpsee-types",
  "reqwest 0.12.28",
@@ -7569,7 +7569,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "15.0.1"
+version = "15.0.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7683,7 +7683,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "8.0.0"
+version = "7.2.0"
 dependencies = [
  "abscissa_core",
  "bytes",
