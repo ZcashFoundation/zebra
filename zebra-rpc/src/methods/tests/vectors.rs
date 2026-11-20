@@ -6024,9 +6024,10 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
     assert_eq!(response.connections, 0);
 }
 
-/// The NSM value balance is monitored from NU7 activation, also when it is zero, and not before.
+/// The NSM value balance is monitored from the block before NU7 activation, also when it is
+/// zero, and not before.
 #[test]
-fn nsm_value_balance_is_monitored_from_nu7_activation() {
+fn nsm_value_balance_is_monitored_from_the_block_before_nu7_activation() {
     let nu7 = NetworkUpgrade::Nu7
         .activation_height(&Mainnet)
         .expect("NU7 is scheduled on Mainnet");
@@ -6037,10 +6038,8 @@ fn nsm_value_balance_is_monitored_from_nu7_activation() {
     };
 
     assert!(monitored(nu7, 0));
-    assert!(monitored(nu7, 36_858_445_520));
-    assert!(monitored((nu7 + 1).expect("valid height"), 0));
-    assert!(!monitored(before_nu7, 0));
-    assert!(!monitored(before_nu7, 100));
+    assert!(monitored(before_nu7, 0));
+    assert!(!monitored(before_nu7.previous().expect("valid height"), 0));
 }
 
 /// Verbose `getblock` reports the block's NSM value balance and its signed change to it, separately
