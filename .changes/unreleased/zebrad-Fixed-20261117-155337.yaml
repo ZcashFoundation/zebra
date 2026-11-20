@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed a node banning honest peers that lag behind a network upgrade and relay transactions for the previous upgrade.
+time: 2026-11-17T15:53:37.311131371Z
