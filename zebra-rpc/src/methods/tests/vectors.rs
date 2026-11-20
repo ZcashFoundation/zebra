@@ -6042,6 +6042,47 @@ fn nsm_value_balance_is_monitored_from_the_block_before_nu7_activation() {
     assert!(!monitored(before_nu7.previous().expect("valid height"), 0));
 }
 
+/// Verbose `getblock` reports ZIP 237's NSM value balance at NU7 - 1 and NU7, although the state
+/// credits `INITIAL_NSM_VALUE_BALANCE` in the NU7 activation block.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_the_initial_nsm_value_balance_before_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+    let initial = i64::from(Mainnet.initial_nsm_value_balance());
+
+    // (height, stored parent NSM, stored block NSM, reported NSM, reported change), in zatoshis.
+    let cases = [
+        (before_nu7, 0, 0, initial, initial),
+        (nu7, 0, initial - 7, initial - 7, -7),
+    ];
+
+    for (height, parent_nsm, nsm, reported, reported_change) in cases {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            1,
+            height,
+            Some(block_info_with_balances(0, 0, parent_nsm)),
+            block_info_with_balances(0, 0, nsm),
+        )
+        .await;
+
+        let nsm_balance = obj.nsm_value_balance.as_ref().expect("has the NSM balance");
+        assert!(nsm_balance.monitored());
+        assert_eq!(nsm_balance.chain_value_zat(), balance_zat(reported));
+        assert_eq!(
+            nsm_balance.value_delta_zat(),
+            Some(change_zat(reported_change))
+        );
+    }
+}
+
 /// Verbose `getblock` reports the block's NSM value balance and its signed change to it, separately
 /// from the value pools' changes, for increases and decreases.
 #[tokio::test(flavor = "multi_thread")]
