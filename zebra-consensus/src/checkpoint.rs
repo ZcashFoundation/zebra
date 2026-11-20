@@ -809,7 +809,7 @@ where
 
         crate::block::check::merkle_root_validity(
             &self.network,
-            &block.block,
+            block.block(),
             &block.transaction_hashes,
         )?;
 
@@ -937,7 +937,7 @@ where
             };
 
             linked.insert((height, hash));
-            hash = qblock.block.block.header.previous_block_hash;
+            hash = qblock.block.block().header.previous_block_hash;
             let Ok(previous_height) = height.previous() else {
                 break;
             };
@@ -1208,7 +1208,7 @@ where
         for current_height in range_heights {
             let valid_qblock = self.process_height(current_height, expected_hash);
             if let Some(qblock) = valid_qblock {
-                expected_hash = qblock.block.block.header.previous_block_hash;
+                expected_hash = qblock.block.block().header.previous_block_hash;
                 // Add the block to the end of the pending block list
                 // (since we're walking the chain backwards, the list is
                 // in reverse chain order)
@@ -1724,7 +1724,7 @@ where
                 // Keep a copy of the block in case the state fails it without checking it.
                 // Its new outputs are only rebuilt if that happens.
                 let mut child = zs::SemanticallyVerifiedBlock {
-                    block: block.block.clone(),
+                    block: block.block().clone(),
                     hash: block.hash,
                     height: block.height,
                     new_outputs: Default::default(),

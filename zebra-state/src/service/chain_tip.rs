@@ -131,7 +131,14 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
 
 impl From<CheckpointVerifiedBlock> for ChainTipBlock {
     fn from(prepared: CheckpointVerifiedBlock) -> Self {
-        SemanticallyVerifiedBlock::from(prepared).into()
+        Self {
+            hash: prepared.hash,
+            height: prepared.height,
+            time: prepared.block.header.time,
+            transactions: prepared.block.transactions.clone(),
+            transaction_hashes: prepared.transaction_hashes,
+            previous_block_hash: prepared.block.header.previous_block_hash,
+        }
     }
 }
 
