@@ -12,7 +12,16 @@ use crate::methods::types::validate_address;
 
 /// `validateaddress` response
 #[derive(
-    Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
+    Clone,
+    Default,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
 )]
 pub struct ValidateAddressResponse {
     /// Whether the address is valid.

@@ -12,7 +12,17 @@ use zec::Zec;
 use super::*;
 
 /// A value pool's balance in Zec and Zatoshis
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct GetBlockchainInfoBalance {
     /// Name of the pool

@@ -12,7 +12,16 @@ use super::zec::Zec;
 
 /// A response to a `getblocksubsidy` RPC request
 #[derive(
-    Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize, Getters, new,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
 )]
 pub struct GetBlockSubsidyResponse {
     /// An array of funding stream descriptions.
@@ -68,7 +77,17 @@ pub struct GetBlockSubsidyResponse {
 pub use self::GetBlockSubsidyResponse as BlockSubsidy;
 
 /// A single funding stream's information in a  `getblocksubsidy` RPC request
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct FundingStream {
     /// A description of the funding stream recipient.
     pub recipient: String,

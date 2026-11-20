@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: 'The `rpc.discover` document is checked in as `zebra-rpc/openrpc.json`, for the OpenRPC playground and other tools. A test fails when it is out of date; regenerate it with `ZEBRA_BLESS=1 cargo test -p zebra-rpc test_rpc_response_data`.'
+time: 2026-11-03T23:04:22.000000000Z

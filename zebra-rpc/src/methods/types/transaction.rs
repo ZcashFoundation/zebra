@@ -39,23 +39,37 @@ use super::zec::Zec;
 use super::{super::opthex, get_block_template::MinerParams};
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 #[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
+#[schemars(bound = "FeeConstraint: amount::Constraint + Clone")]
 pub struct TransactionTemplate<FeeConstraint>
 where
     FeeConstraint: amount::Constraint + Clone + Copy,
 {
     /// The hex-encoded serialized data for this transaction.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     pub(crate) data: SerializedTransaction,
 
     /// The transaction ID of this transaction.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) hash: transaction::Hash,
 
     /// The authorizing data digest of a v5 transaction, or a placeholder for older versions.
     #[serde(rename = "authdigest")]
+    #[schemars(with = "String")]
     #[serde(with = "hex")]
     #[getter(copy)]
     pub(crate) auth_digest: transaction::AuthDigest,
@@ -300,7 +314,16 @@ impl TransactionTemplate<NegativeOrZero> {
 /// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
 /// requests.
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct TransactionObject {
     /// Whether specified block is in the active chain or not (only present with
     /// explicit "blockhash" argument)
@@ -309,6 +332,7 @@ pub struct TransactionObject {
     pub(crate) in_active_chain: Option<bool>,
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     pub(crate) hex: SerializedTransaction,
     /// The height of the block in the best chain that contains the tx, -1 if
     /// it's in a side chain block, or `None` if the tx is in the mempool.
@@ -356,6 +380,7 @@ pub struct TransactionObject {
         default,
         rename = "bindingSig"
     )]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     pub(crate) binding_sig: Option<[u8; 64]>,
 
@@ -366,6 +391,7 @@ pub struct TransactionObject {
         default,
         rename = "joinSplitPubKey"
     )]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     pub(crate) joinsplit_pub_key: Option<[u8; 32]>,
 
@@ -376,6 +402,7 @@ pub struct TransactionObject {
         default,
         rename = "joinSplitSig"
     )]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     pub(crate) joinsplit_sig: Option<[u8; ed25519::Signature::BYTE_SIZE]>,
 
@@ -411,6 +438,7 @@ pub struct TransactionObject {
 
     /// The transaction identifier, encoded as hex bytes.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub txid: transaction::Hash,
 
@@ -422,6 +450,7 @@ pub struct TransactionObject {
         skip_serializing_if = "Option::is_none",
         default
     )]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     pub(crate) auth_digest: Option<transaction::AuthDigest>,
 
@@ -438,6 +467,7 @@ pub struct TransactionObject {
         skip_serializing_if = "Option::is_none",
         default
     )]
+    #[schemars(with = "Option<String>")]
     pub(crate) version_group_id: Option<Vec<u8>>,
 
     /// The lock time
@@ -458,6 +488,7 @@ pub struct TransactionObject {
         skip_serializing_if = "Option::is_none",
         default
     )]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     pub(crate) block_hash: Option<block::Hash>,
 
@@ -468,13 +499,14 @@ pub struct TransactionObject {
 }
 
 /// The transparent input of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum Input {
     /// A coinbase input.
     Coinbase {
         /// The coinbase scriptSig as hex.
         #[serde(with = "hex")]
+        #[schemars(with = "String")]
         coinbase: Vec<u8>,
         /// The script sequence number.
         sequence: u32,
@@ -511,7 +543,16 @@ pub enum Input {
 ///
 /// Only present at `getblock` verbosity 3. The fields match Bitcoin Core's `getblock`
 /// verbosity 3 `prevout` object.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Prevout {
     /// Whether the output being spent was created by a coinbase transaction.
     #[getter(copy)]
@@ -528,7 +569,16 @@ pub struct Prevout {
 }
 
 /// The transparent output of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Output {
     /// The value in ZEC.
     value: f64,
@@ -543,7 +593,16 @@ pub struct Output {
 }
 
 /// The output object returned by `gettxout` RPC requests.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct OutputObject {
     #[serde(rename = "bestblock")]
     best_block: String,
@@ -575,12 +634,22 @@ impl OutputObject {
 }
 
 /// The scriptPubKey of a transaction output.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct ScriptPubKey {
     /// the asm.
     asm: String,
     /// the hex.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     hex: Script,
     /// The required sigs.
     #[serde(rename = "reqSigs")]
@@ -629,7 +698,16 @@ impl ScriptPubKey {
 }
 
 /// The scriptSig of a transaction input.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct ScriptSig {
     /// The asm.
     asm: String,
@@ -640,7 +718,16 @@ pub struct ScriptSig {
 /// A Sprout JoinSplit of a transaction.
 #[allow(clippy::too_many_arguments)]
 #[serde_with::serde_as]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct JoinSplit {
     /// Public input value in ZEC.
     #[serde(rename = "vpub_old")]
@@ -656,6 +743,7 @@ pub struct JoinSplit {
     new_public_value_zat: i64,
     /// Merkle root of the Sprout note commitment tree.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input notes.
@@ -666,11 +754,13 @@ pub struct JoinSplit {
     commitments: Vec<[u8; 32]>,
     /// The onetime public key used to encrypt the ciphertexts
     #[serde(rename = "onetimePubKey")]
+    #[schemars(with = "String")]
     #[serde(with = "hex")]
     #[getter(copy)]
     one_time_pubkey: [u8; 32],
     /// The random seed
     #[serde(rename = "randomSeed")]
+    #[schemars(with = "String")]
     #[serde(with = "hex")]
     #[getter(copy)]
     random_seed: [u8; 32],
@@ -679,6 +769,7 @@ pub struct JoinSplit {
     macs: Vec<[u8; 32]>,
     /// A zero-knowledge proof using the Sprout circuit.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     proof: Vec<u8>,
     /// The output notes ciphertexts.
     #[serde_as(as = "Vec<serde_with::hex::Hex>")]
@@ -686,30 +777,46 @@ pub struct JoinSplit {
 }
 
 /// A Sapling spend of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(skip)]
     cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input note.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     nullifier: [u8; 32],
     /// The randomized public key for spendAuthSig.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     rk: [u8; 32],
     /// A zero-knowledge proof using the Sapling Spend circuit.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     proof: [u8; 192],
     /// A signature authorizing this Spend.
     #[serde(rename = "spendAuthSig", with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     spend_auth_sig: [u8; 64],
 }
@@ -723,26 +830,42 @@ impl ShieldedSpend {
 }
 
 /// A Sapling output of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(skip)]
     cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
+    #[schemars(with = "String")]
     cm_u: [u8; 32],
     /// A Jubjub public key.
     #[serde(rename = "ephemeralKey", with = "hex")]
+    #[schemars(with = "String")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
+    #[schemars(with = "String")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "outCiphertext", with = "hex")]
+    #[schemars(with = "String")]
     out_ciphertext: [u8; 80],
     /// A zero-knowledge proof using the Sapling Output circuit.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     proof: [u8; 192],
 }
 
@@ -756,7 +879,16 @@ impl ShieldedOutput {
 
 /// Object with Orchard-specific information.
 #[serde_with::serde_as]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -787,7 +919,16 @@ pub struct Orchard {
 }
 
 /// Object with Orchard-specific information.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct OrchardFlags {
     /// Whether Orchard outputs are enabled.
     #[serde(rename = "enableOutputs")]
@@ -799,31 +940,49 @@ pub struct OrchardFlags {
 
 /// The Orchard action of a transaction.
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     cv: [u8; 32],
     /// The nullifier of the input note.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     nullifier: [u8; 32],
     /// The randomized validating key for spendAuthSig.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     rk: [u8; 32],
     /// The x-coordinate of the note commitment for the output note.
     #[serde(rename = "cmx", with = "hex")]
+    #[schemars(with = "String")]
     cm_x: [u8; 32],
     /// An encoding of an ephemeral Pallas public key.
     #[serde(rename = "ephemeralKey", with = "hex")]
+    #[schemars(with = "String")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
+    #[schemars(with = "String")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]
+    #[schemars(with = "String")]
     spend_auth_sig: [u8; 64],
     /// A signature authorizing the spend in this Action.
     #[serde(rename = "outCiphertext", with = "hex")]
+    #[schemars(with = "String")]
     out_ciphertext: [u8; 80],
 }
 
