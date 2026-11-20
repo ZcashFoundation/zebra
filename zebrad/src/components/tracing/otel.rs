@@ -17,12 +17,45 @@
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
-    trace::{RandomIdGenerator, Sampler, SdkTracerProvider},
+    trace::{RandomIdGenerator, Sampler, SdkTracer, SdkTracerProvider},
     Resource,
 };
-use tracing::Subscriber;
+use tracing::{Level, Metadata, Subscriber};
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::{registry::LookupSpan, Layer};
+use tracing_subscriber::{filter::filter_fn, registry::LookupSpan, Layer};
+
+/// The spans exported as traces, as `(crate, span name)` pairs.
+///
+/// Each one covers a single bounded operation, such as a peer connection attempt or request.
+/// Zebra's other INFO spans, such as `sync`, `crawl`, and the per-connection and global spans,
+/// last as long as the process or a connection, so a trace under them would never end, and
+/// every span below them would share their one sampling decision.
+const EXPORTED_SPANS: &[(&str, &str)] = &[
+    ("zebra_network", "dial"),
+    ("zebra_network", "connector"),
+    ("zebra_network", "accept_inbound_handshake"),
+    ("zebra_network", "msg_as_req"),
+    ("zebrad", "inbound"),
+    ("zebrad", "mempool"),
+    ("zebra_consensus", "checkpoint"),
+    ("zebra_rpc", "rpc_request"),
+    ("zebra_rpc", "lightwalletd_grpc_request"),
+];
+
+/// Returns `true` if the OpenTelemetry layer should see this span or event.
+///
+/// Spans not in [`EXPORTED_SPANS`] are hidden from the layer, so a span exported under one of
+/// them starts its own trace. Events are exported only at WARN and above, attached to the
+/// exported span they happen in.
+fn is_exported(metadata: &Metadata<'_>) -> bool {
+    if metadata.is_event() {
+        return *metadata.level() <= Level::WARN;
+    }
+
+    let krate = metadata.target().split("::").next().unwrap_or_default();
+
+    EXPORTED_SPANS.contains(&(krate, metadata.name()))
+}
 
 /// Error type for OpenTelemetry layer initialization.
 pub type OtelError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -99,8 +132,94 @@ where
         .with_resource(resource)
         .build();
 
-    let tracer = provider.tracer(service_name.to_owned());
-    let layer = OpenTelemetryLayer::new(tracer);
+    let layer = exporting_layer(provider.tracer(service_name.to_owned()));
 
     Ok((Some(layer), Some(provider)))
+}
+
+/// Returns a layer that exports the spans and events [`is_exported`] selects to `tracer`.
+fn exporting_layer<S>(tracer: SdkTracer) -> impl Layer<S>
+where
+    S: Subscriber + for<'span> LookupSpan<'span>,
+{
+    // Zebra doesn't read the OpenTelemetry context, so activating it on every span enter, and
+    // recording thread and idle time attributes, would only add cost.
+    OpenTelemetryLayer::new(tracer)
+        .with_threads(false)
+        .with_tracked_inactivity(false)
+        .with_context_activation(false)
+        .with_filter(filter_fn(is_exported).with_max_level_hint(Level::INFO))
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::trace::SpanId;
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SpanData};
+    use tracing::{info, info_span, warn};
+    use tracing_subscriber::{layer::SubscriberExt, Registry};
+
+    use super::*;
+
+    /// Runs `work` under a subscriber with only the exporting layer, and returns the exported
+    /// spans.
+    fn export(sampler: Sampler, work: impl FnOnce()) -> Vec<SpanData> {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .with_sampler(sampler)
+            .build();
+        let subscriber = Registry::default().with(exporting_layer(provider.tracer("test")));
+
+        tracing::subscriber::with_default(subscriber, work);
+
+        provider.force_flush().expect("in-memory export can't fail");
+        exporter
+            .get_finished_spans()
+            .expect("in-memory export can't fail")
+    }
+
+    /// Runs `requests` inside process-long spans, like the global span and `sync`.
+    fn under_long_lived_spans(requests: impl FnOnce()) {
+        let _global = tracing::error_span!("", net = "Main").entered();
+        let _sync = tracing::info_span!(target: "zebrad::components::sync", "sync").entered();
+
+        requests();
+    }
+
+    fn request() {
+        let _req = info_span!(target: "zebra_network::peer::connection", "msg_as_req").entered();
+        info!("not exported");
+        warn!("exported");
+    }
+
+    #[test]
+    fn exports_only_operation_spans_as_roots() {
+        let spans = export(Sampler::AlwaysOn, || under_long_lived_spans(request));
+
+        let [span] = spans.as_slice() else {
+            panic!("expected only the request span, got {spans:?}");
+        };
+        assert_eq!(span.name, "msg_as_req");
+        assert_eq!(span.parent_span_id, SpanId::INVALID);
+
+        let events: Vec<_> = span.events.iter().map(|event| &event.name).collect();
+        assert_eq!(events, ["exported"]);
+    }
+
+    #[test]
+    fn samples_each_operation_separately() {
+        const REQUESTS: usize = 1000;
+
+        let spans = export(Sampler::TraceIdRatioBased(0.5), || {
+            under_long_lived_spans(|| (0..REQUESTS).for_each(|_| request()))
+        });
+
+        // With one decision per process, this would be 0 or 1000. The bounds are about 10
+        // standard deviations from the mean, so the test doesn't flake.
+        assert!(
+            (340..=660).contains(&spans.len()),
+            "{} of {REQUESTS} requests were sampled",
+            spans.len(),
+        );
+    }
 }
