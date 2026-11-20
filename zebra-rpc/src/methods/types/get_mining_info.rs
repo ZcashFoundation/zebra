@@ -6,7 +6,16 @@ use zebra_chain::parameters::Network;
 
 /// Response to a `getmininginfo` RPC request.
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
 )]
 pub struct GetMiningInfoResponse {
     /// The current tip height.

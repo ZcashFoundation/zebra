@@ -15,7 +15,17 @@ pub type SubtreeRpcData = NoteCommitmentSubtreeData<String>;
 ///
 /// Contains the Sapling or Orchard pool label, the index of the first subtree in the list,
 /// and a list of subtree roots and end heights.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetSubtreesByIndexResponse {
     /// The shielded pool to which the subtrees belong.
     //
@@ -61,12 +71,23 @@ impl Default for GetSubtreesByIndexResponse {
 /// whereas in `CommitmentTree`, the vector of ommers is sparse with [`None`] values in the gaps.
 ///
 /// The dense format might be used in future RPCs.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetTreestateResponse {
     /// The block hash corresponding to the treestate.
     ///
     /// Stored as a raw [`struct@Hash`]; serialized to JSON as a hex-encoded string.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     hash: Hash,
 
@@ -166,7 +187,17 @@ impl Default for GetTreestateResponse {
 /// A treestate that is included in the [`z_gettreestate`][1] RPC response.
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Treestate {
     /// The Orchard or Sapling note commitment tree, stored as raw bytes and
     /// serialized to JSON as hex-encoded strings (see [`Commitments`]).
@@ -206,7 +237,17 @@ impl Default for Treestate {
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[serde_with::serde_as]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Commitments {
     /// The raw bytes of the Orchard or Sapling note commitment tree root.
     ///

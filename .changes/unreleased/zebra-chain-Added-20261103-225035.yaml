@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: '`block::Hash`, `block::Height`, `amount::Amount`, `serialization::DateTime32`, `transparent::OutputIndex`, `transparent::Script`, `transparent::Address` and `parameters::NetworkUpgrade` implement `schemars::JsonSchema`.'
+time: 2026-11-03T22:50:35.000000000Z
