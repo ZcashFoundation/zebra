@@ -41,6 +41,20 @@ impl PruningWitness {
         let Some(activation) = NetworkUpgrade::Nu5.activation_height(&network) else {
             return Ok(None);
         };
+        // A committed, matching checkpoint authenticates its entire ancestor chain, even before
+        // NU5 has supplied a transaction branch ID. Only use pre-NU5 checkpoints: beyond NU5
+        // the startup legacy-chain check still needs a retained branch-ID witness.
+        let checkpoints = network.checkpoint_list();
+        if activation > Height(1) {
+            let upper = tip.0.min(Height(activation.0 - 1));
+            if upper >= Height(1) {
+                if let Some(height) = checkpoints.max_height_in_range(Height(1)..=upper) {
+                    if db.hash(height) == checkpoints.hash(height) {
+                        self.height = Some(self.height.unwrap_or(Height(1)).max(height));
+                    }
+                }
+            }
+        }
         let ancestors = block_iter::known_chain_ancestor_iter::<Block>(None, db, tip.1.into());
         // A branchless suffix is valid. Bound the initial search, then inspect only new blocks;
         // no witness means keeping the bodies, not rejecting the verified chain.

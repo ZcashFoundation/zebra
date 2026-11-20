@@ -231,6 +231,112 @@ fn pruning_without_a_restart_witness_waits_without_mutation() {
 }
 
 #[test]
+fn a_committed_pre_nu5_checkpoint_allows_pruning_and_legacy_restart() {
+    use zebra_chain::parameters::testnet::{
+        ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters,
+    };
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    };
+    let regtest = |checkpoints| {
+        Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                nu5: Some(6),
+                ..Default::default()
+            },
+            checkpoints,
+            ..Default::default()
+        })
+    };
+    let network = regtest(None);
+    let state = populated_with_network(&config, &network, None, Height(9));
+    let checkpoint_hash = state.db.hash(Height(4)).unwrap();
+    let later_checkpoint_hash = state.db.hash(Height(8)).unwrap();
+    drop(state);
+    let mismatched = regtest(Some(ConfiguredCheckpoints::HeightsAndHashes(vec![
+        (Height(0), network.genesis_hash()),
+        (Height(4), zebra_chain::block::Hash([43; 32])),
+    ])));
+    let state = FinalizedState::new_with_debug(&config, &mismatched, true, false).unwrap();
+    state.db.mark_ready_for_pruning();
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(
+        batch
+            .prepare_history_pruning(
+                &state.db,
+                Height(9),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
+            .unwrap(),
+        None
+    );
+    assert_eq!(batch, DiskWriteBatch::new());
+    drop(state);
+
+    let network = regtest(Some(ConfiguredCheckpoints::HeightsAndHashes(vec![
+        (Height(0), network.genesis_hash()),
+        (Height(4), checkpoint_hash),
+        (Height(8), later_checkpoint_hash),
+    ])));
+    let state = FinalizedState::new_with_debug(&config, &network, true, false).unwrap();
+    state.db.mark_ready_for_pruning();
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(
+        batch
+            .prepare_history_pruning(
+                &state.db,
+                Height(9),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
+            .unwrap(),
+        Some(Height(4))
+    );
+    state.db.write(batch).unwrap();
+    assert_eq!(
+        state.db.block(Height(1).into()).unwrap_err(),
+        crate::BlockReadError::BlockBodyUnavailable { height: Height(1) }
+    );
+    assert!(state.db.block(Height(4).into()).unwrap().is_some());
+    drop(state);
+
+    let reopened = FinalizedState::new_with_debug(&config, &network, true, true).unwrap();
+    assert_eq!(
+        reopened
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        Height(4)
+    );
+    let ancestors = crate::service::block_iter::known_chain_ancestor_iter::<Block>(
+        None,
+        &reopened.db,
+        Height(9).into(),
+    );
+    assert_eq!(
+        crate::service::check::legacy_chain(
+            Height(6),
+            ancestors,
+            &network,
+            crate::constants::MAX_LEGACY_CHAIN_BLOCKS
+        )
+        .unwrap(),
+        None
+    );
+}
+
+#[test]
 fn invalid_pruning_retention_does_not_create_a_cache_directory() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
@@ -1103,11 +1209,7 @@ fn populated_with_witness(
     witness_height: Height,
     tip_height: Height,
 ) -> FinalizedState {
-    use zebra_chain::{
-        parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
-        transaction::{LockTime, Transaction},
-        transparent::Input,
-    };
+    use zebra_chain::parameters::testnet::ConfiguredActivationHeights;
 
     let network = Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
         activation_heights: ConfiguredActivationHeights {
@@ -1116,24 +1218,34 @@ fn populated_with_witness(
         },
         ..Default::default()
     });
+    populated_with_network(config, &network, Some(witness_height), tip_height)
+}
+
+fn populated_with_network(
+    config: &Config,
+    network: &Network,
+    witness_height: Option<Height>,
+    tip_height: Height,
+) -> FinalizedState {
+    use zebra_chain::{
+        parameters::NetworkUpgrade,
+        transaction::{LockTime, Transaction},
+        transparent::Input,
+    };
     let config = Config {
         prune_blocks_older_than: Some(10_000),
         ..config.clone()
     };
-    let state = FinalizedState::new_with_debug(&config, &network, true, false).unwrap();
+    let state = FinalizedState::new_with_debug(&config, network, true, false).unwrap();
     state
         .db
         .update_format_version_on_disk(&state.db.format_version_in_code())
         .unwrap();
-    let mut header: zebra_chain::block::Header = zebra_test::vectors::DUMMY_HEADER
-        .as_slice()
-        .zcash_deserialize_into()
-        .unwrap();
+    let genesis = zebra_chain::block::genesis::regtest_genesis_block();
+    let mut header = *genesis.header;
     let mut batch = DiskWriteBatch::new();
     let cf = |name| state.db.cf_handle(name).unwrap();
-    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
+    assert_eq!(genesis.hash(), network.genesis_hash());
     for height in 0..=tip_height.0 {
         let height = Height(height);
         let inputs = vec![Input::Coinbase {
@@ -1148,17 +1260,21 @@ fn populated_with_witness(
             },
             sequence: u32::MAX,
         }];
-        let tx = Arc::new(if height == witness_height {
-            Transaction::test_v5(
-                NetworkUpgrade::current(&network, height),
-                inputs,
-                vec![],
-                LockTime::unlocked(),
-                height,
-            )
+        let tx = if height.is_min() {
+            genesis.transactions[0].clone()
         } else {
-            Transaction::test_v4(inputs, vec![], LockTime::unlocked(), height)
-        });
+            Arc::new(if witness_height == Some(height) {
+                Transaction::test_v5(
+                    NetworkUpgrade::current(network, height),
+                    inputs,
+                    vec![],
+                    LockTime::unlocked(),
+                    height,
+                )
+            } else {
+                Transaction::test_v4(inputs, vec![], LockTime::unlocked(), height)
+            })
+        };
         header.merkle_root = std::iter::once(tx.hash()).collect();
         let hash = header.hash();
         let location = TransactionLocation::from_usize(height, 0);

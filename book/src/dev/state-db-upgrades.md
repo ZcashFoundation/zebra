@@ -267,10 +267,11 @@ spending-index conversion, and detailed format checks finish successfully. The e
 Read-only instances and skipped or cancelled checks never open the pruning gate.
 
 Restart checks still search at most 100,000 blocks for observed transaction branch IDs. Missing
-history is not evidence of a valid branch. Pruning caches a matching witness and checks new finalized
-blocks without rescanning a branchless suffix. Its initial search is bounded to 100,000 blocks;
-without a witness it waits without deleting bodies or rejecting the chain. Deletion preserves the
-witness even when it is older than the requested retention window.
+history is not evidence of a valid branch. Pruning also accepts a committed pre-NU5 checkpoint
+whose hash matches the configured list, and retains that block's body.
+It caches the witness and checks new finalized blocks without rescanning a branchless suffix.
+The initial branch-ID search is bounded to 100,000 blocks; without either witness it waits without
+deleting bodies or rejecting the chain, even beyond the requested retention window.
 With `state.prune_blocks_older_than` set, one state-owned worker starts pruning after this gate
 opens, wakes at startup and on finalized-tip changes, and deletes at most 100 heights per batch.
 Only transaction bodies are deleted; genesis is retained. The retained floor is derived from

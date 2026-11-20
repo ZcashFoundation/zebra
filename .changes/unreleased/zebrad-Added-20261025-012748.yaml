@@ -24,8 +24,9 @@ body: >-
   they announced or that no archive peer can provide. Pruning rejects zcashd sidecars.
   Limited nodes answer `notfound` for blocks more than 2,304 below their tip, and pruned nodes
   for unavailable bodies; block inventory stops at missing history while headers remain
-  available. Pruning retains a restart witness and waits without deleting bodies when
-  a bounded search finds none; valid branchless suffixes do not stop the running node.
+  available. Pruning retains a restart witness: a matching pre-NU5 checkpoint or a transaction
+  branch ID after NU5. It waits without deleting bodies when a bounded search finds neither;
+  valid branchless suffixes do not stop the running node.
   Monitor the retained floor, deleted heights, and batch latency through
   `state.pruning.retained.height`, `state.pruning.deleted.height.count`, and
   `state.pruning.batch.duration_seconds`.
