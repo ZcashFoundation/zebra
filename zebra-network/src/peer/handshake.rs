@@ -804,8 +804,8 @@ where
 
     // # Security
     //
-    // While syncing, require `NODE_NETWORK` from outbound peers: peers without it can't serve
-    // us historic blocks, but still occupy outbound slots and receive syncer block requests.
+    // While syncing, require `NODE_NETWORK` without `NODE_PRUNED` from outbound peers: other
+    // peers can't serve us historic blocks, but still occupy outbound slots and receive syncer block requests.
     // When many reachable listeners are non-serving, those slots can fill up and stall a fresh
     // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
     // initial block download.
@@ -815,7 +815,7 @@ where
     // connections are always exempt, so light clients can still connect to us.
     if is_syncing
         && matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
-        && !remote.services.contains(PeerServices::NODE_NETWORK)
+        && !remote.services.serves_full_history()
     {
         debug!(
             remote_ip = ?their_addr,
