@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Peers that relay transactions with duplicate spends or nullifiers, or an out-of-range expiry height, are now penalized, as in zcashd.
+time: 2026-11-15T18:57:33.987447378+01:00
