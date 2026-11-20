@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use zcash_script::{
     interpreter::{CallbackTransactionSignatureChecker, Flags},
-    opcode::{Operation, PossiblyBad},
+    opcode::PossiblyBad,
     script::{self, Evaluable as _},
     Opcode,
 };
@@ -332,56 +332,8 @@ impl Sigops for zcash_primitives::transaction::Transaction {
 }
 
 /// Counts the signature operations in `script` like zcashd's `CScript::GetSigOpCount(false)`.
-///
-/// zcashd reads opcodes with `GetOp` and applies no execution limits. This function therefore
-/// counts sigops after pushes larger than the 520-byte execution limit, which output scripts can
-/// contain because creating an output never executes its script. Every `CHECKMULTISIG` counts as
-/// the maximum key count. A truncated push ends the count, like a `GetOp` failure.
-pub fn legacy_sigop_count(mut script: &[u8]) -> u32 {
-    // `Operation` is `repr(u8)`, so each cast yields the opcode byte.
-    const CHECKSIG: u8 = Operation::OP_CHECKSIG as u8;
-    const CHECKSIGVERIFY: u8 = Operation::OP_CHECKSIGVERIFY as u8;
-    const CHECKMULTISIG: u8 = Operation::OP_CHECKMULTISIG as u8;
-    const CHECKMULTISIGVERIFY: u8 = Operation::OP_CHECKMULTISIGVERIFY as u8;
-    /// zcashd's `MAX_PUBKEYS_PER_MULTISIG`.
-    const MAX_PUBKEYS_PER_MULTISIG: u32 = 20;
-
-    let mut count: u32 = 0;
-    while let Some((&opcode, rest)) = script.split_first() {
-        let Some(rest) = skip_push_data(opcode, rest) else {
-            break;
-        };
-        script = rest;
-        count = count.saturating_add(match opcode {
-            CHECKSIG | CHECKSIGVERIFY => 1,
-            CHECKMULTISIG | CHECKMULTISIGVERIFY => MAX_PUBKEYS_PER_MULTISIG,
-            _ => 0,
-        });
-    }
-    count
-}
-
-/// Returns `script` after the push data of `opcode`, or `None` if the push data is truncated.
-///
-/// `script` starts after `opcode`. Opcodes that push no data return `script` unchanged.
-fn skip_push_data(opcode: u8, script: &[u8]) -> Option<&[u8]> {
-    /// Splits a little-endian length of `N` bytes off the front of `script`.
-    fn length<const N: usize>(script: &[u8]) -> Option<(usize, &[u8])> {
-        let (length, rest) = script.split_first_chunk::<N>()?;
-        let mut bytes = [0; 4];
-        bytes[..N].copy_from_slice(length);
-        Some((usize::try_from(u32::from_le_bytes(bytes)).ok()?, rest))
-    }
-
-    let (length, script) = match opcode {
-        // Direct pushes of 0 to 75 bytes, then OP_PUSHDATA1, OP_PUSHDATA2, and OP_PUSHDATA4.
-        0x00..=0x4b => (usize::from(opcode), script),
-        0x4c => length::<1>(script)?,
-        0x4d => length::<2>(script)?,
-        0x4e => length::<4>(script)?,
-        _ => (0, script),
-    };
-    script.get(length..)
+pub fn legacy_sigop_count(script: &[u8]) -> u32 {
+    script::Code(script.to_vec()).sig_op_count(false)
 }
 
 /// Extract the redeem script bytes from a P2SH scriptSig.
