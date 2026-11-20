@@ -340,7 +340,7 @@ These power the Monitor tab and can be scraped by Prometheus for Grafana dashboa
 
 ### High memory usage
 
-1. Reduce sampling: `OTEL_TRACES_SAMPLER_ARG=10`
+1. Reduce sampling: `OTEL_TRACES_SAMPLER=traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1`
 2. Restart Jaeger to clear memory
 3. Consider using external storage for production
 

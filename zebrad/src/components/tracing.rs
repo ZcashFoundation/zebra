@@ -221,9 +221,10 @@ pub struct InnerConfig {
     ///
     /// Lower values reduce network/collector overhead for busy nodes.
     ///
-    /// Note: This differs from the standard `OTEL_TRACES_SAMPLER_ARG` which uses
-    /// a ratio (0.0-1.0). Zebra uses percentage (0-100) for consistency with
-    /// other integer-based configuration options.
+    /// When `None` (default), the standard `OTEL_TRACES_SAMPLER` and
+    /// `OTEL_TRACES_SAMPLER_ARG` environment variables choose the sampler, and every
+    /// trace is sampled if they are unset. Unlike this setting, `OTEL_TRACES_SAMPLER_ARG`
+    /// is a ratio between 0.0 and 1.0, and only applies when `OTEL_TRACES_SAMPLER` is set.
     pub opentelemetry_sample_percent: Option<u8>,
 }
 

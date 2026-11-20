@@ -69,7 +69,9 @@ pub type OtelError = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
 /// * `endpoint` - OTLP HTTP endpoint URL (e.g., "http://localhost:4318")
 /// * `service_name` - Service name for traces (defaults to "zebra")
-/// * `sample_percent` - Sampling percentage between 0 and 100 (defaults to 100)
+/// * `sample_percent` - Sampling percentage between 0 and 100. If `None`, the sampler is read
+///   from the standard `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` environment
+///   variables, and every trace is sampled if they are unset.
 ///
 /// # Errors
 ///
@@ -97,8 +99,6 @@ where
     };
 
     let service_name = service_name.unwrap_or("zebra");
-    // Convert percentage (0-100) to rate (0.0-1.0), clamped to valid range
-    let sample_rate = f64::from(sample_percent.unwrap_or(100).min(100)) / 100.0;
 
     // Build the HTTP exporter with blocking client.
     // This works without an async runtime because:
@@ -110,31 +110,91 @@ where
         .with_endpoint(&endpoint)
         .build()?;
 
-    // Use ratio-based sampling for production flexibility
-    let sampler = if sample_rate >= 1.0 {
-        Sampler::AlwaysOn
-    } else if sample_rate <= 0.0 {
-        Sampler::AlwaysOff
-    } else {
-        Sampler::TraceIdRatioBased(sample_rate)
-    };
-
     let resource = Resource::builder()
         .with_service_name(service_name.to_owned())
         .build();
 
     // Use batch exporter - it spawns its own dedicated background thread
     // for collecting and exporting spans, so it doesn't need an external runtime
-    let provider = SdkTracerProvider::builder()
+    let mut provider = SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
-        .with_sampler(sampler)
         .with_id_generator(RandomIdGenerator::default())
-        .with_resource(resource)
-        .build();
+        .with_resource(resource);
+
+    // The builder starts from the sampler in the standard environment variables, so only a
+    // configured percentage replaces it.
+    if let Some(sample_percent) = sample_percent {
+        provider = provider.with_sampler(sampler_for_percent(sample_percent));
+    }
+
+    let provider = provider.build();
 
     let layer = exporting_layer(provider.tracer(service_name.to_owned()));
 
     Ok((Some(layer), Some(provider)))
+}
+
+/// Returns the sampler for a percentage of traces, treating values above 100 as 100.
+fn sampler_for_percent(sample_percent: u8) -> Sampler {
+    match sample_percent {
+        0 => Sampler::AlwaysOff,
+        100.. => Sampler::AlwaysOn,
+        percent => Sampler::TraceIdRatioBased(f64::from(percent) / 100.0),
+    }
+}
+
+/// Returns the sampler Zebra uses, as the OpenTelemetry SDK describes it.
+///
+/// A configured percentage replaces the sampler in the standard environment variables.
+pub(super) fn sampler_description(sample_percent: Option<u8>) -> String {
+    match sample_percent {
+        Some(percent) => format!("{:?}", sampler_for_percent(percent)),
+        // The SDK reads the environment variables when it builds its default configuration.
+        None => format!("{:?}", opentelemetry_sdk::trace::Config::default().sampler),
+    }
+}
+
+/// Returns why the standard sampler environment variables won't sample as an operator
+/// probably intended, if they won't.
+///
+/// The SDK warns about some of these itself, but before Zebra installs its logs, so those
+/// warnings are lost.
+pub(super) fn sampler_env_problem(
+    sampler: Option<&str>,
+    arg: Option<&str>,
+) -> Option<&'static str> {
+    const RATIO_SAMPLERS: [&str; 2] = ["traceidratio", "parentbased_traceidratio"];
+    const OTHER_SAMPLERS: [&str; 4] = [
+        "always_on",
+        "always_off",
+        "parentbased_always_on",
+        "parentbased_always_off",
+    ];
+
+    match sampler {
+        None if arg.is_some() => Some(
+            "OTEL_TRACES_SAMPLER_ARG applies only when OTEL_TRACES_SAMPLER is set, \
+             so every trace is sampled",
+        ),
+        None => None,
+        Some(sampler) if RATIO_SAMPLERS.contains(&sampler) => {
+            match arg.and_then(|arg| arg.parse::<f64>().ok()) {
+                None => Some(
+                    "OTEL_TRACES_SAMPLER_ARG is missing or not a number, \
+                     so every trace is sampled",
+                ),
+                Some(ratio) if !(0.0..=1.0).contains(&ratio) => {
+                    Some("OTEL_TRACES_SAMPLER_ARG is a ratio from 0.0 to 1.0, not a percentage")
+                }
+                Some(_) => None,
+            }
+        }
+        Some(sampler) if OTHER_SAMPLERS.contains(&sampler) => None,
+        Some(_) => Some(
+            "OTEL_TRACES_SAMPLER is not a sampler this OpenTelemetry SDK supports, \
+             so every trace is sampled unless its remote parent was not",
+        ),
+    }
 }
 
 /// Returns a layer that exports the spans and events [`is_exported`] selects to `tracer`.
@@ -190,6 +250,61 @@ mod tests {
         let _req = info_span!(target: "zebra_network::peer::connection", "msg_as_req").entered();
         info!("not exported");
         warn!("exported");
+    }
+
+    #[test]
+    fn sampler_env_problems() {
+        let cases = [
+            (None, None, false),
+            (None, Some("10"), true),
+            (Some("always_off"), None, false),
+            (Some("parentbased_always_on"), Some("0.5"), false),
+            (Some("traceidratio"), Some("0.1"), false),
+            (Some("traceidratio"), Some("1"), false),
+            (Some("parentbased_traceidratio"), Some("0"), false),
+            (Some("traceidratio"), None, true),
+            (Some("traceidratio"), Some("10%"), true),
+            (Some("traceidratio"), Some("10"), true),
+            (Some("ratio"), Some("0.1"), true),
+        ];
+
+        for (sampler, arg, has_problem) in cases {
+            assert_eq!(
+                sampler_env_problem(sampler, arg).is_some(),
+                has_problem,
+                "OTEL_TRACES_SAMPLER={sampler:?} OTEL_TRACES_SAMPLER_ARG={arg:?}",
+            );
+        }
+    }
+
+    /// Changes the process environment, which only this test reads. Nextest runs each test in
+    /// its own process.
+    #[test]
+    fn sampler_comes_from_env_unless_percent_is_configured() {
+        let with_env = |sampler: &str, arg: &str, sample_percent| {
+            std::env::set_var("OTEL_TRACES_SAMPLER", sampler);
+            std::env::set_var("OTEL_TRACES_SAMPLER_ARG", arg);
+            sampler_description(sample_percent)
+        };
+
+        assert_eq!(with_env("always_off", "", None), "AlwaysOff");
+        assert_eq!(
+            with_env("traceidratio", "0.25", None),
+            "TraceIdRatioBased(0.25)"
+        );
+        assert_eq!(
+            with_env("parentbased_traceidratio", "0", None),
+            "ParentBased(TraceIdRatioBased(0.0))"
+        );
+        assert_eq!(
+            with_env("traceidratio", "0.25", Some(10)),
+            "TraceIdRatioBased(0.1)"
+        );
+        assert_eq!(with_env("always_on", "", Some(0)), "AlwaysOff");
+
+        std::env::remove_var("OTEL_TRACES_SAMPLER");
+        std::env::remove_var("OTEL_TRACES_SAMPLER_ARG");
+        assert_eq!(sampler_description(None), "ParentBased(AlwaysOn)");
     }
 
     #[test]

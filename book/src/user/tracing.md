@@ -38,6 +38,19 @@ Official Zebra release builds include OpenTelemetry support. Export is disabled
 until you configure an OpenTelemetry endpoint using the tracing config or the
 `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
 
+Zebra starts a trace for each peer connection attempt, inbound handshake,
+request from a peer, checkpoint verification, and RPC or gRPC request. An
+inbound or mempool request appears inside the trace of the peer request that
+made it. Only WARN and ERROR log events are attached to these spans.
+Long-running spans, such as the syncer and the peer crawler, aren't exported.
+
+Zebra reads the standard `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG`
+environment variables. For example, `OTEL_TRACES_SAMPLER=traceidratio` and
+`OTEL_TRACES_SAMPLER_ARG=0.1` export 10% of traces. The
+[`opentelemetry_sample_percent`][otel_sample_percent] config option, or
+`ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT`, sets a percentage instead and
+takes precedence. Without either, Zebra exports every trace.
+
 ## Sentry Production Monitoring
 
 Official Zebra release builds include Sentry support. Sentry is only activated
@@ -158,6 +171,7 @@ no function names or source locations.
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
 [flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph
 [flamegraphs]: http://www.brendangregg.com/flamegraphs.html
+[otel_sample_percent]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.opentelemetry_sample_percent
 [systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
 [use_journald]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.use_journald
 [sentry]: https://sentry.io/welcome/

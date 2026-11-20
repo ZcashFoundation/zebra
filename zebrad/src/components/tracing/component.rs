@@ -253,17 +253,22 @@ impl Tracing {
                 .opentelemetry_service_name
                 .clone()
                 .or_else(|| std::env::var("OTEL_SERVICE_NAME").ok());
-            let sample_percent = config.opentelemetry_sample_percent.or_else(|| {
-                std::env::var("OTEL_TRACES_SAMPLER_ARG")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-            });
+            let sample_percent = config.opentelemetry_sample_percent;
 
-            // Capture resolved values for logging
+            // Capture resolved values for logging once the subscriber is installed
+            let sampler_problem = if sample_percent.is_none() {
+                super::otel::sampler_env_problem(
+                    std::env::var("OTEL_TRACES_SAMPLER").ok().as_deref(),
+                    std::env::var("OTEL_TRACES_SAMPLER_ARG").ok().as_deref(),
+                )
+            } else {
+                None
+            };
             let resolved_config = (
                 endpoint.clone(),
                 service_name.clone().unwrap_or_else(|| "zebra".to_string()),
-                sample_percent.unwrap_or(100),
+                super::otel::sampler_description(sample_percent),
+                sampler_problem,
             );
 
             match super::otel::layer(endpoint.as_deref(), service_name.as_deref(), sample_percent) {
@@ -334,13 +339,17 @@ impl Tracing {
         // Log OpenTelemetry status
         #[cfg(feature = "opentelemetry")]
         if otel_provider.is_some() {
-            let (ref endpoint, ref service_name, sample_percent) = otel_resolved_config;
+            let (ref endpoint, ref service_name, ref sampler, sampler_problem) =
+                otel_resolved_config;
             info!(
                 ?endpoint,
                 %service_name,
-                sample_percent,
+                %sampler,
                 "installed OpenTelemetry tracing layer",
             );
+            if let Some(problem) = sampler_problem {
+                warn!(%sampler, "{problem}");
+            }
         }
 
         // Warning if OpenTelemetry is configured but feature not compiled
