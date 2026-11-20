@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Removed
+body: Removed the ZALLET build-time step that cloned and built zcash/wallet
+time: 2026-11-06T08:15:14.6061015+07:00
