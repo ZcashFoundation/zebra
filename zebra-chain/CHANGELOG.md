@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.1.0] - 2026-11-20
+
+### Added
+
+- Added `ChainTip::best_tip_changed_at`, which returns when the current best tip was published if its hash matches, with a default implementation that returns `None`.
+
 ## [16.0.0] - 2026-11-16
 
 ### Breaking Changes

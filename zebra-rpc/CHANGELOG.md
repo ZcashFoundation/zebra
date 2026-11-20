@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [21.0.0] - 2026-11-20
+
+### Breaking Changes
+
+- `client::GetBlockchainInfoResponse::new` and `methods::BlockObject::new` take a new `nsm_value_balance: Option<GetBlockchainInfoBalance>` parameter after `value_pools`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))
+
+### Added
+
+- Added `client::GetBlockchainInfoBalance::nsm`, which builds the Network Sustainability Mechanism (NSM) value balance entry for a network and height, `monitored` from the block before NU7 activation, and the `client::GetBlockchainInfoResponse::nsm_value_balance` and `methods::BlockObject::nsm_value_balance` accessors for the `nsmValueBalance` field of `getblockchaininfo` and verbose `getblock` responses. The accessors return `None` for responses from nodes that do not report `nsmValueBalance`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))
+- Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, and `metrics::LABELS`, which lists the label keys of each labelled metric.
+- Added the `rpc.getblocktemplate.build.duration_seconds` and `rpc.getblocktemplate.first_template.duration_seconds` histograms, and the `rpc.submitblock.outcomes.total` counter with an `outcome` label.
+
 ## [20.0.0] - 2026-11-16
 
 ### Changed

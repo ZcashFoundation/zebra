@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: Added the `tracing.log_format` option. Set it to `"json"`, or set `ZEBRA_TRACING__LOG_FORMAT=json`, to write one JSON object per line, which log collectors such as Google Cloud Logging, Azure Monitor, Grafana Loki, and Datadog read without a custom parser. In JSON mode a panic is written to standard error as one JSON line, whether or not `SENTRY_DSN` is set.
-time: 2026-11-18T19:16:39.114903Z

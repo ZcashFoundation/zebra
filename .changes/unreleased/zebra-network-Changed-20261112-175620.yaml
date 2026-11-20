@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: Changed the `zebra.net.connection.state` gauge updates to build each label with one string allocation instead of two. The gauge keeps its name, labels, and values.
-time: 2026-11-12T17:56:20.10433965Z
