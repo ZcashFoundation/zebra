@@ -144,8 +144,9 @@ compaction. Unexpected deletion failures are fatal, not silently retried.
 Restart checks require retained evidence that the cached chain follows the configured network
 upgrades. After NU5, a matching V5/V6 transaction provides that evidence; the check searches back at
 most 100,000 blocks and refuses to start if missing history prevents it from finding a witness.
-Pruning never deletes the witness needed by this check. It can retain an older suffix than requested
-until a newer witness appears, and does not begin before suitable NU5 evidence exists.
+Pruning retains the V5/V6 witness needed by this check. A matching committed pre-NU5 checkpoint
+also authenticates its earlier blocks, allowing pruning before NU5 while retaining that checkpoint
+body. Without either witness, an older suffix is kept.
 
 Keep the same `indexer` build-feature setting after pruning. Switching the spending-index layout in
 either direction requires full history and is rejected on pruned state. Future migrations that need

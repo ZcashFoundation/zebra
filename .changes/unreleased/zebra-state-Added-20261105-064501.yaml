@@ -12,4 +12,6 @@ body: >-
   indexes, and required read-only upgrades through `DatabaseAccess`, `ConflictingStateDirectories`,
   `PruningRequiresIsolatedState`, `InvalidPruningRetention`, `PrunedDatabase`,
   `PrunedIndexModeMismatch`, and `ReadOnlyDatabaseNeedsUpgrade`.
+  A matching pre-NU5 checkpoint allows earlier pruning while retaining the checkpoint body for
+  restart checks.
 time: 2026-11-05T06:45:01.13088193+01:00
