@@ -1,22 +1,24 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::{collections::HashSet, pin::Pin, time::Duration};
+use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
 
-use futures::Stream;
+use futures::{future, stream, Stream, StreamExt};
+use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
-use tracing::Span;
+use tracing::{Instrument, Span};
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{
-    ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    BlockReadError, ReadRequest, ReadResponse, ReadState,
+    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
 };
 
 use super::{
-    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
-    Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
+    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockAndHeight, BlockHashAndHeight,
+    BlockRangeRequest, BlockRequest, Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -30,6 +32,24 @@ const RESPONSE_BUFFER_SIZE: usize = 64;
 /// block the listener task indefinitely.
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The number of blocks a `get_block_range` stream queues for its consumer, and reads from the
+/// state at a time. A stream holds at most twice this many, 32 MB at the maximum block size.
+const BLOCK_RANGE_BUFFER_SIZE: usize = 8;
+
+/// [`BLOCK_RANGE_BUFFER_SIZE`] as a state request count.
+//
+// The cast is safe because `BLOCK_RANGE_BUFFER_SIZE` is a small constant that fits in a `u32`.
+const BLOCK_RANGE_CHUNK_SIZE: u32 = BLOCK_RANGE_BUFFER_SIZE as u32;
+
+/// The number of `get_block_range` streams the server serves at once, across all connections.
+///
+/// Together with [`BLOCK_RANGE_BUFFER_SIZE`], this bounds the memory held by open streams at 512 MB
+/// at the maximum block size. A request beyond the limit is refused with `RESOURCE_EXHAUSTED`.
+pub(super) const MAX_BLOCK_RANGE_STREAMS: usize = 16;
+
+/// The stream type returned by `get_block_range`.
+type BlockRangeStream = Pin<Box<dyn Stream<Item = Result<BlockAndHeight, Status>> + Send>>;
+
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
 where
@@ -42,6 +62,7 @@ where
         Pin<Box<dyn Stream<Item = Result<BlockAndHash, Status>> + Send>>;
     type MempoolChangeStream =
         Pin<Box<dyn Stream<Item = Result<MempoolChangeMessage, Status>> + Send>>;
+    type GetBlockRangeStream = BlockRangeStream;
 
     async fn chain_tip_change(
         &self,
@@ -283,6 +304,171 @@ where
             ))),
         }
     }
+
+    async fn get_block_range(
+        &self,
+        request: tonic::Request<BlockRangeRequest>,
+    ) -> Result<Response<Self::GetBlockRangeStream>, Status> {
+        let BlockRangeRequest {
+            start_height,
+            end_height,
+        } = request.into_inner();
+
+        // Invalid ranges are rejected up front, without touching the state.
+        let start = block::Height::try_from(start_height).map_err(|_| {
+            Status::invalid_argument(format!("start height out of range: {start_height}"))
+        })?;
+        let end = block::Height::try_from(end_height).map_err(|_| {
+            Status::invalid_argument(format!("end height out of range: {end_height}"))
+        })?;
+        if end < start {
+            return Err(Status::invalid_argument(format!(
+                "end height {end_height} must not be below start height {start_height}"
+            )));
+        }
+
+        block_range_stream(
+            self.read_state.clone(),
+            &self.block_range_permits,
+            start,
+            end,
+            SEND_TIMEOUT,
+        )
+        .map(Response::new)
+    }
+}
+
+/// Streams the finalized blocks from `start` to `end` inclusive, ending the stream with the status
+/// [`serve_block_range`] returns, if any.
+///
+/// The final status has its own channel, chained after the block channel, so it is delivered after
+/// every queued block even when a slow consumer has filled the block channel.
+///
+/// Each stream holds one of `permits` until it ends. Returns `RESOURCE_EXHAUSTED` without starting
+/// a stream if none is free.
+pub(super) fn block_range_stream<ReadStateService: ReadState>(
+    read_state: ReadStateService,
+    permits: &Arc<Semaphore>,
+    start: block::Height,
+    end: block::Height,
+    send_timeout: Duration,
+) -> Result<BlockRangeStream, Status> {
+    let permit = permits.clone().try_acquire_owned().map_err(|_| {
+        Status::resource_exhausted(format!(
+            "the server is already serving {MAX_BLOCK_RANGE_STREAMS} GetBlockRange streams"
+        ))
+    })?;
+
+    let (block_sender, block_receiver) = mpsc::channel(BLOCK_RANGE_BUFFER_SIZE);
+    let (status_sender, status_receiver) = oneshot::channel();
+
+    tokio::spawn(
+        async move {
+            let _permit = permit;
+            let status =
+                serve_block_range(read_state, start, end, send_timeout, block_sender).await;
+            if let Some(status) = status {
+                let _ = status_sender.send(status);
+            }
+        }
+        .instrument(Span::current()),
+    );
+
+    let status =
+        stream::once(status_receiver).filter_map(|status| future::ready(status.ok().map(Err)));
+
+    Ok(Box::pin(ReceiverStream::new(block_receiver).chain(status)))
+}
+
+/// Sends the finalized blocks from `start` to `end` inclusive to `block_sender`, reading them from
+/// the state in chunks of at most [`BLOCK_RANGE_CHUNK_SIZE`] blocks.
+///
+/// Returns `None` when the range or the finalized tip is reached, or when the consumer has
+/// disconnected. Otherwise returns the status that ends the stream:
+/// - `NOT_FOUND` for a block body at or below the finalized tip that is not stored,
+/// - `RESOURCE_EXHAUSTED` if the consumer doesn't read a block within `send_timeout`,
+/// - `UNAVAILABLE` if the state can't be read.
+async fn serve_block_range<ReadStateService: ReadState>(
+    read_state: ReadStateService,
+    start: block::Height,
+    end: block::Height,
+    send_timeout: Duration,
+    block_sender: mpsc::Sender<Result<BlockAndHeight, Status>>,
+) -> Option<Status> {
+    let block::Height(end) = end;
+    let mut next = start.0;
+    while next <= end {
+        // A client that has gone away costs no further state reads.
+        if block_sender.is_closed() {
+            return None;
+        }
+
+        // `next <= end`, so this can't underflow, and `end` is a valid height, far below
+        // `u32::MAX`, so this can't overflow.
+        let count = (end - next + 1).min(BLOCK_RANGE_CHUNK_SIZE);
+
+        let blocks = match read_state
+            .clone()
+            .oneshot(ReadRequest::RawBlocksByHeightRange {
+                start: block::Height(next),
+                count,
+            })
+            .await
+        {
+            Ok(ReadResponse::RawBlocks(blocks)) => blocks,
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => {
+                if let Some(BlockReadError::BlockBodyUnavailable { height }) =
+                    error.downcast_ref::<BlockReadError>()
+                {
+                    return Some(Status::not_found(format!(
+                        "block body at height {} is not stored",
+                        height.0
+                    )));
+                }
+
+                tracing::error!(?error, "failed to read blocks for get_block_range");
+                return Some(Status::unavailable(format!(
+                    "failed to read blocks: {error}"
+                )));
+            }
+        };
+
+        // The state stops at the finalized tip, so an empty response means `next` is above it. A
+        // short response ends before the tip or a missing body, which the next read tells apart.
+        let Some(&(last_height, _)) = blocks.last() else {
+            break;
+        };
+
+        for (height, data) in blocks {
+            let send = block_sender.send(Ok(BlockAndHeight {
+                height: height.0,
+                data,
+            }));
+            match tokio::time::timeout(send_timeout, send).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {
+                    tracing::info!("client disconnected, dropping get_block_range task");
+                    return None;
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "slow consumer, dropping get_block_range stream after send timed out"
+                    );
+                    return Some(Status::resource_exhausted(format!(
+                        "the client did not read a block for {send_timeout:?}, \
+                         the stream ended before height {}",
+                        height.0
+                    )));
+                }
+            }
+        }
+
+        // The last height is at most `end`, far below `u32::MAX`, so this can't overflow.
+        next = last_height.0 + 1;
+    }
+
+    None
 }
 
 /// Decodes the chain tip hashes from a [`NonFinalizedStateChangeRequest`] into a set of

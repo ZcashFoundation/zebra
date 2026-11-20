@@ -104,6 +104,70 @@ async fn state_propagates_incomplete_block_body_errors() {
     .unwrap();
 }
 
+/// `RawBlocksByHeightRange` returns each finalized block's consensus serialization, stops at the
+/// finalized tip, and tells a missing body apart from the tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn raw_blocks_by_height_range_reads_finalized_serializations() {
+    use crate::{BlockReadError, DiskWriteBatch, ReadResponse, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let serialized: Vec<_> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .iter()
+            .take(4)
+            .map(|(height, bytes)| (Height(*height), bytes.to_vec()))
+            .collect();
+        let blocks: Vec<Arc<Block>> = serialized
+            .iter()
+            .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (_state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+
+        let raw_blocks = |start, count| {
+            read_state
+                .clone()
+                .oneshot(ReadRequest::RawBlocksByHeightRange {
+                    start: Height(start),
+                    count,
+                })
+        };
+
+        // The range stops at the finalized tip, height 3, and is empty above it.
+        assert_eq!(
+            raw_blocks(1, 10).await.unwrap(),
+            ReadResponse::RawBlocks(serialized[1..].to_vec()),
+        );
+        assert_eq!(
+            raw_blocks(4, 10).await.unwrap(),
+            ReadResponse::RawBlocks(Vec::new()),
+        );
+
+        // A missing body stops the range before it, and fails a range that starts at it.
+        let height = Height(2);
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        db.write_batch(batch).unwrap();
+
+        assert_eq!(
+            raw_blocks(0, 10).await.unwrap(),
+            ReadResponse::RawBlocks(serialized[..2].to_vec()),
+        );
+        let error = raw_blocks(2, 10).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<BlockReadError>(),
+            Some(&BlockReadError::BlockBodyUnavailable { height }),
+        );
+    })
+    .await
+    .unwrap();
+}
+
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
 ) -> Result<()> {

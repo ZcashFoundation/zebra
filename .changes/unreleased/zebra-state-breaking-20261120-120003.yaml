@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain the `RawBlocksByHeightRange` and `RawBlocks` variants. Consumers that match on them exhaustively must handle the new variants.'
+time: 2026-11-20T12:00:03.000000Z

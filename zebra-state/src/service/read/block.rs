@@ -102,6 +102,31 @@ where
         )
 }
 
+/// Returns up to `count` contiguous finalized blocks from `start`, as their raw Zcash consensus
+/// serializations. See [`ReadRequest::RawBlocksByHeightRange`](crate::ReadRequest::RawBlocksByHeightRange).
+#[allow(clippy::unwrap_in_result)]
+pub fn raw_blocks_by_height_range(
+    db: &ZebraDb,
+    start: Height,
+    count: u32,
+) -> Result<Vec<(Height, Vec<u8>)>, BlockReadError> {
+    let count = usize::try_from(count).expect("Zebra only supports 32-bit or wider usize");
+    let mut blocks = Vec::new();
+    for height in (start.0..=Height::MAX.0).take(count).map(Height) {
+        match db.raw_block_bytes(height.into()) {
+            Ok(Some(bytes)) => blocks.push((height, bytes)),
+            // Above the finalized tip, or not yet visible in a secondary view.
+            Ok(None) => break,
+            // Fail only at `start`, so the caller keeps the blocks before a missing
+            // body and gets the error when it requests that height next.
+            Err(error) if blocks.is_empty() => return Err(error),
+            Err(_) => break,
+        }
+    }
+
+    Ok(blocks)
+}
+
 /// Returns the [`block::Header`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_header<C>(
