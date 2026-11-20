@@ -191,6 +191,8 @@ indexmap = { workspace = true }
 lazy_static = { workspace = true }
 # Unify assembly with Halo 2 and Orchard; startup diagnostics require runtime dispatch.
 pasta_curves = { version = "0.6.1", optional = true, default-features = false }
+# Enable parallel Orchard RedPallas batch verification only for node builds.
+reddsa = { workspace = true, features = ["multicore"] }
 semver = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 toml = { workspace = true }
@@ -347,6 +349,7 @@ zebra-utils = { path = "../zebra-utils" }
 # These dependencies are false positives - they are actually used
 normal = [
     "console-subscriber",  # Used behind the tokio-console feature flag
+    "reddsa",              # Enables multicore verification in zebra-chain and Orchard
     "zebra-utils",         # Used for the zebra-checkpoints feature
 ]
 development = [
