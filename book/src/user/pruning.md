@@ -134,18 +134,19 @@ pruned snapshot can therefore start with less history than the configured window
 A single background worker waits for database migrations, spending-index conversion, and initial
 format checks to finish successfully. Skipped, cancelled, or failed checks do not permit deletion.
 The worker runs at startup and after finalized-tip changes, deleting at most 100 complete block
-heights per batch. It yields between batches. After a backlog spanning more than one batch has
-been deleted, the worker compacts the deleted transaction-body range and logs its start and
-completion. It also compacts previously pruned bodies once after startup, when deletion is idle.
-Normal RocksDB compaction handles ongoing deletion. Both run outside the block commit path;
-shutdown cancels pending compaction and waits for any in-flight deletion or compaction. Unexpected
-deletion failures are fatal, not silently retried.
+heights per batch. It yields between batches. When 10,000 deleted heights accumulate while the
+worker is still behind, it compacts the deleted transaction bodies without waiting for catch-up.
+It also compacts after clearing a backlog spanning more than one batch and once after startup for
+previously pruned bodies. RocksDB handles ongoing compaction between these passes. Both run outside
+the block commit path; shutdown cancels pending compaction and waits for any in-flight deletion or
+compaction. Unexpected deletion failures are fatal, not silently retried.
 
 Restart checks require retained evidence that the cached chain follows the configured network
 upgrades. After NU5, a matching V5/V6 transaction provides that evidence; the check searches back at
 most 100,000 blocks and refuses to start if missing history prevents it from finding a witness.
-Pruning never deletes the witness needed by this check. It can retain an older suffix than requested
-until a newer witness appears, and does not begin before suitable NU5 evidence exists.
+Pruning retains the V5/V6 witness needed by this check. A matching committed pre-NU5 checkpoint
+also authenticates its earlier blocks, allowing pruning before NU5 while retaining that checkpoint
+body. Without either witness, an older suffix is kept.
 
 Keep the same `indexer` build-feature setting after pruning. Switching the spending-index layout in
 either direction requires full history and is rejected on pruned state. Future migrations that need
