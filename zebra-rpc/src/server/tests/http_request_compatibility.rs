@@ -14,7 +14,12 @@ use jsonrpsee::{
 };
 use tower::Service;
 
-use crate::server::http_request_compatibility::{HttpRequestMiddleware, JsonRpcRequest};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+use crate::server::{
+    cookie::Cookie,
+    http_request_compatibility::{HttpRequestMiddleware, JsonRpcRequest, RpcAuth},
+};
 
 /// A body that always returns an error, simulating a TCP RST during body collection.
 struct ErrorBody;
@@ -104,4 +109,67 @@ fn rewrite_keeps_null_request_id() {
 
     let rewritten = rewrite(r#"{"jsonrpc":"2.0","method":"getinfo","params":[]}"#);
     assert_eq!(rewritten.get("id"), None);
+}
+
+/// Builds a middleware that requires the given credentials.
+fn auth_middleware(auth: Option<RpcAuth>) -> HttpRequestMiddleware<MockRpcService> {
+    HttpRequestMiddleware::new(MockRpcService, auth, 2_097_152)
+}
+
+/// Builds the header map of a request sent with `basic_auth(user, password)`.
+fn basic_auth_headers(user: &str, password: &str) -> hyper::HeaderMap {
+    let encoded = STANDARD.encode(format!("{user}:{password}"));
+    let mut headers = hyper::HeaderMap::new();
+    headers.insert(
+        hyper::header::AUTHORIZATION,
+        format!("Basic {encoded}").parse().unwrap(),
+    );
+    headers
+}
+
+fn static_auth() -> RpcAuth {
+    RpcAuth::Static {
+        user: "user".to_string(),
+        password: Cookie::from_secret("s3cret:with:colons".to_string()),
+    }
+}
+
+#[test]
+fn no_auth_accepts_everything() {
+    let middleware = auth_middleware(None);
+    assert!(middleware.check_credentials(&hyper::HeaderMap::new()));
+    assert!(middleware.check_credentials(&basic_auth_headers("anyone", "anything")));
+}
+
+#[test]
+fn static_auth_accepts_matching_user_and_password() {
+    let middleware = auth_middleware(Some(static_auth()));
+    assert!(middleware.check_credentials(&basic_auth_headers("user", "s3cret:with:colons")));
+}
+
+#[test]
+fn static_auth_rejects_wrong_or_missing_credentials() {
+    let middleware = auth_middleware(Some(static_auth()));
+    assert!(!middleware.check_credentials(&hyper::HeaderMap::new()));
+    assert!(!middleware.check_credentials(&basic_auth_headers("user", "wrong")));
+    assert!(!middleware.check_credentials(&basic_auth_headers("other", "s3cret:with:colons")));
+    assert!(!middleware.check_credentials(&basic_auth_headers("user", "s3cret:with")));
+    assert!(!middleware.check_credentials(&basic_auth_headers("", "")));
+
+    let mut garbage = hyper::HeaderMap::new();
+    garbage.insert(
+        hyper::header::AUTHORIZATION,
+        "Basic not-base64!".parse().unwrap(),
+    );
+    assert!(!middleware.check_credentials(&garbage));
+}
+
+/// The cookie only checks the password half, for compatibility with `zcash-cli`.
+#[test]
+fn cookie_auth_ignores_username() {
+    let cookie = Cookie::from_secret("cookie-secret".to_string());
+    let middleware = auth_middleware(Some(RpcAuth::Cookie(cookie)));
+    assert!(middleware.check_credentials(&basic_auth_headers("__cookie__", "cookie-secret")));
+    assert!(middleware.check_credentials(&basic_auth_headers("whatever", "cookie-secret")));
+    assert!(!middleware.check_credentials(&basic_auth_headers("__cookie__", "wrong")));
 }

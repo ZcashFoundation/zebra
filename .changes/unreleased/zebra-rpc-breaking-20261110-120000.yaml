@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: 'Added `rpc_user`, `rpc_password` and `rpc_password_file` to `config::rpc::Config`, and `HttpRequestMiddleware::new` and `HttpRequestMiddlewareLayer::new` now take an `Option<RpcAuth>` instead of an `Option<Cookie>` ([#10404](https://github.com/ZcashFoundation/zebra/issues/10404)).'
+time: 2026-11-10T12:00:00.000000+00:00

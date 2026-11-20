@@ -22,6 +22,11 @@ const FILE: &str = ".cookie";
 pub struct Cookie(String);
 
 impl Cookie {
+    /// Creates a cookie from a configured secret instead of a random one.
+    pub fn from_secret(secret: String) -> Self {
+        Self(secret)
+    }
+
     /// Constant-time comparison to prevent timing side-channels.
     pub fn authenticate(&self, passwd: String) -> bool {
         if passwd.len() != self.0.len() {

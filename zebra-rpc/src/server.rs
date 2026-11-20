@@ -27,8 +27,9 @@ use crate::{
     config,
     methods::{RpcImpl, RpcServer as _},
     server::{
-        http_request_compatibility::HttpRequestMiddlewareLayer,
-        rpc_call_compatibility::FixRpcResponseMiddleware, rpc_metrics::RpcMetricsMiddleware,
+        http_request_compatibility::{HttpRequestMiddlewareLayer, RpcAuth},
+        rpc_call_compatibility::FixRpcResponseMiddleware,
+        rpc_metrics::RpcMetricsMiddleware,
         rpc_tracing::RpcTracingMiddleware,
     },
 };
@@ -130,14 +131,23 @@ impl RpcServer {
         // The largest RPC request is submitblock, which sends a full block
         // as a hex string (2x MAX_BLOCK_BYTES) plus a small JSON-RPC wrapper.
         let max_request_body_size = (MAX_BLOCK_BYTES as usize) * 2 + 1024;
-        let http_middleware_layer = if conf.enable_cookie_auth {
+        // Static credentials take precedence over the cookie, then the cookie
+        // over no authentication at all.
+        let auth = if let Some((user, password)) = conf.static_credentials()? {
+            info!("RPC server requires static user/password authentication");
+            Some(RpcAuth::Static {
+                user,
+                password: Cookie::from_secret(password),
+            })
+        } else if conf.enable_cookie_auth {
             let cookie = Cookie::default();
             cookie::write_to_disk(&cookie, &conf.cookie_dir)
                 .expect("Zebra must be able to write the auth cookie to the disk");
-            HttpRequestMiddlewareLayer::new(Some(cookie), max_request_body_size)
+            Some(RpcAuth::Cookie(cookie))
         } else {
-            HttpRequestMiddlewareLayer::new(None, max_request_body_size)
+            None
         };
+        let http_middleware_layer = HttpRequestMiddlewareLayer::new(auth, max_request_body_size);
 
         let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
 
@@ -196,7 +206,8 @@ impl RpcServer {
         let span = Span::current();
         let wait_on_shutdown = move || {
             span.in_scope(|| {
-                if config.enable_cookie_auth {
+                // Static credentials never write a cookie, so there is nothing to remove.
+                if config.enable_cookie_auth && !config.uses_static_auth() {
                     if let Err(err) = cookie::remove_from_disk(&config.cookie_dir) {
                         warn!(
                             ?err,
