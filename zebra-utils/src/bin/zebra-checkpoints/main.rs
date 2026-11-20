@@ -193,13 +193,8 @@ async fn main() -> Result<()> {
         Height::MIN
     };
 
-    assert!(
-        starting_height < height_limit,
-        "checkpoint generation needs more blocks than the starting height {starting_height:?}. \
-         Hint: wait for the node to sync more blocks"
-    );
-
     // set up counters
+    let mut checkpoint_count: usize = 0;
     let mut cumulative_bytes: u64 = 0;
     let mut last_checkpoint_height = args.last_checkpoint.unwrap_or(Height::MIN);
     let max_checkpoint_height_gap =
@@ -284,11 +279,25 @@ async fn main() -> Result<()> {
         {
             // print to output
             println!("{} {hash}", response_height.0);
+            checkpoint_count += 1;
 
             // reset cumulative totals
             cumulative_bytes = 0;
             last_checkpoint_height = response_height;
         }
+    }
+
+    // Tests and CI wait for one of these lines, so keep their wording stable.
+    if checkpoint_count == 0 {
+        eprintln!(
+            "zebra-checkpoints found no new checkpoints below height {}",
+            height_limit.0
+        );
+    } else {
+        eprintln!(
+            "zebra-checkpoints generated {checkpoint_count} checkpoints, the last at height {}",
+            last_checkpoint_height.0
+        );
     }
 
     Ok(())
