@@ -78,7 +78,7 @@ fn prepared_block_commits_the_chain_an_unprepared_block_does() {
         let (rsp_tx, mut rsp_rx) = oneshot::channel();
         let mut messages = Vec::new();
         if prepare {
-            messages.push(NonFinalizedWriteMessage::Prepare(child.clone()));
+            messages.push(NonFinalizedWriteMessage::Prepare(child.clone(), None));
         }
         messages.push(NonFinalizedWriteMessage::Commit(
             (semantic, rsp_tx, None, None),
@@ -115,7 +115,7 @@ fn request_between_prepare_and_commit_discards_the_prepared_block() {
     let (invalidated_tx, mut invalidated_rx) = oneshot::channel();
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(grandchild.clone()),
+        NonFinalizedWriteMessage::Prepare(grandchild.clone(), None),
         // The prepared chain has the grandchild on top of this block.
         NonFinalizedWriteMessage::Invalidate {
             hash: child.hash(),
@@ -150,7 +150,7 @@ fn only_the_prepared_block_object_commits_the_prepared_chain() {
 
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Prepare(child.clone(), None),
         NonFinalizedWriteMessage::Commit(
             (twin.clone().prepare(), rsp_tx, None, None),
             Instant::now(),
@@ -182,9 +182,9 @@ fn block_that_cannot_be_prepared_is_validated_by_its_commit() {
 
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(Arc::new(without_coinbase)),
-        NonFinalizedWriteMessage::Prepare(Arc::new(repeated_transaction)),
-        NonFinalizedWriteMessage::Prepare(orphan.clone()),
+        NonFinalizedWriteMessage::Prepare(Arc::new(without_coinbase), None),
+        NonFinalizedWriteMessage::Prepare(Arc::new(repeated_transaction), None),
+        NonFinalizedWriteMessage::Prepare(orphan.clone(), None),
         NonFinalizedWriteMessage::Commit(
             (orphan.clone().prepare(), rsp_tx, None, None),
             Instant::now(),
@@ -209,7 +209,7 @@ fn commit_of_another_block_discards_the_prepared_block() {
     let (sibling_tx, mut sibling_rx) = oneshot::channel();
     let (child_tx, mut child_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(child.clone()),
+        NonFinalizedWriteMessage::Prepare(child.clone(), None),
         NonFinalizedWriteMessage::Commit(
             (sibling.clone().prepare(), sibling_tx, None, None),
             Instant::now(),
@@ -242,7 +242,7 @@ fn prepared_block_on_the_finalized_tip_starts_a_chain() {
 
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     let messages = vec![
-        NonFinalizedWriteMessage::Prepare(block1.clone()),
+        NonFinalizedWriteMessage::Prepare(block1.clone(), None),
         NonFinalizedWriteMessage::Commit(
             (block1.clone().prepare(), rsp_tx, None, None),
             Instant::now(),
@@ -255,4 +255,28 @@ fn prepared_block_on_the_finalized_tip_starts_a_chain() {
     assert_eq!(prepared_commits, 1);
     assert_eq!(state.chain_count(), 1);
     assert_eq!(state.best_tip().unwrap().1, block1.hash());
+}
+
+/// The block write task sends back the prepared tip of a block it could prepare, and drops the
+/// channel for a block it couldn't.
+#[test]
+fn prepared_tip_is_only_sent_for_a_block_that_was_prepared() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, state, root) = root_state();
+    let child = root.make_fake_child();
+    let orphan = child.make_fake_child().make_fake_child();
+    let (child_sender, mut child_tip) = oneshot::channel();
+    let (orphan_sender, mut orphan_tip) = oneshot::channel();
+    let messages = vec![
+        NonFinalizedWriteMessage::Prepare(orphan, Some(orphan_sender)),
+        NonFinalizedWriteMessage::Prepare(child, Some(child_sender)),
+    ];
+    run_writer(finalized, state, messages);
+
+    assert!(child_tip.try_recv().is_ok());
+    assert!(matches!(
+        orphan_tip.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
 }

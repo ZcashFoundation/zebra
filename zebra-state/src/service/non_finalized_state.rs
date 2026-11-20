@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
+    parallel::tree::PrecomputedTreeUpdate,
     parameters::Network,
     primitives::zcash_history::BlockCommitmentTreeRoots,
     sprout::{self},
@@ -41,6 +42,7 @@ use crate::{
 
 mod backup;
 mod chain;
+mod precomputed_trees;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -49,6 +51,7 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 mod tests;
 
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use precomputed_trees::{PrecomputedTrees, TreePrecomputer};
 
 /// A block that passed the checks before its chain update, with what the rest of its commit needs.
 struct CheckedBlock {
@@ -213,6 +216,11 @@ pub(crate) struct ValidatedChain {
 }
 
 impl ValidatedChain {
+    /// Returns the chain that ends at the block.
+    pub(crate) fn chain(&self) -> &Chain {
+        &self.chain
+    }
+
     /// Sets the time the block verifier received the block.
     pub(crate) fn set_received_time(&mut self, received_time: Option<Instant>) {
         Arc::make_mut(&mut self.chain).set_tip_received_time(received_time);
@@ -250,6 +258,12 @@ pub struct NonFinalizedState {
     /// Watch mutations publish immediately to live and detached readers. Kept only in memory:
     /// after a restart, a replay is verified once before it is recorded again.
     pub(super) rejected_blocks: watch::Sender<RejectedBlocks>,
+
+    /// Note commitment tree updates for transactions that can be in the next block.
+    ///
+    /// Shared with every clone, like `rejected_blocks`. A block's update is a function of its
+    /// parent's tree and its note commitments, so taking it from here doesn't change the chain.
+    precomputed_trees: watch::Sender<PrecomputedTrees>,
 
     // Configuration
     //
@@ -309,6 +323,7 @@ impl Clone for NonFinalizedState {
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             rejected_blocks: self.rejected_blocks.clone(),
+            precomputed_trees: self.precomputed_trees.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -334,12 +349,24 @@ impl NonFinalizedState {
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
             rejected_blocks: watch::Sender::new(RejectedBlocks::default()),
+            precomputed_trees: watch::Sender::new(PrecomputedTrees::default()),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
+    }
+
+    /// Returns where the note commitment tree updates that are computed ahead of the next block
+    /// go.
+    pub(crate) fn precomputed_trees(&self) -> &watch::Sender<PrecomputedTrees> {
+        &self.precomputed_trees
+    }
+
+    /// Returns the note commitment tree updates that were computed ahead of the next block.
+    pub(crate) fn precomputed_tree_updates(&self) -> Vec<Arc<PrecomputedTreeUpdate>> {
+        self.precomputed_trees.borrow().updates()
     }
 
     /// Writes the current non-finalized state to the backup directory at `backup_dir_path`.
@@ -1078,8 +1105,9 @@ impl NonFinalizedState {
     /// new tree roots, so it runs after them. The commit returns the same result as running these
     /// steps in series: the first error in that order.
     ///
-    /// A block without note commitments has no tree updates, so its steps do run in series, on
-    /// this thread.
+    /// A block without note commitments has no tree updates, and neither has a block whose
+    /// updates were all computed ahead of it, so the steps of those blocks do run in series, on
+    /// this thread, with the tree step last.
     ///
     /// Returns the chain with the block, and how long the phases took if the state counts
     /// metrics. The caller records them once the block is committed.
@@ -1106,6 +1134,11 @@ impl NonFinalizedState {
         // The tree updates only need the parent's tip trees and history tree.
         let mut trees = new_chain.note_commitment_trees_for_tip();
         let parent_history_tree = new_chain.history_block_commitment_tree();
+
+        // Updates that were computed for transactions the mempool expected in this block are
+        // taken as they are.
+        let precomputed_tree_updates = self.precomputed_tree_updates();
+        let has_tree_updates = trees.has_update_work(&block, &precomputed_tree_updates);
 
         let mut block_commitment_result = None;
         let mut non_tree_result = None;
@@ -1155,20 +1188,17 @@ impl NonFinalizedState {
             let phase_start = Instant::now();
             #[cfg(test)]
             tests::wait_for_early_check_failure_before_tree_update();
-            tree_result = Some(trees.update_trees_parallel_with_cancel(&block, || {
-                cancel_tree_update.load(Ordering::Acquire)
-            }));
+            tree_result = Some(trees.update_trees_parallel_with_precomputed(
+                &block,
+                &precomputed_tree_updates,
+                || cancel_tree_update.load(Ordering::Acquire),
+            ));
             tree_duration = phase_start.elapsed();
         };
 
-        // A block without note commitments has no tree updates for its other steps to run beside,
+        // A block without tree updates to compute has nothing for its other steps to run beside,
         // so starting a scope and waking rayon threads would only delay them.
-        let has_note_commitments = block.sprout_note_commitments().next().is_some()
-            || block.sapling_note_commitments().next().is_some()
-            || block.orchard_note_commitments().next().is_some()
-            || block.ironwood_note_commitments().next().is_some();
-
-        if has_note_commitments {
+        if has_tree_updates {
             rayon::in_place_scope_fifo(|scope| {
                 scope.spawn_fifo(|_scope| check_block_commitment());
                 scope.spawn_fifo(|_scope| update_except_trees());

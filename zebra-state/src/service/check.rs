@@ -112,6 +112,21 @@ impl RecentHeaders {
         self.headers.len() >= block_span || self.headers.len() > self.tip_height.as_usize()
     }
 
+    /// Returns the height and hash of the newest block.
+    pub(crate) fn tip(&self) -> (block::Height, block::Hash) {
+        (self.tip_height, self.tip)
+    }
+
+    /// Returns the difficulty thresholds and times of the newest `block_span` blocks, newest
+    /// first, or `None` if a read of that many blocks could return more than these.
+    pub(crate) fn newest(
+        &self,
+        block_span: usize,
+    ) -> Option<Vec<(CompactDifficulty, DateTime<Utc>)>> {
+        self.covers(block_span)
+            .then(|| self.headers.iter().take(block_span).copied().collect())
+    }
+
     /// Returns the recent headers of `child`, or `None` if it isn't a child of this newest block.
     pub(crate) fn of_child(&self, child: &SemanticallyVerifiedBlock) -> Option<Self> {
         (child.block.header.previous_block_hash == self.tip).then(|| self.with_child(child))

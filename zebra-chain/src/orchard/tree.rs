@@ -759,6 +759,16 @@ impl Default for NoteCommitmentTree {
     }
 }
 
+impl NoteCommitmentTree {
+    /// Returns true if this tree and `other` have the same frontier, which makes them the same
+    /// tree.
+    ///
+    /// Unlike `==`, this never compares the trees by their cached roots.
+    pub(crate) fn has_same_frontier(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
 impl Eq for NoteCommitmentTree {}
 
 impl PartialEq for NoteCommitmentTree {

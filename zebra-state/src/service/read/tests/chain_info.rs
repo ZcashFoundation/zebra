@@ -7,7 +7,10 @@ use chrono::{DateTime, Duration, Utc};
 use proptest::prelude::*;
 
 use zebra_chain::{
-    amount::NonNegative, block::Block, parameters::Network, serialization::DateTime32,
+    amount::NonNegative,
+    block::Block,
+    parameters::Network,
+    serialization::{DateTime32, ZcashDeserializeInto},
     value_balance::ValueBalance,
 };
 
@@ -15,9 +18,10 @@ use crate::{
     arbitrary::Prepare,
     service::{
         check::difficulty::pow_adjustment_block_span,
+        check::RecentHeaders,
         finalized_state::FinalizedState,
         non_finalized_state::NonFinalizedState,
-        read::difficulty::{chain_info_from_chain, get_block_template_chain_info},
+        read::difficulty::{chain_info_from_chain, get_block_template_chain_info, PreparedTip},
     },
     tests::FakeChainHelper,
     Config,
@@ -117,5 +121,42 @@ proptest! {
             .expect("the chain's headers give a valid chain info");
         let from_state = from_state.expect("the state's headers give a valid chain info");
         prop_assert_eq!(from_chain, from_state);
+    }
+}
+
+/// A block whose header commits to its final Sapling root has no prepared tip: a commit doesn't
+/// check that root, and the mining candidate's own computation does. Other blocks have one.
+#[test]
+fn only_a_block_without_a_final_sapling_root_commitment_has_a_prepared_tip() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    // Mainnet block 653,599 is after Sapling and before Heartwood, and block 1 is before Sapling.
+    let blocks: [(Arc<Block>, bool); 2] = [
+        (Arc::new(network.test_block(653599, 583999).unwrap()), false),
+        (
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+                .zcash_deserialize_into()
+                .unwrap(),
+            true,
+        ),
+    ];
+    for (block, has_prepared_tip) in blocks {
+        let mut state = NonFinalizedState::new(&network);
+        let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+            .expect("opening an ephemeral database should succeed");
+        finalized_state
+            .set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+        state
+            .commit_new_chain(block.clone().prepare(), &finalized_state)
+            .unwrap();
+        let chain = state.best_chain().expect("the block was committed");
+        let recent_headers = RecentHeaders::read(&state, &finalized_state.db, block.hash(), 1)
+            .expect("the block is in the chain");
+
+        assert_eq!(
+            PreparedTip::new(chain, &block, &network, recent_headers).is_some(),
+            has_prepared_tip,
+        );
     }
 }

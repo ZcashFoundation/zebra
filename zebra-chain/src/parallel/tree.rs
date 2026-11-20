@@ -10,10 +10,12 @@ use crate::{
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
 
+mod precomputed;
 mod roots;
 #[cfg(test)]
 mod tests;
 
+pub use precomputed::PrecomputedTreeUpdate;
 pub use roots::{TreeRoots, TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST};
 
 /// Counts note commitment tree update attempts in tests that enable `proptest-impl`.
@@ -127,6 +129,51 @@ impl NoteCommitmentTrees {
     where
         F: Fn() -> bool + Sync,
     {
+        self.update_trees_parallel_with_precomputed(block, &[], is_cancelled)
+    }
+
+    /// Returns true if updating these trees with `block` takes any work, which is the case
+    /// unless `precomputed` has the update of each tree that `block` appends to.
+    pub fn has_update_work(
+        &self,
+        block: &Block,
+        precomputed: &[Arc<PrecomputedTreeUpdate>],
+    ) -> bool {
+        if block.sprout_note_commitments().next().is_some()
+            || block.sapling_note_commitments().next().is_some()
+        {
+            return true;
+        }
+
+        // Without precomputed updates, the first note commitment decides.
+        if precomputed.is_empty() {
+            return block.orchard_note_commitments().next().is_some()
+                || block.ironwood_note_commitments().next().is_some();
+        }
+
+        let needs_update = |tree, note_commitments: Vec<_>| {
+            !note_commitments.is_empty()
+                && PrecomputedTreeUpdate::find(precomputed, tree, &note_commitments).is_none()
+        };
+
+        needs_update(&self.orchard, block.orchard_note_commitments().collect())
+            || needs_update(&self.ironwood, block.ironwood_note_commitments().collect())
+    }
+
+    /// Updates the note commitment trees in parallel until `is_cancelled` returns true, taking
+    /// the Orchard and Ironwood updates that are in `precomputed` from it.
+    ///
+    /// Returns `false` if any pool update was cancelled. In that case, `self` can be partially
+    /// updated and must be discarded in favour of the error that triggered the cancellation.
+    pub fn update_trees_parallel_with_precomputed<F>(
+        &mut self,
+        block: &Arc<Block>,
+        precomputed: &[Arc<PrecomputedTreeUpdate>],
+        is_cancelled: F,
+    ) -> Result<bool, NoteCommitmentTreeError>
+    where
+        F: Fn() -> bool + Sync,
+    {
         if is_cancelled() {
             return Ok(false);
         }
@@ -154,27 +201,53 @@ impl NoteCommitmentTrees {
         NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // Starting a scope costs more than everything else a block without note commitments
-        // needs here.
+        // A precomputed update is the result of the same update of the same tree.
+        let precomputed_update =
+            |tree, note_commitments: &[orchard::tree::NoteCommitmentUpdate]| {
+                if note_commitments.is_empty() {
+                    return None;
+                }
+                PrecomputedTreeUpdate::find(precomputed, tree, note_commitments)
+            };
+        let precomputed_orchard = precomputed_update(&orchard, &orchard_note_commitments);
+        let precomputed_ironwood = precomputed_update(&ironwood, &ironwood_note_commitments);
+
+        let update_orchard = !orchard_note_commitments.is_empty() && precomputed_orchard.is_none();
+        let update_ironwood =
+            !ironwood_note_commitments.is_empty() && precomputed_ironwood.is_none();
+
+        // Starting a scope costs more than everything else a block needs here if none of its
+        // note commitments have to be hashed into a tree.
         if sprout_note_commitments.is_empty()
             && sapling_note_commitments.is_empty()
-            && orchard_note_commitments.is_empty()
-            && ironwood_note_commitments.is_empty()
+            && !update_orchard
+            && !update_ironwood
         {
+            if let Some((orchard, subtree_root)) = precomputed_orchard {
+                self.orchard = orchard;
+                self.orchard_subtree =
+                    subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
+            }
+            if let Some((ironwood, subtree_root)) = precomputed_ironwood {
+                self.ironwood = ironwood;
+                self.ironwood_subtree =
+                    subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
+            }
+
             return Ok(true);
         }
 
         let mut sprout_result = None;
         let mut sapling_result = None;
-        let mut orchard_result = None;
-        let mut ironwood_result = None;
+        let mut orchard_result = precomputed_orchard.map(|update| Ok(Some(update)));
+        let mut ironwood_result = precomputed_ironwood.map(|update| Ok(Some(update)));
 
-        // The costliest pool with commitments runs on the calling thread, so that thread hashes
-        // instead of waiting for a rayon thread to start the job. Orchard and Ironwood hash with
-        // Sinsemilla, which costs more than Sapling's Pedersen hash, and Sprout's SHA-256 costs
-        // the least.
-        let run_orchard_here = !orchard_note_commitments.is_empty();
-        let run_ironwood_here = !run_orchard_here && !ironwood_note_commitments.is_empty();
+        // The costliest pool with an update to compute runs on the calling thread, so that
+        // thread hashes instead of waiting for a rayon thread to start the job. Orchard and
+        // Ironwood hash with Sinsemilla, which costs more than Sapling's Pedersen hash, and
+        // Sprout's SHA-256 costs the least.
+        let run_orchard_here = update_orchard;
+        let run_ironwood_here = !run_orchard_here && update_ironwood;
         let run_sapling_here =
             !run_orchard_here && !run_ironwood_here && !sapling_note_commitments.is_empty();
         let run_sprout_here = !run_orchard_here && !run_ironwood_here && !run_sapling_here;
@@ -202,7 +275,7 @@ impl NoteCommitmentTrees {
                 });
             }
 
-            if !ironwood_note_commitments.is_empty() {
+            if update_ironwood {
                 spawn_or_run_here(scope, run_ironwood_here, |_scope| {
                     ironwood_result = Some(
                         Self::update_orchard_note_commitment_tree_with_cancel(
@@ -220,7 +293,7 @@ impl NoteCommitmentTrees {
                 });
             }
 
-            if !orchard_note_commitments.is_empty() {
+            if update_orchard {
                 spawn_or_run_here(scope, run_orchard_here, |_scope| {
                     orchard_result = Some(Self::update_orchard_note_commitment_tree_with_cancel(
                         orchard,

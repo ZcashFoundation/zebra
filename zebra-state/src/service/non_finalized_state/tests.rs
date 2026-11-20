@@ -8,6 +8,7 @@ use std::{
 
 mod commit_phases;
 mod dense_chain;
+mod precomputed_trees;
 mod prop;
 mod rejections;
 mod shared_snapshot;

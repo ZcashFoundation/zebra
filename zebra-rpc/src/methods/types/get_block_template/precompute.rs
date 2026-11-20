@@ -469,10 +469,18 @@ impl TemplateCache {
         }
     }
 
+    /// Returns `true` if a long poll, or another subscriber, is waiting for served work.
+    ///
+    /// [`run()`] keeps one subscription of its own for as long as it runs, which isn't counted.
+    pub(crate) fn has_waiting_subscribers(&self) -> bool {
+        self.served.receiver_count() > 1
+    }
+
     /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
     ///
     /// Transaction-bearing work is also queued for the updater's validation worker, so a solve of
-    /// it can reuse the verdict. Publishing replaces any queued check with the newest work.
+    /// it can reuse the verdict. Publishing replaces any queued check with the newest work, or
+    /// with none if the newest work has no transactions.
     /// Without a running updater nothing reads the queue: the RPC validates the work it builds.
     ///
     /// Returns the published build's exact internal generation.
@@ -498,7 +506,14 @@ impl TemplateCache {
                 ..TemplateState::new(Some(template))
             });
         });
-        self.queued.notify_one();
+        // Only work with transactions is checked, so only it wakes the validation worker.
+        //
+        // A wake for other work would also put the worker ahead of the long polls that this
+        // publication has just woken: they would leave this thread's next-task slot for its run
+        // queue, and answer only when another thread had woken up to take them.
+        if unchecked {
+            self.queued.notify_one();
+        }
         generation
     }
 
@@ -853,6 +868,14 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                 {
                     Ok(Some((template, _))) => {
                         cache.publish(template);
+                        // Let the long polls that were waiting for this template answer now.
+                        // Publishing made them this thread's next task, but only until this
+                        // task wakes another one, and the mempool request for the template
+                        // that follows does. With nothing waiting, a yield would only delay
+                        // that template.
+                        if cache.has_waiting_subscribers() {
+                            tokio::task::yield_now().await;
+                        }
                     }
                     // A coinbase-only template doesn't read the mempool, so it can't be out of
                     // sync with the state.
@@ -1169,6 +1192,22 @@ async fn validate_templates(
                     return;
                 }
             }
+        }
+        // Work without transactions replaces the queued check without waking this task, so
+        // drop a queued response that is no longer the one to check.
+        let is_queued = |template: &Arc<CachedTemplate>| {
+            cache.served.borrow().as_ref().is_some_and(|state| {
+                state
+                    .next
+                    .as_ref()
+                    .is_some_and(|next| Arc::ptr_eq(next, template))
+            })
+        };
+        if pending
+            .as_ref()
+            .is_some_and(|(template, _)| !is_queued(template))
+        {
+            pending = None;
         }
         let Some((template, base)) = pending.take_if(|(template, _)| {
             latest_chain_tip.best_tip_hash() == Some(template.previous_block_hash)

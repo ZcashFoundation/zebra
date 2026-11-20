@@ -815,6 +815,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
             read_service,
             latest_chain_tip,
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
+            prepared_tip: None,
             mining_candidate_lifetime: crate::service::arbitrary::TEST_MINING_CANDIDATE_LIFETIME,
             tree_roots_sender,
             wanted_tree_roots,

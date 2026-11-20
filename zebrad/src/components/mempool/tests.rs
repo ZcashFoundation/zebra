@@ -18,6 +18,7 @@ use zebra_chain::{
 };
 
 mod prop;
+mod tree_updates;
 mod vector;
 
 impl Mempool {

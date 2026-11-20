@@ -8,6 +8,7 @@
 //! Only code inside the [`crate::components::mempool`] module has access to it.
 
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet},
     mem::size_of,
     sync::Arc,
@@ -711,6 +712,71 @@ impl Storage {
         self.verified.transactions()
     }
 
+    /// Returns the transactions that are likeliest to be in the next block among those that
+    /// change the Orchard or the Ironwood note commitment tree, the likeliest last.
+    ///
+    /// These are, for each of the two trees, the `limit` transactions with note commitments
+    /// for it that have the highest fee weight ratios. Transactions with the same ratio are
+    /// taken in the order of their IDs. A transaction with more note commitments for a tree
+    /// than the state precomputes updates for isn't taken for that tree.
+    pub(super) fn likeliest_tree_update_transactions(&self, limit: usize) -> Vec<UnminedTx> {
+        /// Orders the likelier of two transactions first.
+        fn likelier_first(left: &VerifiedUnminedTx, right: &VerifiedUnminedTx) -> Ordering {
+            right
+                .fee_weight_ratio
+                .total_cmp(&left.fee_weight_ratio)
+                .then_with(|| {
+                    left.transaction
+                        .id
+                        .mined_id()
+                        .cmp(&right.transaction.id.mined_id())
+                })
+        }
+
+        /// Keeps `tx` in `likeliest` if it is one of its `limit` likeliest transactions.
+        fn keep_likeliest<'tx>(
+            likeliest: &mut Vec<&'tx VerifiedUnminedTx>,
+            tx: &'tx VerifiedUnminedTx,
+            limit: usize,
+        ) {
+            let position = likeliest.partition_point(|other| likelier_first(other, tx).is_lt());
+            if position < limit {
+                likeliest.insert(position, tx);
+                likeliest.truncate(limit);
+            }
+        }
+
+        // The state has no updates for a transaction with more note commitments than this.
+        let has_updates = |note_commitments: usize| {
+            (1..=zebra_state::PRECOMPUTED_TREE_UPDATE_NOTE_COMMITMENTS).contains(&note_commitments)
+        };
+
+        let mut orchard = Vec::new();
+        let mut ironwood = Vec::new();
+        for tx in self.transactions().values() {
+            let transaction = &tx.transaction.transaction;
+            if has_updates(transaction.orchard_note_commitments().count()) {
+                keep_likeliest(&mut orchard, tx, limit);
+            }
+            if has_updates(transaction.ironwood_note_commitments().count()) {
+                keep_likeliest(&mut ironwood, tx, limit);
+            }
+        }
+
+        let mut likeliest = orchard;
+        for tx in ironwood {
+            if !likeliest.iter().any(|known| std::ptr::eq(*known, tx)) {
+                likeliest.push(tx);
+            }
+        }
+        likeliest.sort_unstable_by(|left, right| likelier_first(right, left));
+
+        likeliest
+            .into_iter()
+            .map(|tx| tx.transaction.clone())
+            .collect()
+    }
+
     /// Returns a reference to the [`TransactionDependencies`] in the verified set.
     pub fn transaction_dependencies(&self) -> &TransactionDependencies {
         self.verified.transaction_dependencies()
@@ -1002,4 +1068,11 @@ impl Storage {
         metrics::gauge!("mempool.rejected.transaction.ids.bytes",)
             .set((rejected_count * item_size) as f64);
     }
+}
+
+/// Returns true if a block with `transaction` appends note commitments to the Orchard or the
+/// Ironwood note commitment tree for it.
+pub(super) fn changes_orchard_or_ironwood_tree(transaction: &UnminedTx) -> bool {
+    transaction.transaction.has_orchard_shielded_data()
+        || transaction.transaction.has_ironwood_shielded_data()
 }

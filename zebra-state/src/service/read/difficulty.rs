@@ -19,7 +19,7 @@ use crate::{
             difficulty::{
                 pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
             },
-            difficulty_threshold_and_time_are_valid, AdjustedDifficulty,
+            difficulty_threshold_and_time_are_valid, AdjustedDifficulty, RecentHeaders,
         },
         finalized_state::ZebraDb,
         non_finalized_state::Chain,
@@ -126,6 +126,79 @@ pub(crate) fn chain_info_from_chain(
         chain_value_pools,
         DateTime32::now(),
     ))
+}
+
+/// What a block's mining candidate takes from the chain that the block write task validated for
+/// the block's commit: the parts of that chain that a template on the block is built from.
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedTip {
+    /// The recent headers of the block.
+    recent_headers: RecentHeaders,
+
+    /// The history tree after the block.
+    history_tree: Arc<HistoryTree>,
+}
+
+impl PreparedTip {
+    /// Returns the prepared tip of `chain`, whose newest block is `block` and has
+    /// `recent_headers`.
+    ///
+    /// Returns `None` for a block whose header commits to its final Sapling root. A commit's
+    /// contextual checks don't compare that root with the chain's, and
+    /// [`mining_candidate_chain_info()`] does, so such a block is left to it.
+    pub(crate) fn new(
+        chain: &Chain,
+        block: &block::Block,
+        network: &Network,
+        recent_headers: RecentHeaders,
+    ) -> Option<Self> {
+        if matches!(
+            block.commitment(network),
+            Ok(block::Commitment::FinalSaplingRoot(_)) | Err(_)
+        ) {
+            return None;
+        }
+
+        Some(Self {
+            recent_headers,
+            history_tree: chain.history_block_commitment_tree(),
+        })
+    }
+
+    /// Returns the [`GetBlockTemplateChainInfo`] for a child of the prepared block, as
+    /// [`mining_candidate_chain_info()`] does for a block that isn't prepared.
+    ///
+    /// The block write task checked the block's header rules and commitments on the way to this
+    /// chain, and computed the block's note commitment trees, so this doesn't repeat them.
+    ///
+    /// Returns `None` if the chain's headers could be fewer than the child's difficulty
+    /// adjustment reads, or if the child's height has the NSM reissuance, as
+    /// [`mining_candidate_chain_info()`] does.
+    ///
+    /// Unlike that function, this doesn't look at the current state. The caller checks that the
+    /// block's parent is still the best tip, and that the block wasn't rejected or invalidated.
+    pub(crate) fn chain_info(&self, network: &Network) -> Option<GetBlockTemplateChainInfo> {
+        let (height, hash) = self.recent_headers.tip();
+        let child_height = height.next().ok()?;
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(child_height, network) {
+            return None;
+        }
+
+        let relevant_data = self
+            .recent_headers
+            .newest(pow_adjustment_block_span(network, child_height))?;
+
+        difficulty_time_and_history_tree(
+            relevant_data,
+            height,
+            hash,
+            network,
+            self.history_tree.clone(),
+            Default::default(),
+            DateTime32::now(),
+        )
+        .ok()
+    }
 }
 
 /// Checks a parent in the published snapshot, contextual rules, and history/body commitments.

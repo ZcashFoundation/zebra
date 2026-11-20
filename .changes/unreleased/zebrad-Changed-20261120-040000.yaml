@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Blocks with transparent inputs are verified faster when the outputs they spend were read recently, for example by the mempool: those lookups no longer wait for a blocking thread ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T04:00:00.000000000-05:00

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `ReadRequest::PrecomputeTreeUpdates` and `ReadResponse::PrecomputingTreeUpdates`. Exhaustive enum matches must handle the new variants ([#12559](https://github.com/ZcashFoundation/zebra/pull/12559)).'
+time: 2026-11-20T10:00:00.000000000-05:00

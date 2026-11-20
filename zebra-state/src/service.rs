@@ -18,7 +18,7 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::{mpsc, Arc},
+    sync::{mpsc, Arc, Weak},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -222,6 +222,15 @@ pub(crate) struct StateService {
     /// Bounds early-work computations and keeps a live candidate from being replaced.
     mining_candidate_slot: Arc<Semaphore>,
 
+    /// The block that the block write task was last asked to prepare while a miner was waiting
+    /// for mining candidates, and the channel for its prepared tip.
+    ///
+    /// The weak reference identifies the block's allocation without keeping the block.
+    prepared_tip: Option<(
+        Weak<block::Block>,
+        oneshot::Receiver<read::difficulty::PreparedTip>,
+    )>,
+
     /// How long a mining candidate may compute and stay published, [`MINING_CANDIDATE_LIFETIME`]
     /// outside tests.
     mining_candidate_lifetime: Duration,
@@ -283,6 +292,9 @@ pub struct ReadStateService {
 
     /// Independently enabled, authenticated early block retention.
     early_relay: Arc<early_relay::EarlyRelayState>,
+
+    /// Computes note commitment tree updates for transactions that can be in the next block.
+    tree_precomputer: non_finalized_state::TreePrecomputer,
 
     /// The shared inner on-disk database for the finalized state.
     ///
@@ -567,6 +579,7 @@ impl StateService {
             metrics_exporter: None,
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
+            prepared_tip: None,
             mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
             tree_roots_sender,
             wanted_tree_roots,
@@ -1417,6 +1430,10 @@ impl StateService {
 
         async move {
             if let Some(read_service) = read_service {
+                // An output in memory is read here, without waiting for anything, so a
+                // transaction with many inputs has to let other tasks run between its reads.
+                tokio::task::coop::consume_budget().await;
+
                 // Match AwaitUtxo's checkpoint-queue exclusion; see #5126.
                 let response = read_service
                     .oneshot(ReadRequest::AnyChainUtxo(outpoint))
@@ -1458,6 +1475,7 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            tree_precomputer: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1504,6 +1522,43 @@ impl ReadStateService {
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
+    }
+
+    /// Starts computing the note commitment tree updates that the next block makes if it has
+    /// some of `transactions`, which the mempool expects in it, the likeliest last.
+    ///
+    /// A block's Orchard or Ironwood tree update takes most of the time the state needs to
+    /// validate it, and it is the same update whenever it is computed. So the updates of the
+    /// transactions that the mempool expects in the next block are computed in the background,
+    /// from the time the mempool names them.
+    fn precompute_tree_updates(&self, transactions: &[zebra_chain::transaction::UnminedTx]) {
+        self.tree_precomputer.transactions_expected(
+            self.non_finalized_state_receiver.clone(),
+            transactions
+                .iter()
+                .map(|transaction| (transaction.id.mined_id(), transaction.transaction.clone())),
+        );
+    }
+
+    /// Returns the transparent output of `outpoint` in any chain, like [`read::any_utxo()`], if
+    /// the non-finalized chains have it, or the database can answer from its memory.
+    ///
+    /// Returns `None` if the answer takes a database file read, which is left to a blocking
+    /// thread.
+    fn any_utxo_from_memory(
+        &self,
+        outpoint: &transparent::OutPoint,
+    ) -> Option<Option<transparent::Utxo>> {
+        let created = self
+            .non_finalized_state_receiver
+            .borrow_mapped(|non_finalized_state| non_finalized_state.any_utxo(outpoint));
+        if created.is_some() {
+            return Some(created);
+        }
+
+        self.db
+            .utxo_from_memory(outpoint)
+            .map(|utxo| utxo.map(|utxo| utxo.utxo))
     }
 
     /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
@@ -1650,14 +1705,25 @@ impl Service<Request> for StateService {
                     && self.read_service.mining_candidate_is_allowed(hash)
                 {
                     if let Some(sender) = &self.block_write_sender.non_finalized {
+                        // A mining candidate for the block can build on the chain that the block
+                        // write task validates, so the task sends back the prepared tip if a
+                        // miner is waiting for candidates.
+                        let prepared_tip =
+                            (self.read_service.mining_candidate.receiver_count() > 0).then(|| {
+                                let (sender, prepared_tip) = oneshot::channel();
+                                self.prepared_tip = Some((Arc::downgrade(&block), prepared_tip));
+                                sender
+                            });
                         // If the block write task has exited, there is nothing to prepare.
-                        let _ = sender.send(NonFinalizedWriteMessage::Prepare(block));
+                        let _ = sender.send(NonFinalizedWriteMessage::Prepare(block, prepared_tip));
                     }
                 }
 
                 async { Ok(Response::PreparingCommit) }.boxed()
             }
             Request::MiningCandidate(block) => {
+                // A prepared tip is only used by the next candidate, if it is for that block.
+                let prepared_tip = self.prepared_tip.take();
                 if self.read_service.mining_candidate.receiver_count() == 0 {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
@@ -1686,12 +1752,19 @@ impl Service<Request> for StateService {
                 let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
                 let compute_state = state.clone();
                 let candidate_block = block.clone();
+                // The channel for this block's prepared tip, if the block write task was asked to
+                // prepare this block's commit.
+                let prepared_tip = prepared_tip
+                    .filter(|(preparing, _)| std::ptr::eq(preparing.as_ptr(), Arc::as_ptr(&block)))
+                    .map(|(_, prepared_tip)| prepared_tip);
+                let network = self.network.clone();
+                let prepared_state = state.clone();
                 // The computation is started here rather than by the task below, so it doesn't
                 // wait for that task to run first: a miner's next template waits for its result.
                 //
                 // Queued or running blocking work keeps its own permit through cancellation
                 // or timeout.
-                let compute = tokio::task::spawn_blocking(move || {
+                let mut computing = tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     if !compute_state.mining_candidate_is_allowed(hash) {
                         return None;
@@ -1703,6 +1776,35 @@ impl Service<Request> for StateService {
                         block,
                     )
                 });
+                // The block write task works out the same context on the way to the block's
+                // prepared chain. Whichever of the two has it first is used: the task starts
+                // earlier, and the computation skips the checks that only a commit needs.
+                let compute = async move {
+                    let Some(prepared_tip) = prepared_tip else {
+                        return computing.await.ok().flatten();
+                    };
+
+                    tokio::select! {
+                        biased;
+                        prepared_tip = prepared_tip => {
+                            // The computation doesn't give a context for an invalidated block.
+                            let is_invalidated = prepared_state
+                                .non_finalized_state_receiver
+                                .borrow_mapped(|state| state.is_block_invalidated(hash));
+                            let info = prepared_tip
+                                .ok()
+                                .filter(|_| !is_invalidated)
+                                .and_then(|tip| tip.chain_info(&network));
+                            match info {
+                                Some(info) => Some(info),
+                                // The block couldn't be prepared, or the prepared chain can't
+                                // give its context.
+                                None => computing.await.ok().flatten(),
+                            }
+                        }
+                        computed = &mut computing => computed.ok().flatten(),
+                    }
+                };
                 tokio::spawn(async move {
                     // Drop the guard's permit reference before notifying waiting receivers.
                     let info = tokio::select! {
@@ -1713,8 +1815,8 @@ impl Service<Request> for StateService {
                             return;
                         },
                         result = compute => match result {
-                            Ok(Some(info)) => Arc::new(info),
-                            _ => {
+                            Some(info) => Arc::new(info),
+                            None => {
                                 cancelled.send_modify(|permit| *permit = None);
                                 return;
                             },
@@ -2161,7 +2263,22 @@ impl Service<ReadRequest> for ReadStateService {
         // header it reads: that takes less time than a blocking thread takes to start and to
         // answer. It is computed from a clone of the chain's `Arc`, so it doesn't hold the
         // channel that the block write task publishes its chains to.
+        //
+        // A transparent output is looked up here as well, if the non-finalized chains or the
+        // database's memory have the answer. A block's transaction checks wait for the output
+        // of each transparent input. The database read those outputs when the transactions
+        // were verified for the mempool, and it has them in memory for as long as its block
+        // cache, which every column family shares, keeps them.
         match &req {
+            ReadRequest::PrecomputeTreeUpdates(transactions) => {
+                self.precompute_tree_updates(transactions);
+                return async move { Ok(ReadResponse::PrecomputingTreeUpdates) }.boxed();
+            }
+            ReadRequest::AnyChainUtxo(outpoint) => {
+                if let Some(utxo) = self.any_utxo_from_memory(outpoint) {
+                    return async move { Ok(ReadResponse::AnyChainUtxo(utxo)) }.boxed();
+                }
+            }
             ReadRequest::ChainInfo => {
                 let info = self.latest_best_chain().and_then(|chain| {
                     read::difficulty::chain_info_from_chain(&chain, &self.network)
@@ -2820,7 +2937,8 @@ impl Service<ReadRequest> for ReadStateService {
 
             ReadRequest::NonFinalizedBlocksListener { .. }
             | ReadRequest::EarlyRelayCache
-            | ReadRequest::MiningCandidateChanges => {
+            | ReadRequest::MiningCandidateChanges
+            | ReadRequest::PrecomputeTreeUpdates(_) => {
                 unreachable!("should return early");
             }
 
