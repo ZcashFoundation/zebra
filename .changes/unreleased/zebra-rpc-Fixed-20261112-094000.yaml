@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: Fixed
+body: >-
+  The lightwalletd `GetMempoolStream` handler now sends an internal gRPC error when a mid-stream
+  mempool query fails, instead of closing the stream as if there were no new transactions.
+time: 2026-11-12T09:40:00.000000000+00:00
