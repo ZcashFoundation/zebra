@@ -29,9 +29,9 @@ impl PruningTask {
         let span = tracing::Span::current();
         let task = thread::spawn(move || {
             span.in_scope(|| {
-                run(db, retention, wake, cancelled).unwrap_or_else(|error| {
-                    panic!("unexpected block-body pruning failure: {error}")
-                });
+                run(db, retention, wake, cancelled, MAX_COMPACTION_HEIGHTS).unwrap_or_else(
+                    |error| panic!("unexpected block-body pruning failure: {error}"),
+                );
             });
         });
         Self {
@@ -118,7 +118,11 @@ fn prune_batch(
     Ok(Some(previous..end))
 }
 
-/// Reclaims tombstoned bodies after catch-up, not after each steady-state batch.
+/// At most 10,000 deleted heights accumulate before a backlog compaction.
+/// Steady-state pruning does not compact each small batch against sync writes.
+const MAX_COMPACTION_HEIGHTS: u32 = 100 * MAX_PRUNING_BATCH_HEIGHTS;
+
+/// Reclaims tombstoned bodies after catch-up or a bounded deletion backlog.
 /// More than one batch's worth of deletion distinguishes a backlog from normal finalization.
 /// Earlier pruning also triggers one startup compaction, in case shutdown interrupted reclamation.
 fn compact_catch_up(db: &ZebraDb, deleted: Range<Height>, previously_pruned: bool) {
@@ -126,7 +130,7 @@ fn compact_catch_up(db: &ZebraDb, deleted: Range<Height>, previously_pruned: boo
         return;
     }
     let started = Instant::now();
-    tracing::info!(?deleted, "compacting pruned block bodies after catch-up");
+    tracing::info!(?deleted, "compacting pruned block bodies");
     db.compact_pruned_bodies(deleted.end);
     tracing::info!(
         elapsed_seconds = started.elapsed().as_secs_f64(),
@@ -139,6 +143,7 @@ fn run(
     retention: u32,
     wake: Receiver<()>,
     cancelled: Receiver<()>,
+    max_compaction_heights: u32,
 ) -> Result<(), BoxError> {
     let mut witness = PruningWitness::default();
     let retained_floor = db.history_capabilities()?.lowest_retained_height;
@@ -149,13 +154,20 @@ fn run(
             return Ok(());
         }
         let ready = db.ready_for_pruning();
+        let mut just_deleted = false;
         if let Some(batch) = prune_batch(&db, retention, &mut witness)? {
             match &mut deleted {
                 Some(deleted) => deleted.end = batch.end,
                 None => deleted = Some(batch),
             }
-            thread::yield_now();
-            continue;
+            just_deleted = true;
+            if deleted
+                .as_ref()
+                .is_some_and(|range| range.end.0 - range.start.0 < max_compaction_heights)
+            {
+                thread::yield_now();
+                continue;
+            }
         }
         if ready {
             if let Some(deleted) = deleted.take() {
@@ -165,6 +177,10 @@ fn run(
                 compact_catch_up(&db, deleted, previously_pruned);
                 previously_pruned = false;
             }
+        }
+        if just_deleted {
+            thread::yield_now();
+            continue;
         }
 
         // Readiness can change without another block, but idle ready workers need no timer.
