@@ -7,8 +7,8 @@
 //! Equihash verification, one header hash and one difficulty filter check.
 //!
 //! Inputs are distinct, contiguous Mainnet headers from the Sprout and NU5 eras.
-//! Fixture decoding and validation run before timing. Each iteration calls the
-//! production batch verifier once, including its contiguity and checkpoint checks.
+//! Fixture decoding and validation run before timing. All cases use the
+//! production batch verifier, including its contiguity and checkpoint checks.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -18,6 +18,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::DateTime;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 
+use futures::StreamExt;
 use zebra_chain::{
     block::{self, Height},
     parameters::Network,
@@ -104,6 +105,46 @@ fn bench_header_verification(c: &mut Criterion) {
                                 .block_on(verify_headers(&network, first_height, owned_batch, now))
                                 .expect("fixture headers pass production async verification");
                             drop(std::hint::black_box(hashes));
+                        },
+                        BatchSize::PerIteration,
+                    )
+                },
+            );
+
+            let concurrent_batches = 4;
+            group.throughput(Throughput::Elements(
+                u64::try_from(batch_size * concurrent_batches)
+                    .expect("four batches contain at most 640 headers"),
+            ));
+            group.bench_function(
+                BenchmarkId::new(
+                    format!("async-workers-{workers}-in-flight-{concurrent_batches}"),
+                    batch_size,
+                ),
+                |b| {
+                    b.iter_batched(
+                        || {
+                            (0..concurrent_batches)
+                                .map(|_| batch.to_vec())
+                                .collect::<Vec<_>>()
+                        },
+                        |owned_batches| {
+                            runtime.block_on(async {
+                                let network = &network;
+                                futures_util::stream::iter(owned_batches)
+                                    .for_each_concurrent(concurrent_batches, |owned_batch| async move {
+                                        let hashes = verify_headers(
+                                            network,
+                                            first_height,
+                                            owned_batch,
+                                            now,
+                                        )
+                                        .await
+                                        .expect("fixture headers pass concurrent async verification");
+                                        drop(std::hint::black_box(hashes));
+                                    })
+                                    .await;
+                            });
                         },
                         BatchSize::PerIteration,
                     )
