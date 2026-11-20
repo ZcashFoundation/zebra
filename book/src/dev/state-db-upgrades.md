@@ -275,8 +275,9 @@ With `state.prune_blocks_older_than` set, one state-owned worker starts pruning 
 opens, wakes at startup and on finalized-tip changes, and deletes at most 100 heights per batch.
 Only transaction bodies are deleted; genesis is retained. The retained floor is derived from
 transaction rows, with no new persisted marker or column family. The database-kind boundary
-keeps archive-only readers away from deleted bodies. Normal RocksDB compaction reclaims disk
-space outside the commit path.
+keeps archive-only readers away from deleted bodies. Normal RocksDB compaction and manual body
+compaction after every 10,000 deleted heights in a backlog, or after catch-up, reclaim disk space
+outside the commit path.
 
 Snapshots must retain the `state` or `state-pruned` kind as well as the format version and
 network namespace. Restore into an empty destination; never unpack a pruned snapshot under
