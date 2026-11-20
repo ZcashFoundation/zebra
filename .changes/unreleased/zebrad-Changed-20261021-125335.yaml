@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Changed zcashd-compat to log zcashd's stderr lines at WARN instead of ERROR, because zcashd writes warnings and informational messages to stderr as well as errors. These lines no longer create Sentry issues; they appear in Sentry Logs and as breadcrumbs.
+time: 2026-10-21T12:53:35.320780499Z

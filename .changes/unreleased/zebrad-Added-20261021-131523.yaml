@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added an error log when the supervised zcashd-compat zcashd fails three times in a row, carrying zcashd's last 20 stderr lines, so a crash loop raises one Sentry issue.
+time: 2026-10-21T13:15:23.246419943Z
