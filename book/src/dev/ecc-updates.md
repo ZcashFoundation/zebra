@@ -2,7 +2,7 @@
 
 Zebra relies on numerous dependencies maintained by ZODL (formerly the Electric Coin Company), and updating them can be a complex task. This guide will help you navigate the process.
 
-The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because `zebra-script` depends on the [zcash_script](https://github.com/ZcashFoundation/zcash_script) project, which is now split into two crates (see `zebra-script/Cargo.toml`): `libzcash_script`, which links to specific files from zcash (zcash_script.cpp and all on which it depends), and the higher-level `zcash_script` crate. Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
+The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. `zebra-script` verifies transparent scripts with the Rust interpreter in the [zcash_script](https://github.com/ZcashFoundation/zcash_script) crate (see `zebra-script/Cargo.toml`), which must stay consensus-compatible with the zcashd release Zebra targets. `zebra-fuzz` still uses the `libzcash_script` crate, which links zcashd's C++ interpreter, as a differential fuzzing oracle.
 
 ## Steps for upgrading
 

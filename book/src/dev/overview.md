@@ -115,9 +115,8 @@ into several components:
     safely relay data over Tor, without revealing distinguishing information.
 
 - [`zebra-script`](https://docs.rs/zebra_script) provides
-  script validation. Currently, this is implemented by linking to the C++
-  script verification code from `zcashd`, but in the future we may implement a
-  pure-Rust script implementation.
+  script validation, using the Rust script interpreter in the
+  [`zcash_script`](https://docs.rs/zcash_script) crate.
 
 - [`zebra-consensus`](https://docs.rs/zebra_consensus)
   performs [_semantic validation_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)

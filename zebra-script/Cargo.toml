@@ -2,7 +2,7 @@
 name = "zebra-script"
 version = "15.0.0"
 authors.workspace = true
-description = "Zebra script verification wrapping zcashd's zcash_script library"
+description = "Zebra transparent script verification with the Rust zcash_script interpreter"
 license.workspace = true
 repository.workspace = true
 edition.workspace = true
@@ -13,23 +13,14 @@ homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
 keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
-categories = ["api-bindings", "cryptography::cryptocurrencies"]
-
-[features]
-default = []
-# Enable a C++/Rust comparison interpreter that runs both the original C++
-# implementation and the Rust implementation, and logs a warning if they don't
-# match.
-comparison-interpreter = []
+categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
-libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
 zcash_transparent = { workspace = true }
 zebra-chain = { path = "../zebra-chain", version = "16.0.0" }
 
-rand = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -151,7 +151,7 @@ Zebra is a Zcash full node implementation in Rust. It is a validator node — it
 ```text
 zebrad (CLI orchestration)
   ├── zebra-consensus (block/transaction verification)
-  │     └── zebra-script (script validation via FFI)
+  │     └── zebra-script (transparent script validation)
   ├── zebra-state (finalized + non-finalized storage)
   ├── zebra-network (P2P, peer management)
   └── zebra-rpc (JSON-RPC + gRPC)
@@ -176,7 +176,7 @@ zebrad (CLI orchestration)
 | `zebra-consensus` | Verification completeness, error handling, checkpoint vs semantic paths |
 | `zebra-state`     | Read/write separation (`ReadRequest` vs `Request`), database migrations |
 | `zebra-rpc`       | zcashd compatibility, error responses, timeout handling                 |
-| `zebra-script`    | FFI safety, memory management, lifetime/ownership across boundaries     |
+| `zebra-script`    | zcashd script compatibility, sighash computation, sigop counting        |
 
 ## Coding Style & Naming Conventions
 

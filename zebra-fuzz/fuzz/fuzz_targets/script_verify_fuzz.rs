@@ -1,39 +1,25 @@
 #![no_main]
 
-//! Script Verify — FFI Boundary Fuzz Target (transparent script consensus path)
+//! Script Verify Fuzz Target (transparent script consensus path)
 //!
 //! Targets `zebra_script::CachedFfiTransaction::is_valid`, the script
 //! verification entrypoint, as a high-value fuzz surface because:
 //!
-//! - It is the only Rust → C FFI call in the consensus path (the rest of
-//!   Zebra is pure Rust). The underlying C library is `zcash_script`,
-//!   reached via `libzcash_script::CxxInterpreter::verify_callback`.
-//! - C code does not satisfy Rust's panic semantics. Any mis-encoded
-//!   script / sighash / OP_* dispatch can manifest as a SIGSEGV, OOM,
-//!   integer overflow trap, or stack-overflow in the C interpreter —
-//!   each of which is a remote-DoS primitive for a node validating
-//!   transparent input scripts gossiped from network.
-//! - Existing fuzz targets (8 of them, all enumerated in the `Cargo.toml`
-//!   `[[bin]]` blocks above this one) exclusively exercise **Rust**
-//!   decode paths. Zero coverage on the C FFI edge as of 2026-04-30.
+//! - It runs the Rust `zcash_script` interpreter on scripts gossiped
+//!   from the network. A panic, OOM, or unbounded loop in the
+//!   interpreter, in Zebra's sighash callback, or in Zebra's sigop
+//!   counter is a remote-DoS primitive for a node validating
+//!   transparent input scripts.
+//! - It drives the interpreter with deserialized transactions, so
+//!   signature checks reach Zebra's sighash computation.
 //!
-//! A SIGSEGV or unbounded-loop crash artifact emitted by libfuzzer here
-//! would represent a remote-DoS primitive against the validating node —
-//! the highest-severity class for this surface.
+//! `zebra-script` no longer calls zcashd's C++ interpreter. That
+//! interpreter is still fuzzed directly, and compared with Zebra's
+//! sigop counter, in `script_flag_matrix_fuzz`.
 //!
-//! ───────────────────────────────────────────────────────────────────
-//! Why the FFI panic surface is special
-//! ───────────────────────────────────────────────────────────────────
-//!
-//! `panic::catch_unwind` only catches **Rust** panics. A SIGSEGV in
-//! the C `zcash_script` library bypasses Rust's unwind machinery and
-//! aborts the process. That is **the** finding shape we want here:
-//! libfuzzer's built-in SIGSEGV / SIGABRT / SIGFPE handlers will
-//! record the crashing input as an artifact under
-//! `zebra-fuzz/fuzz/artifacts/script_verify_fuzz/` so it can be
-//! triaged offline. We still wrap each invariant in `catch_unwind`
-//! so that **Rust-side** panics (e.g. an `as` cast that traps in
-//! debug, a `.expect(...)` in the bridge) do not lose the rest of
+//! We wrap each invariant in `catch_unwind` so that a panic on one
+//! invariant (e.g. an `as` cast that traps in debug, or a
+//! `.expect(...)` in the sighash callback) does not lose the rest of
 //! the iteration's coverage on the same input.
 //!
 //! ───────────────────────────────────────────────────────────────────
@@ -44,22 +30,22 @@
 //! spending — under normal validation Zebra reads this from the
 //! UTXO state. The fuzzer obviously has no UTXO database, so we
 //! mock the previous outputs in the simplest way that still drives
-//! the FFI:
+//! the interpreter:
 //!
 //! - One `transparent::Output` per `tx.inputs()` slot.
 //! - Each mock output has `value = 1 zatoshi` (any non-zero NonNegative
 //!   `Amount` works — value is consensus-relevant for fee checks
-//!   higher up the stack but **not** for `verify_callback`, which
+//!   higher up the stack but **not** for script evaluation, which
 //!   only consumes the lock_script bytes).
 //! - Each mock output's `lock_script` is fed from fuzz-controlled
 //!   bytes (the `script_bytes` slice below). This is the actual
-//!   attack input crossing the FFI: malformed Bitcoin Script
+//!   attack input: malformed Bitcoin Script
 //!   bytecode in the prev-output `script_pub_key`.
 //!
 //! We deliberately do **not** build "valid-looking" mock prevouts.
 //! Complex mock state masks real bugs (mock pollutes the input
 //! distribution); minimal mock keeps the fuzz signal sharp on the
-//! C interpreter's response to garbage bytes.
+//! interpreter's response to garbage bytes.
 //!
 //! ───────────────────────────────────────────────────────────────────
 //! Input split layout
@@ -98,18 +84,15 @@
 //! Panic / crash classes of interest for this target
 //! ───────────────────────────────────────────────────────────────────
 //!
-//! 1. **SIGSEGV in zcash_script C library** — malformed `OP_PUSHDATA*`
-//!    length prefixes or stack-underflow on `OP_CHECKSIG` could
-//!    dereference an out-of-bounds pointer in the C interpreter.
-//!    Surfaces as a libfuzzer SIGSEGV artifact (NOT catchable by
-//!    Rust unwind).
-//! 2. **Integer overflow in OP_* dispatch** — script numbers are
-//!    parsed as i32 / i64 on the C side; an attacker-controlled
-//!    arithmetic op could trap (UBSan-equivalent) or wrap silently.
-//! 3. **FFI lifetime / ownership bug** — the Rust side passes
-//!    `&[u8]` slices into the C bridge; if a future refactor
-//!    accidentally invalidates the slice before the C call returns,
-//!    we'd see a use-after-free crash here.
+//! 1. **Interpreter panic** — malformed `OP_PUSHDATA*` length
+//!    prefixes or stack underflow on `OP_CHECKSIG` could index out of
+//!    bounds in the interpreter.
+//! 2. **Integer overflow in OP_* dispatch** — an attacker-controlled
+//!    arithmetic op on script numbers could overflow, which panics in
+//!    a debug build and wraps silently in a release build.
+//! 3. **Sigop counter panic** — `zebra_script::legacy_sigop_count`
+//!    walks raw script bytes; a slip in its push-length handling
+//!    could slice past the end of the script.
 //! 4. **Sighasher Rust-panic** — `CachedFfiTransaction::new` calls
 //!    `transaction.sighasher(nu, all_previous_outputs)`, which
 //!    routes through `librustzcash` for V5+ and through
@@ -194,14 +177,14 @@ fuzz_target!(|data: &[u8]| {
 
     // Coinbase txs are explicitly rejected by `CachedFfiTransaction::is_valid`
     // (returns `Error::TxCoinbase`). Skipping them keeps the fuzz signal
-    // focused on the FFI path that actually reaches the C interpreter.
+    // focused on the path that actually reaches the interpreter.
     if tx.is_coinbase() {
         return;
     }
 
     let inputs_len = tx.inputs().len();
     if inputs_len == 0 {
-        // No transparent inputs ⇒ nothing to verify_callback against.
+        // No transparent inputs ⇒ no script to evaluate.
         // Sapling/Orchard-only V5 txs land here; their fuzz coverage
         // belongs to other targets.
         return;
@@ -212,8 +195,8 @@ fuzz_target!(|data: &[u8]| {
     //
     // One `transparent::Output` per input slot, with the lock_script
     // bytes fed straight from `script_bytes`. This is the actual
-    // adversarial payload that crosses the FFI as `script_pub_key`.
-    // Value is a sentinel 1 zatoshi — irrelevant to verify_callback.
+    // adversarial payload that the interpreter runs as `script_pub_key`.
+    // Value is a sentinel 1 zatoshi — irrelevant to script evaluation.
     // ───────────────────────────────────────────────────────────────────
     let lock_script = transparent::Script::new(script_bytes);
     let mock_value: zebra_chain::amount::Amount<zebra_chain::amount::NonNegative> =
@@ -268,9 +251,6 @@ fuzz_target!(|data: &[u8]| {
 /// Both calls are wrapped in `panic::catch_unwind` so a Rust-side
 /// panic on one tuple does not abort the iteration — libfuzzer can
 /// still observe coverage on the remaining tuples for the same input.
-/// SIGSEGV / SIGABRT in the C `zcash_script` library is **not**
-/// catchable here and will surface as a libfuzzer crash artifact
-/// (which is precisely the high-value finding shape).
 fn drive_is_valid(
     tx: &Arc<Transaction>,
     prev_outputs: Arc<Vec<transparent::Output>>,
@@ -298,27 +278,26 @@ fn drive_is_valid(
 
     // Pick the input index modulo the number of inputs. We also test
     // an out-of-bounds index to exercise the `Error::TxIndex` path,
-    // because the bounds check is the last Rust gate before the FFI
-    // dereference and a future refactor could regress it.
+    // because the bounds check is the last gate before the input is
+    // indexed and a future refactor could regress it.
     let in_bounds = (idx_sel as usize) % inputs_len;
     let oob = inputs_len; // exactly one past the end
 
     // ───────────────────────────────────────────────────────────────────
     // Invariant S-2: is_valid(in_bounds) must not Rust-panic.
     //
-    // This is the **primary** FFI surface. Inside `is_valid`:
+    // This is the **primary** surface. Inside `is_valid`:
     //   - We read the lock_script from the mock prev_output.
     //   - We construct `zcash_script::interpreter::Flags::P2SH |
     //     CHECKLOCKTIMEVERIFY`.
     //   - We unwrap the input's `unlock_script` (rejects Coinbase ⇒
     //     returns Error::TxCoinbase, so coinbase txs are pre-filtered
     //     above).
-    //   - We invoke `interpreter.verify_callback(&script, flags)` which
-    //     trampolines through libzcash_script into the C interpreter.
+    //   - We evaluate the script with `script::Raw::eval(flags, &checker)`,
+    //     the Rust `zcash_script` interpreter.
     //
-    // SIGSEGV / SIGFPE / OOM / unbounded-loop in the C library is the
-    // highest-severity crash class for this surface. Rust panics on this
-    // path are also high-value (FFI bridge bugs).
+    // A panic, OOM, or unbounded loop in the interpreter or the sighash
+    // callback is the highest-severity crash class for this surface.
     // ───────────────────────────────────────────────────────────────────
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let _ = cached.is_valid(in_bounds);
@@ -349,11 +328,11 @@ fn drive_is_valid(
     // ───────────────────────────────────────────────────────────────────
     // Invariant S-4: Sigops::sigops() must not Rust-panic.
     //
-    // The companion FFI entry point on `CachedFfiTransaction` is
-    // `Sigops::sigops`, which iterates every input/output script and
-    // calls `interpreter.legacy_sigop_count_script` for each — another
-    // FFI trampoline into the C library. Same SIGSEGV / overflow class
-    // as `is_valid`, different opcode dispatch table on the C side.
+    // `Sigops::sigops` walks the raw bytes of every input and output
+    // script with `zebra_script::legacy_sigop_count`. The scripts are
+    // attacker-controlled, so a slip in push-length handling would
+    // panic here. `script_flag_matrix_fuzz` compares the counter with
+    // zcashd's C++ `GetSigOpCount`.
     // ───────────────────────────────────────────────────────────────────
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         use zebra_script::Sigops;

@@ -10,21 +10,23 @@
 //!   * Misc   — `P2SH` (BIP-16), `DiscourageUpgradableNOPs`.
 //!
 //! `zebra_script::CachedFfiTransaction::is_valid` hardcodes the flag
-//! set to `P2SH | CHECKLOCKTIMEVERIFY` (`zebra-script/src/lib.rs:161-
-//! 162`) — that is the production policy. The libzcash_script /
-//! zcash_script library underneath, however, supports the full BIP-62/
-//! BIP-66 flag bitfield (`zcash_script::interpreter::Flags`). The C++
-//! interpreter dispatches on every bit of that field; an attacker who
-//! gets one un-fuzzed bit combination to panic / SIGSEGV / loop is a
+//! set to `P2SH | CHECKLOCKTIMEVERIFY` — that is the production policy
+//! — and evaluates scripts with the Rust `zcash_script` interpreter.
+//! That interpreter, and zcashd's C++ interpreter in `libzcash_script`,
+//! support the full BIP-62/BIP-66 flag bitfield
+//! (`zcash_script::interpreter::Flags`) and dispatch on every bit of
+//! that field; a bit combination that panics or loops would be a
 //! Critical-Core DoS regression on any future Zcash NU that activates
 //! the corresponding policy. (NU activations historically *expand* the
 //! mandatory flag set — see `zebra-state` / `zebra-consensus` script-
 //! flag bumps over time.)
 //!
 //! This harness goes one layer below `zebra_script::is_valid` and calls
-//! `libzcash_script::CxxInterpreter::verify_callback(&script, flags)`
-//! directly with attacker-controlled `flags` bits. The flag-control surface is
-//! reached entirely through public APIs; this target needs no `fuzzing`
+//! both interpreters directly with attacker-controlled `flags` bits.
+//! Zebra no longer runs the C++ interpreter in production. Here it is
+//! the reference that the Rust interpreter's verdicts and Zebra's sigop
+//! counts are compared with. The flag-control surface is reached
+//! entirely through public APIs; this target needs no `fuzzing`
 //! feature.
 //!
 //! ───────────────────────────────────────────────────────────────────
@@ -47,7 +49,7 @@
 //! ───────────────────────────────────────────────────────────────────
 //!
 //! Per fuzz iteration we drive the (script_sig, script_pub_key, flags)
-//! tuple through three observers:
+//! tuple through five observers:
 //!
 //!   1. `CxxInterpreter::verify_callback` — primary FFI panic hunt;
 //!      SIGSEGV / SIGABRT / SIGFPE / unbounded loop in the C library
@@ -63,14 +65,25 @@
 //!      and asserting the strict run did not become *more* permissive.
 //!      A violation here is a candidate finding for a flag-handling
 //!      regression in either the C or Rust interpreter.
+//!   4. **Sigop count differential** — `zebra_script::legacy_sigop_count`
+//!      MUST return the same count as the C++ interpreter's
+//!      `legacy_sigop_count_script` for both scripts. Zebra counts
+//!      legacy sigops with its own walk over the script bytes, so a
+//!      difference would make Zebra and zcashd disagree on the block
+//!      sigop limit.
+//!   5. **Production verdict differential** — under the flags Zebra
+//!      verifies with (`P2SH | CHECKLOCKTIMEVERIFY`), and with the same
+//!      sighash callback, lock time and finality, the Rust interpreter
+//!      MUST accept exactly the scripts that the C++ interpreter
+//!      accepts. A difference is a consensus split between Zebra and
+//!      zcashd.
 //!
 //! Observers 1 and 2 are *not* a differential oracle: the two results
 //! are never compared, because the C++ side is driven by the sighash
 //! callback while the Rust side uses `NullSignatureChecker`. Under
 //! those semantics a divergence would not mean a bug, so comparing
-//! them would only produce noise. Making this target differential
-//! requires giving both sides the same checker first; that is a change
-//! of scope, not a missing assertion.
+//! them would only produce noise. Observer 5 gives both sides the same
+//! checker, and compares them for the one flag set that is consensus.
 //!
 //! ───────────────────────────────────────────────────────────────────
 //! Compile (debug build):
@@ -84,7 +97,11 @@ use std::panic::{self, AssertUnwindSafe};
 use libfuzzer_sys::fuzz_target;
 
 use libzcash_script::{CxxInterpreter, RustInterpreter, ZcashScript};
-use zcash_script::{interpreter::Flags, script};
+use zcash_script::{
+    interpreter::{CallbackTransactionSignatureChecker, Flags},
+    script,
+};
+use zebra_script::legacy_sigop_count;
 
 /// Strict flags that, when added, MUST NOT turn an `Err` into `Ok(true)`.
 /// `P2SH` and `CHECKLOCKTIMEVERIFY` are *not* in this set because they
@@ -180,14 +197,13 @@ fuzz_target!(|data: &[u8]| {
     // 1097` has a hardcoded `assert((flags & SCRIPT_VERIFY_P2SH) != 0)`
     // — without P2SH the C++ library aborts via SIGABRT. This is a
     // documented zcashd caller-contract panic (P2SH has been mandatory
-    // since BIP-16; `zebra_script::is_valid` always sets it
-    // — `zebra-script/src/lib.rs:161`) and would not be reachable
-    // through any production code path. Per
-    // `feedback_fuzz_known_panic_filter`, magic-byte filter to keep
-    // libfuzzer exploring the actually-reachable BIP-66/65/62 surface.
+    // since BIP-16, and `zebra_script::is_valid` always sets it), not
+    // a finding. Per `feedback_fuzz_known_panic_filter`, magic-byte
+    // filter to keep libfuzzer exploring the actually-reachable
+    // BIP-66/65/62 surface.
     let flags = Flags::from_bits_truncate(flag_mask) | Flags::P2SH;
 
-    let raw = script::Raw::from_raw_parts(script_sig.clone(), script_pub_key.clone());
+    let raw = script::Raw::from_raw_parts(script_sig, script_pub_key);
 
     // ───────────────────────────────────────────────────────────────────
     // Sighash callback — returns a fixed sentinel. Signature checks will
@@ -197,6 +213,52 @@ fuzz_target!(|data: &[u8]| {
     // ───────────────────────────────────────────────────────────────────
     let sighash_cb: zcash_script::interpreter::SighashCalculator<'_> =
         &|_script_code, _hash_type| Some([0u8; 32]);
+
+    let oracle = CxxInterpreter {
+        sighash: sighash_cb,
+        lock_time: 0,
+        is_final: false,
+    };
+
+    // ───────────────────────────────────────────────────────────────────
+    // Sigop count differential.
+    //
+    // The C++ counter is zcashd's `CScript::GetSigOpCount(false)`, which
+    // Zebra's counter must match on every script, including ones that
+    // could never be evaluated.
+    // ───────────────────────────────────────────────────────────────────
+    for counted in [&raw.sig, &raw.pub_key] {
+        assert_eq!(
+            Ok(legacy_sigop_count(&counted.0)),
+            oracle.legacy_sigop_count_script(counted),
+            "Zebra's legacy sigop count differs from the C++ interpreter's"
+        );
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Production verdict differential.
+    //
+    // Only accept or reject is compared, because the two interpreters
+    // report a failed script with different error types.
+    // ───────────────────────────────────────────────────────────────────
+    let production_flags = Flags::P2SH | Flags::CHECKLOCKTIMEVERIFY;
+    let cxx_accepts = matches!(oracle.verify_callback(&raw, production_flags), Ok(true));
+    let rust_accepts = matches!(
+        raw.eval(
+            production_flags,
+            &CallbackTransactionSignatureChecker {
+                sighash: sighash_cb,
+                lock_time: 0,
+                is_final: false,
+            },
+        ),
+        Ok(true)
+    );
+    assert_eq!(
+        cxx_accepts, rust_accepts,
+        "the Rust interpreter's verdict differs from the C++ interpreter's under Zebra's \
+         verification flags"
+    );
 
     // ───────────────────────────────────────────────────────────────────
     // Layer 1 — CxxInterpreter::verify_callback (FFI primary).
