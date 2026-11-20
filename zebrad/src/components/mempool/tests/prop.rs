@@ -126,9 +126,10 @@ proptest! {
         );
     }
 
-    /// Checks that early NU6.3 branch IDs retain their score before the grace window.
+    /// Checks that NU6.3 branch IDs have no peer score before the grace window, since a peer whose
+    /// tip is ahead of ours can honestly relay them.
     #[test]
-    fn nu6_3_branch_id_keeps_score_before_grace(
+    fn nu6_3_branch_id_has_no_score_before_grace(
         activation_height in 200u32..1_000_000,
         height_offset in -100i64..-40,
     ) {
@@ -154,7 +155,7 @@ proptest! {
                 height,
                 &network,
             ),
-            100,
+            0,
         );
     }
 
@@ -556,22 +557,21 @@ proptest! {
         prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 100);
     }
 
-    /// Checks that NU7 branch IDs have no peer score for 50 minutes of 75-second blocks before
-    /// activation, and keep it earlier.
+    /// Checks that NU7 branch IDs have no peer score at any height below NU7 activation, inside
+    /// or outside the grace window.
     #[test]
-    fn nu7_branch_id_has_no_score_only_within_grace_before_activation(
-        activation_height in 200u32..1_000_000,
-        height_offset in -100i64..0,
+    fn nu7_branch_id_has_no_score_before_activation(
+        activation_height in 200_000u32..1_000_000,
+        height_offset in -100_000i64..0,
     ) {
         let network = configured_testnet(ConfiguredActivationHeights {
-            nu6_3: Some(activation_height - 101),
+            nu6_3: Some(activation_height - 100_001),
             nu7: Some(activation_height),
             ..Default::default()
         });
         let height = height_at_offset(activation_height, height_offset);
-        let expected_score = if height_offset >= -40 { 0 } else { 100 };
 
-        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu7, height, &network), expected_score);
+        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu7, height, &network), 0);
     }
 
     /// Checks that non-adjacent branch IDs retain their normal peer score around NU7 activation.
