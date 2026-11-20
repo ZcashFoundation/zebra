@@ -1405,6 +1405,8 @@ where
             )
         };
 
+        // The fallback tip below has no balances, so it has no NSM value balance either.
+        let tip_pool_values_found = tip_pool_values_rsp.is_ok();
         let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
             use zebra_state::ReadResponse::*;
 
@@ -1507,12 +1509,9 @@ where
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
-            nsm_value_balance: Some(nsm_value_balance_entry(
-                network,
-                tip_height,
-                value_balance.nsm_amount(),
-                None,
-            )),
+            nsm_value_balance: tip_pool_values_found.then(|| {
+                nsm_value_balance_entry(network, tip_height, value_balance.nsm_amount(), None)
+            }),
             upgrades,
             consensus,
             headers: tip_height,
