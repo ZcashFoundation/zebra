@@ -1,15 +1,18 @@
 //! A tonic RPC server for Zebra's indexer API.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
 use zebra_chain::chain_tip::ChainTip;
 use zebra_node_services::mempool::MempoolTxSubscriber;
 use zebra_state::ReadState;
 
-use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_MSG};
+use crate::{
+    indexer::{indexer_server::IndexerServer, methods::MAX_BLOCK_RANGE_STREAMS},
+    server::OPENED_RPC_ENDPOINT_MSG,
+};
 
 /// Maximum concurrent HTTP/2 streams per connection.
 ///
@@ -35,6 +38,8 @@ where
     pub(super) read_state: ReadStateService,
     pub(super) chain_tip_change: Tip,
     pub(super) mempool_change: MempoolTxSubscriber,
+    /// One permit per `get_block_range` stream the server may serve at once.
+    pub(super) block_range_permits: Arc<Semaphore>,
 }
 
 /// Initializes the indexer RPC server
@@ -53,6 +58,7 @@ where
         read_state,
         chain_tip_change,
         mempool_change,
+        block_range_permits: Arc::new(Semaphore::new(MAX_BLOCK_RANGE_STREAMS)),
     };
 
     let reflection_service = tonic_reflection::server::Builder::configure()

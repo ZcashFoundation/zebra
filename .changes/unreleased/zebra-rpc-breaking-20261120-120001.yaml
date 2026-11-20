@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: 'The generated `indexer::indexer_server::Indexer` trait has a new required `get_block_range` method and `GetBlockRangeStream` associated type. Implementers of the trait must add them.'
+time: 2026-11-20T12:00:01.000000Z

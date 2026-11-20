@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: 'Added the `GetBlockRange` indexer gRPC method, with the `indexer::BlockRangeRequest` and `indexer::BlockAndHeight` messages, and `indexer::indexer_client::IndexerClient::get_block_range`.'
+time: 2026-11-20T12:00:02.000000Z

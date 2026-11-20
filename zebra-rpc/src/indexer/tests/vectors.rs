@@ -3,7 +3,10 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, Semaphore},
+    task::JoinHandle,
+};
 use tower::BoxError;
 use zebra_chain::{
     block::{Block, Height},
@@ -12,14 +15,17 @@ use zebra_chain::{
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
-use zebra_state::{HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse};
+use zebra_state::{
+    BlockReadError, HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse,
+};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
 };
 
 use crate::indexer::{
-    self, indexer_client::IndexerClient, BlockRequest, Empty, NonFinalizedStateChangeRequest,
+    self, indexer_client::IndexerClient, methods::block_range_stream, BlockAndHeight,
+    BlockRangeRequest, BlockRequest, Empty, NonFinalizedStateChangeRequest,
 };
 
 #[tokio::test]
@@ -37,6 +43,7 @@ async fn rpc_server_spawn() -> Result<()> {
     test_chain_tip_change(client.clone(), mock_chain_tip_sender).await?;
     test_mempool_change(client.clone(), mempool_transaction_sender).await?;
     test_get_block(client.clone(), mock_read_service.clone()).await?;
+    test_get_block_range(client.clone(), mock_read_service.clone()).await?;
     test_non_finalized_state_change(client.clone(), mock_read_service).await?;
 
     Ok(())
@@ -170,6 +177,271 @@ async fn test_get_block(
     let (decoded_block, decoded_hash) = response.decode().expect("response should decode");
     assert_eq!(decoded_hash, expected_hash);
     assert_eq!(decoded_block.hash(), expected_hash);
+
+    Ok(())
+}
+
+/// Tests how a `GetBlockRange` stream ends: after the whole range, at the finalized tip, at a
+/// missing block body, or on a state error. Invalid ranges are rejected without reading the state.
+async fn test_get_block_range(
+    client: IndexerClient<tonic::transport::Channel>,
+    mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
+) -> Result<()> {
+    for (start_height, end_height) in [(2, 1), (u32::MAX, u32::MAX), (0, u32::MAX)] {
+        let status = client
+            .clone()
+            .get_block_range(tonic::Request::new(BlockRangeRequest {
+                start_height,
+                end_height,
+            }))
+            .await
+            .expect_err("an invalid block range should be rejected");
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    let blocks: Vec<(Height, Vec<u8>)> = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ]
+    .into_iter()
+    .map(|bytes| {
+        let block: Block = bytes.zcash_deserialize_into()?;
+        let height = block.coinbase_height().expect("test block has a height");
+        Ok((height, bytes.to_vec()))
+    })
+    .collect::<Result<_>>()?;
+    let raw_blocks =
+        |range: std::ops::Range<usize>| ReadResponse::RawBlocks(blocks[range].to_vec());
+    let read = |start, count| ReadRequest::RawBlocksByHeightRange {
+        start: Height(start),
+        count,
+    };
+
+    // Each case is the requested range, the state's answer to each read, and the final status.
+    type Reads = Vec<(ReadRequest, std::result::Result<ReadResponse, BoxError>)>;
+    let cases: Vec<(u32, u32, Reads, Option<tonic::Code>)> = vec![
+        // The whole range: ends `OK` after the last requested block, without another read.
+        (1, 2, vec![(read(1, 2), Ok(raw_blocks(0..2)))], None),
+        // The finalized tip is below the end: ends `OK` once a read is empty.
+        (
+            1,
+            5,
+            vec![
+                (read(1, 5), Ok(raw_blocks(0..2))),
+                (read(3, 3), Ok(raw_blocks(0..0))),
+            ],
+            None,
+        ),
+        // A missing body at height 3: ends `NOT_FOUND` after the blocks before it.
+        (
+            1,
+            5,
+            vec![
+                (read(1, 5), Ok(raw_blocks(0..2))),
+                (
+                    read(3, 3),
+                    Err(BlockReadError::BlockBodyUnavailable { height: Height(3) }.into()),
+                ),
+            ],
+            Some(tonic::Code::NotFound),
+        ),
+        // A state read error: ends `UNAVAILABLE`.
+        (
+            1,
+            2,
+            vec![(read(1, 2), Err("state read failed".into()))],
+            Some(tonic::Code::Unavailable),
+        ),
+    ];
+
+    for (start_height, end_height, reads, expected_status) in cases {
+        let mut request_client = client.clone();
+        let request_task = tokio::spawn(async move {
+            request_client
+                .get_block_range(tonic::Request::new(BlockRangeRequest {
+                    start_height,
+                    end_height,
+                }))
+                .await
+        });
+
+        let expected_blocks: Vec<_> = reads
+            .iter()
+            .filter_map(|(_, response)| match response {
+                Ok(ReadResponse::RawBlocks(blocks)) => Some(blocks),
+                _ => None,
+            })
+            .flatten()
+            .map(|(height, data)| (height.0, data.clone()))
+            .collect();
+        for (request, response) in reads {
+            mock_read_service
+                .expect_request(request)
+                .await
+                .respond(response);
+        }
+
+        let stream = request_task
+            .await?
+            .expect("a valid block range should be accepted")
+            .into_inner();
+        let (received, status) = read_block_range(stream).await;
+
+        assert_eq!(received, expected_blocks);
+        assert_eq!(status.as_ref().map(tonic::Status::code), expected_status);
+        assert!(
+            status
+                .as_ref()
+                .is_none_or(|status| status.code() != tonic::Code::NotFound
+                    || status.message().contains("height 3")),
+            "NOT_FOUND should name the missing height: {status:?}"
+        );
+    }
+
+    // A read the cases don't expect fails the next case's `expect_request`, or this check.
+    mock_read_service.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// Reads a `GetBlockRange` stream to its end, returning its blocks and its final error status.
+async fn read_block_range(
+    mut stream: tonic::Streaming<BlockAndHeight>,
+) -> (Vec<(u32, Vec<u8>)>, Option<tonic::Status>) {
+    let mut received = Vec::new();
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await
+            .expect("the stream should make progress before timeout");
+        match message {
+            Some(Ok(block)) => received.push((block.height, block.data)),
+            Some(Err(status)) => return (received, Some(status)),
+            None => return (received, None),
+        }
+    }
+}
+
+/// Tests that a `GetBlockRange` stream whose consumer stops reading ends with
+/// `RESOURCE_EXHAUSTED` after the blocks already queued, even though the block channel is full.
+#[tokio::test]
+async fn get_block_range_slow_consumer_ends_with_resource_exhausted() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError> =
+        MockService::build().for_unit_tests();
+    let send_timeout = Duration::from_millis(100);
+
+    let mut stream = block_range_stream(
+        mock_read_service.clone(),
+        &Arc::new(Semaphore::new(1)),
+        Height(0),
+        Height(1000),
+        send_timeout,
+    )?;
+
+    // The first chunk fills the block channel, so the first send of the second chunk times out.
+    for start in [0, 8] {
+        mock_read_service
+            .expect_request(ReadRequest::RawBlocksByHeightRange {
+                start: Height(start),
+                count: 8,
+            })
+            .await
+            .respond(ReadResponse::RawBlocks(
+                (start..start + 8)
+                    .map(|height| (Height(height), Vec::new()))
+                    .collect(),
+            ));
+    }
+    tokio::time::sleep(send_timeout * 10).await;
+    mock_read_service.expect_no_requests().await;
+
+    for expected_height in 0..8 {
+        let block = stream
+            .next()
+            .await
+            .expect("queued blocks are delivered")
+            .expect("queued blocks are not errors");
+        assert_eq!(block.height, expected_height);
+    }
+
+    let status = stream
+        .next()
+        .await
+        .expect("the stream ends with a status")
+        .expect_err("the final status is an error");
+    assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+    assert!(stream.next().await.is_none());
+
+    Ok(())
+}
+
+/// Tests that a `GetBlockRange` stream whose client has gone away reads nothing from the state.
+#[tokio::test]
+async fn get_block_range_stops_reading_after_the_client_disconnects() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError> =
+        MockService::build().for_unit_tests();
+
+    drop(block_range_stream(
+        mock_read_service.clone(),
+        &Arc::new(Semaphore::new(1)),
+        Height(0),
+        Height(1000),
+        Duration::from_secs(60),
+    )?);
+    mock_read_service.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// Tests that `GetBlockRange` refuses a stream with `RESOURCE_EXHAUSTED` while every permit is held,
+/// and serves one again once a stream has ended.
+#[tokio::test]
+async fn get_block_range_refuses_streams_beyond_the_limit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError> =
+        MockService::build().for_unit_tests();
+    let permits = Arc::new(Semaphore::new(1));
+    let read_service = mock_read_service.clone();
+    let open_stream = || {
+        block_range_stream(
+            read_service.clone(),
+            &permits,
+            Height(0),
+            Height(0),
+            Duration::from_secs(60),
+        )
+    };
+
+    let mut first = open_stream()?;
+
+    // Refused while the first stream is reading from the state.
+    let read = mock_read_service
+        .expect_request(ReadRequest::RawBlocksByHeightRange {
+            start: Height(0),
+            count: 1,
+        })
+        .await;
+    let Err(status) = open_stream() else {
+        panic!("a stream beyond the limit should be refused");
+    };
+    assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+
+    read.respond(ReadResponse::RawBlocks(vec![(Height(0), Vec::new())]));
+    assert_eq!(first.next().await.expect("one block")?.height, 0);
+    assert!(first.next().await.is_none());
+
+    // The task releases its permit as it ends, just after closing the stream.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while permits.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    drop(open_stream()?);
 
     Ok(())
 }

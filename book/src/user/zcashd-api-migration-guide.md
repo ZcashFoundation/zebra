@@ -324,7 +324,8 @@ Zebra's equivalent is the **indexer gRPC service**
 (`zebra-rpc/proto/indexer.proto`). It streams best-chain tip changes
 (`ChainTipChange`), non-finalized blocks (`NonFinalizedStateChange`), and
 mempool additions, invalidations, and mined transactions (`MempoolChange`), and
-serves single blocks (`GetBlock`). Enable it by setting `indexer_listen_addr` in
+serves single blocks (`GetBlock`) and ranges of finalized blocks
+(`GetBlockRange`). Enable it by setting `indexer_listen_addr` in
 the `[rpc]` section of `zebrad.toml`. It has no authentication, so bind it to a
 loopback or private address. Zallet uses this service; see
 [Running Zallet with Zebra](zallet.md).

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added the `GetBlockRange` method to the indexer gRPC service. It streams the finalized blocks in an inclusive height range, in ascending order and in the same encoding as `GetBlock`, read from the stored block bytes. The stream ends with `OK` at the end of the range or at the finalized tip, with `NOT_FOUND` naming the height of a block whose body is not stored, with `RESOURCE_EXHAUSTED` if the client stops reading for longer than the send timeout, and with `UNAVAILABLE` if the state cannot be read. The server serves at most 16 streams at once and refuses more with `RESOURCE_EXHAUSTED`. zakurad uses the same messages, has no stream limit and ends a stream with `OK` where Zebra reports `NOT_FOUND` or `RESOURCE_EXHAUSTED`.'
+time: 2026-11-20T12:00:00.000000Z
