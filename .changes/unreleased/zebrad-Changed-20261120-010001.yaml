@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Block templates take mempool transactions in a fixed order instead of by ZIP 317''s weighted random draws: by fee weight ratio and then transaction ID, with a transaction that spends other mempool transactions tried right after the last of them. From the fee reduction height the weight ratio has no cap, where ZIP 2009 specifies a cap of 10. The same mempool now gives the same template ([#12560](https://github.com/ZcashFoundation/zebra/pull/12560)).'
+time: 2026-11-20T01:00:01.000000000-05:00

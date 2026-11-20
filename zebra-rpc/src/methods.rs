@@ -742,9 +742,9 @@ pub trait Rpc {
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
     /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
-    /// 5000 zatoshis before ZIP 2009 activation, and 1000 zatoshis from Mainnet height
-    /// 3,590,000, Testnet height 4,465,026, or Regtest height 1. Custom testnets use the
-    /// Testnet policy height.
+    /// 5000 zatoshis before the ZIP 2009 fee reduction height, and 400 zatoshis from Mainnet
+    /// height 3,590,000, Testnet height 4,465,026, or height 1 on Regtest and custom testnets.
+    /// ZIP 2009 specifies 1000 zatoshis from that height.
     ///
     /// method: post
     /// tags: wallet

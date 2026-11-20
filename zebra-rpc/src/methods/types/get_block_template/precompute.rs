@@ -1513,8 +1513,7 @@ async fn precompute_fee_coinbase(
 /// Removes mined, conflicting and expired transactions from a private pre-tip snapshot.
 ///
 /// Only fee prediction uses this snapshot. The full template always selects again from the
-/// committed mempool, so arrivals, reorgs or different ZIP-317 draws cannot reuse a proof for the
-/// wrong fees.
+/// committed mempool, so arrivals and reorgs cannot reuse a proof for the wrong fees.
 fn candidate_mempool(
     block: &Block,
     tip_height: Height,

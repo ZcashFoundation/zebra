@@ -46,9 +46,11 @@ fn zip2009_fee_parameters_at_activation() {
 
     for network in [Network::Mainnet, testnet, regtest, custom_testnet] {
         let activation = network.fee_reduction_height();
-        for (height, marginal_fee, cap) in [
+        // The fee is 10 times the legacy conventional fee, which is above the legacy cap, and
+        // 125 times the reduced one, which has no cap.
+        for (height, marginal_fee, weight_ratio) in [
             (activation.previous().unwrap(), 5_000, 4.0),
-            (activation, 1_000, 10.0),
+            (activation, 400, 125.0),
         ] {
             assert_eq!(super::marginal_fee(&network, height), marginal_fee);
             assert_eq!(
@@ -62,7 +64,7 @@ fn zip2009_fee_parameters_at_activation() {
                     &network,
                     height,
                 ),
-                cap,
+                weight_ratio,
             );
         }
     }
@@ -106,10 +108,44 @@ fn zip2009_mempool_admission_at_activation() {
             if accepted {
                 let verified = result.expect("the reduced conventional fee applies at activation");
                 assert!(verified.pays_conventional_fee());
-                assert_eq!(verified.fee_weight_ratio, 1.0);
+                // The fee is 2.5 times the reduced conventional fee for 2 actions.
+                assert_eq!(verified.fee_weight_ratio, 2.5);
             } else {
                 assert_eq!(result.unwrap_err(), Error::UnpaidActions);
             }
         }
     }
+}
+
+/// The serialized-size fee floor never rejects a transaction that pays its conventional fee,
+/// before or after the fee reduction, whatever its size. The reduced conventional fee for two
+/// logical actions is below the floor that `zcashd` has for a transaction of 8,010 bytes or more,
+/// such as a two-action Orchard transaction.
+#[test]
+fn conventional_fee_is_never_below_the_size_fee_floor() {
+    use crate::{block::MAX_BLOCK_BYTES, parameters::Network};
+
+    /// The serialized size of a v5 transaction with two Orchard actions and nothing else.
+    const TWO_ACTION_ORCHARD_TX_SIZE: usize = 9_165;
+
+    let network = Network::Mainnet;
+    let activation = network.fee_reduction_height();
+    let max_size = usize::try_from(MAX_BLOCK_BYTES).unwrap();
+
+    for height in [activation.previous().unwrap(), activation] {
+        let conventional_fee = super::conventional_fee(2, &network, height);
+        for size in [1, 4_000, 8_009, 8_010, TWO_ACTION_ORCHARD_TX_SIZE, max_size] {
+            assert_eq!(mempool_checks(0, conventional_fee, size), Ok(()), "{size}");
+        }
+    }
+
+    // The floor still applies to a fee below its cap.
+    assert_eq!(
+        mempool_checks(0, Amount::try_from(399).unwrap(), 4_000),
+        Err(Error::FeeBelowMinimumRate)
+    );
+    assert_eq!(
+        mempool_checks(0, Amount::try_from(400).unwrap(), max_size),
+        Ok(())
+    );
 }

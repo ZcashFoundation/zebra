@@ -19,7 +19,8 @@ mod tests;
 
 /// Returns the ZIP-317 marginal fee in zatoshis per logical action for the next block.
 ///
-/// Both fee parameters change at the network's [ZIP-2009] activation height.
+/// Both fee parameters change at the network's [ZIP-2009] fee reduction height. From that
+/// height Zebra's marginal fee is 400 zatoshis, not the 1,000 zatoshis that ZIP 2009 specifies.
 ///
 /// [ZIP-2009]: https://zips.z.cash/zip-2009
 pub fn marginal_fee(network: &Network, next_block_height: Height) -> u64 {
@@ -27,11 +28,14 @@ pub fn marginal_fee(network: &Network, next_block_height: Height) -> u64 {
 }
 
 /// Returns the marginal fee and block production weight ratio cap for the next block.
-fn fee_parameters(network: &Network, next_block_height: Height) -> (u64, f32) {
+///
+/// From the fee reduction height there is no cap: a transaction's weight is its fee divided by
+/// its conventional fee, however high. ZIP 2009 specifies a cap of 10 from that height.
+fn fee_parameters(network: &Network, next_block_height: Height) -> (u64, Option<f32>) {
     if next_block_height >= network.fee_reduction_height() {
-        (1_000, 10.0)
+        (400, None)
     } else {
-        (5_000, 4.0)
+        (5_000, Some(4.0))
     }
 }
 
@@ -69,11 +73,13 @@ pub const MIN_MEMPOOL_TX_FEE_RATE: usize = 100;
 
 /// The fee cap for [`MIN_MEMPOOL_TX_FEE_RATE`] minimum required mempool fees.
 ///
-/// Based on `LEGACY_DEFAULT_FEE` in `zcashd`:
+/// This is the reduced marginal fee, so the size-based minimum fee is never more than a
+/// conventional fee, which is at least twice the marginal fee. `zcashd` caps its minimum at
+/// `LEGACY_DEFAULT_FEE`, 1,000 zatoshis:
 /// <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
 ///
 /// This is a `usize` to simplify transaction size-based calculation code.
-pub const MEMPOOL_TX_FEE_REQUIREMENT_CAP: usize = 1000;
+pub const MEMPOOL_TX_FEE_REQUIREMENT_CAP: usize = 400;
 
 /// Returns the conventional fee for an action count in the next block, as defined by [ZIP-317].
 ///
@@ -114,7 +120,7 @@ pub fn unpaid_actions(
 
     // max(0, conventional_actions - marginal_fee_weight_ratio)
     //
-    // Subtracting MAX_MONEY/1000 from a u32 can't go above i64::MAX.
+    // Subtracting MAX_MONEY/400 from a u32 can't go above i64::MAX.
     let unpaid_actions = i64::from(conventional_actions) - marginal_fee_weight_ratio;
 
     unpaid_actions.try_into().unwrap_or_default()
@@ -152,7 +158,10 @@ pub fn conventional_fee_weight_ratio(
 
     let uncapped_weight = miner_fee / conventional_fee;
 
-    uncapped_weight.min(fee_parameters(network, next_block_height).1)
+    match fee_parameters(network, next_block_height).1 {
+        Some(weight_ratio_cap) => uncapped_weight.min(weight_ratio_cap),
+        None => uncapped_weight,
+    }
 }
 
 /// Returns the conventional actions for `transaction`, `max(logical_actions, GRACE_ACTIONS)`,
@@ -221,7 +230,7 @@ pub fn mempool_checks(
     //
     // In Zebra, we use a similar minimum fee rate to `zcashd` v5.5.0 and later.
     // Transactions must pay a fee of at least 100 zatoshis per 1000 bytes of serialized size,
-    // with a maximum fee of 1000 zatoshis.
+    // with a maximum fee of 400 zatoshis, where `zcashd` has a maximum of 1000.
     //
     // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.cpp#L24-L37>
     //
@@ -232,8 +241,11 @@ pub fn mempool_checks(
     // ## Note
     //
     // If the check above for the maximum number of unpaid actions passes with
-    // [`BLOCK_UNPAID_ACTION_LIMIT`] set to zero, then there is no way for the legacy check below to
-    // fail. This renders the legacy check redundant in that case.
+    // [`BLOCK_UNPAID_ACTION_LIMIT`] set to zero, then there is no way for the legacy check below
+    // to fail: the smallest conventional fee is 800 zatoshis, for two logical actions at the
+    // reduced marginal fee, and this floor is capped at 400. With zcashd's cap of 1,000, the
+    // floor would reject a transaction of 8,010 bytes or more that pays that fee, such as a
+    // two-action Orchard transaction.
 
     const KILOBYTE: usize = 1000;
 

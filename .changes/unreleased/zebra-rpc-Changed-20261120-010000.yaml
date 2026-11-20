@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getstandardfee` reports 400 zatoshis per logical action from the fee reduction height, not the 1,000 zatoshis that ZIP 2009 specifies. `getblocktemplate` selects mempool transactions in a fixed order instead of by weighted random draws: by fee weight ratio and then transaction ID, with a transaction that spends other mempool transactions tried right after the last of them ([#12560](https://github.com/ZcashFoundation/zebra/pull/12560)).'
+time: 2026-11-20T01:00:00.000000000-05:00

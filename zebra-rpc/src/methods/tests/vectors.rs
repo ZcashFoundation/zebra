@@ -8617,8 +8617,8 @@ async fn rpc_get_standard_fee() {
         let snapshots = [
             (None, None, 5000),
             (old_policy_tip, old_policy_tip, 5000),
-            (Some(before), old_policy_tip, 1000),
-            (Some(activation), Some(activation), 1000),
+            (Some(before), old_policy_tip, 400),
+            (Some(activation), Some(activation), 400),
             (old_policy_tip, Some(before), 5000),
         ];
         let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
