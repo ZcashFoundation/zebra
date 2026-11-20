@@ -641,6 +641,81 @@ async fn disabled_mempool_keeps_tip_action_until_sync_status_catches_up() -> Res
     Ok(())
 }
 
+/// Check that short sync batches don't start the mempool on Mainnet while the best tip is old.
+///
+/// A node with few useful peers also gets short sync batches, so sync status alone can report
+/// that Zebra is close to the tip while it is still syncing.
+#[tokio::test]
+async fn mempool_stays_disabled_with_short_sync_batches_and_old_tip() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+
+    // The best tip is the 2016 genesis block.
+    service.checks_tip_age = true;
+
+    service.enable(&mut recent_syncs).await;
+    assert!(
+        service.sync_status.is_close_to_tip(),
+        "short sync batches report that Zebra is close to the tip"
+    );
+    assert!(!service.is_enabled());
+
+    // Without the tip age check, the same sync status starts the mempool from the same tip
+    // action, so the check above is what kept it disabled.
+    service.skip_tip_age_check();
+    service.dummy_call().await;
+    assert!(service.is_enabled());
+
+    Ok(())
+}
+
+/// Check the best tip age limit for starting the mempool, which only applies on Mainnet.
+#[test]
+fn near_network_tip_requires_recent_mainnet_tip() {
+    let now = chrono::Utc::now();
+    let (chain_tip, chain_tip_sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+
+    assert!(
+        !mempool::is_near_network_tip(&Network::Mainnet, &chain_tip, now),
+        "an empty Mainnet state is not near the network tip"
+    );
+
+    for (tip_age, is_near) in [
+        (-chrono::Duration::minutes(5), true),
+        (chrono::Duration::zero(), true),
+        (MAX_START_TIP_AGE, true),
+        (MAX_START_TIP_AGE + chrono::Duration::seconds(1), false),
+        (chrono::Duration::days(30), false),
+    ] {
+        chain_tip_sender.send_best_tip_block_time(now - tip_age);
+        assert_eq!(
+            mempool::is_near_network_tip(&Network::Mainnet, &chain_tip, now),
+            is_near,
+            "Mainnet tip age: {tip_age}"
+        );
+    }
+
+    // Test networks start on sync status alone, so miners can restart a stalled network.
+    for network in [
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
+    ] {
+        assert!(
+            mempool::is_near_network_tip(&network, &chain_tip, now),
+            "{network} with an old tip"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_mined() -> Result<(), Report> {
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -2311,7 +2386,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mut mempool, mempool_transaction_subscriber) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2322,6 +2397,7 @@ async fn setup_with_mempool_config(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
+    mempool.skip_tip_age_check();
 
     // Keep the change feed drained in the background so tests that ignore it
     // don't leave the broadcast channel without receivers (which would make
@@ -2619,6 +2695,7 @@ async fn enabled_mempool_with_mock_verifier(
         chain_tip_change.clone(),
         misbehavior_tx,
     );
+    mempool.skip_tip_age_check();
     let mut changes = mempool_changes.subscribe();
     tokio::spawn(async move { while changes.recv().await.is_ok() {} });
 
