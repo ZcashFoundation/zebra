@@ -3,6 +3,7 @@
 use std::{
     fs::{self, File},
     io::Write,
+    path::Path,
 };
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
@@ -16,7 +17,10 @@ use tracing_subscriber::{
 };
 use zebra_chain::parameters::Network;
 
-use crate::{application::build_version, components::tracing::Config};
+use crate::{
+    application::build_version,
+    components::tracing::{Config, LogFormat},
+};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -90,8 +94,9 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         // Only show the intro for user-focused node server commands like `start`
-        // Also skip the intro for regtest, since it pollutes the QA test logs
-        if uses_intro && !network.is_regtest() {
+        // Also skip the intro for regtest, since it pollutes the QA test logs,
+        // and for JSON logs, since log collectors usually read standard error as well.
+        if uses_intro && !network.is_regtest() && config.log_format == LogFormat::Text {
             // If it's a terminal and color escaping is enabled: clear screen and
             // print Zebra logo (here `use_color` is being interpreted as
             // "use escape codes")
@@ -116,35 +121,8 @@ impl Tracing {
         }
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            // Make sure the directory for the log file exists.
-            // If the log is configured in the current directory, it won't have a parent directory.
-            //
-            // # Security
-            //
-            // If the user is running Zebra with elevated permissions ("root"), they should
-            // create the log file directory before running Zebra, and make sure the Zebra user
-            // account has exclusive access to that directory, and other users can't modify
-            // its parent directories.
-            //
-            // This avoids a TOCTOU security issue in the Rust filesystem API.
-            let log_file_dir = log_file.parent();
-            if let Some(log_file_dir) = log_file_dir {
-                if !log_file_dir.exists() {
-                    eprintln!("Directory for log file {log_file:?} does not exist, trying to create it...");
-
-                    if let Err(create_dir_error) = fs::create_dir_all(log_file_dir) {
-                        eprintln!("Failed to create directory for log file: {create_dir_error}");
-                        eprintln!("Trying log file anyway...");
-                    }
-                }
-            }
-
-            if uses_intro {
-                // We want this to appear on stdout instead of the usual log messages.
-                println!("Sending logs to {log_file:?}...");
-            }
-            let log_file = File::options().append(true).create(true).open(log_file)?;
-            Box::new(log_file) as BoxWrite
+            let text_logs = config.log_format == LogFormat::Text;
+            Box::new(open_log_file(log_file, text_logs, uses_intro)?) as BoxWrite
         } else {
             let stdout = std::io::stdout();
             Box::new(stdout) as BoxWrite
@@ -157,7 +135,12 @@ impl Tracing {
             .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(writer);
 
-        let logger = fmt::layer().with_ansi(use_color).with_writer(non_blocking);
+        let (event_format, field_format) = super::format::EventFormat::new(config.log_format);
+        let logger = fmt::layer()
+            .fmt_fields(field_format)
+            .event_format(event_format)
+            .with_ansi(use_color)
+            .with_writer(non_blocking);
         let warn_error_layer = LastWarnErrorLayer {
             last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
         };
@@ -185,7 +168,7 @@ impl Tracing {
                 .with(env_filter)
                 .with(logger)
                 .with(warn_error_layer)
-                .with(ErrorLayer::default());
+                .with(ErrorLayer::new(field_format));
 
             (subscriber, filter_handle)
         };
@@ -198,7 +181,7 @@ impl Tracing {
             let subscriber = tracing_subscriber::registry()
                 .with(logger.with_filter(EnvFilter::from(&filter)))
                 .with(warn_error_layer.with_filter(EnvFilter::from(&filter)))
-                .with(ErrorLayer::default().with_filter(EnvFilter::from(&filter)));
+                .with(ErrorLayer::new(field_format).with_filter(EnvFilter::from(&filter)));
 
             (subscriber, None)
         };
@@ -449,6 +432,43 @@ impl Tracing {
             );
         }
     }
+}
+
+/// Opens `log_file` for appending, and creates its directory if it doesn't exist.
+///
+/// Plain text notices are printed only with text logs, because log collectors usually read
+/// standard output and standard error as well. Opening the file reports any error.
+///
+/// # Security
+///
+/// If the user is running Zebra with elevated permissions ("root"), they should create the log
+/// file directory before running Zebra, and make sure the Zebra user account has exclusive
+/// access to that directory, and other users can't modify its parent directories.
+///
+/// This avoids a TOCTOU security issue in the Rust filesystem API.
+#[allow(clippy::print_stdout, clippy::print_stderr)]
+fn open_log_file(log_file: &Path, text_logs: bool, uses_intro: bool) -> std::io::Result<File> {
+    // If the log is configured in the current directory, it won't have a parent directory.
+    let missing_dir = log_file.parent().filter(|dir| !dir.exists());
+
+    if let Some(log_file_dir) = missing_dir {
+        if text_logs {
+            eprintln!("Directory for log file {log_file:?} does not exist, trying to create it...");
+        }
+
+        let created = fs::create_dir_all(log_file_dir);
+        if let (Err(create_dir_error), true) = (created, text_logs) {
+            eprintln!("Failed to create directory for log file: {create_dir_error}");
+            eprintln!("Trying log file anyway...");
+        }
+    }
+
+    if uses_intro && text_logs {
+        // We want this to appear on stdout instead of the usual log messages.
+        println!("Sending logs to {log_file:?}...");
+    }
+
+    File::options().append(true).create(true).open(log_file)
 }
 
 impl std::fmt::Debug for Tracing {

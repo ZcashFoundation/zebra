@@ -198,16 +198,15 @@ pub(super) fn sampler_env_problem(
 }
 
 /// Returns a layer that exports the spans and events [`is_exported`] selects to `tracer`.
-fn exporting_layer<S>(tracer: SdkTracer) -> impl Layer<S>
+pub(super) fn exporting_layer<S>(tracer: SdkTracer) -> impl Layer<S>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    // Zebra doesn't read the OpenTelemetry context, so activating it on every span enter, and
-    // recording thread and idle time attributes, would only add cost.
+    // Zebra doesn't record thread and idle time attributes, which would only add cost. Entering
+    // an exported span activates its context, which gives JSON logs its trace and span IDs.
     OpenTelemetryLayer::new(tracer)
         .with_threads(false)
         .with_tracked_inactivity(false)
-        .with_context_activation(false)
         .with_filter(filter_fn(is_exported).with_max_level_hint(Level::INFO))
 }
 
