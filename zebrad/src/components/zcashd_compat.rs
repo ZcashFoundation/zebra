@@ -17,6 +17,8 @@ pub use manifest::{
     ZcashdReleaseArtifact, ZcashdReleaseManifest, EMBEDDED_MANIFEST_SCHEMA_VERSION,
     EMBEDDED_ZCASHD_RELEASE_MANIFEST,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use preflight::parse_self_cgroup_paths;
 pub use preflight::run_preflight;
 pub use supervisor::{
     is_command_resolvable, reject_peer_selection_extra_args, run as run_supervisor,

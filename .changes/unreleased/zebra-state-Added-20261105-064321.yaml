@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: Added `BlockReadError` to distinguish incomplete stored block bodies from unknown blocks.
-time: 2026-11-05T06:43:21.988723369+01:00

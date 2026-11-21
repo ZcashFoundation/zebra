@@ -429,9 +429,9 @@
             "uid": "zebra-prometheus"
           },
           "exemplar": true,
-          "expr": "rate(proofs_groth16_verified{}[$__interval])",
+          "expr": "rate(proofs_sapling_verified{}[$__interval])",
           "interval": "",
-          "legendFormat": "Groth16",
+          "legendFormat": "Sapling",
           "refId": "A"
         },
         {

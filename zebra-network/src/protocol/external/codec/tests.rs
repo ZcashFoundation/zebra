@@ -2,4 +2,6 @@
 
 use super::*;
 
+mod decode_metrics;
+
 mod vectors;

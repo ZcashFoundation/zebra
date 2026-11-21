@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Fixed verbose `getblock` responses reporting each whole value pool balance as the block''s `valueDelta` and `valueDeltaZat` when the parent block''s balances were not found, for example after a reorg during the request. These fields are now omitted in that case. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))'
+time: 2026-11-09T10:36:37.068425885-07:00

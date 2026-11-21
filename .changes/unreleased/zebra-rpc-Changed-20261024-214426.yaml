@@ -1,7 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: >-
-  Body-dependent block RPC methods backed by primary state report incomplete stored blocks as
-  errors, distinct from unknown blocks. Standalone secondary sync retains finalized-tip updates
-  until the complete tip body is visible.
-time: 2026-10-24T21:44:26.220272811+02:00

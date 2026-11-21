@@ -57,6 +57,10 @@ readinessProbe:
 - Endpoints are unauthenticated and return minimal plain text.
 - Bind to an internal address and restrict exposure with network policies,
   firewall rules, or Service selectors.
+- Each connection serves one request. The server closes connections that don't
+  send their request headers within 5 seconds, and serves at most 32 concurrent
+  connections and 10,000 requests per 5 seconds. A client that can reach the
+  endpoints can still use up these limits and make probes fail.
 
 ## Notes
 

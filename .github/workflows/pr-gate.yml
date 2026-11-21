@@ -145,28 +145,45 @@ jobs:
           # The path is part of the cache version, so it must match the save path exactly.
           path: target/zc-cache/${{ steps.baseline.outputs.rev }}.*
           key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
-      # A declared break only has to analyse cleanly; an undeclared one must not break the API.
+      # zc fails only when it can't analyse every crate. The next step judges breaks, because
+      # zc can't leave out zebrad's library.
       - name: Diff the public API and dependencies
         id: zc
         uses: ZcashFoundation/zc@b6140120caa4414571f0cf62d4d82cdec73344a8 # v0.8.1
         with:
           baseline: ${{ steps.baseline.outputs.rev }}
-          fail-on: ${{ needs.changes.outputs.breaking == 'true' && 'error' || 'api-breaking' }}
+          fail-on: error
           features: ${{ env.ZC_FEATURES }}
+      # A declared break only has to analyse cleanly. An undeclared one must not break the API of a
+      # library crate. zebrad's library isn't a supported API, so a break only there needs no '!'.
+      # This counts what zc's `api-breaking` policy counts, apart from zebrad.
+      - name: Check for an undeclared break
+        if: needs.changes.outputs.breaking != 'true' && steps.zc.outputs.verdict == 'breaking'
+        env:
+          REPORT: ${{ steps.zc.outputs.report }}
+        run: |
+          broken="$(jq -r '
+            [.crates[] | select(.removed + .changed + (.breaking_added | length) > 0) | .name]
+            + [.public_dep_breaks[] | select(.class == "breaking") | .crate]
+            | unique | join(" ")' "$REPORT")"
+          libraries="$(tr ' ' '\n' <<< "$broken" | grep -vx zebrad | paste -sd ' ' -)" || true
+          if [[ -n "$libraries" ]]; then
+            echo "::error title=Declare or avoid the break::This PR breaks the public API of ${libraries}. If the break is intended, add '!' to the PR title and a 'breaking' change fragment. zc already leaves out the 'proptest-impl', 'fuzzing', and 'bench' features. This check is advisory and does not block merging."
+            exit 1
+          fi
+          if [[ -n "$broken" ]]; then
+            echo "::notice title=Break only in zebrad's library::zebrad's library isn't a supported API, so this PR needs no '!'."
+          fi
       - name: Explain how to resolve the failure
         if: failure() && steps.zc.outcome == 'failure'
         env:
           REPORT: ${{ steps.zc.outputs.report }}
-          VERDICT: ${{ steps.zc.outputs.verdict }}
         run: |
           stages=""
           if [[ -f "$REPORT" ]]; then
             stages="$(jq -r '[.crates[].error.stage // empty] | unique | join(" ")' "$REPORT")"
           fi
-          if [[ "$VERDICT" == "breaking" ]]; then
-            title="Declare or avoid the break"
-            hint="If the break is intended, add '!' to the PR title and a 'breaking' change fragment. zc already leaves out the 'proptest-impl', 'fuzzing', and 'bench' features. It still counts zebrad's library, but a break only in zebrad's library does not need '!'."
-          elif [[ "$stages" == *baseline_build* ]]; then
+          if [[ "$stages" == *baseline_build* ]]; then
             title="The fork point does not build"
             hint="zc could not build this PR's fork point on the base branch with its pinned nightly. Every PR from that fork point fails the same way, so a rerun will not help; it needs a fix on the base branch or in zc."
           elif [[ "$stages" == *head_build* ]]; then
