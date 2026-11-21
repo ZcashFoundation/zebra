@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`submitblock` commits a solved block faster when it matches a validated proposal with the same parent ([#12573](https://github.com/ZcashFoundation/zebra/pull/12573)).'
+time: 2026-11-21T14:35:01+01:00

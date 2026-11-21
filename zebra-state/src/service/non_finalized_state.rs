@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -229,9 +229,8 @@ impl ValidatedChain {
 
 /// The state of the chains in memory, including queued blocks.
 ///
-/// Clones of the non-finalized state contain independent copies of the chains.
-/// This is different from `FinalizedState::clone()`,
-/// which returns a shared reference to the database.
+/// Clones have independent chain sets but share the slot holding a validated proposal's private
+/// chain. This differs from `FinalizedState::clone()`, which shares the database.
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
@@ -264,6 +263,10 @@ pub struct NonFinalizedState {
     /// Shared with every clone, like `rejected_blocks`. A block's update is a function of its
     /// parent's tree and its note commitments, so taking it from here doesn't change the chain.
     precomputed_trees: watch::Sender<PrecomputedTrees>,
+
+    /// A validated proposal's private chain, shared with published state snapshots until a
+    /// solved-template commit takes it. Never published until that commit succeeds.
+    prepared: Arc<Mutex<Option<Arc<Chain>>>>,
 
     // Configuration
     //
@@ -324,6 +327,7 @@ impl Clone for NonFinalizedState {
             invalidated_blocks: self.invalidated_blocks.clone(),
             rejected_blocks: self.rejected_blocks.clone(),
             precomputed_trees: self.precomputed_trees.clone(),
+            prepared: self.prepared.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -350,6 +354,7 @@ impl NonFinalizedState {
             invalidated_blocks: Default::default(),
             rejected_blocks: watch::Sender::new(RejectedBlocks::default()),
             precomputed_trees: watch::Sender::new(PrecomputedTrees::default()),
+            prepared: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -833,7 +838,8 @@ impl NonFinalizedState {
 
     /// Apply an exact proposal verdict to its solved block and original parent.
     ///
-    /// Normal chain application rebuilds indexes and the history leaf using the solved hash.
+    /// Normal chain application rebuilds indexes and the history leaf using the solved hash;
+    /// a matching prepared proposal instead rebinds its header-dependent indexes and history leaf.
     /// Mined bodies are published only after checking current invalidation and resolving the parent.
     /// A changed wall clock can suppress early relay without changing the normal commit policy.
     pub(super) fn commit_prevalidated_contextual(
@@ -886,12 +892,62 @@ impl NonFinalizedState {
                 let _ = notifications.validated.send(Some(contextual.block.clone()));
             }
         }
-        let chain = Arc::unwrap_or_clone(parent_chain).push(contextual)?;
+        let chain = if let Some(chain) = self.take_prepared_for(&contextual, &parent_chain) {
+            chain
+        } else {
+            Arc::unwrap_or_clone(parent_chain).push(contextual)?
+        };
         self.insert_with(Arc::new(chain), |chains| {
             chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
         });
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Store a validated proposal's chain so the writer can rebind it to a solved header.
+    pub(crate) fn store_prepared(&self, chain: Arc<Chain>) {
+        let previous = self
+            .prepared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .replace(chain);
+        // A superseded chain may own thousands of index entries. Never free it under the lock.
+        drop(previous);
+    }
+
+    /// Take a proposal chain whose parent is still the committed best chain.
+    /// A finalized root may have disappeared since validation; its hash at the first remaining
+    /// height still binds every later ancestor.
+    fn take_prepared_for(
+        &self,
+        block: &ContextuallyVerifiedBlock,
+        parent_chain: &Chain,
+    ) -> Option<Chain> {
+        if parent_chain.is_empty() {
+            return None;
+        }
+        let root_height = parent_chain.non_finalized_root_height();
+        let mut slot = self
+            .prepared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let candidate = slot.as_ref()?;
+        let proposal = candidate.tip_block()?;
+        if candidate.hash_by_height(root_height) != Some(parent_chain.hash_by_height(root_height)?)
+            || candidate.non_finalized_tip_height()
+                != parent_chain.non_finalized_tip_height().next().ok()?
+            || !same_block_except_proof_of_work(proposal, block)
+        {
+            return None;
+        }
+        let candidate = slot.take()?;
+        drop(slot);
+        let mut chain = Arc::unwrap_or_clone(candidate);
+        while chain.non_finalized_root_height() < root_height {
+            chain.pop_root();
+        }
+        chain.rebind_tip(block.clone()).ok()?;
+        Some(chain)
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
@@ -1855,6 +1911,23 @@ impl NonFinalizedState {
             count_bar.chain(fork_bars).for_each(howudoin::Tx::close);
         }
     }
+}
+
+/// An exact proposal match ignores only nonce and Equihash solution. Header commitments bind
+/// the transaction authorizing data; transaction hashes and height bind the contextual result.
+fn same_block_except_proof_of_work(
+    proposal: &ContextuallyVerifiedBlock,
+    block: &ContextuallyVerifiedBlock,
+) -> bool {
+    let (proposal_header, header) = (&proposal.block.header, &block.block.header);
+    proposal.height == block.height
+        && proposal.transaction_hashes == block.transaction_hashes
+        && proposal_header.version == header.version
+        && proposal_header.previous_block_hash == header.previous_block_hash
+        && proposal_header.merkle_root == header.merkle_root
+        && proposal_header.commitment_bytes == header.commitment_bytes
+        && proposal_header.time == header.time
+        && proposal_header.difficulty_threshold == header.difficulty_threshold
 }
 
 impl Drop for NonFinalizedState {
