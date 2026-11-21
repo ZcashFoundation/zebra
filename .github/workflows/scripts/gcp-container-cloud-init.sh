@@ -54,7 +54,13 @@ for path in ${MOUNT_PATHS}; do
   DOCKER_MOUNTS+="${DOCKER_MOUNTS:+ }-v ${HOST_CACHE_DIR}:${path}"
 done
 
-# docker reads the env file as one KEY=VALUE per line.
+# docker reads the env file as one KEY=VALUE per line, so a carriage return or
+# newline inside a value would start another variable. konlet kept it in the
+# value, so reject it rather than let a value inject variables.
+if [[ "${CONTAINER_ENV}" == *[$'\r\n']* ]]; then
+  echo "CONTAINER_ENV must not contain a carriage return or newline" >&2
+  exit 1
+fi
 ENV_FILE_BODY=$(echo "${CONTAINER_ENV}" | tr ',' '\n' | sed 's/^/      /')
 
 cat <<CLOUDINIT

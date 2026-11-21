@@ -114,10 +114,11 @@ jobs:
             exit 1
           fi
           # log_file is concatenated into the comma-separated CONTAINER_ENV list that
-          # becomes the container's env file, so a comma would inject additional
-          # container environment variables.
-          if [[ "${LOG_FILE}" == *,* ]]; then
-            echo "::error::log_file must not contain a comma"
+          # becomes the container's env file, one variable per line, so a comma,
+          # carriage return or newline would inject additional container environment
+          # variables.
+          if [[ "${LOG_FILE}" == *[,$'\r\n']* ]]; then
+            echo "::error::log_file must not contain a comma, carriage return or newline"
             exit 1
           fi
 
@@ -377,12 +378,13 @@ jobs:
             P2P=18233; RPC=18232
           fi
 
-          # log_file is spliced into the comma-separated CONTAINER_ENV list below, so
-          # a comma would inject extra container environment variables. The validate
+          # log_file is spliced into the comma-separated CONTAINER_ENV list below, which
+          # becomes an env file with one variable per line, so a comma, carriage return
+          # or newline would inject extra container environment variables. The validate
           # job checks the input; check the effective value, which may instead have
           # come from the environment-scoped vars.CD_LOG_FILE fallback.
-          if [[ "${LOG_FILE}" == *,* ]]; then
-            echo "::error::log_file must not contain a comma"
+          if [[ "${LOG_FILE}" == *[,$'\r\n']* ]]; then
+            echo "::error::log_file must not contain a comma, carriage return or newline"
             exit 1
           fi
 
