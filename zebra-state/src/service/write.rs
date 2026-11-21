@@ -12,7 +12,10 @@ use tokio::sync::{
 };
 
 use tracing::Span;
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    parallel::tree::NoteCommitmentTrees,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
@@ -64,6 +67,87 @@ pub(crate) fn validate_and_commit_non_finalized(
     }
 
     Ok(())
+}
+
+/// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`].
+fn finalize_root_blocks(
+    finalized_state: &mut FinalizedState,
+    non_finalized_state: &mut NonFinalizedState,
+    prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+) {
+    while non_finalized_state.should_finalize_root() {
+        tracing::trace!("finalizing a block past the reorg or index entry limit");
+        let contextually_verified_with_trees = non_finalized_state.finalize();
+        *prev_finalized_note_commitment_trees = finalized_state
+            .commit_finalized_direct(
+                contextually_verified_with_trees,
+                prev_finalized_note_commitment_trees.take(),
+                "commit contextually-verified request",
+            )
+            .expect(
+                "unexpected finalized block commit error: note commitment and history trees were \
+                 already checked by the non-finalized state",
+            )
+            .1
+            .into();
+    }
+}
+
+/// What the block write task did with a non-finalized block, so the state service can update the
+/// blocks and outputs it tracks as sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NonFinalizedWriteOutcome {
+    /// The block was rejected, or evicted from every chain, so it isn't in the state.
+    Rejected(block::Hash),
+
+    /// The block was committed, and the state published to readers contains it.
+    Committed(block::Hash),
+}
+
+/// Sends the hashes of blocks evicted from the non-finalized state on `non_finalized_rejected_sender`,
+/// so the state service accepts them again if the network extends their chain.
+///
+/// Returns `true` if any blocks were evicted.
+fn forget_evicted_blocks(
+    non_finalized_state: &mut NonFinalizedState,
+    non_finalized_rejected_sender: &UnboundedSender<NonFinalizedWriteOutcome>,
+) -> bool {
+    let evicted = non_finalized_state.take_evicted_block_hashes();
+    for &hash in &evicted {
+        // If the receiver was dropped, the state service is shutting down.
+        let _ = non_finalized_rejected_sender.send(NonFinalizedWriteOutcome::Rejected(hash));
+    }
+
+    !evicted.is_empty()
+}
+
+/// Finalizes root blocks after a commit, then reports and publishes any forks that finalizing
+/// evicted, because [`NonFinalizedState::finalize`] re-inserts the remaining chains under the
+/// fork limits.
+fn finalize_root_blocks_and_forget_evicted(
+    finalized_state: &mut FinalizedState,
+    non_finalized_state: &mut NonFinalizedState,
+    prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+    non_finalized_rejected_sender: &UnboundedSender<NonFinalizedWriteOutcome>,
+    chain_tip_sender: &mut ChainTipSender,
+    non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
+    backup_dir_path: Option<&Path>,
+) {
+    finalize_root_blocks(
+        finalized_state,
+        non_finalized_state,
+        prev_finalized_note_commitment_trees,
+    );
+
+    if forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender) {
+        update_latest_chain_channels(
+            non_finalized_state,
+            &finalized_state.db,
+            chain_tip_sender,
+            non_finalized_state_sender,
+            backup_dir_path,
+        );
+    }
 }
 
 /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
@@ -140,7 +224,7 @@ struct WriteBlockWorkerTask {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
-    non_finalized_rejected_sender: UnboundedSender<block::Hash>,
+    non_finalized_rejected_sender: UnboundedSender<NonFinalizedWriteOutcome>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
     /// If `Some`, the non-finalized state is written to this backup directory
@@ -209,7 +293,7 @@ impl BlockWriteSender {
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
-        tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+        tokio::sync::mpsc::UnboundedReceiver<NonFinalizedWriteOutcome>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
         // Security: The number of blocks in these channels is limited by
@@ -359,6 +443,25 @@ impl WriteBlockWorkerTask {
             return;
         }
 
+        // A restored backup can hold more blocks than the limits allow, so finalize them before
+        // committing any new blocks.
+        let restored_root = non_finalized_state.root_height();
+        finalize_root_blocks(
+            finalized_state,
+            non_finalized_state,
+            &mut prev_finalized_note_commitment_trees,
+        );
+        if non_finalized_state.root_height() != restored_root {
+            forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
+            update_latest_chain_channels(
+                non_finalized_state,
+                &finalized_state.db,
+                chain_tip_sender,
+                non_finalized_state_sender,
+                backup_dir_path.as_deref(),
+            );
+        }
+
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
@@ -379,6 +482,7 @@ impl WriteBlockWorkerTask {
             };
 
             let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+                forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
                 update_latest_chain_channels(
                     non_finalized_state,
                     &finalized_state.db,
@@ -436,7 +540,8 @@ impl WriteBlockWorkerTask {
                 // If the receiver was dropped (the StateService is shutting
                 // down), ignore the error: the lockout cannot matter once the
                 // service exits.
-                let _ = non_finalized_rejected_sender.send(child_hash);
+                let _ = non_finalized_rejected_sender
+                    .send(NonFinalizedWriteOutcome::Rejected(child_hash));
 
                 // Update the caller with the error.
                 let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
@@ -448,6 +553,8 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
+
+            forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
 
             // Committing blocks to the finalized state keeps the same chain,
             // so we can update the chain seen by the rest of the application now.
@@ -464,22 +571,23 @@ impl WriteBlockWorkerTask {
             )
             .expect("just successfully inserted a non-finalized block above");
 
+            // Readers can now find the block's outputs in the published state, so the state
+            // service doesn't need its own copies.
+            let _ =
+                non_finalized_rejected_sender.send(NonFinalizedWriteOutcome::Committed(child_hash));
+
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
-            {
-                tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees = non_finalized_state.finalize();
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
-            }
+            finalize_root_blocks_and_forget_evicted(
+                finalized_state,
+                non_finalized_state,
+                &mut prev_finalized_note_commitment_trees,
+                non_finalized_rejected_sender,
+                chain_tip_sender,
+                non_finalized_state_sender,
+                backup_dir_path.as_deref(),
+            );
 
             // Update the metrics if semantic and contextual validation passes
             //

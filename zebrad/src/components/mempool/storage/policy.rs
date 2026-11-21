@@ -13,12 +13,8 @@ use zebra_chain::transparent;
 // mempool transactions *before* script verification (`check::mempool_standard_input_scripts`).
 // They are re-exported here for the storage-time policy checks, so the two paths can't drift apart.
 pub(super) use zebra_consensus::transaction::check::{
-    are_inputs_standard, standard_script_kind, MAX_STANDARD_SCRIPTSIG_SIZE,
+    are_inputs_standard, standard_script_kind, MAX_STANDARD_SCRIPTSIG_SIZE, MAX_STANDARD_TX_SIGOPS,
 };
-
-/// Maximum number of signature operations allowed per standard transaction (zcashd `MAX_STANDARD_TX_SIGOPS`).
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L22>
-pub(super) const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
 
 /// Maximum number of public keys allowed in a standard multisig script.
 /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L46-L48>

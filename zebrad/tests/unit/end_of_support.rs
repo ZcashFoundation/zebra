@@ -145,8 +145,10 @@ fn end_of_support_height_counts_whole_days() {
 /// With NU7 inside the support window, the panic height follows 25-second blocks after NU7.
 #[test]
 fn end_of_support_height_follows_nu7_target_spacing() {
-    // NU7 activates 30 days (of 75-second blocks) after the release height.
-    let nu7 = ESTIMATED_RELEASE_HEIGHT + 30 * 1152;
+    // NU7 activates inside the support window, before the warning, after whole days of
+    // 75-second blocks.
+    let nu7_days = EOS_WARN_AFTER / 2;
+    let nu7 = ESTIMATED_RELEASE_HEIGHT + nu7_days * 1152;
     let network = Parameters::build()
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
@@ -165,7 +167,7 @@ fn end_of_support_height_follows_nu7_target_spacing() {
         Height(ESTIMATED_RELEASE_HEIGHT + EOS_PANIC_AFTER * 1152)
     );
     // The blocks up to the one before NU7 take 75 seconds, the rest take 25 seconds.
-    let height_after = |days: u32| Height(nu7 - 1 + ((days - 30) * 24 * 60 * 60 + 75) / 25);
+    let height_after = |days: u32| Height(nu7 - 1 + ((days - nu7_days) * 24 * 60 * 60 + 75) / 25);
     assert_eq!(panic_height, height_after(EOS_PANIC_AFTER));
     assert_eq!(
         end_of_support::estimated_height_after_release(&network, EOS_WARN_AFTER),

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added the `rpc.getblocktemplate.build.duration_seconds` and `rpc.getblocktemplate.first_template.duration_seconds` histograms, and the `rpc.submitblock.outcomes.total` counter with an `outcome` label.
+time: 2026-11-17T12:26:26.881246Z

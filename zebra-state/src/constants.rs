@@ -109,8 +109,39 @@ pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 /// The maximum number of non-finalized chain forks Zebra will track on test networks.
 ///
 /// Minimum-difficulty blocks can create many equal-work sibling forks at once (#11133). A fork of
-/// coinbase-only blocks copies about 2.7 MB of indexes, so 100 of them use about 270 MB.
+/// coinbase-only blocks copies about 2.7 MB of indexes, so 100 of them use about 270 MB. Forks
+/// over busy blocks are much larger, so Zebra also limits the index entries of all chains, to
+/// [`MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`] on test networks.
 pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
+
+/// The minimum number of blocks Zebra keeps in the best non-finalized chain when the index entry
+/// limit makes it finalize blocks before the chain reaches [`MAX_BLOCK_REORG_HEIGHT`].
+///
+/// zcashd does not reorganize more than 99 blocks.
+pub(crate) const MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT: u32 = 100;
+
+/// The maximum total number of index entries in all non-finalized chains on test networks.
+///
+/// Test networks have a lower limit than Mainnet, because they keep ten times as many forks.
+///
+/// Chains index their blocks, transactions, transparent outputs and spends, and nullifiers, at
+/// about 1 KB per entry, and count the blocks they share with other chains once. When the total
+/// passes this limit, Zebra drops the chain with the lowest work, but keeps the best chain and the
+/// most recently inserted chain.
+///
+/// If the best and newest chains alone pass the limit, Zebra also finalizes blocks early, but keeps
+/// at least 100 blocks.
+pub const MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS: usize = 2_000_000;
+
+/// The maximum total number of index entries in all non-finalized chains on Mainnet.
+///
+/// Zebra counts entries, drops chains, and finalizes blocks early as it does for
+/// [`MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`].
+///
+/// A block filled with the smallest transparent outputs has about 62,000 entries, so this is
+/// the size of [`MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT`] of the densest blocks, which use about
+/// 5 GB. A lower limit would not save memory, because Zebra keeps that many blocks anyway.
+pub const MAX_NON_FINALIZED_INDEX_ENTRIES: usize = 6_200_000;
 
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;

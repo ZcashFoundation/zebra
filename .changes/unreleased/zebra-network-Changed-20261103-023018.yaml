@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: Omit addresses with unknown services from `MetaAddr::sanitize()` and preserve handshake services for alternate addresses.
-time: 2026-11-03T02:30:18.297006162+01:00

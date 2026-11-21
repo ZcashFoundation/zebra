@@ -51,12 +51,13 @@ pub const MAX_ARBITRARY_ITEMS: usize = 4;
 
 // TODO: if needed, fixup transaction outputs
 //       (currently 0..=9 outputs, consensus rules require 1..)
+// V1 and V2 always get an output, so blocks of them pass the block transaction size check.
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
-            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
+            vec(any::<transparent::Output>(), 1..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| {
@@ -72,7 +73,7 @@ impl Transaction {
     pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
-            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
+            vec(any::<transparent::Output>(), 1..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| {

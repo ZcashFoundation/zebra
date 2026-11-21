@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Checkpoint sync commits blocks with transparent outputs faster.
-time: 2026-11-04T22:13:35.266375246+01:00

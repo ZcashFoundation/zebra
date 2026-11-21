@@ -30,7 +30,9 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
-use zebra_network::{AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE};
+use zebra_network::{
+    constants::GETDATA_MAX_BLOCK_COUNT, AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE,
+};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -64,16 +66,6 @@ pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 /// as used in `ProcessGetData()`:
 /// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.cpp#L6410-L6412>
 pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
-
-/// The maximum number of blocks the [`Inbound`] service will queue in response to a block request,
-/// before ignoring any additional block IDs in that request.
-///
-/// This is the same as `zcashd`'s request limit:
-/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
-///
-/// (Zebra's request limit is one block in transit per peer, because it fans out block requests to
-/// many peers instead of just a few peers.)
-pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
 
 /// The maximum number of transaction IDs the [`Inbound`] service will look up in the mempool in
 /// response to a transaction request, before ignoring any additional transaction IDs in that

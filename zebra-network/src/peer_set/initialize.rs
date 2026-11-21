@@ -609,59 +609,131 @@ async fn limit_initial_peers(
 /// Senders use `try_send()`, so this task keeps receiving while a flush is waiting for the
 /// address book updater. Otherwise the channel could fill up during the flush, and new
 /// reports would be dropped.
+///
+/// # Security
+///
+/// A report that bans a peer is sent right away, not at the next flush. A peer that serves a
+/// forged body for a block that only it advertised would otherwise keep getting the requests for
+/// that block until its ban landed, and the requester gives up after a few retries
+/// (GHSA-g9rc-89v4-hhvf). Each peer address gets at most one early ban per `flush_interval`, and
+/// banned peers are disconnected, so peers still can't keep the address book busy.
 async fn batch_misbehavior_updates(
     mut misbehavior_rx: mpsc::Receiver<MisbehaviorReport>,
     address_book_updater: AddressBookChangeSender,
     flush_interval: Duration,
 ) {
-    let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
+    let mut batch = MisbehaviorBatch::default();
     let mut flush_timer = IntervalStream::new(tokio::time::interval(flush_interval));
 
     loop {
         tokio::select! {
             msg = misbehavior_rx.recv() => match msg {
-                Some(report) => batch_misbehavior_report(&mut misbehaviors, report),
+                Some(report) => batch.add(report),
                 None => break,
             },
 
             _ = flush_timer.next() => {
-                for (_, report) in std::mem::take(&mut misbehaviors) {
-                    let update = address_book_updater.send(MetaAddr::new_misbehavior(
-                        report.addr,
-                        report.score,
-                        report.reason,
-                    ));
-                    tokio::pin!(update);
-
-                    // Keep receiving while the address book updater is busy.
-                    // Reports received here are sent in the next flush.
-                    loop {
-                        tokio::select! {
-                            _ = &mut update => break,
-                            Some(report) = misbehavior_rx.recv() => {
-                                batch_misbehavior_report(&mut misbehaviors, report);
-                            }
-                        }
-                    }
+                for (_, report) in batch.start_interval() {
+                    send_misbehavior_update(
+                        &address_book_updater,
+                        report,
+                        &mut batch,
+                        &mut misbehavior_rx,
+                    )
+                    .await;
                 }
             },
         };
+
+        while let Some(report) = batch.next_early_ban() {
+            send_misbehavior_update(
+                &address_book_updater,
+                report,
+                &mut batch,
+                &mut misbehavior_rx,
+            )
+            .await;
+        }
     }
 
     tracing::warn!("exiting misbehavior update batch task");
 }
 
-/// Adds `report` to the batched `misbehaviors`, summing the scores for the same peer.
-fn batch_misbehavior_report(
-    misbehaviors: &mut HashMap<PeerSocketAddr, MisbehaviorReport>,
+/// Sends `report` to the address book, and batches the reports received while the address book
+/// updater is busy, which are sent later.
+async fn send_misbehavior_update(
+    address_book_updater: &AddressBookChangeSender,
     report: MisbehaviorReport,
+    batch: &mut MisbehaviorBatch,
+    misbehavior_rx: &mut mpsc::Receiver<MisbehaviorReport>,
 ) {
-    // Keep the first reason: any report can cross the ban threshold.
-    let score = report.score;
-    misbehaviors
-        .entry(report.addr)
-        .and_modify(|batched| batched.score = batched.score.saturating_add(score))
-        .or_insert(report);
+    let update = address_book_updater.send(MetaAddr::new_misbehavior(
+        report.addr,
+        report.score,
+        report.reason,
+    ));
+    tokio::pin!(update);
+
+    loop {
+        tokio::select! {
+            _ = &mut update => break,
+            Some(report) = misbehavior_rx.recv() => batch.add(report),
+        }
+    }
+}
+
+/// The misbehavior reports batched during a flush interval.
+#[derive(Debug, Default)]
+struct MisbehaviorBatch {
+    /// The batched reports, with the scores for the same peer summed.
+    reports: HashMap<PeerSocketAddr, MisbehaviorReport>,
+
+    /// The peers whose batched score reached the ban threshold during this flush interval.
+    /// Each of them gets one early ban.
+    early_bans: HashSet<PeerSocketAddr>,
+
+    /// The peers in `early_bans` whose ban hasn't been sent yet.
+    unsent_early_bans: Vec<PeerSocketAddr>,
+}
+
+impl MisbehaviorBatch {
+    /// Adds `report` to the batch, summing the scores for the same peer.
+    ///
+    /// Only the peer in `report` can reach the ban threshold, so this never scans the batch.
+    fn add(&mut self, report: MisbehaviorReport) {
+        let addr = report.addr;
+        // Keep the first reason: any report can cross the ban threshold.
+        let score = report.score;
+        let batched = self
+            .reports
+            .entry(addr)
+            .and_modify(|batched| batched.score = batched.score.saturating_add(score))
+            .or_insert(report);
+
+        if batched.score >= constants::MAX_PEER_MISBEHAVIOR_SCORE && self.early_bans.insert(addr) {
+            self.unsent_early_bans.push(addr);
+        }
+    }
+
+    /// Returns the batched report for a peer that reached the ban threshold, if its early ban
+    /// hasn't been sent yet.
+    fn next_early_ban(&mut self) -> Option<MisbehaviorReport> {
+        while let Some(addr) = self.unsent_early_bans.pop() {
+            if let Some(report) = self.reports.remove(&addr) {
+                return Some(report);
+            }
+        }
+
+        None
+    }
+
+    /// Starts a new flush interval, and returns the reports batched during the last one.
+    fn start_interval(&mut self) -> HashMap<PeerSocketAddr, MisbehaviorReport> {
+        self.early_bans.clear();
+        self.unsent_early_bans.clear();
+
+        std::mem::take(&mut self.reports)
+    }
 }
 
 /// Open a peer connection listener on `config.listen_addr`,

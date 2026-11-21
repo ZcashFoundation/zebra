@@ -39,6 +39,11 @@ fn download_verify_error_metric_labels_ignore_details() {
         };
         assert_eq!(error.metric_label(), "invalid");
     }
+
+    assert_eq!(
+        NonStandard(NonStandardTransactionError::IsDust).metric_label(),
+        "non_standard",
+    );
 }
 
 /// A directly pushed full transaction must consume the sending peer's

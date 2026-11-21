@@ -736,7 +736,7 @@ fn cgroup_memory_limit_bytes() -> Result<Option<u64>, Report> {
 }
 
 #[cfg(target_os = "linux")]
-fn parse_self_cgroup_paths(self_cgroup: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn parse_self_cgroup_paths(self_cgroup: &str) -> (Option<String>, Option<String>) {
     let mut v2_relative_path = None;
     let mut v1_memory_relative_path = None;
 

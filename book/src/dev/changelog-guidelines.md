@@ -33,7 +33,8 @@ also takes one `zebrad` fragment of kind `network-upgrade` (rendered as `Network
 Upgrade`). It is the only kind that gives `zebrad` a new major version, only
 `zebrad` may use it, and like `breaking` it needs a `!` in the PR title. Running `changie new` with no flags
 prompts for all of them. Fragments land in `.changes/unreleased/` and are
-committed with the PR.
+committed with the PR. [Change Fragments on `next`](next-branch.md#change-fragments-on-next)
+describes how they move between `main` and `next`.
 
 The PR Gate dry-runs the release batching over every pending fragment on pull
 requests, in the merge queue and on `main`, and fails if changie cannot batch

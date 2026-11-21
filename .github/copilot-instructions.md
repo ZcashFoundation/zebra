@@ -47,10 +47,12 @@ If the PR touches a Tower `Service` implementation:
 
 - Prefer `thiserror` with `#[from]` / `#[source]`
 - `expect()` messages must explain **why** the invariant holds:
+
   ```rust
   .expect("block hash exists because we just inserted it")  // good
   .expect("failed to get block")                            // bad
   ```
+
 - Don't turn invariant violations into misleading `None`/defaults
 
 ### Numeric Safety
@@ -109,14 +111,7 @@ When the PR adds abstraction, flags, generics, or refactors:
 - **`zebra-rpc`**: zcashd compatibility (response shapes, errors, timeouts), user-facing behavior
 - **`zebra-script`**: FFI memory safety, lifetime/ownership across boundaries
 
-## Output Format
+## Review findings
 
-Categorize findings by severity:
-
-- **BLOCKER**: Must fix (bugs, security, correctness, consensus safety)
-- **IMPORTANT**: Should fix (maintainability, likely future bugs)
-- **SUGGESTION**: Optional improvement
-- **NITPICK**: Minor style/clarity (keep brief)
-- **QUESTION**: Clarification needed
-
-For each finding, include the file path and an actionable suggestion explaining the "why".
+- Flag a concrete issue the diff introduces or extends. Identify the affected line, explain the consequence, and suggest a targeted correction.
+- Raise each issue once. Skip style-only feedback and duplicate reports from automated checks.
