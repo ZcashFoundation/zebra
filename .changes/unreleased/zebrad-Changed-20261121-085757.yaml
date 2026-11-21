@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Blocks relayed early by a peer are now downloaded without waiting for that peer to announce them again.
+time: 2026-11-21T08:57:57Z
