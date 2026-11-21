@@ -101,8 +101,8 @@ use std::{
     net::IpAddr,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, Waker},
-    time::Instant,
+    task::{Context, Poll, Wake, Waker},
+    time::{Duration, Instant},
 };
 
 use futures::{
@@ -126,7 +126,7 @@ use tower::{
 };
 use tracing::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -191,6 +191,9 @@ struct QueuedInvRequest {
 
 /// Bounds queued discovery requests; overflow falls back to any ready peer.
 const MAX_QUEUED_FIND_REQUESTS: usize = 16;
+/// Traces measured roughly 0.05-0.1 ms from discovery completion to the admitted download
+/// starting; 10 ms allows Buffer scheduling without holding discovery for a full peer timeout.
+const FIND_BUFFER_TURN: Duration = Duration::from_millis(10);
 
 /// How long a busy block advertiser is preferred before ordinary speculative routing.
 const BLOCK_ADVERTISER_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -236,16 +239,34 @@ fn not_found_registry_error(hash: InventoryHash) -> BoxError {
     SharedPeerError::from(PeerError::NotFoundRegistry(vec![hash])).into()
 }
 
-/// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
-/// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
-/// the stall tracker can be updated and the peer disconnected if needed.
+/// Completion of one find request, including caller cancellation, delivered to the peer set.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum StallOutcome {
     Stall,
-    Clear,
+    Clear(Option<block::Hash>),
+    Unscored,
 }
 
 type StallEvent = (PeerSocketAddr, Arc<ConnectionInfo>, StallOutcome);
+
+/// An unanswered find keeps its connection ineligible for another find even after the client
+/// channel has capacity. Dropping the caller also releases the marker without scoring the peer.
+struct FindResponseGuard {
+    addr: PeerSocketAddr,
+    connection: Arc<ConnectionInfo>,
+    outcome: StallOutcome,
+    sender: tokio_mpsc::UnboundedSender<StallEvent>,
+    wake: Arc<super::PeerSetWaker>,
+}
+
+impl Drop for FindResponseGuard {
+    fn drop(&mut self) {
+        let _ = self
+            .sender
+            .send((self.addr, self.connection.clone(), self.outcome));
+        self.wake.wake_by_ref();
+    }
+}
 
 /// How a routed block request ended, for the [`InventoryRegistry`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -269,11 +290,12 @@ type InvOutcomeEvent = (
 /// Empty replies are valid when the locator reaches the remote tip. Neither a local wall-clock
 /// estimate nor an untrusted, frozen handshake height proves otherwise. Fair discovery routing
 /// prevents fast empty replies from monopolizing requests.
-fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
+fn classify_find_response<E>(result: &Result<Response, E>) -> StallOutcome {
     match result {
-        Ok(Response::BlockHashes(_) | Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
-        Ok(_) => None,
-        Err(_) => Some(StallOutcome::Stall),
+        Ok(Response::BlockHashes(hashes)) => StallOutcome::Clear(hashes.first().copied()),
+        Ok(Response::BlockHeaders(_)) => StallOutcome::Clear(None),
+        Ok(_) => StallOutcome::Unscored,
+        Err(_) => StallOutcome::Stall,
     }
 }
 
@@ -308,6 +330,9 @@ where
     /// Tracks peers returning failed `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
+    /// Only one unanswered find request may occupy a connection, even if its client channel is
+    /// already ready for another request. Entries are tied to connection identities.
+    find_in_flight: HashMap<PeerSocketAddr, Arc<ConnectionInfo>>,
 
     /// Receives stall/clear events from tracked routing futures in
     /// [`Self::call_ready_peer`]. The channel keeps the tracker single-owner (no
@@ -353,6 +378,9 @@ where
     ///
     /// After [`FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
     queued_find_requests: VecDeque<QueuedFindRequest>,
+    /// Temporarily leave an announced block's source for an admitted Buffer-held download.
+    /// Expiry wakes queued discovery even when no download was admitted.
+    find_buffer_until: Option<(PeerSocketAddr, tokio::time::Instant)>,
 
     /// Wakes the peer set at the next unexpired queued find request deadline.
     ///
@@ -543,6 +571,7 @@ where
 
             // Stall tracking
             find_response_stalls: FindResponseStallTracker::new(),
+            find_in_flight: HashMap::new(),
             stall_event_rx,
             stall_event_tx,
 
@@ -556,6 +585,7 @@ where
             find_peer_queue: VecDeque::new(),
             tree_root_peer_queue: VecDeque::new(),
             queued_find_requests: VecDeque::new(),
+            find_buffer_until: None,
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
             block_advert_senders: super::AdvertPeerRegistry::default(),
@@ -1148,15 +1178,22 @@ where
             .any(|(key, current)| *key == addr && Arc::ptr_eq(current, info))
     }
 
-    /// Drains pending stall/clear events from tracked routing futures and
-    /// disconnects peers that have exceeded the stall threshold. The peer's
-    /// TCP connection is closed when its service is dropped; address book and
-    /// ban list are untouched, so the peer is free to reconnect.
+    /// Releases completed or cancelled find ownership and updates stall tracking.
+    /// Only a matching live connection may change routing or punishment state.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
         while let Poll::Ready(Some((addr, connection_info, outcome))) =
             self.stall_event_rx.poll_recv(cx)
         {
-            // A delayed response from an old connection must not affect its replacement.
+            let current = self
+                .find_in_flight
+                .get(&addr)
+                .is_some_and(|current| Arc::ptr_eq(current, &connection_info));
+            if !current {
+                continue;
+            }
+            // Other disconnect paths can prune the peer without calling `remove`; release its
+            // ownership regardless, but never score a no-longer-connected incarnation.
+            self.find_in_flight.remove(&addr);
             if !self.is_current_connection(addr, &connection_info) {
                 continue;
             }
@@ -1170,7 +1207,18 @@ where
                         self.remove(&addr);
                     }
                 }
-                StallOutcome::Clear => self.find_response_stalls.clear(addr),
+                StallOutcome::Clear(hash) => {
+                    self.find_response_stalls.clear(addr);
+                    if hash.is_some_and(|hash| {
+                        self.inventory_registry
+                            .advertising_peers(hash.into())
+                            .any(|peer| *peer == addr)
+                    }) {
+                        self.find_buffer_until =
+                            Some((addr, tokio::time::Instant::now() + FIND_BUFFER_TURN));
+                    }
+                }
+                StallOutcome::Unscored => {}
             }
         }
     }
@@ -1211,6 +1259,10 @@ where
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
+        self.find_in_flight.remove(key);
+        if self.find_buffer_until.is_some_and(|(peer, _)| peer == *key) {
+            self.find_buffer_until = None;
+        }
         self.find_peer_queue.retain(|(addr, _)| addr != key);
         self.tree_root_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
@@ -1321,17 +1373,26 @@ where
         }
 
         let serving_only = !allow_non_serving && !self.serving_peer_keys.is_empty();
-        let (index, (key, _)) = self
-            .find_peer_queue
-            .iter()
-            .enumerate()
-            .find(|(_, (key, _))| {
-                self.ready_services.contains_key(key)
-                    && (!self.limited_peer_keys.contains(key) || allow_limited)
-                    && (!serving_only
-                        || self.serving_peer_keys.contains(key)
-                        || (allow_limited && self.limited_peer_keys.contains(key)))
-            })?;
+        let reserved = self
+            .find_buffer_until
+            .filter(|(_, until)| tokio::time::Instant::now() < *until)
+            .map(|(peer, _)| peer);
+        let (index, (key, _)) =
+            self.find_peer_queue
+                .iter()
+                .enumerate()
+                .find(|(_, (key, info))| {
+                    self.ready_services.contains_key(key)
+                        && reserved != Some(*key)
+                        && !self
+                            .find_in_flight
+                            .get(key)
+                            .is_some_and(|in_flight| Arc::ptr_eq(in_flight, info))
+                        && (!self.limited_peer_keys.contains(key) || allow_limited)
+                        && (!serving_only
+                            || self.serving_peer_keys.contains(key)
+                            || (allow_limited && self.limited_peer_keys.contains(key)))
+                })?;
         let key = *key;
         self.find_peer_queue.rotate_left(index + 1);
         Some(key)
@@ -1992,19 +2053,32 @@ where
             .take_ready_service(&key)
             .expect("callers select `key` from the ready services just before calling");
 
-        // Configured sidecars are trusted downstream consumers, not upstream sync sources.
+        // Channel readiness does not imply completion of an earlier find on that connection.
         let track_stalls = is_find_request && !self.zcashd_compat_peer_keys.contains(&key);
+        let guard = is_find_request.then(|| {
+            let connection = svc.connection_info().clone();
+            if let Some(previous) = self.find_in_flight.insert(key, connection.clone()) {
+                debug_assert!(
+                    !Arc::ptr_eq(&previous, &connection),
+                    "find routing excludes connections with unanswered finds"
+                );
+            }
+            FindResponseGuard {
+                addr: key,
+                connection,
+                outcome: StallOutcome::Unscored,
+                sender: self.stall_event_tx.clone(),
+                wake: self.maintenance_waker.clone(),
+            }
+        });
         let fut = svc.call(req);
-        let response = if track_stalls {
-            let connection_info = svc.connection_info().clone();
-            let stall_tx = self.stall_event_tx.clone();
+        let response = if let Some(mut guard) = guard {
             async move {
-                // Cancellation is not evidence of failure: a caught-up peer can
-                // legitimately send no getblocks reply before the caller times out.
                 let result = fut.await;
-                if let Some(outcome) = classify_find_response(&result) {
-                    let _ = stall_tx.send((key, connection_info, outcome));
+                if track_stalls {
+                    guard.outcome = classify_find_response(&result);
                 }
+                drop(guard);
                 result.map_err(Into::into)
             }
             .boxed()
@@ -2101,6 +2175,11 @@ where
                 if !expired {
                     // Requests enter this FIFO with monotonically increasing deadlines.
                     next_deadline.get_or_insert(queued.deadline);
+                }
+                if let Some((peer, until)) = self.find_buffer_until {
+                    if self.ready_services.contains_key(&peer) && now < until {
+                        next_deadline = Some(next_deadline.map_or(until, |at| at.min(until)));
+                    }
                 }
                 self.queued_find_requests.push_back(queued);
             }
@@ -2619,6 +2698,10 @@ where
             }
         }
 
+        // Compact inventory is registered before a find completed by that announcement can
+        // reserve a short turn for the download it triggered.
+        let _poll_pending_or_ready: Poll<()> =
+            self.inventory_registry.poll_inventory(&mut peer_cx)?;
         // Drain stall events first, so disconnects free up slots that
         // `poll_discover` can fill in the same poll cycle.
         self.drain_stall_events(&mut peer_cx);
@@ -2630,8 +2713,6 @@ where
 
         // These tasks don't provide new peers or newly ready peers.
         let _poll_pending: Poll<()> = self.poll_background_errors(&mut peer_cx)?;
-        let _poll_pending_or_ready: Poll<()> =
-            self.inventory_registry.poll_inventory(&mut peer_cx)?;
         // Register failures after rotation so they survive a full interval before aging.
         self.drain_inv_failures(&mut peer_cx);
 
@@ -2654,7 +2735,8 @@ where
             &self.ready_services,
             &self.cancel_handles,
         );
-        // Discovery gets newly ready serving peers before queued block downloads can take them.
+        // Discovery normally gets newly ready serving peers before queued downloads,
+        // except for a bounded reservation after a find reports an advertised block.
         // Even without ready peers, poll deadlines and cancellations to keep the queue live.
         self.route_queued_find_requests(&mut peer_cx);
 

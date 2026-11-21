@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Avoided overlapping block-discovery requests on one peer so newly advertised blocks can be downloaded without waiting for another announcement.
+time: 2026-11-21T11:44:49Z

@@ -1,6 +1,6 @@
 //! Regression checkpoints for inventory failure eligibility, attribution, and wakeups.
 
-use std::{collections::HashSet, future::Future, sync::Arc};
+use std::{collections::HashSet, future::Future, sync::Arc, task::Context};
 
 use futures::{channel::mpsc, SinkExt};
 use zebra_chain::serialization::SerializationError;
@@ -51,6 +51,327 @@ async fn finish_download(
             .expect("the peer returned the requested block"),
         response,
     );
+}
+
+/// A compact discovery answer cannot let duplicate finds get ahead of its admitted download.
+#[tokio::test]
+async fn compact_find_response_releases_the_sole_peer_for_a_buffered_download() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut inventory_sender, addrs, mut handles, _tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the fixture contains block inventory");
+    };
+    peer_set.ready().await.unwrap();
+    let connection = peer_set.ready_services[&addrs[0]].connection_info().clone();
+    let find_request = Request::FindBlocks {
+        known_blocks: vec![block::Hash([1; 32])],
+        stop: None,
+    };
+    let download_request = Request::BlockDownload {
+        hash,
+        advertiser: Some(connection),
+    };
+    let (network, _poll_task) = peer_set.into_buffer(16);
+    let mut first = Box::pin(network.clone().oneshot(find_request.clone()));
+    assert!(futures::poll!(first.as_mut()).is_pending());
+    let initial = timeout(Duration::from_millis(250), async {
+        loop {
+            if let Some(request) = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+            {
+                break request;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the first find reaches the peer");
+    assert_eq!(initial.request, find_request);
+
+    let mut others = Vec::new();
+    for _ in 0..2 {
+        let mut pending = Box::pin(network.clone().oneshot(find_request.clone()));
+        assert!(futures::poll!(pending.as_mut()).is_pending());
+        others.push(pending);
+    }
+    let mut download = Box::pin(network.clone().oneshot(download_request.clone()));
+    assert!(futures::poll!(download.as_mut()).is_pending());
+    send_inventory(
+        &mut inventory_sender,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    initial
+        .tx
+        .send(Ok(Response::BlockHashes(vec![hash])))
+        .unwrap();
+    assert_eq!(first.await.unwrap(), Response::BlockHashes(vec![hash]));
+
+    let next = timeout(Duration::from_millis(250), async {
+        loop {
+            if let Some(request) = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+            {
+                break request;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the admitted download must not need a later inventory message");
+    assert_eq!(next.request, download_request);
+    next.tx.send(Ok(response.clone())).unwrap();
+    assert_eq!(download.await.unwrap(), response);
+
+    for find in others {
+        let request = timeout(Duration::from_millis(250), async {
+            loop {
+                if let Some(request) = handles[0]
+                    .try_to_receive_outbound_client_request()
+                    .request()
+                {
+                    break request;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("discovery continues after the download");
+        assert_eq!(request.request, find_request);
+        request.tx.send(Ok(Response::BlockHashes(vec![]))).unwrap();
+        assert_eq!(find.await.unwrap(), Response::BlockHashes(vec![]));
+    }
+}
+
+/// Different peers can answer discovery concurrently; only duplicate finds on one peer wait.
+#[tokio::test]
+async fn finds_still_fan_out_to_distinct_peers() {
+    let _init_guard = zebra_test::init();
+    let (peer_set, _guard, _, mut handles, _tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK; 2]);
+    let (network, _poll_task) = peer_set.into_buffer(16);
+    let find = Request::FindBlocks {
+        known_blocks: vec![block::Hash([1; 32])],
+        stop: None,
+    };
+    let mut first = Box::pin(network.clone().oneshot(find.clone()));
+    assert!(futures::poll!(first.as_mut()).is_pending());
+    let mut second = Box::pin(network.clone().oneshot(find.clone()));
+    assert!(futures::poll!(second.as_mut()).is_pending());
+
+    for (index, handle) in handles.iter_mut().enumerate() {
+        let request = timeout(Duration::from_millis(250), async {
+            loop {
+                if let Some(request) = handle.try_to_receive_outbound_client_request().request() {
+                    break request;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("each independent peer receives a find");
+        assert_eq!(request.request, find);
+        let hash = block::Hash(
+            [u8::try_from(index + 2).expect("two mock peer indexes fit in a byte"); 32],
+        );
+        request
+            .tx
+            .send(Ok(Response::BlockHashes(vec![hash])))
+            .unwrap();
+    }
+    let (first, second) = tokio::join!(first, second);
+    let mut answers = HashSet::new();
+    for result in [first, second] {
+        let Response::BlockHashes(hashes) = result.unwrap() else {
+            panic!("find requests return block hashes");
+        };
+        assert_eq!(hashes.len(), 1);
+        answers.insert(hashes[0]);
+    }
+    assert_eq!(
+        answers,
+        HashSet::from([block::Hash([2; 32]), block::Hash([3; 32])]),
+    );
+}
+
+/// Cancellation and timeout release find ownership without scoring a live connection.
+#[tokio::test]
+async fn canceled_find_releases_connection_ownership() {
+    let _init_guard = zebra_test::init();
+    for timeout_first in [false, true] {
+        let (mut peer_set, _guard, addrs, _handles, _tip) =
+            peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+        let request = Request::FindBlocks {
+            known_blocks: vec![block::Hash([1; 32])],
+            stop: None,
+        };
+        let mut find = peer_set.ready().await.unwrap().call(request);
+        assert!(peer_set.find_in_flight.contains_key(&addrs[0]));
+        if timeout_first {
+            assert!(
+                timeout(Duration::from_millis(10), &mut find).await.is_err(),
+                "an unanswered find reaches its caller's deadline"
+            );
+        }
+        drop(find);
+        let waker = futures::task::noop_waker();
+        peer_set.drain_stall_events(&mut Context::from_waker(&waker));
+        assert!(!peer_set.find_in_flight.contains_key(&addrs[0]));
+    }
+}
+
+/// A late completion from a disconnected peer cannot clear its replacement's find marker.
+#[tokio::test]
+async fn old_find_completion_does_not_release_replacement() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, _guard, addrs, _handles, _tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+    let find = peer_set.ready().await.unwrap().call(Request::FindBlocks {
+        known_blocks: vec![block::Hash([1; 32])],
+        stop: None,
+    });
+    let addr = addrs[0];
+    let old = peer_set.find_in_flight[&addr].clone();
+    peer_set.remove(&addr);
+    let replacement = Arc::new((*old).clone());
+    peer_set
+        .find_peer_queue
+        .push_back((addr, replacement.clone()));
+    peer_set.find_in_flight.insert(addr, replacement.clone());
+    drop(find);
+    let waker = futures::task::noop_waker();
+    peer_set.drain_stall_events(&mut Context::from_waker(&waker));
+    assert!(Arc::ptr_eq(&peer_set.find_in_flight[&addr], &replacement));
+}
+
+/// Revoking a connection outside `remove` releases its find marker on late completion.
+#[tokio::test]
+async fn revoked_find_completion_releases_marker_without_scoring() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, _guard, addrs, mut handles, _tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+    let (bans_tx, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
+    peer_set.bans_receiver = bans_rx;
+    let addr = addrs[0];
+    let find = peer_set.ready().await.unwrap().call(Request::FindBlocks {
+        known_blocks: vec![block::Hash([1; 32])],
+        stop: None,
+    });
+    let request = handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("find reached the connection");
+    let connection = peer_set.find_in_flight[&addr].clone();
+
+    bans_tx.send_modify(|bans| bans.ban(addr.ip()));
+    peer_set.disconnect_from_ineligible_peers();
+    assert!(!peer_set.is_current_connection(addr, &connection));
+    assert!(peer_set.find_in_flight.contains_key(&addr));
+
+    request
+        .tx
+        .send(Err(PeerError::ConnectionReceiveTimeout.into()))
+        .expect("the old find still awaits its response");
+    assert!(find.await.is_err());
+    let waker = futures::task::noop_waker();
+    peer_set.drain_stall_events(&mut Context::from_waker(&waker));
+    assert!(!peer_set.find_in_flight.contains_key(&addr));
+    assert!(!peer_set.find_response_stalls.record_stall(addr));
+    assert!(
+        !peer_set.find_response_stalls.record_stall(addr),
+        "a revoked connection must not contribute a stall to this address",
+    );
+}
+
+/// Queued discovery resumes when an advertised-block reservation expires, even with Buffer traffic.
+#[tokio::test]
+async fn queued_find_progresses_with_idle_and_busy_buffers() {
+    let _init_guard = zebra_test::init();
+    for buffered_count in [0, 4] {
+        let (peer_set, mut inventory_sender, addrs, mut handles, _tip) =
+            peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+        let (network, _poll_task) = peer_set.into_buffer(16);
+        let request = Request::FindBlocks {
+            known_blocks: vec![block::Hash([1; 32])],
+            stop: None,
+        };
+        let mut first = Box::pin(network.clone().oneshot(request.clone()));
+        assert!(futures::poll!(first.as_mut()).is_pending());
+        let initial = timeout(Duration::from_millis(250), async {
+            loop {
+                if let Some(request) = handles[0]
+                    .try_to_receive_outbound_client_request()
+                    .request()
+                {
+                    break request;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the first find reaches the peer");
+        let mut next_find = Box::pin(network.clone().oneshot(request.clone()));
+        assert!(futures::poll!(next_find.as_mut()).is_pending());
+        tokio::task::yield_now().await;
+        assert!(
+            handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .is_none(),
+            "duplicate finds cannot take the peer before its first response",
+        );
+        let mut buffered = Vec::new();
+        for _ in 0..buffered_count {
+            let mut call = Box::pin(network.clone().oneshot(Request::Peers));
+            assert!(futures::poll!(call.as_mut()).is_pending());
+            buffered.push(call);
+        }
+        let advertised_hash = block::Hash([2; 32]);
+        send_inventory(
+            &mut inventory_sender,
+            InventoryStatus::new_available(InventoryHash::Block(advertised_hash), addrs[0]),
+        );
+        initial
+            .tx
+            .send(Ok(Response::BlockHashes(vec![advertised_hash])))
+            .unwrap();
+        assert_eq!(
+            first.await.unwrap(),
+            Response::BlockHashes(vec![block::Hash([2; 32])])
+        );
+        let mut found = false;
+        for _ in 0..=buffered_count {
+            let next = timeout(Duration::from_millis(250), async {
+                loop {
+                    if let Some(request) = handles[0]
+                        .try_to_receive_outbound_client_request()
+                        .request()
+                    {
+                        break request;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("buffer traffic cannot starve queued discovery");
+            match next.request {
+                Request::FindBlocks { .. } => {
+                    found = true;
+                    next.tx.send(Ok(Response::BlockHashes(vec![]))).unwrap();
+                }
+                Request::Peers => next.tx.send(Ok(Response::Nil)).unwrap(),
+                other => panic!("unexpected peer request: {other:?}"),
+            }
+        }
+        assert!(found, "queued discovery must make progress");
+        assert_eq!(next_find.await.unwrap(), Response::BlockHashes(vec![]));
+        for call in buffered {
+            assert_eq!(call.await.unwrap(), Response::Nil);
+        }
+    }
 }
 
 /// Prefer a briefly busy advertiser, but fall back while a stalled connection is still alive.

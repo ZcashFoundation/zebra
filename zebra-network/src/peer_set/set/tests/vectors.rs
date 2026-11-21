@@ -2428,17 +2428,14 @@ fn find_requests_rotate_past_fast_empty_responder_and_reconnections() {
             .expect("each continuously ready connection gets its turn");
         }
 
-        // Fill the mock channel's buffer and sender slot. Its neighbor must remain usable
-        // even when the unready peer reaches the front of the discovery order.
-        let mut busy_responses = Vec::new();
-        for _ in 0..2 {
-            busy_responses.push(
-                timeout(Duration::from_secs(10), peer_set.ready())
-                    .await
-                    .expect("peer readiness must not hang")
-                    .expect("peer set is ready")
-                    .call(requests[0].0.clone()),
-            );
+        // One unanswered find keeps its connection busy for discovery. The other peer
+        // must continue serving repeated finds instead of waiting behind it.
+        let busy_response = timeout(Duration::from_secs(10), peer_set.ready())
+            .await
+            .expect("peer readiness must not hang")
+            .expect("peer set is ready")
+            .call(requests[0].0.clone());
+        for _ in 0..3 {
             respond_to_request(
                 &mut peer_set,
                 &mut handles[1],
@@ -2446,29 +2443,19 @@ fn find_requests_rotate_past_fast_empty_responder_and_reconnections() {
                 Ok(requests[1].1.clone()),
             )
             .await
-            .expect("the other peer gets its turn while requests accumulate");
+            .expect("an unanswered find must not block a different peer");
         }
-        respond_to_request(
-            &mut peer_set,
-            &mut handles[1],
-            requests[1].0.clone(),
-            Ok(requests[1].1.clone()),
-        )
-        .await
-        .expect("an unready peer must not block its ready neighbor");
-        for busy_response in busy_responses {
-            handles[0]
-                .try_to_receive_outbound_client_request()
-                .request()
-                .expect("busy peer retained its request")
-                .tx
-                .send(Ok(requests[0].1.clone()))
-                .expect("busy request is pending");
-            timeout(Duration::from_secs(10), busy_response)
-                .await
-                .expect("busy response must not hang")
-                .expect("busy response succeeds");
-        }
+        handles[0]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("busy peer retained its request")
+            .tx
+            .send(Ok(requests[0].1.clone()))
+            .expect("busy request is pending");
+        timeout(Duration::from_secs(10), busy_response)
+            .await
+            .expect("busy response must not hang")
+            .expect("busy response succeeds");
         for index in [0, 1] {
             respond_to_request(
                 &mut peer_set,
@@ -2538,108 +2525,102 @@ fn find_results_from_replaced_connections_do_not_affect_replacement() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
     tokio::time::pause();
-    let address: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
-    let (client, mut old_handle) = ClientTestHarness::build()
-        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
-        .with_start_height(block::Height(2_500_000))
-        .finish();
-    let (mut discovery_tx, discovered_peers) = futures::channel::mpsc::channel(2);
-    discovery_tx
-        .try_send(Ok::<_, BoxError>(Change::Insert(address, client.into())))
-        .expect("discovery channel has room");
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .build();
-        let request = Request::FindBlocks {
-            known_blocks: vec![],
-            stop: None,
-        };
-        let mut pending = Vec::new();
-        for _ in 0..=FIND_RESPONSE_STALL_THRESHOLD {
-            let response_fut = timeout(Duration::from_secs(10), peer_set.ready())
+    runtime.block_on(async {
+        for late_success in [false, true] {
+            let address: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+            let (client, mut old_handle) = ClientTestHarness::build()
+                .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+                .with_start_height(block::Height(2_500_000))
+                .finish();
+            let (mut discovery_tx, discovered_peers) = futures::channel::mpsc::channel(2);
+            discovery_tx
+                .try_send(Ok::<_, BoxError>(Change::Insert(address, client.into())))
+                .expect("discovery channel has room");
+            let (minimum_peer_version, _best_tip) =
+                MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+            let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+                .with_discover(discovered_peers)
+                .with_minimum_peer_version(minimum_peer_version)
+                .build();
+            let request = Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            };
+            let old = timeout(Duration::from_secs(10), peer_set.ready())
                 .await
                 .expect("peer readiness must not hang")
                 .expect("peer is ready")
                 .call(request.clone());
-            let client_request = old_handle
+            let old_request = old_handle
                 .try_to_receive_outbound_client_request()
                 .request()
                 .expect("old connection received the request");
-            pending.push((response_fut, client_request));
-        }
 
-        let (replacement, mut handle) = ClientTestHarness::build()
-            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
-            .with_start_height(block::Height(2_500_000))
-            .finish();
-        discovery_tx
-            .try_send(Ok(Change::Remove(address)))
-            .expect("discovery channel has room");
-        discovery_tx
-            .try_send(Ok(Change::Insert(address, replacement.into())))
-            .expect("discovery channel has room");
-        timeout(Duration::from_secs(10), peer_set.ready())
-            .await
-            .expect("replacement readiness must not hang")
-            .expect("replacement is ready");
-        assert!(!old_handle.wants_connection_heartbeats());
-
-        let (late_success, late_success_request) = pending
-            .pop()
-            .expect("one old request is reserved for success");
-        for (response_fut, client_request) in pending {
-            client_request
-                .tx
-                .send(Err(PeerError::ConnectionReceiveTimeout.into()))
-                .expect("old request is still waiting for its response");
-            assert!(timeout(Duration::from_secs(10), response_fut)
+            let (replacement, mut handle) = ClientTestHarness::build()
+                .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+                .with_start_height(block::Height(2_500_000))
+                .finish();
+            discovery_tx
+                .try_send(Ok(Change::Remove(address)))
+                .expect("discovery channel has room");
+            discovery_tx
+                .try_send(Ok(Change::Insert(address, replacement.into())))
+                .expect("discovery channel has room");
+            timeout(Duration::from_secs(10), peer_set.ready())
                 .await
-                .expect("old response must not hang")
+                .expect("replacement readiness must not hang")
+                .expect("replacement is ready");
+            assert!(!old_handle.wants_connection_heartbeats());
+
+            for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+                assert!(respond_to_request(
+                    &mut peer_set,
+                    &mut handle,
+                    request.clone(),
+                    Err(PeerError::ConnectionReceiveTimeout.into()),
+                )
+                .await
                 .is_err());
+            }
+            if late_success {
+                old_request
+                    .tx
+                    .send(Ok(Response::BlockHashes(vec![])))
+                    .expect("old request is still waiting for its response");
+                timeout(Duration::from_secs(10), old)
+                    .await
+                    .expect("old response must not hang")
+                    .expect("old response succeeds");
+            } else {
+                old_request
+                    .tx
+                    .send(Err(PeerError::ConnectionReceiveTimeout.into()))
+                    .expect("old request is still waiting for its response");
+                assert!(timeout(Duration::from_secs(10), old)
+                    .await
+                    .expect("old response must not hang")
+                    .is_err());
+            }
             let _ = peer_set.ready().now_or_never();
             assert!(
                 handle.wants_connection_heartbeats(),
-                "old connection failures must not disconnect its replacement",
+                "old outcomes cannot affect the replacement's failure threshold",
             );
-        }
-
-        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
             assert!(respond_to_request(
                 &mut peer_set,
                 &mut handle,
-                request.clone(),
+                request,
                 Err(PeerError::ConnectionReceiveTimeout.into()),
             )
             .await
             .is_err());
+            let _ = peer_set.ready().now_or_never();
+            assert!(
+                !handle.wants_connection_heartbeats(),
+                "only replacement failures count toward its disconnect threshold",
+            );
         }
-        late_success_request
-            .tx
-            .send(Ok(Response::BlockHashes(vec![])))
-            .expect("old request is still waiting for its response");
-        timeout(Duration::from_secs(10), late_success)
-            .await
-            .expect("old response must not hang")
-            .expect("old response succeeds");
-
-        assert!(respond_to_request(
-            &mut peer_set,
-            &mut handle,
-            request,
-            Err(PeerError::ConnectionReceiveTimeout.into()),
-        )
-        .await
-        .is_err());
-        let _ = peer_set.ready().now_or_never();
-        assert!(
-            !handle.wants_connection_heartbeats(),
-            "old connection successes must not clear the replacement's failures",
-        );
     });
 }
 
