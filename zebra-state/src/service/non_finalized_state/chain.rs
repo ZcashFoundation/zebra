@@ -28,7 +28,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
-    work::difficulty::PartialCumulativeWork,
+    work::{difficulty::PartialCumulativeWork, equihash::Solution},
 };
 
 use crate::{
@@ -1550,6 +1550,59 @@ impl Chain {
         Ok(history_tree)
     }
 
+    /// Rebind a validated proposal's tip to its solution, retaining already computed indexes
+    /// and note commitment trees. On an error, the chain is left unchanged.
+    pub(crate) fn rebind_tip(
+        &mut self,
+        block: ContextuallyVerifiedBlock,
+    ) -> Result<(), ValidateContextError> {
+        let height = self.non_finalized_tip_height();
+        let previous = self.tip_block().expect("rebinding needs a proposal tip");
+        assert_eq!(block.height, height, "rebinding replaces the tip block");
+        assert_eq!(
+            block.transaction_hashes, previous.transaction_hashes,
+            "rebinding keeps the tip's transactions"
+        );
+        let previous_hash = previous.hash;
+        let previous_size = solution_size(&previous.block);
+        let solved_size = solution_size(&block.block);
+        let Ok(parent_height) = height.previous() else {
+            unreachable!("rebinding a proposal tip requires its parent height");
+        };
+        let parent_tree = self
+            .history_trees_by_height
+            .get(&parent_height)
+            .expect("only rebound when the parent history tree exists")
+            .clone();
+        let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
+        let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
+        let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
+        let history_tree = Self::history_tree_with_block(
+            &self.network,
+            parent_tree,
+            block.block.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &ironwood_root,
+            },
+        )?;
+        self.history_trees_by_height.insert(height, history_tree);
+        let info = self
+            .block_info_by_height
+            .get_mut(&height)
+            .expect("every block in the chain has block info");
+        *info = BlockInfo::new(
+            *info.value_pools(),
+            info.size() + solved_size - previous_size,
+        );
+        self.height_by_hash.remove(&previous_hash);
+        self.height_by_hash.insert(block.hash, height);
+        self.blocks.insert(height, Arc::new(block));
+        self.precious_rank = None;
+        Ok(())
+    }
+
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
@@ -2594,6 +2647,15 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
         }
         self.block_info_by_height.remove(height);
     }
+}
+
+/// Serialized solution length includes the length prefix, which changes on some Regtest solves.
+fn solution_size(block: &block::Block) -> u32 {
+    let size = match block.header.solution {
+        Solution::Common(_) => Solution::SERIALIZED_SIZE,
+        Solution::Regtest(_) => Solution::REGTEST_SERIALIZED_SIZE,
+    };
+    u32::try_from(size).expect("a solution is smaller than a block, which fits in a u32")
 }
 
 impl Ord for Chain {

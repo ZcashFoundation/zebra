@@ -47,7 +47,7 @@ fn large_transfer_chain(
     };
 
     let network = Network::Mainnet;
-    let finalized_height = Height(600_000);
+    let finalized_height = Height(902_999);
     let value: Amount<NonNegative> = (MAX_MONEY / 2 + 1).try_into()?;
     let pools = ValueBalance::from_transparent_amount(value);
     let addresses = [
@@ -342,6 +342,89 @@ fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
     let reverted = chain.fork(blocks[0].hash).unwrap();
     assert!(reverted.eq_internal_state(&root));
     assert!(reverted.push(block)?.eq_internal_state(&chain));
+    Ok(())
+}
+
+/// A solved proposal reuses its validated chain, including its Heartwood history leaf after
+/// a root is finalized. A shorter Regtest solution changes the stored serialized size.
+#[test]
+fn prepared_chain_commits_solved_proposal_after_root_finalization() -> Result<()> {
+    use zebra_chain::work::equihash;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
+    let published = base.push(blocks[0].clone())?.push(blocks[1].clone())?;
+    let proposal = blocks[2].clone();
+    let prepared = published.clone().push(proposal.clone())?;
+
+    let mut solved_block = Block::clone(&proposal.block);
+    let header = Arc::make_mut(&mut solved_block.header);
+    header.nonce = [0x55; 32].into();
+    header.solution = equihash::Solution::Regtest([0; 36]);
+    let mut solved = proposal.clone();
+    solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+    assert_ne!(solved.hash, proposal.hash);
+
+    for finalize_root in [false, true] {
+        let mut parent = published.clone();
+        if finalize_root {
+            parent.pop_root();
+        }
+        let expected = parent.clone().push(solved.clone())?;
+        let finalized = FinalizedState::new(&Config::ephemeral(), &network)
+            .expect("opening an ephemeral database should succeed");
+        let mut state = NonFinalizedState::new(&network);
+        state.insert(Arc::new(parent));
+        // Proposal validation runs on a snapshot, while the writer owns the original state.
+        state.clone().store_prepared(Arc::new(prepared.clone()));
+        state.commit_prevalidated_contextual(solved.clone(), &finalized.db, None)?;
+
+        let committed = state
+            .best_chain()
+            .expect("the solved proposal was committed");
+        assert!(committed.eq_internal_state(&expected));
+        assert!(committed.history_block_commitment_tree().hash().is_some());
+        assert!(
+            state.prepared.lock().unwrap().is_none(),
+            "rebinding must consume the private proposal chain"
+        );
+    }
+    Ok(())
+}
+
+/// A prepared proposal with a different body must use the normal push.
+#[test]
+fn prepared_chain_with_different_body_falls_back_to_push() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
+    let published = base.push(blocks[0].clone())?.push(blocks[1].clone())?;
+    let proposal = blocks[2].clone();
+    let mut solved_block = Block::clone(&proposal.block);
+    Arc::make_mut(&mut solved_block.header).nonce = [0x55; 32].into();
+    let mut solved = proposal.clone();
+    solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+    let expected = published.clone().push(solved.clone())?;
+
+    let (_, alternative, _, _) = large_transfer_chain(&[&[0], &[1], &[1]])?;
+    let candidate = published.clone().push(alternative[2].clone())?;
+    assert_ne!(
+        candidate.tip_block().unwrap().transaction_hashes,
+        solved.transaction_hashes
+    );
+    let finalized = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
+    let mut state = NonFinalizedState::new(&network);
+    state.insert(Arc::new(published));
+    state.store_prepared(Arc::new(candidate));
+    state.commit_prevalidated_contextual(solved, &finalized.db, None)?;
+
+    assert!(state.best_chain().unwrap().eq_internal_state(&expected));
+    assert!(
+        state.prepared.lock().unwrap().is_some(),
+        "a mismatched prepared chain must remain available as the normal push is used"
+    );
     Ok(())
 }
 

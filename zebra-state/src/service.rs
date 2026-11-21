@@ -2911,12 +2911,14 @@ impl Service<ReadRequest> for ReadStateService {
                     semantically_verified,
                 )?;
 
-                let contextual = latest_non_finalized_state
+                let chain = latest_non_finalized_state
                     .find_chain(|chain| chain.contains_block_hash(hash))
-                    .expect("successful proposal validation inserted its block")
+                    .expect("successful proposal validation inserted its block");
+                let contextual = chain
                     .block(hash.into())
                     .expect("the selected chain contains the proposal")
                     .clone();
+                latest_non_finalized_state.store_prepared(chain);
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 

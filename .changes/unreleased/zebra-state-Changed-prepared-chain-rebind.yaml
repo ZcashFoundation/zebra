@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Clones of `NonFinalizedState` now share a private prepared-proposal slot; `ReadRequest::CheckBlockProposalValidity` retains the validated chain for matching solved-block commits.'
+time: 2026-11-22T00:00:00Z
