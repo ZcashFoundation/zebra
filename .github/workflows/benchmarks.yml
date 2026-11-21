@@ -56,6 +56,15 @@ jobs:
             echo "::endgroup::"
           done <<< "$BENCHES"
 
+      - name: Retain benchmark measurements
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: cargo-criterion-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bench_output.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Convert criterion JSON to github-action-benchmark format
         run: |
           jq -s '[.[] | select(.reason == "benchmark-complete") | {
@@ -165,6 +174,30 @@ jobs:
             cargo bench $cmd -- --save-baseline pr
             echo "::endgroup::"
           done <<< "$BENCHES"
+
+      - name: Export benchmark baselines
+        id: export
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          dir="$RUNNER_TEMP/criterion-comparison"
+          mkdir -p "$dir"
+          critcmp --export pr > "$RUNNER_TEMP/pr.json"
+          mv "$RUNNER_TEMP/pr.json" "$dir/pr-$HEAD_SHA.json"
+          critcmp --export base > "$RUNNER_TEMP/base.json"
+          mv "$RUNNER_TEMP/base.json" "$dir/base-$BASE_SHA.json"
+
+      - name: Retain benchmark comparison inputs
+        if: ${{ !cancelled() && steps.export.outcome != 'skipped' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: criterion-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/criterion-comparison/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Compare results
         id: compare
