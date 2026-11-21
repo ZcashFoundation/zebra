@@ -39,7 +39,7 @@ fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
     for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
 
-        for tx in &block.transactions {
+        for tx in block.transactions.iter().filter(|tx| tx.version() == 4) {
             let Some(sprout_bundle) = tx.sprout_bundle() else {
                 continue;
             };
