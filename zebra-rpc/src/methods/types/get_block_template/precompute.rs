@@ -95,13 +95,13 @@ pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
 pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Maximum pause for coalescing a burst; slow builds still wait at least their own duration.
+/// Maximum duration of a continuously arriving burst before refreshing work.
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_secs(1);
 
-/// Pause for coalescing steady arrivals, unless the previous build took longer.
+/// Steady-arrival pause, and the quiet period that ends a burst.
 const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(50);
 
-/// Additions in the pending window that extend the short pause to the burst deadline.
+/// Additions in the pending window that switch to quiet-period burst coalescing.
 const MEMPOOL_BURST_ADDITIONS: usize = 50;
 
 /// Reading inputs owns no proof or mutex permit.
@@ -1085,20 +1085,21 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                 } => {}
             }
         }
+        let mut burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
 
         // Count additions in the pending window rather than estimating a moving rate. Bursts
-        // extend the short pause to the throttle deadline. Both deadlines include the previous
-        // build's duration, and neither slides with arrivals.
+        // wait until arrivals stop for the short pause, but never beyond the throttle deadline.
+        // Neither deadline slides for steady arrivals.
         loop {
             let deadline = if additions >= MEMPOOL_BURST_ADDITIONS {
-                burst_build
+                burst_build.min(burst_quiet_at.max(next_build))
             } else {
                 next_build
             };
             tokio::select! {
                 biased;
                 _ = sleep_until(deadline) => {
-                    if additions >= MEMPOOL_BURST_ADDITIONS {
+                    if deadline == burst_build {
                         break;
                     }
 
@@ -1108,9 +1109,11 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                         match changes.try_recv() {
                             Ok(change) if change.is_added() => {
                                 additions = additions.saturating_add(change.tx_ids().len());
+                                burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                             }
                             Err(broadcast::error::TryRecvError::Lagged(_)) => {
                                 additions = MEMPOOL_BURST_ADDITIONS;
+                                burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                             }
                             Err(
                                 broadcast::error::TryRecvError::Empty
@@ -1118,20 +1121,21 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                             ) => break,
                             _ => {}
                         }
-                        if additions >= MEMPOOL_BURST_ADDITIONS {
-                            break;
-                        }
                     }
-                    if additions < MEMPOOL_BURST_ADDITIONS {
+                    if additions < MEMPOOL_BURST_ADDITIONS
+                        || Instant::now() >= burst_quiet_at
+                    {
                         break;
                     }
                 },
                 change = changes.recv() => match change {
                     Ok(change) if change.is_added() => {
                         additions = additions.saturating_add(change.tx_ids().len());
+                        burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         additions = MEMPOOL_BURST_ADDITIONS;
+                        burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                     }
                     Err(broadcast::error::RecvError::Closed) => sleep_until(deadline).await,
                     _ => {}
