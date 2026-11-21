@@ -264,7 +264,7 @@ impl<S: Service<Request>> Service<Request> for DrainBetweenPolls<S> {
 }
 
 #[test]
-fn queued_find_priority_survives_second_readiness_pass() {
+fn buffered_request_precedes_duplicate_find_after_readiness_change() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
     tokio::time::pause();
@@ -327,15 +327,14 @@ fn queued_find_priority_survives_second_readiness_pass() {
                     while let Some(request) = client.take_request() {
                         received.push(request);
                     }
-                    for (actual, expected) in received.iter().zip([&find, &find, &ordinary_request])
-                    {
+                    for (actual, expected) in received.iter().zip([&find, &ordinary_request]) {
                         assert_eq!(
                             actual.request(),
                             expected,
-                            "the buffer's held ordinary request must follow both queued finds"
+                            "a buffered request uses capacity before the duplicate find",
                         );
                     }
-                    received.len() == 3
+                    received.len() == 2
                 };
                 if complete {
                     break;
@@ -344,8 +343,54 @@ fn queued_find_priority_survives_second_readiness_pass() {
             }
         })
         .await
-        .expect("queued finds and held ordinary work must dispatch without other traffic");
-        // Cancel callers before dropping the real response senders retained in the log.
+        .expect("the first find and buffered work must dispatch without other traffic");
+        let mut responses = received
+            .try_lock()
+            .expect("test request log is not locked across awaits");
+        responses
+            .remove(0)
+            .respond(Ok(Response::BlockHashes(vec![])));
+        responses.remove(0).respond(Ok(Response::Nil));
+        drop(responses);
+        assert_eq!(
+            pending.remove(0).await.unwrap(),
+            Response::BlockHashes(vec![])
+        );
+        // The production peer set has an idle poller. This hand-wrapped Buffer needs its
+        // equivalent maintenance request to poll an otherwise idle queued find.
+        let maintenance = buffered
+            .ready()
+            .await
+            .expect("the buffer has room for maintenance")
+            .call(Request::PollPeerSet);
+        let next = timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(request) = received
+                    .try_lock()
+                    .expect("test request log is not locked across awaits")
+                    .pop()
+                {
+                    break request;
+                }
+                if let Some(request) = client
+                    .try_lock()
+                    .expect("test client is not locked across awaits")
+                    .take_request()
+                {
+                    break request;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the duplicate find progresses once the first response completes");
+        assert_eq!(next.request(), &find);
+        next.respond(Ok(Response::BlockHashes(vec![])));
+        assert_eq!(
+            pending.remove(0).await.unwrap(),
+            Response::BlockHashes(vec![])
+        );
+        maintenance.await.unwrap();
         drop((pending, ordinary));
     });
 }
