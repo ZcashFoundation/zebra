@@ -13,6 +13,7 @@ use tokio::{pin, select, sync::mpsc, time::timeout};
 
 use zebra_chain::{
     block::{Hash, Height},
+    chain_sync_status::ChainSyncStatus,
     chain_tip::mock::MockChainTip,
 };
 use zebra_network as zn;
@@ -20,7 +21,7 @@ use zebra_state as zs;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    components::sync::{ChainSync, FANOUT},
+    components::sync::{ChainSync, CheckedTip, SyncStatus, FANOUT},
     config::ZebradConfig,
 };
 
@@ -41,6 +42,7 @@ struct TestScenario {
     >,
     peers: Mock<zn::Request, zn::Response>,
     state: Mock<zs::Request, zs::Response>,
+    status: SyncStatus,
 }
 
 impl TestScenario {
@@ -51,7 +53,7 @@ impl TestScenario {
         let (tip, _) = MockChainTip::new();
         let (misbehavior, _) = mpsc::channel(1);
 
-        let (sync, _) = ChainSync::new(
+        let (sync, status) = ChainSync::new(
             &ZebradConfig::default(),
             Height(0),
             peers.clone(),
@@ -62,7 +64,12 @@ impl TestScenario {
             misbehavior,
         );
 
-        Self { sync, peers, state }
+        Self {
+            sync,
+            peers,
+            state,
+            status,
+        }
     }
 
     /// Supplies one response and answers state queries with per-hash observation counts.
@@ -231,4 +238,54 @@ async fn assert_downloaded_hashes(test: &mut TestScenario, hashes: impl IntoIter
         remaining_hashes.is_empty(),
         "missing downloads: {remaining_hashes:?}"
     );
+}
+
+/// All fanout replies contribute to both competing downloads and the sync-tip status.
+#[tokio::test]
+async fn obtain_tips_collects_competing_peers_before_updating_status() {
+    let _init_guard = zebra_test::init();
+    let mut test = TestScenario::new();
+    let first: Vec<Hash> = (1..=11).map(|index| Hash([index; 32])).collect();
+    let competing: Vec<Hash> = (12..=22).map(|index| Hash([index; 32])).collect();
+
+    let deferred = test
+        .obtain_tips_with_responses(vec![first.clone(), competing.clone()], |_, _| None)
+        .await
+        .expect("the syncer waits for both competing responses");
+    assert_eq!(
+        test.sync.prospective_tips,
+        HashSet::from([
+            CheckedTip {
+                tip: first[9],
+                expected_next: first[10],
+            },
+            CheckedTip {
+                tip: competing[9],
+                expected_next: competing[10],
+            },
+        ]),
+        "both competing tips remain eligible for extension",
+    );
+    assert!(
+        !test.status.is_close_to_tip(),
+        "22 unique hashes from both peers must keep the sync status away from the tip",
+    );
+    assert!(
+        deferred
+            .iter()
+            .all(|hash| first.contains(hash) || competing.contains(hash)),
+        "lookahead defers only hashes from these peers",
+    );
+    let admitted: Vec<_> = first
+        .iter()
+        .chain(&competing)
+        .copied()
+        .filter(|hash| !deferred.contains(hash))
+        .collect();
+    assert_eq!(
+        admitted.len() + deferred.len(),
+        first.len() + competing.len(),
+        "both peers' hashes remain scheduled or deferred",
+    );
+    assert_downloaded_hashes(&mut test, admitted).await;
 }
