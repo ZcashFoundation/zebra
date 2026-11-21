@@ -437,13 +437,15 @@ jobs:
           # restart policy did.
           #
           # Logs are JSON lines, which Cloud Logging stores as structured entries with their
-          # `severity`.
+          # `severity`. Without a TTY, standard output and standard error stay separate and
+          # each line reaches Cloud Logging unchanged.
           CONTAINER_IMAGE="${DEPLOY_IMAGE}" \
           CONTAINER_NAME=zebrad \
           CONTAINER_ENV="ZEBRA_TRACING__LOG_FORMAT=json,ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
           DISK_DEVICE_NAME="${DISK_NAME}" \
           MOUNT_PATHS=/home/zebra/.cache/zebra \
           RESTART_POLICY=always \
+          CONTAINER_TTY=false \
             "${CLOUD_INIT_GENERATOR}" > "${RUNNER_TEMP}/cloud-init.yaml"
 
           gcloud compute instance-templates create "${TEMPLATE_NAME}" \

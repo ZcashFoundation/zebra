@@ -51,7 +51,7 @@ The document reproduces these konlet behaviours, each of which a workflow step d
 | --- | --- | --- |
 | formats a blank data disk | a oneshot unit runs `blkid \|\| mkfs.ext4` | new disks; a disk that already has a filesystem is never reformatted |
 | `--container-restart-policy=never` keeps the exited container | `Restart=no`, and no `docker run --rm` | test steps that read the exited container's status and logs |
-| `--container-tty` | `docker run --tty` | the TTY merges zebrad's stderr into the stdout that log-parsing steps read |
+| `--container-tty` | `docker run --tty`, set by `CONTAINER_TTY`: on for test VMs, off for nodes | tests: the TTY merges zebrad's stderr into the stdout that log-parsing steps read; nodes: without it, each JSON log line reaches Cloud Logging unchanged |
 | container named `klt-<instance>` | a fixed `CONTAINER_NAME` | the step that finds the test container |
 | default restart policy `always` | `Restart=always` with `RestartSec=10` | nodes; systemd stops restarting a unit that starts more than 5 times in 10s, so a 100ms delay would let a crash loop end the node |
 
