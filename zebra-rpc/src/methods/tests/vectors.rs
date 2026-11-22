@@ -5198,6 +5198,53 @@ async fn getblocktemplate_fallback_rechecks_difficulty_after_build() {
     assert!(template.min_time > context.max_time);
 }
 
+/// A ready RPC task runs before a cached template is served when the tip read does not suspend.
+#[tokio::test(flavor = "current_thread")]
+async fn getblocktemplate_yields_before_serving_cached_template() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let read_state = tower::service_fn(move |request| {
+        assert!(matches!(request, ReadRequest::Tip));
+        std::future::ready(Ok::<_, BoxError>(ReadResponse::Tip(Some((height, hash)))))
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let rpc = template_regression_rpc(
+        network.clone(),
+        MockService::build().for_unit_tests(),
+        read_state,
+        tip,
+        sync,
+    );
+    rpc.gbt
+        .template_cache()
+        .unwrap()
+        .publish(template_extending(&network, height, hash));
+
+    let other_task_ran = Arc::new(AtomicBool::new(false));
+    tokio::spawn({
+        let other_task_ran = other_task_ran.clone();
+        async move { other_task_ran.store(true, Ordering::SeqCst) }
+    });
+    let template = rpc
+        .get_block_template(None)
+        .await
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(template.previous_block_hash, hash);
+    assert!(
+        other_task_ran.load(Ordering::SeqCst),
+        "a ready task must run between the tip read and the cached response"
+    );
+}
+
 /// CPU-bound construction must not execute on the single async runtime thread.
 #[tokio::test(flavor = "current_thread")]
 async fn getblocktemplate_fallback_builds_off_executor() {
@@ -6506,6 +6553,8 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
                 withdraw_on_read.store(true, Ordering::SeqCst);
                 let waiting = rpc.precomputed_template_for_state_tip(cache);
                 tokio::pin!(waiting);
+                // The first poll stops at the scheduling point after the tip read.
+                assert!(futures::poll!(&mut waiting).is_pending());
                 assert!(
                     futures::poll!(&mut waiting).is_pending(),
                     "a snapshot whose guard dropped must not admit cached work"
