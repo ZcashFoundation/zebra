@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Submitting a previously validated block proposal avoids repeating coinbase-position and transparent double-spend checks.
+time: 2026-11-22T21:30:30.371374104+01:00
