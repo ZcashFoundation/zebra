@@ -90,6 +90,7 @@ pub use disk_format::{
 pub(crate) use zebra_db::block::FINALIZED_TIP_READS;
 pub(crate) use zebra_db::history::{PruningWitness, MAX_PRUNING_BATCH_HEIGHTS};
 pub use zebra_db::ZebraDb;
+pub(crate) use zebra_db::PARALLEL_BLOCK_READ_THRESHOLD;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;

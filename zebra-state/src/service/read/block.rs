@@ -13,6 +13,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use rayon::prelude::*;
 
 use zebra_chain::{
     block::{self, Block, Height, SerializedBlock},
@@ -25,7 +26,7 @@ use zebra_chain::{
 use crate::{
     response::{AnyTx, MinedTx, OutputWithMetadata},
     service::{
-        finalized_state::ZebraDb,
+        finalized_state::{ZebraDb, PARALLEL_BLOCK_READ_THRESHOLD},
         non_finalized_state::{Chain, NonFinalizedState},
         read::tip,
     },
@@ -481,6 +482,41 @@ where
         Some(chain) if chain.as_ref().spent_utxos.contains_key(&outpoint) => None,
         chain => utxo(chain, db, outpoint),
     }
+}
+
+/// The maximum number of outpoints looked up by one batched read.
+const MAX_BATCHED_INPUTS: usize = 16_384;
+
+/// Prefetches outputs found by the ordinary `AwaitUtxos` lookup.
+///
+/// Outputs are returned even if spent on a non-finalized chain; contextual validation checks
+/// whether they can be spent by the block being verified. Excess outpoints use `AwaitUtxos`.
+pub fn any_chain_utxos(
+    non_finalized: &NonFinalizedState,
+    db: &ZebraDb,
+    outpoints: &[transparent::OutPoint],
+) -> Arc<HashMap<transparent::OutPoint, Utxo>> {
+    let read = |outpoint: &transparent::OutPoint| {
+        non_finalized
+            .any_utxo(outpoint)
+            .or_else(|| db.utxo(outpoint).map(|utxo| utxo.utxo))
+            .map(|utxo| (*outpoint, utxo))
+    };
+    // Cold database reads overlap without scheduling one state-service request per input.
+    let utxos = if outpoints.len() >= PARALLEL_BLOCK_READ_THRESHOLD {
+        outpoints
+            .par_iter()
+            .take(MAX_BATCHED_INPUTS)
+            .filter_map(read)
+            .collect()
+    } else {
+        outpoints
+            .iter()
+            .take(MAX_BATCHED_INPUTS)
+            .filter_map(read)
+            .collect()
+    };
+    Arc::new(utxos)
 }
 
 /// Returns an unspent output and metadata from one best-chain view.

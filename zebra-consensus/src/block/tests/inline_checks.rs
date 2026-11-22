@@ -81,6 +81,7 @@ fn mock_state() -> State {
             zs::Request::EarlyRelay { .. } => zs::Response::EarlyRelay(None),
             zs::Request::RejectBlock(_) => zs::Response::Rejected(false),
             zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
+            zs::Request::AnyChainUtxos { .. } => zs::Response::AnyChainUtxos(Default::default()),
             zs::Request::AwaitUtxos(outpoints) => zs::Response::Utxos(
                 outpoints
                     .into_iter()

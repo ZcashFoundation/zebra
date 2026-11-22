@@ -404,6 +404,9 @@ async fn early_relay_pre_nu5_keeps_ordinary_scoring() {
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
                 zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
                 zs::Request::RejectBlock(_) => zs::Response::Rejected(false),
+                zs::Request::AnyChainUtxos { .. } => {
+                    zs::Response::AnyChainUtxos(Default::default())
+                }
                 _ => panic!("pre-NU5 negotiated bodies use ordinary validation"),
             })
         });
@@ -573,6 +576,9 @@ async fn early_relay_missing_parent_uses_ordinary_verification() {
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
                 zs::Request::EarlyRelay { .. } => zs::Response::EarlyRelay(None),
                 zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
+                zs::Request::AnyChainUtxos { .. } => {
+                    zs::Response::AnyChainUtxos(Default::default())
+                }
                 zs::Request::CommitSemanticallyVerifiedBlock(block) => {
                     zs::Response::Committed(block.hash)
                 }

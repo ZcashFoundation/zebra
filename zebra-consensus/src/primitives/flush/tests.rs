@@ -165,6 +165,7 @@ async fn transparent_blocks_do_not_register_or_yield() {
                     transaction_hash: tx.hash(),
                     transaction: tx,
                     known_utxos: Arc::new(HashMap::new()),
+                    parent_utxos: Arc::new(HashMap::new()),
                     height: block.coinbase_height().unwrap(),
                     time: block.header.time,
                 })

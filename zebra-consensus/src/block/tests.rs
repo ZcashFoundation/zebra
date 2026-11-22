@@ -32,6 +32,7 @@ mod dispatch;
 mod early_relay;
 mod inline_checks;
 mod nu7;
+mod parent_utxos;
 mod request_lifetime;
 mod transparent_spends;
 
@@ -67,8 +68,13 @@ async fn block_dispatches_shielded_transactions_first() {
         ))
     });
     let state = tower::service_fn(|request| async move {
-        assert!(matches!(request, zs::Request::KnownBlock(_)));
-        Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+        match request {
+            zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
+            zs::Request::AnyChainUtxos { .. } => {
+                Ok(zs::Response::AnyChainUtxos(Arc::new(HashMap::new())))
+            }
+            _ => panic!("unexpected state request: {request:?}"),
+        }
     });
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -148,11 +154,13 @@ async fn proposal_error_waits_for_dispatched_transaction_siblings() {
         }
     });
     let state = tower::service_fn(|request| async move {
-        assert!(
-            matches!(request, zs::Request::KnownBlock(_)),
-            "failed semantic verification must not reach contextual proposal validation"
-        );
-        Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+        match request {
+            zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
+            zs::Request::AnyChainUtxos { .. } => {
+                Ok(zs::Response::AnyChainUtxos(Arc::new(HashMap::new())))
+            }
+            _ => panic!("failed semantic verification must not reach contextual state validation"),
+        }
     });
     let checking = SemanticBlockVerifier::new(&network, state, transactions)
         .oneshot(Request::CheckProposal(block));
@@ -2410,6 +2418,9 @@ async fn changed_proposals_require_transaction_verification() {
                     zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
                     zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
                     zs::Request::EarlyRelay { .. } => Ok(zs::Response::EarlyRelay(None)),
+                    zs::Request::AnyChainUtxos { .. } => {
+                        Ok(zs::Response::AnyChainUtxos(Arc::new(HashMap::new())))
+                    }
                     // The fee-free transaction mock leaves the historical coinbase overpaying.
                     zs::Request::RejectBlock(_) => Ok(zs::Response::Rejected(false)),
                     _ => panic!("a changed proposal must miss"),

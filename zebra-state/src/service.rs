@@ -2191,6 +2191,7 @@ impl Service<Request> for StateService {
             | Request::KnownTransaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
+            | Request::AnyChainUtxos { .. }
             | Request::Block(_)
             | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
@@ -2586,6 +2587,10 @@ impl Service<ReadRequest> for ReadStateService {
                 &state.db,
                 outpoint,
             ))),
+
+            ReadRequest::AnyChainUtxos { outpoints } => Ok(ReadResponse::AnyChainUtxos(
+                read::any_chain_utxos(&state.latest_non_finalized_state(), &state.db, &outpoints),
+            )),
 
             // Used by the StateService.
             ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(

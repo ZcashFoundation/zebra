@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: '`BlockRequest::parent_utxos` accepts prefetched transparent outputs from any chain, avoiding state lookups for those inputs during block transaction verification.'
+time: 2026-11-22T00:00:03.000000000+00:00

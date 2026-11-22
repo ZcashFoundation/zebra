@@ -1211,6 +1211,27 @@ where
                     .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
                     .collect::<HashMap<_, _>>(),
             );
+            // Read external outputs in one batch. Contextual validation still checks spends.
+            let external: Vec<_> = block
+                .transactions
+                .iter()
+                .flat_map(|tx| tx.spent_outpoints())
+                .filter(|outpoint| !known_utxos.contains_key(outpoint))
+                .collect();
+            let parent_utxos = if external.is_empty() {
+                Arc::new(HashMap::new())
+            } else {
+                match state_service
+                    .clone()
+                    .oneshot(zs::Request::AnyChainUtxos { outpoints: external })
+                    .await
+                {
+                    Ok(zs::Response::AnyChainUtxos(utxos)) => utxos,
+                    Ok(_) => unreachable!("AnyChainUtxos returns only batched UTXOs"),
+                    // This is an optional hint; the ordinary state lookup still checks every input.
+                    Err(_) => Arc::new(HashMap::new()),
+                }
+            };
             let mut batch_flush = None;
             // Move the verifier in: borrowing it across awaits would need `V: Sync`.
             let transaction_verifier = transaction_verifier;
@@ -1242,6 +1263,7 @@ where
                     transaction_hash,
                     transaction: transaction.clone(),
                     known_utxos: known_utxos.clone(),
+                    parent_utxos: parent_utxos.clone(),
                     height,
                     time: block.header.time,
                 };

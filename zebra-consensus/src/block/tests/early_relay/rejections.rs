@@ -267,6 +267,9 @@ async fn untyped_commit_errors_do_not_record_rejections() {
                 match request {
                     zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
                     zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
+                    zs::Request::AnyChainUtxos { .. } => {
+                        Ok(zs::Response::AnyChainUtxos(Default::default()))
+                    }
                     zs::Request::CommitContextuallyVerifiedBlock(_) if cached => {
                         Err("untyped state commit failure".into())
                     }
