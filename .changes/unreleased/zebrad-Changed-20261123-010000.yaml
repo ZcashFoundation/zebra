@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Updated `url` to 2.5.9, clearing RUSTSEC-2026-0592. Zebra isn''t affected: neither Zebra nor its dependencies call `Url::origin()` ([#12577](https://github.com/ZcashFoundation/zebra/pull/12577)).'
+time: 2026-11-23T01:00:00.000000000+01:00
