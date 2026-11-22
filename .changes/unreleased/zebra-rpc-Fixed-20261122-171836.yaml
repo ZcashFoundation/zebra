@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Fixed the read-state syncer started by `init_read_state_with_syncer` failing with "unexpected empty non-finalized state" when catching up with the primary finalized the block it was about to commit. The block is now skipped.
+time: 2026-11-22T17:18:36.140353+05:00

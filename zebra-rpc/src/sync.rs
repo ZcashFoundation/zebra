@@ -449,6 +449,16 @@ impl TrustedChainSync {
             self.fill_finalized_gap(block.height).await;
         }
 
+        // Catching up can finalize the block after `sync()` checked it. If committing it succeeded,
+        // pruning would then remove every non-finalized block and leave the state empty.
+        if self
+            .db
+            .finalized_tip_height()
+            .is_some_and(|tip| block.height <= tip)
+        {
+            return Ok(());
+        }
+
         self.commit(block)
     }
 
