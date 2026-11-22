@@ -30,6 +30,7 @@ use super::*;
 mod decoded_size;
 mod dispatch;
 mod early_relay;
+mod in_flight_proposal;
 mod inline_checks;
 mod nu7;
 mod request_lifetime;

@@ -13,7 +13,7 @@ use std::{
     io::{self, Write},
     num::NonZeroUsize,
     pin::Pin,
-    sync::{Arc, Weak},
+    sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -58,6 +58,8 @@ pub struct SemanticBlockVerifier<S, V> {
     transaction_verifier: V,
     /// Successful proposals, newest first; shared by all outstanding verification requests.
     proposals: Arc<watch::Sender<ProposalCache>>,
+    /// Bounded proposal checks whose verdict exact decoded bodies can join.
+    in_flight_proposals: Arc<InFlightProposals>,
     /// Admission remains owned by blocking checks even if their requesting future is cancelled.
     ///
     /// These checks used to run on the async worker threads, which default to one per core, so
@@ -71,6 +73,8 @@ pub struct SemanticBlockVerifier<S, V> {
     transaction_hash_computations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     cached_body_checks: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    in_flight_joins: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn run_blocking<T: Send + 'static>(
@@ -128,6 +132,93 @@ struct PreparedProposal {
     /// The proposal's wire bytes, so a submission is compared without serializing again.
     wire: Arc<[u8]>,
     retained_bytes: usize,
+}
+
+/// A newly started check loses to ordinary verification; after a head start, joining wins.
+///
+/// A rebuilt template solved immediately was slower when joined, while a 50 ms solve delay
+/// benefited. This threshold selects between the existing cold path and the shared verdict;
+/// it never delays a submission to wait for eligibility.
+const MIN_IN_FLIGHT_PROPOSAL_AGE: Duration = Duration::from_millis(40);
+
+/// Only the normalized header and exact-body hash are retained before validation, not an
+/// unchecked body or verdict. A dropped check closes its watch channel.
+#[derive(Debug)]
+struct InFlightProposal {
+    header: block::Header,
+    key: [u8; 32],
+    eligible_at: Instant,
+    done: Arc<watch::Sender<bool>>,
+}
+
+#[derive(Debug, Default)]
+struct InFlightProposals(Mutex<VecDeque<InFlightProposal>>);
+
+struct InFlightProposalGuard {
+    entries: Arc<InFlightProposals>,
+    done: Arc<watch::Sender<bool>>,
+}
+
+impl InFlightProposals {
+    fn has_header(&self, header: &block::Header) -> bool {
+        let header = normalized_proposal_header(header);
+        self.0
+            .lock()
+            .expect("proposal registry lock is not poisoned")
+            .iter()
+            .any(|entry| entry.header == header && Instant::now() >= entry.eligible_at)
+    }
+
+    fn register(
+        self: &Arc<Self>,
+        key: [u8; 32],
+        header: &block::Header,
+    ) -> Option<InFlightProposalGuard> {
+        let mut entries = self
+            .0
+            .lock()
+            .expect("proposal registry lock is not poisoned");
+        if entries.iter().any(|entry| entry.key == key) {
+            return None;
+        }
+        let done = Arc::new(watch::channel(false).0);
+        entries.push_front(InFlightProposal {
+            header: normalized_proposal_header(header),
+            key,
+            eligible_at: Instant::now() + MIN_IN_FLIGHT_PROPOSAL_AGE,
+            done: done.clone(),
+        });
+        entries.truncate(8);
+        Some(InFlightProposalGuard {
+            entries: self.clone(),
+            done,
+        })
+    }
+
+    fn lookup(&self, key: [u8; 32]) -> Option<watch::Receiver<bool>> {
+        self.0
+            .lock()
+            .expect("proposal registry lock is not poisoned")
+            .iter()
+            .find(|entry| entry.key == key && Instant::now() >= entry.eligible_at)
+            .map(|entry| entry.done.subscribe())
+    }
+}
+
+impl InFlightProposalGuard {
+    fn complete(&self) {
+        self.done.send_replace(true);
+    }
+}
+
+impl Drop for InFlightProposalGuard {
+    fn drop(&mut self) {
+        self.entries
+            .0
+            .lock()
+            .expect("proposal registry lock is not poisoned")
+            .retain(|entry| !Arc::ptr_eq(&entry.done, &self.done));
+    }
 }
 
 /// Bound retained proposal data, including unusually large spent-output scripts.
@@ -788,6 +879,7 @@ where
             state_service,
             transaction_verifier,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
+            in_flight_proposals: Arc::default(),
             blocking_checks: Arc::new(Semaphore::new(
                 std::thread::available_parallelism().map_or(1, NonZeroUsize::get),
             )),
@@ -799,6 +891,8 @@ where
             transaction_hash_computations: Default::default(),
             #[cfg(test)]
             cached_body_checks: Default::default(),
+            #[cfg(test)]
+            in_flight_joins: Default::default(),
         }
     }
 
@@ -839,6 +933,7 @@ where
         let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
         let proposals = self.proposals.clone();
+        let in_flight_proposals = self.in_flight_proposals.clone();
         let blocking_checks = self.blocking_checks.clone();
         #[cfg(test)]
         let proposal_key_computations = self.proposal_key_computations.clone();
@@ -848,6 +943,8 @@ where
         let transaction_hash_computations = self.transaction_hash_computations.clone();
         #[cfg(test)]
         let cached_body_checks = self.cached_body_checks.clone();
+        #[cfg(test)]
+        let in_flight_joins = self.in_flight_joins.clone();
 
         let block = request.block();
 
@@ -941,7 +1038,8 @@ where
                     let header = normalized_proposal_header(&block.header);
                     proposals.borrow().iter().any(|proposal| {
                         normalized_proposal_header(&proposal.block.header) == header
-                    })
+                    }) || (matches!(request, Request::CommitDecoded(_, _))
+                        && in_flight_proposals.has_header(&block.header))
                 })
             {
                 let block = block.clone();
@@ -978,6 +1076,14 @@ where
             }) {
                 return Err(VerifyBlockError::OversizedBlock);
             }
+            // A proposal can be awaiting transaction or state checks when the miner solves it.
+            // Register only its normalized exact-body hash; never publish an unchecked verdict.
+            let pending_guard = if request.is_proposal() {
+                let (key, _) = proposal_key.expect("proposals always have a cache key");
+                in_flight_proposals.register(key, &block.header)
+            } else {
+                None
+            };
             let cached = decoded_match.map(|(contextual, _)| contextual).or_else(|| {
                 let (key, _) = proposal_key.filter(|_| !request.is_proposal())?;
                 proposals
@@ -990,6 +1096,11 @@ where
                     })
                     .map(|proposal| proposal.contextual.clone())
             });
+            let pending_receiver = if cached.is_none() && matches!(request, Request::CommitDecoded(_, _)) {
+                proposal_key.and_then(|(key, _)| in_flight_proposals.lookup(key))
+            } else {
+                None
+            };
 
             let reconstructed_hashes = match &request {
                 Request::CommitDecoded(decoded, _) | Request::CommitEarlyRelay(decoded) => decoded
@@ -1155,6 +1266,29 @@ where
                     Some(announcement) => announcement.await.ok().and_then(Result::ok),
                     None => None,
                 }
+            };
+
+            // Join only exact decoded bodies. A failed, cancelled, or evicted proposal
+            // leaves no verdict; ordinary verification then checks the entire body.
+            let cached = if cached.is_none() {
+                if let Some(mut pending) = pending_receiver {
+                    #[cfg(test)]
+                    in_flight_joins.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if pending.wait_for(|ready| *ready).await.is_ok() {
+                        let (key, _) = proposal_key.expect("joined proposals have a cache key");
+                        proposals
+                            .borrow()
+                            .iter()
+                            .find(|proposal| proposal.key == key)
+                            .map(|proposal| proposal.contextual.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                cached
             };
 
             if let Some(cached) = cached {
@@ -1377,6 +1511,9 @@ where
                         let (key, size) = proposal_key.expect("proposals always have a cache key");
                         let transaction_bytes = size - block.header.zcash_serialized_size();
                         cache_proposal(&proposals, key, block, transaction_bytes, contextual).await;
+                        if let Some(guard) = &pending_guard {
+                            guard.complete();
+                        }
                         Ok(hash)
                     }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
