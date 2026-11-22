@@ -1509,6 +1509,13 @@ where
                 else {
                     return None;
                 };
+                // A non-finalized tip is answered in this poll, without a blocking thread. Let
+                // other ready RPC tasks run before cloning and serializing the cached template,
+                // as they did when the tip read waited for a blocking thread.
+                //
+                // The tip can change meanwhile; a moved cache makes the lookup below miss, and
+                // the wait at the end of the loop re-reads the tip.
+                tokio::task::yield_now().await;
 
                 if let Some(template) =
                     cache.template_for_tip(tip_hash, &self.network, self.template_clock_now())
