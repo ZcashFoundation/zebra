@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Submitting a previously validated block proposal avoids repeating coinbase-position and transparent double-spend checks ([#12581](https://github.com/ZcashFoundation/zebra/pull/12581)).
+time: 2026-11-22T21:30:30.371374104+01:00

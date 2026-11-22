@@ -1977,6 +1977,7 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>, peer: b
             }
             let identity_computations = verifier.proposal_key_computations.load(Ordering::SeqCst);
             let size_serializations = verifier.block_size_serializations.load(Ordering::SeqCst);
+            let cached_body_checks = verifier.cached_body_checks.load(Ordering::SeqCst);
             calls.store(if reuse { usize::MAX } else { 0 }, Ordering::SeqCst);
             let (committed, mut commits) = tokio::sync::mpsc::channel(1);
             let (validated, validation) = watch::channel(None);
@@ -2004,6 +2005,11 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>, peer: b
                 verifier.block_size_serializations.load(Ordering::SeqCst) - size_serializations,
                 usize::from((!cached && peer) || (cached && matches!(replacement, Some(0 | 1))),),
                 "peer misses and stale prepared handles still require size serialization",
+            );
+            assert_eq!(
+                verifier.cached_body_checks.load(Ordering::SeqCst) - cached_body_checks,
+                usize::from(!reuse),
+                "an exact proposal's coinbase and transparent spends need no second scan",
             );
             if !reuse {
                 assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
