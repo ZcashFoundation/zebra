@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added bounded batched transparent output reads from any chain through `Request::AnyChainUtxos` and `ReadRequest::AnyChainUtxos`, returning the matching `Response` or `ReadResponse` variant ([#12579](https://github.com/ZcashFoundation/zebra/pull/12579)).'
+time: 2026-11-22T00:00:00.000000000+00:00

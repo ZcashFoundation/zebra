@@ -29,9 +29,10 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_block, any_raw_transaction, any_transaction, any_utxo, block, block_and_size, block_header,
-    block_info, known_transaction, mined_transaction, raw_block, spent_outputs_for_block,
-    transaction_hashes_for_any_block, transaction_hashes_for_block, unspent_output, unspent_utxo,
+    any_block, any_chain_utxos, any_raw_transaction, any_transaction, any_utxo, block,
+    block_and_size, block_header, block_info, known_transaction, mined_transaction, raw_block,
+    spent_outputs_for_block, transaction_hashes_for_any_block, transaction_hashes_for_block,
+    unspent_output, unspent_utxo,
 };
 
 #[cfg(feature = "indexer")]

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'The `Request`, `ReadRequest`, `Response`, and `ReadResponse` enums have new `AnyChainUtxos` variants; exhaustive matches must handle them ([#12579](https://github.com/ZcashFoundation/zebra/pull/12579)).'
+time: 2026-11-22T00:00:01.000000000+00:00

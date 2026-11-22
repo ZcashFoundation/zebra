@@ -48,8 +48,15 @@ async fn block_transaction_dispatch_interleaves_verification() {
         }
     });
     let state = service_fn(|request| async move {
-        assert!(matches!(request, zebra_state::Request::KnownBlock(_)));
-        Ok::<_, BoxError>(zebra_state::Response::KnownBlock(None))
+        match request {
+            zebra_state::Request::KnownBlock(_) => {
+                Ok::<_, BoxError>(zebra_state::Response::KnownBlock(None))
+            }
+            zebra_state::Request::AnyChainUtxos { .. } => {
+                Ok(zebra_state::Response::AnyChainUtxos(Default::default()))
+            }
+            _ => panic!("unexpected state request: {request:?}"),
+        }
     });
 
     let result = tokio::time::timeout(

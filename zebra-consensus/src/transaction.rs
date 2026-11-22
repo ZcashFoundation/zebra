@@ -177,6 +177,9 @@ pub struct BlockRequest {
     /// Additional UTXOs which are known at the time of verification.
     /// The map and its outputs are shared with semantic and contextual block metadata.
     pub known_utxos: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
+    /// Outputs prefetched from any chain. Kept separate from the block's new outputs, which
+    /// are passed to contextual state validation; spends are checked there.
+    pub parent_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
     /// The height of the block containing this transaction.
     pub height: block::Height,
     /// The time that the block was mined.
@@ -299,6 +302,7 @@ where
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
+        let parent_utxos = req.parent_utxos.clone();
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
         let queueing = tx
@@ -329,8 +333,13 @@ where
 
             // Load spent UTXOs from the block context and state.
             // The UTXOs are required for almost all the async checks.
-            let (spent_utxos, spent_outputs) =
-                Self::block_spent_utxos(tx.clone(), known_utxos, state.clone()).await?;
+            let (spent_utxos, spent_outputs) = Self::block_spent_utxos(
+                tx.clone(),
+                known_utxos,
+                parent_utxos,
+                state.clone(),
+            )
+            .await?;
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
@@ -392,6 +401,7 @@ where
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
+        parent_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
         state: Timeout<ZS>,
     ) -> Result<
         (
@@ -411,6 +421,9 @@ where
                 if let Some(output) = known_utxos.get(outpoint) {
                     spent_outputs[input_idx] = Some(output.utxo.output.clone());
                     spent_utxos.insert(*outpoint, output.utxo.clone());
+                } else if let Some(utxo) = parent_utxos.get(outpoint) {
+                    spent_outputs[input_idx] = Some(utxo.output.clone());
+                    spent_utxos.insert(*outpoint, utxo.clone());
                 } else {
                     outpoints.push(*outpoint);
                 }

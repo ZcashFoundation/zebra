@@ -45,8 +45,8 @@ use super::disk_format::upgrade::{can_read_without_migration, restorable_db_vers
 // License, Version 2.0, at your option.
 // Adapted from zakura-core/zakura
 // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
-/// Minimum input or address count for parallel finalized-state lookups.
-const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
+/// Minimum input or address count for parallel finalized-state and batched UTXO lookups.
+pub(crate) const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
 
 pub mod block;
 pub mod chain;
