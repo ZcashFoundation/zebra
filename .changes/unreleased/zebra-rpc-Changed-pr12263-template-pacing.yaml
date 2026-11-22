@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: Template refreshes coalesce steady additions for 50 ms; bursts of at least 50 additions or lost notifications wait until arrivals pause for 50 ms, for at most one second. Slow builds extend the pause ([#12263](https://github.com/ZcashFoundation/zebra/pull/12263), [#12570](https://github.com/ZcashFoundation/zebra/pull/12570)).
+body: Template refreshes coalesce steady additions for 10 ms; bursts near 1,000 additions per second or lost notifications wait until arrivals pause for 10 ms, for at most one second. Slow builds extend the pause without raising the burst threshold above 50 additions ([#12263](https://github.com/ZcashFoundation/zebra/pull/12263), [#12570](https://github.com/ZcashFoundation/zebra/pull/12570)).
 time: 2026-11-05T23:33:31+01:00
