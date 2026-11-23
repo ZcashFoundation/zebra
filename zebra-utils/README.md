@@ -14,52 +14,36 @@ Binaries are easier to use if they are located in your system execution path.
 
 ## synthetic-snapshot
 
-Run an end-to-end snapshot bootstrap on a local synthetic Regtest chain:
+From the repository root:
 
 ```sh
-cargo build --locked -p zebrad --bin zebrad
-cargo build --locked -p zebra-utils --features synthetic-snapshot --bin synthetic-snapshot
+./zebra-utils/snapshot-benchmark
 ```
 
-Save a trial configuration as `trial.json`:
+The script builds the tools and runs one trial per side with the current
+`zebrad`. To compare two compatible builds with matching profiles and
+features, pass their executable paths (five trials per build):
+
+```sh
+./zebra-utils/snapshot-benchmark /path/to/baseline/zebrad /path/to/candidate/zebrad
+```
+
+The baseline serves both runs. The script prints median interval timings and
+deltas and leaves the JSON reports and logs in the printed workspace. Node
+intervals measure elapsed time between log markers, not individual operations:
+manifest verification to last piece verification includes header verification,
+successor handling, and SST backpressure; state rename to initialization includes
+cleanup. Runs are sequential, not controlled cold-cache measurements.
+
+To customize or reuse a fixture, run `prepare` and `benchmark` directly with
+`target/debug/synthetic-snapshot`. Both accept `--config trial.json`:
 
 ```json
-{
-  "state": "prepared-a",
-  "height": 120,
-  "tail": 2,
-  "trials": 2
-}
+{"state": "prepared-a", "height": 120, "tail": 2, "trials": 5}
 ```
 
-```sh
-target/debug/synthetic-snapshot prepare --config trial.json
-target/debug/synthetic-snapshot run --config trial.json \
-  --zebrad "$PWD/target/debug/zebrad" --output trial-run
-target/debug/synthetic-snapshot verify --config trial.json --state trial-run/trial-1/cache
-```
-
-`state` is relative to the config file; it and `--output` must name new
-directories. `prepare` writes the snapshot commitment and checkpoints back
-to the config after an export/import check. `tail` is the number of headers
-after the snapshot height, not a block-sync trial. `run` records timings,
-logical database and snapshot sizes, and per-trial results in
-`trial-run/report.json`. Standalone `verify` requires a stopped trial node and
-compares only snapshot-selected rows, not rebuilt indexes or later headers.
-
-To run the production-serving and cleanup regressions, build stock `zebrad`
-as above and use:
-
-```sh
-ZEBRAD_BIN="$PWD/target/debug/zebrad" cargo test --locked -p zebra-utils \
-  --features synthetic-snapshot --bin synthetic-snapshot serving_tests:: -- --ignored
-ZEBRAD_BIN="$PWD/target/debug/zebrad" SYNTHETIC_SNAPSHOT_TEST_HOOK=1 \
-  cargo test --locked -p zebra-utils --features synthetic-snapshot \
-  --test synthetic_snapshot_failures -- --ignored
-```
-
-The cleanup regression runs on Linux. Its compile-time hook is used only to
-inject a mismatch after shutdown; ordinary builds don't include it.
+`state` is a new directory relative to the config; `tail` is the number of
+headers to serve after the snapshot height.
 
 ## zebra-checkpoints
 

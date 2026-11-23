@@ -19,6 +19,7 @@ use super::{
     config::Prepared,
     node::SnapshotNode,
     report::{self, Failure, RunReport, RunTimings, TrialReport, TrialTimings},
+    stages::StageTimings,
     verify::compare_installed,
 };
 
@@ -37,10 +38,11 @@ const AFTER_STOP_HOOK_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) fn command(
     config: &Path,
+    source_zebrad: &Path,
     zebrad: &Path,
     output: &Path,
     emit_json: bool,
-) -> Result<(), BoxError> {
+) -> Result<Vec<TrialReport>, BoxError> {
     let total = Instant::now();
     let admission = Instant::now();
     // Admission precedes workspace creation and every child launch.
@@ -53,6 +55,7 @@ pub(crate) fn command(
         configuration: prepared.as_ref().ok().map(|p| &p.config),
         prepared_state: prepared.as_ref().ok().map(|p| p.source.cache_dir.as_path()),
         zebrad,
+        source_zebrad,
         output,
         passed: false,
         failures: Vec::new(),
@@ -116,7 +119,7 @@ pub(crate) fn command(
         }
     }
     if report.passed {
-        Ok(())
+        Ok(report.trials)
     } else {
         Err("snapshot trial run failed; see JSON report and node logs".into())
     }
@@ -216,7 +219,7 @@ fn execute(
         let height = height.map_err(|error| Failure::new("source_fixture", error))?;
         let started = Instant::now();
         let source = runtime.block_on(interruption.until(SnapshotNode::start(
-            zebrad,
+            report.source_zebrad,
             &prepared.network,
             &serving,
             &output.join("source"),
@@ -244,6 +247,7 @@ fn execute(
                 passed: false,
                 failures: Vec::new(),
                 timings_seconds: TrialTimings::default(),
+                bootstrap_stages_seconds: StageTimings::default(),
                 state_bytes: None,
                 comparison: None,
             };
@@ -269,6 +273,14 @@ fn execute(
             }
             trial.timings_seconds.state_size = Some(started.elapsed().as_secs_f64());
             trial.timings_seconds.total = total.elapsed().as_secs_f64();
+            let log = trial_workspace.join("bootstrap.stdout.log");
+            match StageTimings::read(&log) {
+                Ok(timings) => trial.bootstrap_stages_seconds = timings,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    eprintln!("cannot read stage timings from {}: {error}", log.display())
+                }
+            }
             trial.passed = trial.failures.is_empty() && trial.comparison.is_some();
             let passed = trial.passed;
             eprintln!(

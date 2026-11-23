@@ -3,6 +3,7 @@
 // This binary prints reports and progress directly to its callers.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod benchmark;
 mod config;
 mod interrupt;
 mod node;
@@ -11,6 +12,7 @@ mod report;
 mod run;
 #[cfg(test)]
 mod serving_tests;
+mod stages;
 mod verify;
 
 use std::{path::PathBuf, process::ExitCode};
@@ -18,8 +20,10 @@ use std::{path::PathBuf, process::ExitCode};
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(about = "Prepare synthetic snapshots and independently verify installed Zebra state")]
+#[command(about = "Benchmark Zebra snapshot bootstrap on synthetic Regtest state")]
 enum Command {
+    /// Benchmark two zebrad builds on the same prepared snapshot.
+    Benchmark(benchmark::Args),
     /// Build A, export, import into temporary state, and compare selected rows.
     Prepare {
         /// One JSON config; successful preparation updates its resolved section atomically.
@@ -53,12 +57,13 @@ fn main() -> ExitCode {
     let command = Command::parse();
     let canonical = |config: PathBuf| config.canonicalize().map_err(zebra_state::BoxError::from);
     let result = match command {
+        Command::Benchmark(args) => benchmark::run(args),
         Command::Prepare { config } => canonical(config).and_then(|c| prepare::prepare(&c)),
         Command::Run {
             config,
             zebrad,
             output,
-        } => run::command(&config, &zebrad, &output, true),
+        } => run::command(&config, &zebrad, &zebrad, &output, true).map(|_| ()),
         Command::Verify { config, state } => {
             canonical(config).and_then(|c| verify::command(&c, &state))
         }

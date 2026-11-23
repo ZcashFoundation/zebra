@@ -1,4 +1,4 @@
-//! Direct run output. Durations are monotonic seconds; sizes are logical file bytes.
+//! Direct run output. Harness durations are monotonic; node intervals use log timestamps.
 
 use std::{
     fmt::Display,
@@ -13,7 +13,7 @@ use zebra_state::{
     state_snapshot::compare::ComparisonSummary, BoxError, Config,
 };
 
-use super::config::TrialConfig;
+use super::{config::TrialConfig, stages::StageTimings};
 
 #[derive(Serialize)]
 pub(crate) struct Failure {
@@ -61,6 +61,7 @@ pub(crate) struct TrialReport {
     pub passed: bool,
     pub failures: Vec<Failure>,
     pub timings_seconds: TrialTimings,
+    pub bootstrap_stages_seconds: StageTimings,
     pub state_bytes: Option<u64>,
     pub comparison: Option<ComparisonSummary>,
 }
@@ -71,6 +72,7 @@ pub(crate) struct RunReport<'a> {
     pub configuration: Option<&'a TrialConfig>,
     pub prepared_state: Option<&'a Path>,
     pub zebrad: &'a Path,
+    pub source_zebrad: &'a Path,
     pub output: &'a Path,
     pub passed: bool,
     pub failures: Vec<Failure>,
