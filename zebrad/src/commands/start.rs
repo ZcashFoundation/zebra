@@ -173,6 +173,14 @@ fn check_tcp_slow_start_after_idle() {
 #[cfg(not(target_os = "linux"))]
 fn check_tcp_slow_start_after_idle() {}
 
+/// Report credential configuration errors while preserving panic diagnostics for other RPC failures.
+fn rpc_startup_error(error: tower::BoxError) -> Report {
+    match error.downcast::<StaticCredentialsError>() {
+        Ok(credentials_error) => Report::new(*credentials_error),
+        Err(error) => panic!("server should start: {error:?}"),
+    }
+}
+
 impl StartCmd {
     /// Extra time Zebra waits for the zcashd-compat supervisor task beyond the
     /// child's `shutdown_grace_period`. The supervisor's `terminate_child` waits
@@ -516,14 +524,9 @@ impl StartCmd {
             .unwrap_or_else(|| tokio::spawn(std::future::pending().in_current_span()));
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
-            match RpcServer::start(rpc_impl.clone(), config.rpc.clone()).await {
-                Ok(rpc_task_handle) => rpc_task_handle,
-                // Incomplete or unreadable credentials are an operator mistake, not a bug.
-                Err(error) => match error.downcast::<StaticCredentialsError>() {
-                    Ok(credentials_error) => return Err(Report::new(*credentials_error)),
-                    Err(error) => panic!("server should start: {error:?}"),
-                },
-            }
+            RpcServer::start(rpc_impl.clone(), config.rpc.clone())
+                .await
+                .map_err(rpc_startup_error)?
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };
