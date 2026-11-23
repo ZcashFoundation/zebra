@@ -77,9 +77,9 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_protocol::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_address::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_protocol::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+                zcash_address::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
             }
         }
     }
@@ -88,9 +88,9 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_protocol::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_address::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_protocol::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+                zcash_address::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
             }
         }
     }
@@ -282,6 +282,22 @@ impl Network {
     /// Return the lowercase network name.
     pub fn lowercase_name(&self) -> String {
         self.to_string().to_ascii_lowercase()
+    }
+
+    /// Returns the network's persistent storage namespace.
+    ///
+    /// Mainnet, public Testnet, and Regtest retain their existing directory names.
+    /// Configured Testnets include their wire magic: distinct networks must use distinct magic,
+    /// even when they share a human-readable name.
+    pub fn directory_name(&self) -> String {
+        let mut name = self.lowercase_name();
+        if matches!(self, Self::Testnet(params) if !params.is_regtest() && !params.is_default_testnet())
+        {
+            use fmt::Write;
+            write!(name, "-{:08x}", u32::from_be_bytes(self.magic().0))
+                .expect("writing to a String cannot fail");
+        }
+        name
     }
 
     /// Returns `true` if this network is a testing network.

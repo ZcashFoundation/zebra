@@ -17,7 +17,7 @@ use tokio::{
 };
 use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use crate::RequestWeight;
 

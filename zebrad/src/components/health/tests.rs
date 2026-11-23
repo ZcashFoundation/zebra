@@ -12,9 +12,8 @@ use tokio::{
 use zebra_chain::{chain_sync_status::mock::MockSyncStatus, parameters::Network};
 use zebra_network::{address_book_peers::MockAddressBookPeers, PeerSocketAddr};
 
-// Build a config tailored for tests: enable the listener and disable the
-// built-in rate limiter so assertions don't race the cooldown unless a test
-// overrides it.
+// Build a config tailored for tests: enable the listener and enforce readiness
+// checks on all networks.
 fn config_for(addr: SocketAddr) -> Config {
     Config {
         listen_addr: Some(addr),
@@ -46,10 +45,11 @@ async fn http_get(addr: SocketAddr, path: &str) -> Option<(u16, String)> {
         "GET {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         path
     );
+    // A dropped connection can fail the write.
     timeout(Duration::from_secs(2), stream.write_all(request.as_bytes()))
         .await
         .expect("write timeout")
-        .expect("write ok");
+        .ok()?;
 
     let mut buf = Vec::new();
     timeout(Duration::from_secs(2), stream.read_to_end(&mut buf))
@@ -66,6 +66,27 @@ async fn http_get(addr: SocketAddr, path: &str) -> Option<(u16, String)> {
         .unwrap_or(0);
 
     Some((status, text))
+}
+
+// Start a server whose endpoints both return 200, for tests of connection handling.
+async fn start_server() -> (JoinHandle<()>, SocketAddr) {
+    let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+
+    let (chain_tip_metrics_sender, chain_tip_metrics_receiver) = ChainTipMetrics::channel();
+    let _ = chain_tip_metrics_sender.send(ChainTipMetrics::new(Instant::now(), Some(0)));
+
+    let (task, addr) = init(
+        cfg,
+        Network::Mainnet,
+        chain_tip_metrics_receiver,
+        sync_status,
+        peers_with_count(1),
+    )
+    .await;
+
+    (task, addr.expect("server bound addr"))
 }
 
 #[tokio::test]
@@ -174,49 +195,132 @@ async fn not_ready_when_tip_is_too_old() {
     task.abort();
 }
 
-#[tokio::test]
-async fn rate_limiting_drops_bursts() {
-    // With a sleep shorter than the configured interval we should only be able
-    // to observe one successful request before the limiter responds with 429.
-    let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+#[test]
+fn rate_limiting_drops_bursts() {
+    let start = Instant::now();
+    let mut num_recent_requests = 0;
+    let mut last_request_count_reset_time = start;
+    let mut allow_at = |now| {
+        allow_request(
+            &mut num_recent_requests,
+            &mut last_request_count_reset_time,
+            || now,
+        )
+    };
 
-    let mut sync_status = MockSyncStatus::default();
-    sync_status.set_is_close_to_tip(true);
-
-    let (chain_tip_metrics_sender, chain_tip_metrics_receiver) = ChainTipMetrics::channel();
-    let _ = chain_tip_metrics_sender.send(ChainTipMetrics::new(Instant::now(), Some(0)));
-
-    let (task, addr_opt) = init(
-        cfg,
-        Network::Mainnet,
-        chain_tip_metrics_receiver,
-        sync_status,
-        peers_with_count(1),
-    )
-    .await;
-    let addr = addr_opt.expect("addr");
-
-    let (first_status, first_body) = http_get(addr, "/healthy").await.unwrap();
-    assert_eq!(first_status, 200, "first response: {}", first_body);
-
-    let mut was_request_dropped = false;
-    for i in 0..(MAX_RECENT_REQUESTS + 10) {
-        if http_get(addr, "/healthy").await.is_none() {
-            was_request_dropped = true;
-            tracing::info!("got expected status after some reqs: {i}");
-            break;
+    for window_start in [
+        start,
+        start + RECENT_REQUEST_INTERVAL + Duration::from_nanos(1),
+    ] {
+        for _ in 0..MAX_RECENT_REQUESTS {
+            assert!(allow_at(window_start));
         }
-    }
 
-    assert!(
-        was_request_dropped,
-        "requests should be dropped past threshold"
+        assert!(!allow_at(window_start));
+        assert!(!allow_at(
+            window_start + RECENT_REQUEST_INTERVAL - Duration::from_nanos(1)
+        ));
+        assert!(!allow_at(window_start + RECENT_REQUEST_INTERVAL));
+
+        // The reset-triggering request is allowed without incrementing the new window's counter.
+        assert!(allow_at(
+            window_start + RECENT_REQUEST_INTERVAL + Duration::from_nanos(1)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn connection_serves_one_request() {
+    // Two pipelined requests on a kept-alive connection get one response, so a client can't send
+    // requests that the request limit doesn't count.
+    let (task, addr) = start_server().await;
+
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("connect ok");
+    stream
+        .write_all(
+            "GET /healthy HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                .repeat(2)
+                .as_bytes(),
+        )
+        .await
+        .expect("write ok");
+
+    let mut buf = Vec::new();
+    timeout(Duration::from_secs(2), stream.read_to_end(&mut buf))
+        .await
+        .expect("the server closes the connection after one response")
+        .expect("read ok");
+
+    let text = String::from_utf8_lossy(&buf);
+    assert_eq!(
+        text.matches("HTTP/1.1 200 OK").count(),
+        1,
+        "responses: {text}"
     );
 
-    tokio::time::sleep(RECENT_REQUEST_INTERVAL + Duration::from_millis(100)).await;
+    task.abort();
+}
 
-    let (third_status, third_body) = http_get(addr, "/healthy").await.unwrap();
-    assert_eq!(third_status, 200, "last response: {}", third_body);
+#[tokio::test]
+async fn idle_connection_is_closed() {
+    // A client that never sends a request can't hold a connection open.
+    let (task, addr) = start_server().await;
+
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("connect ok");
+
+    let mut buf = [0; 1];
+    let read = timeout(HEADER_READ_TIMEOUT * 2, stream.read(&mut buf))
+        .await
+        .expect("the server closes idle connections");
+    assert!(matches!(read, Ok(0) | Err(_)), "unexpected read: {read:?}");
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn connections_past_the_limit_are_dropped() {
+    let (task, addr) = start_server().await;
+
+    // Idle connections hold every slot until they close or time out.
+    let mut idle = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        idle.push(
+            tokio::net::TcpStream::connect(addr)
+                .await
+                .expect("connect ok"),
+        );
+    }
+
+    // The server accepts connections in order, so it drops this one without serving it. Writing
+    // and reading can fail once it does.
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("connect ok");
+    let _ = stream
+        .write_all(b"GET /healthy HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await;
+    let mut buf = Vec::new();
+    let _ = timeout(Duration::from_secs(2), stream.read_to_end(&mut buf))
+        .await
+        .expect("the server closes connections past the limit");
+    assert!(
+        !String::from_utf8_lossy(&buf).contains("HTTP/1.1"),
+        "a connection past the limit was served"
+    );
+
+    // Closing the idle connections frees their slots.
+    drop(idle);
+    timeout(Duration::from_secs(2), async {
+        while !matches!(http_get(addr, "/healthy").await, Some((200, _))) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("closed connections free their slots");
 
     task.abort();
 }

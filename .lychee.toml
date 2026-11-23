@@ -41,8 +41,9 @@ exclude_path = [
     "book/mermaid.min.js",
     "zebra-rpc/qa/rpc-tests",
     "supply-chain",
-    # CHANGELOG contains historical references to deprecated URLs
+    # Changelogs and their changie sources contain historical references to deprecated URLs
     "CHANGELOG.md",
+    ".changes",
 ]
 
 # Accept these HTTP status codes as valid

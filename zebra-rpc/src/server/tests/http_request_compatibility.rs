@@ -14,7 +14,7 @@ use jsonrpsee::{
 };
 use tower::Service;
 
-use crate::server::http_request_compatibility::HttpRequestMiddleware;
+use crate::server::http_request_compatibility::{HttpRequestMiddleware, JsonRpcRequest};
 
 /// A body that always returns an error, simulating a TCP RST during body collection.
 struct ErrorBody;
@@ -89,4 +89,19 @@ async fn oversized_request_body_is_rejected() {
     let result = middleware.call(request).await;
 
     assert!(result.is_err(), "oversized request body should be rejected");
+}
+
+/// The rewrite keeps an explicit `"id": null`, and still omits a missing `id` (a notification).
+#[test]
+fn rewrite_keeps_null_request_id() {
+    let rewrite = |request: &str| {
+        let request: JsonRpcRequest = serde_json::from_str(request).expect("valid request");
+        serde_json::to_value(request.into_2()).expect("serializable")
+    };
+
+    let rewritten = rewrite(r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":null}"#);
+    assert_eq!(rewritten.get("id"), Some(&serde_json::Value::Null));
+
+    let rewritten = rewrite(r#"{"jsonrpc":"2.0","method":"getinfo","params":[]}"#);
+    assert_eq!(rewritten.get("id"), None);
 }

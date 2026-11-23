@@ -48,6 +48,29 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 }
 
 proptest! {
+    /// Borrowed plain and ordered lookups preserve the old output-map accounting and errors.
+    #[test]
+    fn borrowed_value_balances_match_owned_outputs(
+        tx in any::<Transaction>(),
+        value in any::<Amount<NonNegative>>(),
+    ) {
+        let output = transparent::Output::new(value, transparent::Script::new(&[0; 1024]));
+        let outputs: std::collections::HashMap<_, _> =
+            tx.spent_outpoints().map(|outpoint| (outpoint, output.clone())).collect();
+        let plain: std::collections::HashMap<_, _> = outputs.iter().map(|(outpoint, output)| {
+            (*outpoint, transparent::Utxo::new(output.clone(), block::Height(1), false))
+        }).collect();
+        let ordered: std::collections::HashMap<_, _> = plain.iter().map(|(outpoint, utxo)| {
+            (*outpoint, transparent::OrderedUtxo::from_utxo(utxo.clone(), 0))
+        }).collect();
+        let expected = tx.transparent_value_balance_from_outputs(&outputs).and_then(|transparent| {
+            transparent + tx.sprout_value_balance()? + tx.sapling_value_balance()
+                + tx.orchard_value_balance() + tx.ironwood_value_balance()
+        });
+        prop_assert_eq!(tx.value_balance(&plain), expected.clone());
+        prop_assert_eq!(tx.value_balance(&ordered), expected);
+    }
+
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
         let _init_guard = zebra_test::init();
@@ -67,6 +90,17 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         assert_transaction_roundtrip(tx)?;
+    }
+
+    /// `has_transparent_inputs()` and `has_transparent_outputs()` read the bundle lengths
+    /// directly instead of rebuilding the input and output vectors; they must agree with the
+    /// allocating accessors.
+    #[test]
+    fn transparent_presence_matches_accessors(tx in any::<Transaction>()) {
+        let _init_guard = zebra_test::init();
+
+        prop_assert_eq!(tx.has_transparent_inputs(), !tx.inputs().is_empty());
+        prop_assert_eq!(tx.has_transparent_outputs(), !tx.outputs().is_empty());
     }
 
     #[test]
@@ -203,7 +237,7 @@ fn arbitrary_transaction_versions_cover_each_era() -> Result<()> {
         (NetworkUpgrade::Nu6_1, &[4, 5]),
         (NetworkUpgrade::Nu6_2, &[4, 5]),
         (NetworkUpgrade::Nu6_3, &[4, 5, 6]),
-        (NetworkUpgrade::Nu7, &[4, 5, 6]),
+        (NetworkUpgrade::Nu7, &[5, 6]),
     ];
 
     // A deterministic RNG makes the "every version appears" assertions reliable: with 64

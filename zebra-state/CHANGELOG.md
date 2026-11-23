@@ -5,6 +5,91 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.0.0] - 2026-11-16
+
+### Breaking Changes
+
+- Contextually verified blocks share their `new_outputs` and `spent_outputs` maps through `Arc`, and value balances use the `zebra-chain` API that accepts `HashMap<OutPoint, U: AsRef<Utxo>>`; `zebra-chain` types appear in the public API, so upgrade both together. `ContextuallyVerifiedBlock::with_block_and_spent_utxos` now requires its spent-output map to include every transparent input's UTXO, including outputs created by earlier transactions in the same block; it no longer fills these entries from the block's new outputs.
+- Finalized block, block-and-size, and tip-block reads now return `Result<Option<_>, BlockReadError>`: handle incomplete primary data separately from unknown blocks. State service body requests propagate the same typed errors. Secondary readers return `None` until all required data is visible.
+- Remove the `elasticsearch` feature, the `Config::elasticsearch_url`, `elasticsearch_username` and `elasticsearch_password` fields, the `FinalizedState::elastic_db` and `elastic_blocks` fields, the `FinalizedState::elasticsearch` method, the `enable_elastic_db` argument of `FinalizedState::new`, and `RedactedString`.
+- Return `ChainTipBlock` instead of `CheckpointVerifiedBlock` from `FinalizedState::commit_finalized`, moving created outputs into the database commit instead of copying them. Callers should use the returned chain-tip summary rather than the consumed checkpoint block.
+- Added `CommitBlockError::OrphanQueueFull`, which exhaustive matches on `CommitBlockError` must handle.
+- The non-finalized `Chain::tx_loc_by_hash` field is no longer public. Its transaction, spend, and nullifier indexes are persistent maps, so committing a block or forking a chain no longer copies them.
+- Removed `Chain::partial_transparent_indexes` and the `TransparentTransfers` type with its `is_empty`, `balance`, `received`, `tx_ids`, `created_utxos`, and `spent_utxos` methods. Non-finalized address changes are now stored per block; use `Chain::partial_transparent_balance_change`, `partial_transparent_utxo_changes`, `partial_transparent_spent_utxo_count`, or `partial_transparent_tx_ids` instead.
+
+### Added
+
+- Added `BlockReadError` to distinguish incomplete stored block bodies from unknown blocks.
+- Added `SemanticallyVerifiedBlock::retained_bytes()`, which estimates the memory a block keeps alive, and `CommitBlockError::OrphanQueueFull` with its `new_orphan_queue_full()` constructor, which the state returns for blocks it drops from a full queue.
+- Added the `ValidateContextError::NonSequentialFinalizedChild` variant.
+- Added `MAX_NON_FINALIZED_INDEX_ENTRIES` and `MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`, which limit the combined size of the non-finalized chain indexes on Mainnet and on test networks.
+- Added the `state.memory.index.entries`, `state.memory.best.chain.index.entries`, `state.memory.fork.evicted.count`, `state.memory.backup.restored.block.count`, and `state.memory.backup.restore.duration_seconds` metrics.
+
+### Changed
+
+- Avoid formatting whole verified blocks into commit spans; retain compact height and hash context.
+- Move per-input, per-transaction, and tip getter spans to TRACE and state request spans to DEBUG; reuse known block hashes in commit spans. Log events are unchanged.
+- Reduce allocations and script copies when indexing transparent transactions in non-finalized blocks.
+- An ephemeral database keeps its format version file in its own temporary directory and creates no other temporary directories. `database_format_version_on_disk` returns `Ok(None)` for an ephemeral config, since its database is only created when opened.
+- Changed `constants::LOCK_FILE_ERROR` to match only the panic raised when another process holds the state database lock, instead of RocksDB lock error text.
+- Reduce build dependencies while retaining UTC timestamp support.
+- The state service stops holding a copy of a sent block's transparent outputs once the block is committed, and doesn't copy the outputs of blocks restored from the non-finalized backup.
+
+### Fixed
+
+- Fixed the database open panic reporting every I/O error as a lock conflict: it now includes the RocksDB error, and only suggests checking for another zebrad process when the database lock is actually held.
+- Fixed read-only state databases leaving their secondary RocksDB directory in the system temporary directory: it is now removed when the database is dropped.
+
+### Security
+
+- `ReadRequest::AddressBalance` no longer copies the whole non-finalized chain to skip the blocks that are also in the finalized state. It now reads the balance changes of the requested addresses above the finalized tip from the shared chain, so concurrent requests can no longer run the node out of memory when a recent block has many transparent outputs ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
+- `ReadRequest::UtxosByAddresses` and `ReadRequest::TransactionIdsByAddresses` now collect at most `max_entries` non-finalized UTXOs and transaction IDs, instead of copying all the recent UTXOs and transactions of the requested addresses on every request ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
+- When the state receives a block it already queued under the same hash, it keeps each block body with the request that sent it, so each caller gets the result of its own body ([GHSA-7jvw-68q7-xfh4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-7jvw-68q7-xfh4)).
+- Limit the queue of blocks waiting for their parent blocks to 1,000 blocks and 320 MiB of estimated memory, failing childless blocks whose callers stopped waiting first, then the highest queued blocks, with `CommitBlockError::OrphanQueueFull` when it is full ([GHSA-8qxv-5f2c-452c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8qxv-5f2c-452c)).
+- Reject queued non-finalized blocks that aren't at the next height after their finalized parent, with `ValidateContextError::NonSequentialFinalizedChild`, and switch from checkpoint commits to full validation only once the final checkpoint is written ([GHSA-m44m-9r8r-r64j](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m44m-9r8r-r64j)).
+
+## [16.0.0] - 2026-10-22
+
+### Breaking Changes
+
+- `ReadRequest::TransactionIdsByAddresses` takes an optional `max_entries`, which bounds the address index scan and returns the first transaction IDs in chain order. `ZebraDb::{address_transaction_locations, address_tx_ids, partial_finalized_transparent_tx_ids}` take the same optional limit ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+
+### Added
+
+- `MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS`, the fork limit on test networks, also available from `constants` ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+
+### Changed
+
+- Raised the MSRV to 1.89.
+
+### Fixed
+
+- The fork limit no longer evicts the chain just committed or the best chain, and equal-work ties evict the earliest-received chain. Test networks keep up to 100 forks instead of 10 ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+- Removing one of two queued or sent blocks with the same transaction no longer drops their shared outputs from the UTXO caches. Thanks to @ouicate for the report ([#11619](https://github.com/ZcashFoundation/zebra/issues/11619)).
+- `check::utxo::transparent_spend()` computes each transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost at block commit.
+- Reject invalidating the root of the only non-finalized chain without changing state, and handle empty non-finalized state when updating chain-tip notifications ([#11536](https://github.com/ZcashFoundation/zebra/issues/11536)).
+
+### Security
+
+- After a checkpoint block fails to commit, the state no longer reports the blocks above the finalized tip as known, so they can be downloaded again ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h)).
+
+## [15.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- The state uses database format v29.0.0. Its registered upgrade automatically moves compatible v28 state into `state/v29` when no v29 database exists, without a resync or record migration. Legacy 48-byte value-pool and 52-byte block-info records remain readable with a zero NSM balance; new writes use 56 and 60 bytes. New block-info records append NSM after the existing pool-and-size prefix. Direct database readers must use a v29-compatible `zebra-state` dependency and be upgraded with the writer; v28 readers cannot read the wider records. Retain a v28 backup before upgrading for rollback: disabling `state.delete_old_database` does not preserve the directory that the upgrade moves. Manual directory renames are not a substitute for the supported upgrade. The public `zebra_state::IntoDisk::Bytes` associated type changes from `Vec<u8>` to `[u8; 60]` for `zebra_chain::block_info::BlockInfo`, and from `[u8; 48]` to `[u8; 56]` for `zebra_chain::value_balance::ValueBalance<NonNegative>`. The NSM reserve is seeded once at NU7 activation, persisted with each block, and excluded from issued supply. `GetBlockTemplateChainInfo::chain_value_pools` is now unconditional; update struct literals. Contextual invalid-subsidy errors score the sending peer 100 ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ContextuallyVerifiedBlock::with_block_and_spent_utxos` now also requires the network and parent chain value pools. It performs accounting, not coinbase payout validation; callers must separately apply the contextual subsidy checks. Deferred-pool calculation propagates subsidy errors through `ValidateContextError::InvalidSubsidy` rather than substituting zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ReadRequest::SolutionRate::num_blocks` is now `Option<usize>`: use `Some` for an explicit window or `None` to select the consensus averaging window after the requested height is clamped to the snapshotted tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `Config::{db_path, non_finalized_state_backup_dir}` include configured Testnet wire magic in storage namespaces. Resynchronize existing custom Testnets; Mainnet, public Testnet, and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain `SpentOutputs` variants that return the transparent outputs spent by a block's non-coinbase inputs. Consumers that match on them exhaustively must handle the new variants. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))
+- Updated `sapling-crypto` to 0.9, whose `Node` appears in `ReadResponse::SaplingSubtrees` ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Changed
+
+- From NU7 activation, the state credits the NSM with 60% of aggregate transaction fees, rounded down. From the configured NSM reissuance height, contextual payout validation uses the exact parent reserve and rejects coinbases that claim the withheld fees ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- [ZIP 218](https://zips.z.cash/zip-0218) widens the difficulty averaging window from 17 to 102 blocks at NU7 ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `ReadRequest::ChainInfo` bounds timestamps by network-specific median-time rules and the local two-hour future limit, rejecting empty ranges. Testnet minimum-difficulty timestamps follow the candidate upgrade: six target spacings before NU7 and eighteen from NU7, requiring a gap strictly greater than 450 seconds under the approved amendment in [zips#1382](https://github.com/zcash/zips/pull/1382). Templates retain standard difficulty when the threshold exceeds the timestamp representation ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+
 ## [14.0.0] - 2026-09-23
 
 ### Breaking Changes

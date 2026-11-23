@@ -31,9 +31,7 @@ expression: block_template
   "target": "0555540000000000000000000000000000000000000000000000000000000000",
   "mintime": 1654008606,
   "mutable": [
-    "time",
-    "transactions",
-    "prevblock"
+    "time"
   ],
   "noncerange": "00000000ffffffff",
   "sigoplimit": 20000,

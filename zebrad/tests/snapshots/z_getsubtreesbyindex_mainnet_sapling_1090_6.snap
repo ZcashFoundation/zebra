@@ -4,7 +4,7 @@ expression: parsed
 ---
 {
   "jsonrpc": "2.0",
-  "id": 123,
+  "id": "[id]",
   "result": {
     "pool": "sapling",
     "start_index": 1090,

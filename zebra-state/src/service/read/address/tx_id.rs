@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Returns the transaction IDs that sent or received funds from the supplied [`transparent::Address`]es,
-/// within `query_height_range`, in chain order.
+/// within `query_height_range`, in chain order, at most `max_entries` of them.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
 /// or the `query_height_range` is totally outside both the `chain` and `db` range,
@@ -36,6 +36,7 @@ pub fn transparent_tx_ids<C>(
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
     query_height_range: RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -48,7 +49,7 @@ where
     // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
     for _ in 0..=FINALIZED_STATE_QUERY_RETRIES {
         let (finalized_tx_ids, finalized_tip_range) =
-            finalized_transparent_tx_ids(db, &addresses, query_height_range.clone());
+            finalized_transparent_tx_ids(db, &addresses, query_height_range.clone(), max_entries);
 
         // Apply the non-finalized tx ID changes.
         let chain_tx_id_changes = chain_transparent_tx_id_changes(
@@ -56,12 +57,14 @@ where
             &addresses,
             finalized_tip_range,
             query_height_range.clone(),
+            max_entries,
         );
 
         // If the tx IDs are valid, return them, otherwise, retry or return an error.
         match chain_tx_id_changes {
             Ok(chain_tx_id_changes) => {
-                let tx_ids = apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes);
+                let tx_ids =
+                    apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes, max_entries);
 
                 return Ok(tx_ids);
             }
@@ -83,6 +86,7 @@ fn finalized_transparent_tx_ids(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
     query_height_range: RangeInclusive<Height>,
+    limit: Option<usize>,
 ) -> (
     BTreeMap<TransactionLocation, transaction::Hash>,
     Option<RangeInclusive<Height>>,
@@ -94,7 +98,8 @@ fn finalized_transparent_tx_ids(
     // Check if the finalized state changed while we were querying it
     let start_finalized_tip = db.finalized_tip_height();
 
-    let finalized_tx_ids = db.partial_finalized_transparent_tx_ids(addresses, query_height_range);
+    let finalized_tx_ids =
+        db.partial_finalized_transparent_tx_ids(addresses, query_height_range, limit);
 
     let end_finalized_tip = db.finalized_tip_height();
 
@@ -112,6 +117,7 @@ fn finalized_transparent_tx_ids(
 
 /// Returns the extra transaction IDs for `addresses` in the non-finalized chain `query_height_range`,
 /// matching or overlapping the transaction IDs for the `finalized_tip_range`,
+/// at most `max_entries` of them, the first in chain order.
 ///
 /// If the addresses do not exist in the non-finalized `chain`, returns an empty list.
 //
@@ -121,6 +127,7 @@ fn chain_transparent_tx_id_changes<C>(
     addresses: &HashSet<transparent::Address>,
     finalized_tip_range: Option<RangeInclusive<Height>>,
     query_height_range: RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -266,15 +273,22 @@ where
         }
     }
 
-    Ok(chain.partial_transparent_tx_ids(addresses, query_height_range))
+    Ok(chain.partial_transparent_tx_ids(addresses, query_height_range, max_entries))
 }
 
-/// Returns the combined finalized and non-finalized transaction IDs.
+/// Returns the combined finalized and non-finalized transaction IDs, truncated to `max_entries`.
 fn apply_tx_id_changes(
     finalized_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
     chain_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+    max_entries: Option<usize>,
 ) -> BTreeMap<TransactionLocation, transaction::Hash> {
     // Correctness: compensate for inconsistent tx IDs finalized blocks across multiple addresses,
     // by combining them with overlapping non-finalized block tx IDs.
-    finalized_tx_ids.into_iter().chain(chain_tx_ids).collect()
+    let tx_ids: BTreeMap<_, _> = finalized_tx_ids.into_iter().chain(chain_tx_ids).collect();
+
+    // Truncate after merging, so the survivors are the first in chain order.
+    match max_entries {
+        Some(max_entries) => tx_ids.into_iter().take(max_entries).collect(),
+        None => tx_ids,
+    }
 }

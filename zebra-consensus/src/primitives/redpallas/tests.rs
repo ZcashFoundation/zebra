@@ -19,7 +19,7 @@ async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
 where
     V: Service<Item, Response = ()>,
 {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let mut results = FuturesUnordered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);

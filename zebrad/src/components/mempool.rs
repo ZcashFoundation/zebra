@@ -22,10 +22,12 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
+    ops::Bound,
     pin::{pin, Pin},
     task::{Context, Poll},
 };
 
+use chrono::Duration;
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
@@ -38,7 +40,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_node_services::mempool::{
     CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
 };
@@ -86,8 +88,9 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-/// The number of NU6.3 heights where stale NU6.2 branch IDs receive no peer score.
-const NU6_3_BRANCH_ID_GRACE_PERIOD: i64 = 40;
+/// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
+/// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
+const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
 
 /// Returns the mempool peer score after applying branch ID activation policy.
 fn adjusted_mempool_misbehavior_score(
@@ -96,29 +99,57 @@ fn adjusted_mempool_misbehavior_score(
     verification_height: Height,
     network: &Network,
 ) -> u32 {
-    let is_nu6_3_grace_mismatch = matches!(error, TransactionError::WrongConsensusBranchId)
-        && NetworkUpgrade::Nu6_3
-            .activation_height(network)
-            .is_some_and(|activation_height| {
-                let expected_upgrade = NetworkUpgrade::current(network, verification_height);
-                let height_offset = verification_height - activation_height;
+    let is_grace_mismatch =
+        match (error, transaction_upgrade) {
+            (TransactionError::WrongConsensusBranchId, Some(_)) => true,
+            // V4 and older transactions commit to the branch ID only in their signatures, so one
+            // signed for an adjacent upgrade fails its scripts instead. zcashd checks the previous
+            // branch ID explicitly; Zebra doesn't, so it forgives any script failure in the window.
+            (TransactionError::Script(_), None) => true,
+            _ => false,
+        } && is_in_branch_id_grace_period(transaction_upgrade, verification_height, network);
 
-                match (transaction_upgrade, expected_upgrade) {
-                    (Some(NetworkUpgrade::Nu6_2), NetworkUpgrade::Nu6_3) => {
-                        (0..NU6_3_BRANCH_ID_GRACE_PERIOD).contains(&height_offset)
-                    }
-                    (Some(NetworkUpgrade::Nu6_3), NetworkUpgrade::Nu6_2) => {
-                        (-NU6_3_BRANCH_ID_GRACE_PERIOD..0).contains(&height_offset)
-                    }
-                    _ => false,
-                }
-            });
+    // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
+    // relay a transaction we reject.
+    let is_tip_relative_lock_time = matches!(
+        error,
+        TransactionError::LockedUntilAfterBlockHeight(_)
+            | TransactionError::LockedUntilAfterBlockTime(_)
+    );
 
-    if is_nu6_3_grace_mismatch {
+    if is_grace_mismatch || is_tip_relative_lock_time {
         0
     } else {
         error.mempool_misbehavior_score()
     }
+}
+
+/// Returns `true` if `transaction_upgrade` activates immediately before or after the upgrade
+/// current at `height` on `network`, and `height` is within the grace window of that boundary.
+/// `None` matches either adjacent upgrade.
+fn is_in_branch_id_grace_period(
+    transaction_upgrade: Option<NetworkUpgrade>,
+    height: Height,
+    network: &Network,
+) -> bool {
+    let activations = network.activation_list();
+    let Some((&current_height, &current)) = activations.range(..=height).next_back() else {
+        return false;
+    };
+    let grace_blocks =
+        BRANCH_ID_GRACE_PERIOD.num_seconds() / current.target_spacing().num_seconds();
+    let matches = |upgrade| transaction_upgrade.is_none_or(|tx_upgrade| tx_upgrade == upgrade);
+
+    let previous = activations.range(..current_height).next_back();
+    let next = activations
+        .range((Bound::Excluded(height), Bound::Unbounded))
+        .next();
+
+    previous
+        .is_some_and(|(_, &previous)| matches(previous) && height - current_height < grace_blocks)
+        || next.is_some_and(|(&next_height, &next)| {
+            matches(next) && next_height - height <= grace_blocks
+        })
 }
 
 /// The state of the mempool.
@@ -282,7 +313,7 @@ pub struct Mempool {
     transaction_sender: broadcast::Sender<MempoolChange>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     // Diagnostics
     //
@@ -308,6 +339,10 @@ pub struct Mempool {
 }
 
 impl Mempool {
+    /// Builds the mempool using a non-owning outbound network handle.
+    ///
+    /// Pass [`zn::NetworkService::background_service`] because the network's inbound handler
+    /// retains the mempool and must not keep its own network alive.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         network: &Network,
@@ -318,7 +353,7 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, MempoolTxSubscriber) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
@@ -393,11 +428,18 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.state.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.state.clone(),
+            )
+            .with_max_datacarrier_bytes(
+                self.config
+                    .max_datacarrier_bytes
+                    .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
+            ),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
@@ -739,13 +781,18 @@ impl Service<Request> for Mempool {
                             );
 
                             if score != 0 {
-                                let _ = self.misbehavior_sender.try_send((*advertiser_addr, score));
+                                let _ =
+                                    self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                                        *advertiser_addr,
+                                        score,
+                                        format!("invalid mempool transaction {tx_id}: {error}"),
+                                    ));
                             }
                         };
 
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
-                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
+                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.metric_label()).increment(1);
 
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
@@ -767,6 +814,7 @@ impl Service<Request> for Mempool {
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
                 *last_seen_tip_hash = block.hash;
+                let cleanup_start = std::time::Instant::now();
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -780,6 +828,8 @@ impl Service<Request> for Mempool {
                 // Clear any transaction rejections if they might have become valid after
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
+                metrics::histogram!("mempool.tip_cleanup.duration_seconds")
+                    .record(cleanup_start.elapsed().as_secs_f64());
 
                 mined_mempool_ids.extend(mined);
                 invalidated_ids.extend(invalidated);
@@ -790,7 +840,10 @@ impl Service<Request> for Mempool {
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
             if let Some(tip_height) = best_tip_height {
+                let expiry_start = std::time::Instant::now();
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
+                metrics::histogram!("mempool.expiry.duration_seconds")
+                    .record(expiry_start.elapsed().as_secs_f64());
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);

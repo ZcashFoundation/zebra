@@ -1,6 +1,6 @@
 //! Consensus critical contextual checks
 
-use std::{borrow::Borrow, sync::Arc};
+use std::sync::Arc;
 
 use chrono::Duration;
 
@@ -13,20 +13,20 @@ use zebra_chain::{
 
 use crate::{
     service::{
-        block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
-        finalized_state::ZebraDb, non_finalized_state::NonFinalizedState,
+        block_iter::{any_chain_ancestor_iter, Iter},
+        check::difficulty::pow_adjustment_block_span,
+        finalized_state::ZebraDb,
+        non_finalized_state::NonFinalizedState,
     },
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::subsidy::{self, CoinbaseTransactionError, SubsidyError},
     value_balance::ValueBalance,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use crate::ContextuallyVerifiedBlock;
 
 // use self as check
@@ -51,33 +51,32 @@ pub(crate) use difficulty::AdjustedDifficulty;
 /// Check that the semantically verified block is contextually valid for `network`,
 /// based on the `finalized_tip_height` and `relevant_chain`.
 ///
-/// This function performs checks that require a small number of recent blocks,
-/// including previous hash, previous height, and block difficulty.
+/// This function performs checks that require a small number of recent headers,
+/// including previous height and block difficulty.
 ///
-/// The relevant chain is an iterator over the ancestors of `block`, starting
-/// with its parent block.
+/// The relevant chain is an iterator over the ancestor headers of `block`, starting
+/// with its parent. Its initial height comes from the parent hash's state index.
 #[tracing::instrument(skip(semantically_verified, finalized_tip_height, relevant_chain))]
-pub(crate) fn block_is_valid_for_recent_chain<C>(
+pub(crate) fn block_is_valid_for_recent_chain(
     semantically_verified: &SemanticallyVerifiedBlock,
     network: &Network,
     finalized_tip_height: Option<block::Height>,
-    relevant_chain: C,
-) -> Result<(), ValidateContextError>
-where
-    C: IntoIterator,
-    C::Item: Borrow<Block>,
-    C::IntoIter: ExactSizeIterator,
-{
+    relevant_chain: Iter<block::Header>,
+) -> Result<(), ValidateContextError> {
     let finalized_tip_height = finalized_tip_height
         .expect("finalized state must contain at least one block to do contextual validation");
     check::block_is_not_orphaned(finalized_tip_height, semantically_verified.height)?;
 
-    let relevant_chain: Vec<_> = relevant_chain
-        .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+    // ZIP 218 makes the averaging window, and so the block span, depend on the block's height.
+    let block_span = pow_adjustment_block_span(network, semantically_verified.height);
+
+    let parent_height = relevant_chain.height;
+    let relevant_data: Vec<_> = relevant_chain
+        .take(block_span)
+        .map(|header| (header.difficulty_threshold, header.time))
         .collect();
 
-    let Some(parent_block) = relevant_chain.first() else {
+    if relevant_data.is_empty() {
         warn!(
             ?semantically_verified,
             ?finalized_tip_height,
@@ -85,12 +84,9 @@ where
         );
 
         return Err(ValidateContextError::NotReadyToBeCommitted);
-    };
+    }
 
-    let parent_block = parent_block.borrow();
-    let parent_height = parent_block
-        .coinbase_height()
-        .expect("valid blocks have a coinbase height");
+    let parent_height = parent_height.expect("a parent header has an indexed height");
     check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
 
     // skip this check during tests if we don't have enough blocks in the chain
@@ -99,7 +95,7 @@ where
     //
     // TODO: accept a NotReadyToBeCommitted error in those tests instead
     #[cfg(test)]
-    if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
+    if relevant_data.len() < block_span {
         return Ok(());
     }
 
@@ -111,7 +107,7 @@ where
     // verified blocks, so there will be at least 1 million blocks in the state when it is
     // called. So this error should never happen on Mainnet or the default Testnet.
     //
-    // It's okay to use a relevant chain of fewer than `POW_ADJUSTMENT_BLOCK_SPAN` blocks, because
+    // It's okay to use a relevant chain of fewer than `block_span` blocks, because
     // the MedianTime function uses height 0 if passed a negative height by the ActualTimespan function:
     // > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
     // > MedianTime(height : N) := median([[ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to height − 1 ]])
@@ -121,16 +117,10 @@ where
     //
     // See the 'Difficulty Adjustment' section (page 132) in the Zcash specification.
     #[cfg(not(test))]
-    if relevant_chain.is_empty() {
+    if relevant_data.is_empty() {
         return Err(ValidateContextError::NotReadyToBeCommitted);
     }
 
-    let relevant_data = relevant_chain.iter().map(|block| {
-        (
-            block.borrow().header.difficulty_threshold,
-            block.borrow().header.time,
-        )
-    });
     let difficulty_adjustment =
         AdjustedDifficulty::new_from_block(&semantically_verified.block, network, relevant_data);
     check::difficulty_threshold_and_time_are_valid(
@@ -345,12 +335,16 @@ pub(crate) fn legacy_chain<I>(
     max_legacy_chain_blocks: usize,
 ) -> Result<(), BoxError>
 where
-    I: Iterator<Item = Arc<Block>>,
+    I: Iterator<Item = Result<Arc<Block>, crate::BlockReadError>>,
 {
     let mut ancestors = ancestors.peekable();
-    let tip_height = ancestors.peek().and_then(|block| block.coinbase_height());
+    let tip_height = ancestors
+        .peek()
+        .and_then(|block| block.as_ref().ok())
+        .and_then(|block| block.coinbase_height());
 
     for (index, block) in ancestors.enumerate() {
+        let block = block?;
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
@@ -408,7 +402,7 @@ pub(crate) fn initial_contextual_validity(
     non_finalized_state: &NonFinalizedState,
     semantically_verified: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    let relevant_chain = any_ancestor_blocks(
+    let relevant_chain = any_chain_ancestor_iter::<block::Header>(
         non_finalized_state,
         finalized_state,
         semantically_verified.block.header.previous_block_hash,
@@ -428,15 +422,14 @@ pub(crate) fn initial_contextual_validity(
 }
 
 /// Checks the block subsidy, funding streams, and miner fees paid by `contextual`'s coinbase
-/// transaction, from the ZIP 234 deployment height.
+/// transaction, from the NSM reissuance height.
 ///
 /// The block verifier checks the subsidy, funding streams and miner fees before the deployment
 /// height. From then on the block subsidy depends on the NSM value balance after the parent block,
 /// which is only known during contextual validation, so the checks run here instead.
 ///
-/// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
-pub(crate) fn zip234_subsidy_is_valid(
+/// [zip]: https://zips.z.cash/zip-0237
+pub(crate) fn nsm_subsidy_is_valid(
     contextual: &ContextuallyVerifiedBlock,
     network: &Network,
     parent_chain_value_pools: ValueBalance<NonNegative>,

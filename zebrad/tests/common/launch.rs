@@ -8,15 +8,16 @@
 use std::{
     env,
     fmt::Debug,
-    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
 
+use color_eyre::eyre::eyre;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network::{self, *};
 use zebra_network::CacheDir;
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt},
@@ -36,10 +37,6 @@ use crate::common::{
 /// metrics or tracing test failures in Windows CI.
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(20);
 
-/// After we launch `zebrad`, wait this long in extended tests.
-/// See [`LAUNCH_DELAY`] for details.
-pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(45);
-
 /// After we launch `lightwalletd`, wait this long for the command to start up,
 /// take the actions expected by the quick tests, and log the expected logs.
 ///
@@ -56,12 +53,6 @@ pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 /// This bounds the startup log checks, so a `lightwalletd` log format change fails in minutes
 /// instead of blocking for the full test timeout, which is up to 11 hours for the sync tests.
 pub const LIGHTWALLETD_STARTUP_DELAY: Duration = Duration::from_secs(10 * 60);
-
-/// The amount of time we wait between launching two conflicting nodes.
-///
-/// We use a longer time to make sure the first node has launched before the second starts,
-/// even if CI is under load.
-pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(20);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
@@ -217,6 +208,27 @@ where
     }
 }
 
+/// Waits until the mempool of a launched `zebrad` is active, failing after [`LAUNCH_DELAY`].
+///
+/// Verbose `getrawmempool` fails until the mempool is active, which needs a chain tip. On Regtest,
+/// which commits its own genesis block, success also means `zebrad` can answer mining RPCs.
+pub async fn wait_for_mempool_activation(client: &RpcRequestClient) -> Result<()> {
+    let mut last_error = None;
+    tokio::time::timeout(LAUNCH_DELAY, async {
+        while let Err(error) = client
+            .json_result_from_call::<serde_json::Value>("getrawmempool", "[true]")
+            .await
+        {
+            last_error = Some(error);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        eyre!("mempool did not become active within {LAUNCH_DELAY:?} (last RPC error: {last_error:?})")
+    })
+}
+
 /// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
 /// See [`spawn_zebrad_for_rpc_with_opts`] for more details.
@@ -226,7 +238,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     test_name: S,
     test_type: TestType,
     use_internet_connection: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<TestChild<TempDir>>> {
     spawn_zebrad_for_rpc_with_opts(network, test_name, test_type, use_internet_connection, true)
 }
 
@@ -240,11 +252,11 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 /// not to cache a backup of its non-finalized state on disk.
 ///
 /// Returns:
-/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(Some(zebrad))` on success,
 /// - `Ok(None)` if the test doesn't have the required network or cached state, and
 /// - `Err(_)` if spawning zebrad fails.
 ///
-/// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
+/// Callers read the bound RPC address from the startup logs after checking earlier startup messages.
 #[tracing::instrument]
 pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
     network: Network,
@@ -252,7 +264,7 @@ pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
     test_type: TestType,
     use_internet_connection: bool,
     use_non_finalized_backup: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<TestChild<TempDir>>> {
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
@@ -274,10 +286,10 @@ pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(test_type.zebrad_timeout())
+        .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    Ok(Some((zebrad, config.rpc.listen_addr)))
+    Ok(Some(zebrad))
 }
 
 /// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
@@ -353,7 +365,7 @@ where
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(test_type.zebrad_timeout())
+        .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     Ok(Some(zebrad))

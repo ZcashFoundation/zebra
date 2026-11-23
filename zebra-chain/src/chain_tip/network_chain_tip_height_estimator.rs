@@ -26,7 +26,7 @@ pub struct NetworkChainTipHeightEstimator {
     current_block_time: DateTime<Utc>,
     current_height: block::Height,
     current_target_spacing: Duration,
-    next_target_spacings: vec::IntoIter<(block::Height, Duration)>,
+    target_spacings: vec::IntoIter<(block::Height, Duration)>,
 }
 
 impl NetworkChainTipHeightEstimator {
@@ -38,23 +38,24 @@ impl NetworkChainTipHeightEstimator {
     ///
     /// # Implementation details
     ///
-    /// The `network` is used to obtain a list of target spacings used in different sections of the
-    /// block chain. The first section is used as a starting point.
+    /// The current height determines the initial target spacing. Past and future spacing changes
+    /// are retained so estimates can cross transitions in either direction.
     pub fn new(
         current_block_time: DateTime<Utc>,
         current_height: block::Height,
         network: &Network,
     ) -> Self {
-        let mut target_spacings = NetworkUpgrade::target_spacings(network);
-        let (_genesis_height, initial_target_spacing) =
-            target_spacings.next().expect("No target spacings were set");
-
         NetworkChainTipHeightEstimator {
             current_block_time,
             current_height,
-            current_target_spacing: initial_target_spacing,
+            current_target_spacing: NetworkUpgrade::target_spacing_for_height(
+                network,
+                current_height,
+            ),
             // TODO: Remove the `Vec` allocation once existential `impl Trait`s are available.
-            next_target_spacings: target_spacings.collect::<Vec<_>>().into_iter(),
+            target_spacings: NetworkUpgrade::target_spacings(network)
+                .collect::<Vec<_>>()
+                .into_iter(),
         }
     }
 
@@ -62,39 +63,50 @@ impl NetworkChainTipHeightEstimator {
     ///
     /// # Implementation details
     ///
-    /// The `current_block_time` and the `current_height` is advanced to the end of each section
-    /// that has a different target spacing time. Once the `current_block_time` passes the
-    /// `target_time`, the last active target spacing time is used to calculate the final height
-    /// estimation.
+    /// The reference time and height move through each spacing era towards `target_time`.
+    /// The interval ending at an activation block uses that upgrade's spacing in both directions.
+    /// Once the target era is reached, its spacing is used to calculate the final height.
     pub fn estimate_height_at(mut self, target_time: DateTime<Utc>) -> block::Height {
-        while let Some((change_height, next_target_spacing)) = self.next_target_spacings.next() {
-            self.estimate_up_to(change_height);
+        if target_time < self.current_block_time {
+            while let Some((change_height, target_spacing)) = self.target_spacings.next_back() {
+                if change_height > self.current_height {
+                    continue;
+                }
 
-            if self.current_block_time >= target_time {
-                break;
+                self.current_target_spacing = target_spacing;
+                self.estimate_at((change_height - 1).unwrap_or(block::Height(0)));
+
+                if self.current_block_time <= target_time {
+                    break;
+                }
             }
+        } else {
+            while let Some((change_height, next_target_spacing)) = self.target_spacings.next() {
+                if change_height <= self.current_height {
+                    continue;
+                }
 
-            self.current_target_spacing = next_target_spacing;
+                self.estimate_at(
+                    (change_height - 1).expect("future spacing changes are after genesis"),
+                );
+
+                if self.current_block_time >= target_time {
+                    break;
+                }
+
+                self.current_target_spacing = next_target_spacing;
+            }
         }
 
         self.estimate_height_at_with_current_target_spacing(target_time)
     }
 
-    /// Advance the `current_block_time` and `current_height` to the next change in target spacing
-    /// time.
-    ///
-    /// The `current_height` is advanced to `max_height` (if it's not already past that height).
-    /// The amount of blocks advanced is then used to extrapolate the amount to advance the
-    /// `current_block_time`.
-    fn estimate_up_to(&mut self, max_height: block::Height) {
-        let remaining_blocks = max_height - self.current_height;
-
-        if remaining_blocks > 0 {
-            let target_spacing_seconds = self.current_target_spacing.num_seconds();
-            let time_to_activation = Duration::seconds(remaining_blocks * target_spacing_seconds);
-            self.current_block_time += time_to_activation;
-            self.current_height = max_height;
-        }
+    /// Move the reference time and height to an era boundary using the current target spacing.
+    fn estimate_at(&mut self, height: block::Height) {
+        let remaining_blocks = height - self.current_height;
+        let target_spacing_seconds = self.current_target_spacing.num_seconds();
+        self.current_block_time += Duration::seconds(remaining_blocks * target_spacing_seconds);
+        self.current_height = height;
     }
 
     /// Calculate an estimate for the chain height using the `current_target_spacing`.
@@ -110,11 +122,9 @@ impl NetworkChainTipHeightEstimator {
         let time_difference = target_time - self.current_block_time;
         let mut time_difference_seconds = time_difference.num_seconds();
 
-        if time_difference_seconds < 0 {
-            // Undo the rounding towards negative infinity done by `chrono::Duration`, which yields
-            // an incorrect value for the dividend of the division.
-            //
-            // (See https://docs.rs/time/0.1.44/src/time/duration.rs.html#166-173)
+        if time_difference.subsec_nanos() < 0 {
+            // Chrono truncates whole seconds towards zero. Floor negative fractions before
+            // dividing by the spacing, without changing exact negative seconds.
             time_difference_seconds -= 1;
         }
 

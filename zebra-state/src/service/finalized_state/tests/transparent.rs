@@ -182,7 +182,10 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         &spent_utxos_by_outpoint,
         &spent_utxos_by_out_loc,
         #[cfg(feature = "indexer")]
-        &HashMap::new(),
+        &HashMap::from([
+            (existing_outpoint, existing_output_location),
+            (t0_output_outpoint, t0_output_location),
+        ]),
         address_balances,
     );
 

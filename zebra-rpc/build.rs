@@ -14,6 +14,12 @@ const ZALLET_COMMIT: Option<&str> = Some("027e5e2139b2ca8f0317edb9d802b03a46e9aa
 const ZAINO_COMMIT: Option<&str> = Some("559510ffcc62a5a6e7bb20db5e3329654542c8b1");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Each step declares the files it reads. Without any `rerun-if-changed`, Cargo
+    // reruns this script when the newest mtime in the package changes at all, even
+    // when a copy such as a Docker image layer only truncates it to whole seconds.
+    println!("cargo:rerun-if-env-changed=PROTOC");
+    println!("cargo:rerun-if-env-changed=ZALLET");
+
     build_or_copy_proto()?;
     build_zallet_for_qa_tests();
     build_rpc_schema()?;
@@ -65,6 +71,10 @@ fn build_or_copy_proto_set(
         .is_some();
 
     if are_proto_files_available && is_protoc_available {
+        for proto_file in proto_files {
+            println!("cargo:rerun-if-changed={proto_file}");
+        }
+
         let mut config =
             tonic_prost_build::configure().file_descriptor_set_path(out_dir.join(descriptor_name));
 
@@ -85,6 +95,7 @@ fn build_or_copy_proto_set(
         for file_name in file_names {
             let out_path = out_dir.join(file_name);
             let generated_path = format!("proto/__generated__/{file_name}");
+            println!("cargo:rerun-if-changed={generated_path}");
             if fs::read(&out_path).ok() != Some(fs::read(&generated_path)?) {
                 fs::copy(generated_path, out_path)?;
             }
@@ -155,6 +166,7 @@ fn build_zallet_for_qa_tests() {
 fn build_rpc_schema() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = env::var("OUT_DIR").map(PathBuf::from)?;
     let json_rpc_methods_rs = "src/methods.rs";
+    println!("cargo:rerun-if-changed={json_rpc_methods_rs}");
     let trait_names = ["Rpc"];
     openrpsee::generate_openrpc(json_rpc_methods_rs, &trait_names, false, &out_dir)?;
 

@@ -33,7 +33,7 @@ Jaeger categorizes spans by their role:
 | Kind | Description | Example in Zebra |
 |------|-------------|------------------|
 | **SERVER** | Entry point handling external requests | JSON-RPC endpoints (`getblock`, `getinfo`) |
-| **INTERNAL** | Internal operations within the service | Block verification, state operations |
+| **INTERNAL** | Internal operations within the service | Peer requests, checkpoint verification |
 | **CLIENT** | Outgoing calls to other services | (Not currently used) |
 
 This distinction is important for the Monitor tab (see below).
@@ -60,11 +60,9 @@ The Monitor tab provides RED metrics (Rate, Errors, Duration) aggregated from tr
 │  Operations metrics                                                 │
 │  ┌────────────────────────────────────────────────────────────────┐│
 │  │ Name                      P95 Latency   Request rate   Error   ││
-│  │ state                     10s           10.27 req/s    < 0.1%  ││
 │  │ connector                 4.52s         0.24 req/s     < 0.1%  ││
 │  │ checkpoint                95.88ms       6.69 req/s     < 0.1%  ││
-│  │ best_tip_height           4.75ms        58.84 req/s    < 0.1%  ││
-│  │ download_and_verify       2.32s         0.11 req/s     < 0.1%  ││
+│  │ msg_as_req                12.40ms       9.31 req/s     < 0.1%  ││
 │  └────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```text
@@ -84,7 +82,7 @@ The Monitor tab provides RED metrics (Rate, Errors, Duration) aggregated from tr
 The "Span Kind" dropdown filters which operations you see:
 
 - **Internal**: All internal Zebra operations (default view)
-  - Block verification, state operations, network handling
+  - Peer connections and requests, and checkpoint verification
   - High volume during sync
 
 - **Server**: External-facing request handlers
@@ -95,14 +93,19 @@ The "Span Kind" dropdown filters which operations you see:
 
 | Operation | Description | Normal Latency |
 |-----------|-------------|----------------|
-| `state` | State database operations | 1-10s during sync |
-| `connector` | Peer connection establishment | 1-5s |
-| `dial` | Network dial attempts | 1-5s |
-| `checkpoint` | Checkpoint verification | 50-200ms |
-| `best_tip_height` | Chain tip queries | < 10ms |
-| `download_and_verify` | Block download + verification | 1-5s |
-| `block_commitment_is_valid_for_chain_history` | Block validation | 50-200ms |
+| `dial` | Outbound connection attempt, with `connector` inside it | 1-5s |
+| `connector` | Outbound TCP connection and handshake | 1-5s |
+| `accept_inbound_handshake` | Inbound peer handshake | 1-5s |
+| `msg_as_req` | Request received from a peer, with `inbound` or `mempool` inside it | Request-dependent |
+| `checkpoint` | Checkpoint verification of a block | 50-200ms |
 | `rpc_request` | JSON-RPC handler (SERVER span) | Method-dependent |
+| `lightwalletd_grpc_request` | lightwalletd gRPC handler (SERVER span) | Method-dependent |
+
+Zebra exports only these operation spans, and attaches only WARN and ERROR log events to them.
+Each operation starts its own trace, so the sampler decides separately for every one. An operation
+that happens inside another, such as `inbound` inside `msg_as_req` or `connector` inside `dial`,
+appears in that operation's trace. Long-running spans, such as the syncer, the peer crawler, and
+each peer connection, are not exported.
 
 ## Search Tab
 
@@ -281,11 +284,12 @@ processors:
 
 connectors:
   spanmetrics:  # Generates Prometheus metrics from spans
-    namespace: traces.spanmetrics
+    namespace: span_metrics
 
 exporters:
   prometheus:
     endpoint: 0.0.0.0:8889  # Spanmetrics for Prometheus
+    namespace: traces
 ```text
 
 ### Spanmetrics
@@ -294,7 +298,7 @@ Jaeger automatically generates Prometheus metrics from spans:
 
 ```bash
 # View spanmetrics
-curl -s http://localhost:8889/metrics | grep traces_spanmetrics
+curl -s http://localhost:8889/metrics | grep traces_span_metrics
 ```text
 
 These power the Monitor tab and can be scraped by Prometheus for Grafana dashboards.
@@ -336,7 +340,7 @@ These power the Monitor tab and can be scraped by Prometheus for Grafana dashboa
 
 ### High memory usage
 
-1. Reduce sampling: `OTEL_TRACES_SAMPLER_ARG=10`
+1. Reduce sampling: `OTEL_TRACES_SAMPLER=traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1`
 2. Restart Jaeger to clear memory
 3. Consider using external storage for production
 

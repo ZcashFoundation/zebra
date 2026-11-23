@@ -54,6 +54,12 @@ pub struct OrderedUtxo {
     pub tx_index_in_block: usize,
 }
 
+impl AsRef<Utxo> for Utxo {
+    fn as_ref(&self) -> &Utxo {
+        self
+    }
+}
+
 impl AsRef<Utxo> for OrderedUtxo {
     fn as_ref(&self) -> &Utxo {
         &self.utxo
@@ -139,9 +145,9 @@ pub enum CoinbaseSpendRestriction {
     },
 }
 
-/// Compute an index of [`Utxo`]s, given an index of [`OrderedUtxo`]s.
+/// Compute an index of [`Utxo`]s from outpoint and [`OrderedUtxo`] pairs.
 pub fn utxos_from_ordered_utxos(
-    ordered_utxos: HashMap<transparent::OutPoint, OrderedUtxo>,
+    ordered_utxos: impl IntoIterator<Item = (transparent::OutPoint, OrderedUtxo)>,
 ) -> HashMap<transparent::OutPoint, Utxo> {
     ordered_utxos
         .into_iter()

@@ -649,9 +649,9 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (addr) (zcash_net_in_messages{job=\"$job\"})",
+          "expr": "sum(zcash_net_in_messages{job=\"$job\"})",
           "interval": "",
-          "legendFormat": "{{command}}",
+          "legendFormat": "inbound messages",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -663,7 +663,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "inbound message peers - $job",
+      "title": "inbound message total - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -760,9 +760,9 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (addr) (zcash_net_out_messages{job=\"$job\"})",
+          "expr": "sum(zcash_net_out_messages{job=\"$job\"})",
           "interval": "",
-          "legendFormat": "{{command}}",
+          "legendFormat": "outbound messages",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -774,7 +774,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "outbound message peers - $job",
+      "title": "outbound message total - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,

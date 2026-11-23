@@ -325,7 +325,7 @@ impl AddressBook {
             .filter(|addr| addr.is_active_for_gossip(now))
             .collect();
 
-        peers.shuffle(&mut rand::thread_rng());
+        peers.shuffle(&mut rand::rng());
 
         peers
     }
@@ -518,6 +518,8 @@ impl AddressBook {
 
                 warn!(
                     ?updated,
+                    score,
+                    reason = change.misbehavior_reason(),
                     total_peers = self.by_addr.len(),
                     recent_peers = self.recently_live_peers(chrono_now).len(),
                     "banned ip and removed banned peer addresses from address book",

@@ -53,11 +53,14 @@ pub fn subsidy_is_valid(
     net: &Network,
     expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<DeferredPoolBalanceChange, CoinbaseTransactionError> {
-    if expected_block_subsidy.is_zero() {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+
+    // A zero subsidy removes proportional payouts, but not fixed lockbox disbursements.
+    if expected_block_subsidy.is_zero()
+        && Some(height) != NetworkUpgrade::Nu6_1.activation_height(net)
+    {
         return Ok(DeferredPoolBalanceChange::zero());
     }
-
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
 
     let mut coinbase_outputs: MultiSet<Output> = block
         .transactions
@@ -68,11 +71,8 @@ pub fn subsidy_is_valid(
         .cloned()
         .collect();
 
-    let mut has_amount = |addr: &Address, amount| {
-        assert!(addr.is_script_hash(), "address must be P2SH");
-
-        coinbase_outputs.remove(&Output::new(amount, addr.script()))
-    };
+    let mut has_amount =
+        |addr: &Address, amount| coinbase_outputs.remove(&Output::new(amount, addr.script()));
 
     // # Note
     //
@@ -134,6 +134,10 @@ pub fn subsidy_is_valid(
         // > addresses.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+        //
+        // ZIP 2008 assigns a P2PKH recipient. Match the standard script of the assigned address
+        // exactly, retaining the prescribed P2SH scripts for all historical recipients.
+        // <https://zips.z.cash/zip-2008>
         //
         // [ZIP-271]: <https://zips.z.cash/zip-0271>
         // [ZIP-48]: <https://zips.z.cash/zip-0048>

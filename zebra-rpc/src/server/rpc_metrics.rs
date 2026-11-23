@@ -9,12 +9,15 @@
 //! These metrics complement the OpenTelemetry tracing in `rpc_tracing.rs`,
 //! providing aggregated data suitable for dashboards and alerting.
 
-use std::time::Instant;
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use jsonrpsee::{
     server::middleware::rpc::{layer::ResponseFuture, RpcServiceT},
     MethodResponse,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Middleware that collects Prometheus metrics for each RPC request.
 ///
@@ -23,16 +26,38 @@ use jsonrpsee::{
 /// - `rpc.request.duration_seconds{method}` - Histogram of request durations
 /// - `rpc.active_requests` - Gauge of currently active requests
 /// - `rpc.errors.total{method, error_code}` - Counter of errors by method and code
+///
+/// Method labels use registered RPC method names, or `unknown` for unregistered names.
 #[derive(Clone)]
 pub struct RpcMetricsMiddleware<S> {
     service: S,
+    registered_methods: Arc<HashSet<&'static str>>,
 }
 
 impl<S> RpcMetricsMiddleware<S> {
-    /// Create a new `RpcMetricsMiddleware` with the given `service`.
-    pub fn new(service: S) -> Self {
-        Self { service }
+    /// Create a new `RpcMetricsMiddleware` with the given `service` and registered method names.
+    ///
+    /// Collect `registered_methods` from the server's `RpcModule::method_names()` iterator.
+    /// Requests for names outside this set are labeled `unknown`.
+    pub fn new(service: S, registered_methods: Arc<HashSet<&'static str>>) -> Self {
+        Self {
+            service,
+            registered_methods,
+        }
     }
+
+    fn method_label(&self, method: &str) -> &'static str {
+        method_label(&self.registered_methods, method)
+    }
+}
+
+/// The registered name of `method`, or `unknown` for names the server does not register, so
+/// labels stay bounded whatever clients send.
+pub(crate) fn method_label(
+    registered_methods: &HashSet<&'static str>,
+    method: &str,
+) -> &'static str {
+    registered_methods.get(method).copied().unwrap_or("unknown")
 }
 
 impl<'a, S> RpcServiceT<'a> for RpcMetricsMiddleware<S>
@@ -43,7 +68,7 @@ where
 
     fn call(&self, request: jsonrpsee::types::Request<'a>) -> Self::Future {
         let service = self.service.clone();
-        let method = request.method_name().to_owned();
+        let method = self.method_label(request.method_name());
         let start = Instant::now();
 
         // Increment active requests gauge
@@ -61,11 +86,11 @@ where
             };
 
             // Record request count
-            metrics::counter!("rpc.requests.total", "method" => method.clone(), "status" => status)
+            metrics::counter!("rpc.requests.total", "method" => method, "status" => status)
                 .increment(1);
 
             // Record request duration
-            metrics::histogram!("rpc.request.duration_seconds", "method" => method.clone())
+            metrics::histogram!("rpc.request.duration_seconds", "method" => method)
                 .record(duration);
 
             // Record errors with error code

@@ -10,7 +10,9 @@ use tower::util::ServiceExt;
 use tracing::Span;
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
+use zebra_state::{
+    ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
@@ -292,16 +294,16 @@ where
 /// # Errors
 ///
 /// Returns an [`invalid_argument`](Status::invalid_argument) status if there are more hashes than
-/// the non-finalized state can hold chains ([`MAX_NON_FINALIZED_CHAIN_FORKS`]), or if any hash is
-/// not exactly 32 bytes long.
+/// the non-finalized state can hold chains ([`MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS`]), or
+/// if any hash is not exactly 32 bytes long.
 fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<block::Hash>, Status> {
-    // The non-finalized state holds at most `MAX_NON_FINALIZED_CHAIN_FORKS` chains, so a caller can
-    // never legitimately have more chain tips than that. Bound the untrusted input up front rather
-    // than allocating a set sized by the request.
-    if chain_tip_hashes.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
+    // Test networks keep the most chains, so a caller can't legitimately send more tips than that.
+    // Bound the untrusted input before allocating.
+    if chain_tip_hashes.len() > MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS {
         return Err(Status::invalid_argument(format!(
-            "too many chain tip hashes: got {}, expected at most {MAX_NON_FINALIZED_CHAIN_FORKS}",
+            "too many chain tip hashes: got {}, expected at most {}",
             chain_tip_hashes.len(),
+            MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
         )));
     }
 
@@ -373,13 +375,26 @@ mod tests {
     }
 
     #[test]
-    fn decode_known_chain_tips_rejects_too_many() {
-        let encoded = (0..=MAX_NON_FINALIZED_CHAIN_FORKS as u8)
+    fn decode_known_chain_tips_accepts_test_network_forks() {
+        let encoded = (0..MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS as u8)
             .map(|b| hash(b).bytes_in_display_order().to_vec())
             .collect();
 
-        let status = decode_known_chain_tips(encoded)
-            .expect_err("more than MAX_NON_FINALIZED_CHAIN_FORKS hashes should be rejected");
+        let tips = decode_known_chain_tips(encoded)
+            .expect("as many hashes as test networks keep chains should be accepted");
+
+        assert!(tips.len() > zebra_state::MAX_NON_FINALIZED_CHAIN_FORKS);
+    }
+
+    #[test]
+    fn decode_known_chain_tips_rejects_too_many() {
+        let encoded = (0..=MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS as u8)
+            .map(|b| hash(b).bytes_in_display_order().to_vec())
+            .collect();
+
+        let status = decode_known_chain_tips(encoded).expect_err(
+            "more than MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS hashes should be rejected",
+        );
 
         assert_eq!(status.code(), Code::InvalidArgument);
     }

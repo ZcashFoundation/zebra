@@ -157,7 +157,7 @@ where
     let addr = addr.into();
     let network = network.clone();
 
-    tokio::net::TcpStream::connect(*addr)
+    peer::connect_tcp_nodelay(*addr)
         .err_into()
         .and_then(move |tcp_stream| {
             connect_isolated_with_inbound(&network, tcp_stream, user_agent, inbound_service)

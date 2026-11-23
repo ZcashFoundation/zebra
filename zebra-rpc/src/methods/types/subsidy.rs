@@ -16,13 +16,21 @@ use super::zec::Zec;
 )]
 pub struct GetBlockSubsidyResponse {
     /// An array of funding stream descriptions.
-    /// Always present before NU6, because Zebra returns an error for heights before the first halving.
-    #[serde(rename = "fundingstreams", skip_serializing_if = "Vec::is_empty")]
+    /// Empty arrays are omitted on the wire and deserialize as empty.
+    #[serde(
+        default,
+        rename = "fundingstreams",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub(crate) funding_streams: Vec<FundingStream>,
 
     /// An array of lockbox stream descriptions.
-    /// Always present after NU6.
-    #[serde(rename = "lockboxstreams", skip_serializing_if = "Vec::is_empty")]
+    /// Empty arrays are omitted on the wire and deserialize as empty.
+    #[serde(
+        default,
+        rename = "lockboxstreams",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub(crate) lockbox_streams: Vec<FundingStream>,
 
     /// The mining reward amount in ZEC.

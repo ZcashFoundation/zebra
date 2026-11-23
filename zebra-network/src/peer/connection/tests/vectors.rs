@@ -5,7 +5,8 @@
 //!   - inbound message, but not a request (or a response)
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
+    sync::{atomic::Ordering, Arc, Mutex},
     task::Poll,
     time::{Duration, Instant},
 };
@@ -15,22 +16,316 @@ use futures::{
     sink::SinkMapErr,
     FutureExt, SinkExt, StreamExt,
 };
+use metrics::{
+    atomics::AtomicU64, Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString,
+    Unit,
+};
 use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
-use zebra_chain::serialization::SerializationError;
+use zebra_chain::{
+    block::{self, Block},
+    serialization::{SerializationError, ZcashDeserializeInto},
+    transaction::{self, UnminedTx},
+};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
+    constants::{
+        GETDATA_MAX_BLOCK_COUNT, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        REQUEST_TIMEOUT,
+    },
     peer::{
-        connection::{overload_drop_connection_probability, Connection, State},
+        connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
     },
-    protocol::external::Message,
+    protocol::{
+        external::{InventoryHash, Message},
+        internal::InventoryResponse,
+    },
     types::Nonce,
     PeerError, Request, Response,
 };
+
+#[derive(Default)]
+struct ConnectionMetricsRecorder {
+    counters: Mutex<HashMap<Key, Arc<AtomicU64>>>,
+    gauges: Mutex<HashMap<String, Arc<AtomicU64>>>,
+}
+
+impl ConnectionMetricsRecorder {
+    fn counter(&self, key: Key) -> u64 {
+        self.counters
+            .lock()
+            .expect("test recorder mutex is unpoisoned")
+            .get(&key)
+            .map_or(0, |value| value.load(Ordering::Relaxed))
+    }
+
+    fn state(&self, command: &str) -> f64 {
+        let gauges = self
+            .gauges
+            .lock()
+            .expect("test recorder mutex is unpoisoned");
+        f64::from_bits(
+            gauges
+                .get(command)
+                .expect("the connection recorded this state")
+                .load(Ordering::Relaxed),
+        )
+    }
+}
+
+impl Recorder for ConnectionMetricsRecorder {
+    fn describe_counter(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn describe_gauge(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn describe_histogram(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
+        Counter::from_arc(
+            self.counters
+                .lock()
+                .expect("test recorder mutex is unpoisoned")
+                .entry(key.clone())
+                .or_default()
+                .clone(),
+        )
+    }
+
+    fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
+        if key.name() != "zebra.net.connection.state" {
+            return Gauge::noop();
+        }
+
+        let mut labels = key.labels();
+        let command = labels.next().expect("connection state has a command label");
+        assert_eq!(command.key(), "command");
+        assert!(
+            labels.next().is_none(),
+            "state must not have per-peer labels"
+        );
+        let mut gauges = self
+            .gauges
+            .lock()
+            .expect("test recorder mutex is unpoisoned");
+        Gauge::from_arc(
+            gauges
+                .entry(command.value().to_owned())
+                .or_default()
+                .clone(),
+        )
+    }
+
+    fn register_histogram(&self, _key: &Key, _metadata: &Metadata<'_>) -> Histogram {
+        Histogram::noop()
+    }
+}
+
+/// Aggregate gauges count concurrent peers and return to zero after transitions and disconnects.
+#[tokio::test]
+async fn connection_state_metrics_return_to_zero() {
+    let _init_guard = zebra_test::init();
+    let recorder = ConnectionMetricsRecorder::default();
+    let mut series_count = None;
+
+    metrics::with_local_recorder(&recorder, || {
+        for cycle in 0..8 {
+            let (first, mut client_tx, _service, mut outbound_messages, _error_slot) =
+                new_test_connection();
+            let (second, _idle_client_tx, _idle_service, _idle_messages, _idle_error_slot) =
+                new_test_connection();
+            let (mut peer_tx, peer_rx) = mpsc::channel(1);
+            let (mut idle_peer_tx, idle_peer_rx) = mpsc::channel(1);
+            let first = first.run(peer_rx).shared();
+            let second = second.run(idle_peer_rx).shared();
+
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(second.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+
+            // Polling an unchanged state must not count the same connection twice.
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+
+            let (response_tx, mut response_rx) = oneshot::channel();
+            client_tx
+                .try_send(ClientRequest {
+                    request: Request::Peers,
+                    tx: response_tx,
+                    span: Span::none(),
+                })
+                .expect("the connection is listening for client requests");
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(
+                outbound_messages.try_recv().expect("the request was sent"),
+                Message::GetAddr,
+            );
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+            assert_eq!(recorder.state("AwaitingResponse(Peers)"), 1.0);
+
+            peer_tx
+                .try_send(Ok(Message::Addr(Vec::new())))
+                .expect("the connection is listening for peer messages");
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(
+                response_rx
+                    .try_recv()
+                    .expect("the response channel is open")
+                    .expect("the response was sent")
+                    .expect("the peer returned a valid response"),
+                Response::Peers(Vec::new()),
+            );
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+            assert_eq!(recorder.state("AwaitingResponse(Peers)"), 0.0);
+
+            // Exercise both normal disconnects and cancellation of a live connection.
+            if cycle % 2 == 0 {
+                peer_tx.close_channel();
+                assert_eq!(first.clone().now_or_never(), Some(()));
+            }
+            drop(first);
+            assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+
+            // Distinct transport error messages must not create distinct state series.
+            idle_peer_tx
+                .try_send(Err(
+                    std::io::Error::other(format!("peer failure {cycle}")).into()
+                ))
+                .expect("the idle connection is listening for peer messages");
+            assert_eq!(second.clone().now_or_never(), Some(()));
+            drop(second);
+            drop(new_test_connection().0);
+
+            let gauges = recorder
+                .gauges
+                .lock()
+                .expect("test recorder mutex is unpoisoned");
+            assert!(gauges
+                .values()
+                .all(|value| f64::from_bits(value.load(Ordering::Relaxed)) == 0.0));
+            assert_eq!(*series_count.get_or_insert(gauges.len()), gauges.len());
+        }
+    });
+}
+
+#[test]
+fn connection_state_commands_omit_serialization_details() {
+    for detail in ["first peer failure", "second peer failure"] {
+        let handler = Handler::Finished(Err(PeerError::Serialization(
+            std::io::Error::other(detail).into(),
+        )));
+        assert_eq!(handler.command(), "Finished(Serialization)");
+        assert!(
+            handler.to_string().contains(detail),
+            "logs retain error details",
+        );
+    }
+}
+
+/// Bound block requests before inbound dispatch without capping transactions or counting duplicates.
+#[tokio::test]
+async fn getdata_block_hashes_are_bounded_before_dispatch() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<_> = (0u64..50_000)
+            .map(|index| {
+                let mut hash = [0; 32];
+                hash[..8].copy_from_slice(&index.to_le_bytes());
+                InventoryHash::Block(block::Hash(hash))
+            })
+            .collect();
+        let transactions: Vec<_> = (0..32)
+            .map(|index| InventoryHash::Tx(transaction::Hash([index; 32])))
+            .chain(std::iter::once(InventoryHash::Wtx(transaction::WtxId {
+                id: transaction::Hash([32; 32]),
+                auth_digest: transaction::AuthDigest([33; 32]),
+            })))
+            .collect();
+        let ignored = [
+            InventoryHash::Error,
+            InventoryHash::FilteredBlock(block::Hash([255; 32])),
+        ];
+        let mixed: Vec<_> = transactions
+            .iter()
+            .chain(&ignored)
+            .chain(&blocks[..32])
+            .copied()
+            .collect();
+        let duplicates: Vec<_> = std::iter::repeat_n(blocks[0], 32)
+            .chain(blocks[..GETDATA_MAX_BLOCK_COUNT].iter().copied())
+            .collect();
+
+        for items in [
+            blocks[..1].to_vec(),
+            blocks[..GETDATA_MAX_BLOCK_COUNT].to_vec(),
+            blocks[..=GETDATA_MAX_BLOCK_COUNT].to_vec(),
+            blocks,
+            duplicates,
+            mixed,
+            transactions,
+            ignored.to_vec(),
+            Vec::new(),
+        ] {
+            // The connection keeps the first distinct block hashes, in inventory order.
+            let mut expected_blocks = HashSet::new();
+            for hash in items.iter().filter_map(InventoryHash::block_hash) {
+                if expected_blocks.len() == GETDATA_MAX_BLOCK_COUNT {
+                    break;
+                }
+                expected_blocks.insert(hash);
+            }
+            let expected_transactions: HashSet<_> = items
+                .iter()
+                .filter_map(InventoryHash::unmined_tx_id)
+                .collect();
+            let (mut connection, _client_tx, mut inbound_service, _outbound, _error_slot) =
+                new_test_connection();
+            let message = Message::GetData(items);
+
+            if expected_blocks.is_empty() && expected_transactions.is_empty() {
+                assert_eq!(
+                    connection.handle_message_as_request(message.clone()).await,
+                    Some(message),
+                );
+                inbound_service.expect_no_requests().await;
+                continue;
+            }
+
+            let (_, unhandled) = tokio::join!(
+                async {
+                    let request = inbound_service.expect_request_that(|_| true).await;
+                    match request.request() {
+                        Request::BlocksByHash(hashes) => {
+                            assert!(
+                                !expected_blocks.is_empty(),
+                                "transactions stay transactions"
+                            );
+                            assert_eq!(
+                                hashes, &expected_blocks,
+                                "block requests must keep the first distinct hashes, bounded \
+                                 before dispatch",
+                            );
+                        }
+                        Request::TransactionsById(ids) => {
+                            assert!(expected_blocks.is_empty(), "blocks take priority");
+                            assert_eq!(ids, &expected_transactions);
+                        }
+                        request => panic!("unexpected inbound request: {request:?}"),
+                    }
+                    request.respond(Response::Nil);
+                },
+                connection.handle_message_as_request(message),
+            );
+            assert_eq!(unhandled, None);
+        }
+    })
+    .await
+    .expect("getdata dispatch finishes within the timeout");
+}
 
 /// Test that the connection run loop works as a future
 #[tokio::test]
@@ -137,8 +432,6 @@ async fn connection_run_loop_message_ok() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -187,6 +480,418 @@ async fn connection_run_loop_message_ok() {
     connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
+}
+
+/// Public clients can send maintenance requests without panicking or writing to the peer.
+#[tokio::test(start_paused = true)]
+async fn client_poll_peer_set_returns_nil() {
+    use tower::{Service, ServiceExt};
+
+    let _init_guard = zebra_test::init();
+    let (connection, client_tx, _inbound_service, mut outbound, error_slot) = new_test_connection();
+    let (mut client, _harness) = crate::peer::ClientTestHarness::build().finish();
+    client.server_tx = client_tx;
+    client.error_slot = error_slot.clone();
+    let connection_task = tokio::spawn(connection.run(futures::stream::pending()));
+
+    let response = tokio::time::timeout(Duration::from_secs(1), async {
+        client
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::PollPeerSet)
+            .await
+    })
+    .await
+    .expect("maintenance requests must finish without a peer response")
+    .expect("maintenance requests must succeed");
+    assert_eq!(response, Response::Nil);
+    assert!(outbound.next().now_or_never().is_none());
+    assert!(error_slot.try_get_error().is_none());
+
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// An empty mempool reply releases the connection before the request timeout.
+#[tokio::test(start_paused = true)]
+async fn empty_mempool_reply_unblocks_queued_block_request() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    let (block_tx, block_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::BlockDownload {
+                hash,
+                advertiser: None,
+            },
+            tx: block_tx,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(outbound.next().now_or_never().is_none());
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        assert_eq!(
+            mempool_rx.await.unwrap().unwrap(),
+            Response::TransactionIds(Vec::new()),
+        );
+        assert_eq!(
+            outbound.next().await,
+            Some(Message::GetData(vec![InventoryHash::Block(hash)])),
+        );
+    })
+    .await
+    .expect("an empty mempool reply must release the queued block request without a timeout");
+
+    assert!(error_slot.try_get_error().is_none());
+    drop(block_rx);
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// A late empty mempool reply must not finish a later block-locator request.
+#[tokio::test(start_paused = true)]
+async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+    drop(mempool_rx);
+
+    let (find_tx, mut find_rx) = oneshot::channel();
+    client_tx
+        .send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            },
+            tx: find_tx,
+            span: Span::current(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::GetBlocks {
+            known_blocks: Vec::new(),
+            stop: None,
+        }),
+    );
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), &mut find_rx)
+            .await
+            .is_err(),
+        "the late empty mempool reply must leave the block-locator request pending",
+    );
+
+    let hashes = vec![
+        zebra_chain::block::Hash([1; 32]),
+        zebra_chain::block::Hash([2; 32]),
+    ];
+    peer_tx
+        .send(Ok(Message::Inv(
+            hashes.iter().copied().map(InventoryHash::Block).collect(),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), find_rx)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        Response::BlockHashes(hashes),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// An empty `getblocks` result sends nothing, so peers can't take it for an empty mempool reply,
+/// while a nonempty result is still sent as an inventory.
+#[tokio::test(start_paused = true)]
+async fn empty_find_blocks_result_sends_no_inventory() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, _client_tx, mut inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+    let get_blocks = Message::GetBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+    let find_blocks = Request::FindBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+
+    peer_tx.send(Ok(get_blocks.clone())).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks.clone())
+        .await
+        .respond(Response::BlockHashes(Vec::new()));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .is_err(),
+        "an empty getblocks result must not be sent as an empty inventory",
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    peer_tx.send(Ok(get_blocks)).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks)
+        .await
+        .respond(Response::BlockHashes(vec![hash]));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Inv(vec![InventoryHash::Block(hash)])),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// Dedicated block adverts preserve the ordinary request counter and cancellation labels.
+#[test]
+fn block_advert_request_metrics_include_cancellation() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = ConnectionMetricsRecorder::default();
+
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::pause();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                let (mut connection, _client_tx, _service, mut outbound_messages, _error_slot) =
+                    new_test_connection();
+                let hash = block::Hash([1; 32]);
+                let (result, delivery) = tokio::sync::oneshot::channel();
+                let (_, message) = tokio::join!(
+                    connection.send_block_advert(crate::peer_set::BlockAdvert { hash, result }),
+                    outbound_messages.next(),
+                );
+                assert_eq!(
+                    message,
+                    Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+                );
+                delivery
+                    .await
+                    .expect("the completed write sends an acknowledgement")
+                    .expect("the connected test transport accepts the advert");
+
+                let (result, delivery) = tokio::sync::oneshot::channel();
+                drop(delivery);
+                connection
+                    .send_block_advert(crate::peer_set::BlockAdvert { hash, result })
+                    .await;
+                assert!(outbound_messages.try_recv().is_err());
+
+                assert_eq!(
+                    recorder.counter(Key::from_parts(
+                        "zebra.net.out.requests",
+                        &[("command", Request::AdvertiseBlock(hash, None).command())],
+                    )),
+                    1,
+                );
+                assert_eq!(
+                    recorder.counter(Key::from_parts(
+                        "zebra.net.out.requests.canceled",
+                        &[("command", Request::AdvertiseBlockToAll(hash).command())],
+                    )),
+                    1,
+                );
+                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 1);
+            })
+            .await
+            .expect("the local transport and canceled advert complete without remote responses");
+        });
+    });
+}
+/// Block adverts bypass pending responses without replacing their handlers or closing the client.
+#[tokio::test]
+async fn block_advert_while_awaiting_response() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let (
+            mut connection,
+            mut client_tx,
+            _inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+        let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+        connection.block_advert_rx = block_advert_rx;
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+
+        // Exercise the idle path before leaving an address request awaiting its response.
+        let idle_hash = block::Hash([1; 32]);
+        let (result, idle_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: idle_hash,
+                result,
+            })
+            .unwrap();
+        assert_eq!(
+            peer_outbound_messages.next().await,
+            Some(Message::Inv(vec![InventoryHash::Block(idle_hash)]))
+        );
+        idle_delivery.await.unwrap().unwrap();
+
+        let (request_tx, mut request_rx) = oneshot::channel();
+        client_tx
+            .try_send(ClientRequest {
+                request: Request::Peers,
+                tx: request_tx,
+                span: Span::current(),
+            })
+            .unwrap();
+        assert_eq!(peer_outbound_messages.next().await, Some(Message::GetAddr));
+
+        let busy_hash = block::Hash([2; 32]);
+        let (result, busy_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: busy_hash,
+                result,
+            })
+            .unwrap();
+        assert_eq!(
+            peer_outbound_messages.next().await,
+            Some(Message::Inv(vec![InventoryHash::Block(busy_hash)]))
+        );
+        busy_delivery.await.unwrap().unwrap();
+        assert!(request_rx.try_recv().unwrap().is_none());
+
+        // Closing only the advert channel must leave the original request alive.
+        drop(block_advert_tx);
+        peer_tx.try_send(Ok(Message::Addr(Vec::new()))).unwrap();
+        assert_eq!(
+            request_rx.await.unwrap().unwrap(),
+            Response::Peers(Vec::new())
+        );
+        assert!(shared_error_slot.try_get_error().is_none());
+
+        drop(client_tx);
+        connection_task.await.unwrap();
+    })
+    .await
+    .expect("adverts and the original response finish before the request timeout");
+}
+
+/// A pending GetBlocks response must not be displaced by a simultaneous unsolicited advert.
+#[tokio::test]
+async fn getblocks_response_precedes_ready_block_advert() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let (
+            mut connection,
+            client_tx,
+            mut inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+        let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+        connection.block_advert_rx = block_advert_rx;
+        let response_hash = block::Hash([3; 32]);
+        let advert_hash = block::Hash([4; 32]);
+
+        // Queue both inputs before starting the loop, making selection order deterministic.
+        peer_tx
+            .try_send(Ok(Message::GetBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            }))
+            .unwrap();
+        let (result, _delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: advert_hash,
+                result,
+            })
+            .unwrap();
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+
+        tokio::join!(
+            async {
+                inbound_service
+                    .expect_request(Request::FindBlocks {
+                        known_blocks: Vec::new(),
+                        stop: None,
+                    })
+                    .await
+                    .respond(Response::BlockHashes(vec![response_hash]));
+            },
+            async {
+                assert_eq!(
+                    peer_outbound_messages.next().await,
+                    Some(Message::Inv(vec![InventoryHash::Block(response_hash)]))
+                );
+                assert_eq!(
+                    peer_outbound_messages.next().await,
+                    Some(Message::Inv(vec![InventoryHash::Block(advert_hash)]))
+                );
+            }
+        );
+        assert!(shared_error_slot.try_get_error().is_none());
+
+        drop(client_tx);
+        connection_task.await.unwrap();
+    })
+    .await
+    .expect("the response and advert are both delivered");
 }
 
 /// Test that the connection run loop fails correctly when dropped
@@ -465,8 +1170,6 @@ async fn connection_run_loop_send_timeout_nil_response() {
     let request = ClientRequest {
         request: Request::AdvertiseTransactionIds(HashSet::new(), None),
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -539,8 +1242,6 @@ async fn connection_run_loop_send_timeout_expect_response() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -585,6 +1286,88 @@ async fn connection_run_loop_send_timeout_expect_response() {
     assert_eq!(outbound_message, None);
 }
 
+/// Test that the connection returns an error to the client, rather than panicking,
+/// when the connection task is cancelled while it is sending a message to a peer.
+///
+/// Regression test for [GHSA-6v36-c42v-v98p].
+///
+/// [GHSA-6v36-c42v-v98p]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p
+#[tokio::test]
+async fn connection_run_loop_cancelled_during_send() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (_peer_tx, peer_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let connection_join_handle = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::AdvertiseTransactionIds(HashSet::new(), None),
+        tx: request_tx,
+        span: Span::current(),
+    };
+
+    client_tx.try_send(request).expect("channel is valid");
+
+    // The peer isn't reading messages, so the send blocks.
+    // Let the connection start sending, but stop before the send times out.
+    tokio::time::sleep(REQUEST_TIMEOUT / 2).await;
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none(), "unexpected error: {error:?}");
+    assert!(
+        matches!(request_rx.try_recv(), Ok(None)),
+        "the request should still be sending",
+    );
+
+    // Simulate `Client::drop()`, which sets the error slot, then aborts the connection task.
+    shared_error_slot
+        .try_update_error(PeerError::ClientDropped.into())
+        .expect("the connection hasn't errored yet");
+    connection_join_handle.abort();
+
+    let connection_result = connection_join_handle.await;
+    assert!(
+        connection_result
+            .as_ref()
+            .is_err_and(|error| error.is_cancelled()),
+        "expected cancelled run loop, but it panicked or finished: {connection_result:?}",
+    );
+
+    let peer_response = request_rx.try_recv();
+    assert_eq!(
+        peer_response
+            .expect("response sender was used before it was dropped")
+            .expect("response is present")
+            .expect_err("response is an error (not a message)")
+            .inner_debug(),
+        "ClientDropped",
+    );
+
+    assert!(client_tx.is_closed());
+
+    inbound_service.expect_no_requests().await;
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, Some(Message::Inv(Vec::new())));
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
+}
+
 /// Test that the connection run loop continues but returns an error to the client,
 /// when a peer accepts a message, but does not send an expected response.
 #[tokio::test]
@@ -613,8 +1396,6 @@ async fn connection_run_loop_receive_timeout() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -780,10 +1561,11 @@ fn overload_probability_reduces_over_time() {
 /// Test that connections are randomly terminated in response to `Overloaded` errors.
 ///
 /// TODO: do a similar test on the real service stack created in the `start` command.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn connection_is_randomly_disconnected_on_overload() {
     let _init_guard = zebra_test::init();
 
+    // All peer traffic uses in-memory channels; preserve the waits using virtual time.
     // The number of times we repeat the test
     const TEST_RUNS: usize = 220;
     // The expected number of tests before a test failure due to random chance.
@@ -912,8 +1694,6 @@ async fn connection_ping_pong_round_trip() {
         .send(ClientRequest {
             request: Request::Ping(nonce),
             tx: response_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::none(),
         })
         .await
@@ -959,6 +1739,396 @@ async fn connection_ping_pong_round_trip() {
 
     drop(peer_tx);
     let _ = connection.await;
+}
+
+/// Test that `FindBlocks` responses keep at most the first 500 block hashes.
+#[test]
+fn find_blocks_response_hash_limit() {
+    let _init_guard = zebra_test::init();
+
+    let hashes: Vec<block::Hash> = (0..501u32)
+        .map(|i| {
+            let mut hash = [0; 32];
+            hash[..4].copy_from_slice(&i.to_le_bytes());
+            block::Hash(hash)
+        })
+        .collect();
+
+    for len in [500, 501] {
+        let mut handler = Handler::FindBlocks;
+        let items = hashes[..len]
+            .iter()
+            .copied()
+            .map(InventoryHash::Block)
+            .collect();
+
+        let ignored = handler.process_message(Message::Inv(items), &mut Vec::new(), None);
+        assert!(
+            ignored.is_none(),
+            "response must not be handled as a request"
+        );
+
+        match handler {
+            Handler::Finished(Ok(Response::BlockHashes(response))) => {
+                assert_eq!(response, hashes[..500], "must keep the first 500 hashes")
+            }
+            handler => panic!("unexpected handler state for {len} hashes: {handler:?}"),
+        }
+    }
+}
+
+/// Test that a `notfound` for a cancelled request doesn't end a later request for other inventory.
+#[tokio::test]
+async fn connection_ignores_notfound_for_cancelled_requests() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = [
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_slice(),
+    ]
+    .into_iter()
+    .map(|bytes| {
+        bytes
+            .zcash_deserialize_into()
+            .expect("block vectors are valid")
+    })
+    .collect();
+    let transactions: Vec<UnminedTx> = blocks
+        .iter()
+        .map(|block| UnminedTx::from(&block.transactions[0]))
+        .collect();
+    let block_request = |block: &Arc<Block>| Request::BlocksByHash(HashSet::from([block.hash()]));
+    let transaction_request = |tx: &UnminedTx| Request::TransactionsById(HashSet::from([tx.id]));
+
+    // A cancelled transaction request, then a block request.
+    let response = cancelled_notfound_then_response(
+        transaction_request(&transactions[0]),
+        transactions[0].id.into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a transaction request.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        transaction_request(&transactions[1]),
+        Message::Tx(transactions[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Transactions(vec![InventoryResponse::Available((
+            transactions[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a request for a different block.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+}
+
+/// Cancels `cancelled`, sends `request`, then delivers the peer's `notfound` for `missing` from
+/// the cancelled request before `reply`. Returns the response to `request`.
+async fn cancelled_notfound_then_response(
+    cancelled: Request,
+    missing: InventoryHash,
+    request: Request,
+    reply: Message,
+) -> Response {
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, mut inbound_service, mut peer_outbound_messages, error_slot) =
+        new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let mut response_rx = None;
+    for request in [cancelled, request] {
+        // Dropping the previous receiver cancels its request.
+        drop(response_rx.take());
+        let (tx, rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request,
+                tx,
+                span: Span::none(),
+            })
+            .await
+            .expect("connection accepts requests");
+        assert!(matches!(
+            peer_outbound_messages.next().await,
+            Some(Message::GetData(_))
+        ));
+        response_rx = Some(rx);
+    }
+
+    for message in [Message::NotFound(vec![missing]), reply] {
+        peer_tx
+            .send(Ok(message))
+            .await
+            .expect("connection is running");
+    }
+    let response = response_rx
+        .expect("the loop sends the request")
+        .await
+        .expect("connection responds")
+        .expect("the notfound for the cancelled request is ignored");
+
+    assert!(error_slot.try_get_error().is_none());
+    inbound_service.expect_no_requests().await;
+
+    drop(peer_tx);
+    let _ = connection.await;
+    response
+}
+
+/// Unrequested and duplicate transactions use the unsolicited path without ending a download.
+#[tokio::test(start_paused = true)]
+async fn unsolicited_transactions_leave_download_pending() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let transactions: Vec<UnminedTx> = [
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+            zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_slice(),
+            zebra_test::vectors::BLOCK_MAINNET_3_BYTES.as_slice(),
+        ]
+        .into_iter()
+        .map(|bytes| {
+            let block: Block = bytes
+                .zcash_deserialize_into()
+                .expect("block vectors are valid");
+            UnminedTx::from(&block.transactions[0])
+        })
+        .collect();
+        let (connection, mut client_tx, mut inbound_service, mut outbound, error_slot) =
+            new_test_connection();
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+        let (response_tx, mut response_rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request: Request::TransactionsById(HashSet::from([
+                    transactions[0].id,
+                    transactions[1].id,
+                ])),
+                tx: response_tx,
+                span: Span::none(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(outbound.next().await, Some(Message::GetData(_))));
+
+        // Check an unrelated transaction before any response, then a duplicate and another
+        // unrelated transaction after the first requested transaction.
+        for (index, transaction) in [&transactions[2], &transactions[0], &transactions[2]]
+            .into_iter()
+            .enumerate()
+        {
+            peer_tx
+                .send(Ok(Message::Tx(transaction.clone())))
+                .await
+                .unwrap();
+            inbound_service
+                .expect_request(Request::PushTransaction(transaction.clone(), None))
+                .await
+                .respond(Response::Nil);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(1), &mut response_rx)
+                    .await
+                    .is_err(),
+                "unsolicited transactions must leave the download pending",
+            );
+            if index == 0 {
+                peer_tx
+                    .send(Ok(Message::Tx(transactions[0].clone())))
+                    .await
+                    .unwrap();
+            }
+        }
+        peer_tx
+            .send(Ok(Message::Tx(transactions[1].clone())))
+            .await
+            .unwrap();
+        assert_eq!(
+            response_rx.await.unwrap().unwrap(),
+            Response::Transactions(
+                transactions[..2]
+                    .iter()
+                    .cloned()
+                    .map(|tx| InventoryResponse::Available((tx, None)))
+                    .collect(),
+            ),
+        );
+        assert!(error_slot.try_get_error().is_none());
+        connection_task.abort();
+        assert!(connection_task.await.unwrap_err().is_cancelled());
+    })
+    .await
+    .expect("the requested transactions must complete the download");
+}
+
+/// Only IDs explicitly named on the wire may affect missing-inventory routing.
+#[tokio::test(flavor = "multi_thread")]
+async fn synthesized_missing_inventory_is_not_registered() {
+    use tokio::sync::broadcast;
+    use tokio_util::codec::Framed;
+    use tower::{Service, ServiceExt};
+    use zebra_chain::{
+        parameters::Network,
+        transaction::{self, UnminedTxId},
+    };
+
+    use crate::{
+        peer::{ConnectedAddr, Handshake, HandshakeRequest},
+        peer_set::{ActiveConnectionCounter, InventoryChange},
+        protocol::external::Codec,
+        types::PeerServices,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = Network::Mainnet;
+        let addr = "127.0.0.1:8233".parse().unwrap();
+        let (inv_collector, mut inv_receiver) = broadcast::channel(16);
+        let handshake = Handshake::builder()
+            .with_config(crate::Config {
+                network: network.clone(),
+                ..Default::default()
+            })
+            .with_inbound_service(tower::service_fn(|_| async {
+                Ok::<_, crate::BoxError>(Response::Nil)
+            }))
+            .with_inventory_collector(inv_collector)
+            .finish()
+            .expect("the mandatory handshake configuration is supplied");
+        let (local_stream, remote_stream) = tokio::io::duplex(65536);
+        let mut remote = Framed::new(
+            remote_stream,
+            Codec::builder().for_network(&network).finish(),
+        );
+        let (client, ()) = tokio::join!(
+            handshake.oneshot(HandshakeRequest {
+                data_stream: local_stream,
+                connected_addr: ConnectedAddr::new_outbound_direct(addr),
+                connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+            }),
+            async {
+                let Some(Ok(Message::Version(mut version))) = remote.next().await else {
+                    panic!("the local peer starts with a version message");
+                };
+                version.nonce.0 ^= 1;
+                version.services = PeerServices::NODE_NETWORK;
+                remote.send(Message::Version(version)).await.unwrap();
+                remote.send(Message::Verack).await.unwrap();
+                assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+            },
+        );
+        let mut client = client.expect("the remote peer completes the handshake");
+        remote.codec_mut().reconfigure_full_body_len();
+
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .expect("the block vector is valid");
+        let tx = UnminedTx::from(&block.transactions[0]);
+        for (available, ids) in [
+            (
+                Message::Block(block.clone()),
+                [
+                    InventoryHash::Block(block.hash()),
+                    InventoryHash::Block(block::Hash([2; 32])),
+                    InventoryHash::Block(block::Hash([3; 32])),
+                ],
+            ),
+            (
+                Message::Tx(tx.clone()),
+                [
+                    tx.id.into(),
+                    UnminedTxId::Legacy(transaction::Hash([2; 32])).into(),
+                    UnminedTxId::Legacy(transaction::Hash([3; 32])).into(),
+                ],
+            ),
+        ] {
+            for partial in [false, true] {
+                let requested = if partial { &ids[..] } else { &ids[1..] };
+                let request = match &available {
+                    Message::Block(_) => Request::BlocksByHash(
+                        requested
+                            .iter()
+                            .map(|id| id.block_hash().unwrap())
+                            .collect(),
+                    ),
+                    Message::Tx(_) => Request::TransactionsById(
+                        requested
+                            .iter()
+                            .map(|id| id.unmined_tx_id().unwrap())
+                            .collect(),
+                    ),
+                    _ => unreachable!("the cases only contain blocks or transactions"),
+                };
+                let response = client.ready().await.unwrap().call(request);
+                assert!(matches!(
+                    remote.next().await.unwrap().unwrap(),
+                    Message::GetData(_)
+                ));
+                if partial {
+                    remote.send(available.clone()).await.unwrap();
+                }
+                remote.send(Message::NotFound(vec![ids[1]])).await.unwrap();
+                let response = response.await;
+                if partial {
+                    let missing = match response.unwrap() {
+                        Response::Blocks(items) => {
+                            items.iter().filter_map(|item| item.missing()).count()
+                        }
+                        Response::Transactions(items) => {
+                            items.iter().filter_map(|item| item.missing()).count()
+                        }
+                        response => panic!("unexpected inventory response: {response:?}"),
+                    };
+                    assert_eq!(
+                        missing, 2,
+                        "the response synthesizes the unreported missing ID"
+                    );
+                } else {
+                    assert!(response
+                        .unwrap_err()
+                        .inner_debug()
+                        .contains("NotFoundResponse"));
+                }
+                assert_eq!(
+                    inv_receiver.try_recv().unwrap(),
+                    InventoryChange::new_missing(ids[1], addr),
+                );
+                assert_eq!(
+                    inv_receiver.try_recv(),
+                    Err(broadcast::error::TryRecvError::Empty),
+                    "synthesized missing IDs must not be registered",
+                );
+            }
+        }
+    })
+    .await
+    .expect("the wire inventory responses must complete promptly");
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

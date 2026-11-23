@@ -485,6 +485,17 @@ where
                 return Err(TransactionError::CoinbaseInMempool);
             }
 
+            // A mempool transaction must fit in the next block's ZIP 218 shielded budget.
+            // Reject it before state lookups or proof verification; block verification checks
+            // the aggregate budget separately, including the coinbase.
+            if nu >= NetworkUpgrade::Nu7 {
+                if let Some((pool, count, limit)) =
+                    crate::block::ShieldedActionCounts::from_transaction(tx.as_ref()).exceeded_limit()
+                {
+                    return Err(TransactionError::TooManyShieldedActions { pool, count, limit });
+                }
+            }
+
             // Do quick checks first
             check_common_consensus_rules(tx.as_ref(), height, &network)?;
 
@@ -518,6 +529,16 @@ where
             // the script interpreter.
             check::mempool_standard_input_scripts(tx.as_ref(), &spent_outputs)?;
 
+            // Reject transactions above the standard sigop limit before script verification
+            // checks every one of their signatures, in the same order as zcashd:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1901-L1905
+            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+            let p2sh_sigops = zebra_script::p2sh_sigop_count(tx.as_ref(), &spent_outputs);
+            let total_sigops = sigops.saturating_add(p2sh_sigops);
+            if total_sigops > check::MAX_STANDARD_TX_SIGOPS {
+                return Err(TransactionError::NonStandardSigops { sigops: total_sigops });
+            }
+
             // Apply ZIP-317 policy before expensive cryptographic verification.
             let miner_fee = miner_fee(tx.as_ref(), &spent_utxos)?;
             let unpaid_actions = transaction::zip317::unpaid_actions(&unmined_tx, miner_fee);
@@ -529,7 +550,7 @@ where
             tracing::trace!(?tx_id, "got state UTXOs");
 
             // Select version-specific async verification pipeline
-            let mut async_checks = dispatch_version_verification(
+            let async_checks = dispatch_version_verification(
                 tx.as_ref(),
                 nu,
                 script_verifier,
@@ -537,28 +558,27 @@ where
                 tx_id,
             )?;
 
-            let check_anchors_and_revealed_nullifiers_query = state
-                .clone()
-                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+            // The async checks are lazy: nothing reaches a verifier until they are polled. Check
+            // nullifiers and anchors first, because returning early does not remove items that are
+            // already queued in a batch verifier. Include service readiness in the state deadline.
+            let response = tokio::time::timeout(
+                UTXO_LOOKUP_TIMEOUT,
+                state.clone().oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
                     unmined_tx.clone(),
-                ))
-                .map(|res| {
-                    assert!(
-                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
-                        "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
-                    );
-                    Ok(())
-                });
-
-            async_checks.push(check_anchors_and_revealed_nullifiers_query);
+                )),
+            )
+            .await
+            .map_err(BoxError::from)??;
+            assert!(
+                response == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
+            );
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
             async_checks.check().await?;
 
             tracing::trace!(?tx_id, "finished async checks");
-
-            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
 
             // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
             // spends both chain and mempool UTXOs (mempool outputs are appended last by
@@ -571,7 +591,7 @@ where
                 unmined_tx,
                 miner_fee,
                 sigops,
-                cached_ffi_transaction.p2sh_sigops(),
+                p2sh_sigops,
                 spent_outputs.into(),
             )?;
 
@@ -1056,14 +1076,29 @@ fn verify_v4_transaction_network_upgrade(
         | NetworkUpgrade::Nu6_2
         | NetworkUpgrade::Nu6_3 => Ok(()),
 
-        #[cfg(zcash_unstable = "zfuture")]
-        NetworkUpgrade::ZFuture => Ok(()),
-
         // Does not support V4 transactions
+        //
+        // # Consensus
+        //
+        // > [NU7 onward] The transaction version number MUST be 5 or 6.
+        //
+        // <https://zips.z.cash/zip-2003>
+        //
+        // `ZFuture` follows NU7, so it inherits the V4 rejection.
+        //
+        // This rule is deliberately not gated behind `zcash_unstable = "nu7"`: it is a no-op
+        // until NU7 has an activation height on a network, so gating it would only make the
+        // gated and ungated builds diverge without changing behaviour on any live network.
         NetworkUpgrade::Genesis
         | NetworkUpgrade::BeforeOverwinter
         | NetworkUpgrade::Overwinter
         | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            transaction.version(),
+            network_upgrade,
+        )),
+
+        #[cfg(zcash_unstable = "zfuture")]
+        NetworkUpgrade::ZFuture => Err(TransactionError::UnsupportedByNetworkUpgrade(
             transaction.version(),
             network_upgrade,
         )),

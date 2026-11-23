@@ -80,7 +80,7 @@ fn ironwood_included_in_remaining_transaction_value() {
 
 /// The NSM value balance is tracked with the chain value pools, but it is not one of them: it is
 /// excluded from the issued supply, so it doesn't count towards the `MAX_MONEY` cap.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn nsm_value_balance_is_not_part_of_the_issued_supply() {
     let _init_guard = zebra_test::init();

@@ -15,7 +15,6 @@ use orchard::{
     bundle::BatchValidator,
     circuit::{OrchardCircuitVersion, VerifyingKey},
 };
-use rand::thread_rng;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::{
     parameters::NetworkUpgrade,
@@ -188,7 +187,7 @@ impl Item {
         if batch.queue(self).is_err() {
             return false;
         }
-        batch.validate(thread_rng())
+        batch.validate(rand::rng())
     }
 }
 
@@ -498,7 +497,7 @@ impl Verifier {
     /// Synchronously process the batch (the verifying key is held by the batch), and send the
     /// result using the channel sender. This function blocks until the batch is completed.
     fn verify(batch: BatchValidator<'static>, tx: Sender) {
-        let result = batch.validate(thread_rng());
+        let result = batch.validate(rand::rng());
         let _ = tx.send(Some(result));
     }
 
@@ -518,7 +517,7 @@ impl Verifier {
     async fn flush_spawning(batch: BatchValidator<'static>, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         let start = std::time::Instant::now();
-        let result = spawn_fifo(move || batch.validate(thread_rng())).await;
+        let result = spawn_fifo(move || batch.validate(rand::rng())).await;
         let duration = start.elapsed().as_secs_f64();
 
         let result_label = match &result {

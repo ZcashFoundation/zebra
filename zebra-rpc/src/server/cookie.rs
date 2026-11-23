@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use color_eyre::Result;
-use rand::RngCore;
+use rand::Rng;
 use subtle::ConstantTimeEq;
 
 use std::{
@@ -34,7 +34,7 @@ impl Cookie {
 impl Default for Cookie {
     fn default() -> Self {
         let mut bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut bytes);
+        rand::rng().fill_bytes(&mut bytes);
 
         Self(STANDARD.encode(bytes))
     }

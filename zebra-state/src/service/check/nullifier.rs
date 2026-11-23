@@ -1,6 +1,6 @@
 //! Checks for nullifier uniqueness.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use tracing::trace;
 use zebra_chain::transaction::Transaction;
@@ -105,7 +105,7 @@ where
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(level = "trace", skip_all)]
 pub(crate) fn tx_no_duplicates_in_chain(
     finalized_chain: &ZebraDb,
     non_finalized_chain: Option<&Arc<Chain>>,
@@ -170,9 +170,9 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// different pools have nullifiers with same bit pattern, they won't be
 /// considered the same when determining uniqueness. This is enforced by the
 /// callers of this function.
-#[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
+#[tracing::instrument(level = "trace", skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
+    chain_nullifiers: &mut imbl::HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
     revealing_tx_id: SpendingTransactionId,
 ) -> Result<(), ValidateContextError>
@@ -217,12 +217,12 @@ where
 /// [`add_to_non_finalized_chain_unique`], so this shielded data should be the
 /// only shielded data that added this nullifier to this
 /// [`Chain`].
-#[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
+#[tracing::instrument(level = "trace", skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
+    chain_nullifiers: &mut imbl::HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
 ) where
-    NullifierT: std::fmt::Debug + Eq + std::hash::Hash,
+    NullifierT: Copy + std::fmt::Debug + Eq + std::hash::Hash,
 {
     for nullifier in shielded_data_nullifiers.into_iter() {
         trace!(?nullifier, "removing nullifier");

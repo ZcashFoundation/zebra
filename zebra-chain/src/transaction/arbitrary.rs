@@ -35,23 +35,12 @@ use super::{
     FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx, VerifiedUnminedTx,
 };
 
-/// Returns the librustzcash consensus branch ID for `network_upgrade`, falling back to
-/// `fallback` when the upgrade has no branch ID that librustzcash recognises.
-///
-/// Shielded bundles must be built for the branch of the transaction that will carry them, since
-/// the branch selects the bundle version and therefore which flags are representable. The
-/// fallback must match the one the corresponding `Transaction::test_v*` constructor uses, or the
-/// bundle would be built for a different branch than the transaction it ends up in. In
-/// particular NU7's branch ID is behind an unstable feature, so a v6 transaction at NU7 falls
-/// back to NU6.3 — the branch where v6 and the Ironwood pool were introduced.
-fn branch_id_of(
-    network_upgrade: NetworkUpgrade,
-    fallback: zcash_protocol::consensus::BranchId,
-) -> zcash_protocol::consensus::BranchId {
+/// Returns the librustzcash consensus branch ID selected for the test transaction and its bundles.
+fn branch_id_of(network_upgrade: NetworkUpgrade) -> zcash_protocol::consensus::BranchId {
     network_upgrade
         .branch_id()
         .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-        .unwrap_or(fallback)
+        .expect("the generated transaction upgrade has a supported consensus branch ID")
 }
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
@@ -62,12 +51,13 @@ pub const MAX_ARBITRARY_ITEMS: usize = 4;
 
 // TODO: if needed, fixup transaction outputs
 //       (currently 0..=9 outputs, consensus rules require 1..)
+// V1 and V2 always get an output, so blocks of them pass the block transaction size check.
 impl Transaction {
     /// Generate a proptest strategy for V1 Transactions
     pub fn v1_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
-            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
+            vec(any::<transparent::Output>(), 1..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| {
@@ -83,7 +73,7 @@ impl Transaction {
     pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
-            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
+            vec(any::<transparent::Output>(), 1..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
             .prop_map(|(inputs, outputs, lock_time)| {
@@ -160,7 +150,7 @@ impl Transaction {
                         .flatten()
                         .and_then(|(n_actions, seed)| {
                             shielded::fake_bundle_for_branch(
-                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu5),
+                                branch_id_of(nu),
                                 ::orchard::ValuePool::Orchard,
                                 n_actions,
                                 seed,
@@ -224,7 +214,7 @@ impl Transaction {
                             .flatten()
                             .and_then(|(n_actions, seed)| {
                                 shielded::fake_bundle_for_branch(
-                                    branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                    branch_id_of(nu),
                                     ::orchard::ValuePool::Orchard,
                                     n_actions,
                                     seed,
@@ -237,7 +227,7 @@ impl Transaction {
                     let ironwood_bundle = (!is_genesis).then_some(ironwood).flatten().and_then(
                         |(n_actions, seed)| {
                             shielded::fake_bundle_for_branch(
-                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                branch_id_of(nu),
                                 ::orchard::ValuePool::Ironwood,
                                 n_actions,
                                 seed ^ 0xEEEE_0000_u64,
@@ -860,8 +850,14 @@ impl Arbitrary for Transaction {
             .boxed(),
 
             // V6 transactions are only valid from NU6.3; v4 and v5 remain valid alongside them.
-            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => prop_oneof![
+            NetworkUpgrade::Nu6_3 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
+                Self::v5_strategy(ledger_state.clone()),
+                Self::v6_strategy(ledger_state)
+            ]
+            .boxed(),
+            // ZIP 2003 removes V4 from NU7 onward.
+            NetworkUpgrade::Nu7 => prop_oneof![
                 Self::v5_strategy(ledger_state.clone()),
                 Self::v6_strategy(ledger_state)
             ]
@@ -972,7 +968,7 @@ pub fn transaction_to_fake_v5(
 
             let branch_id = block_nu
                 .branch_id()
-                .and_then(|cbid| BranchId::try_from(cbid).ok())
+                .map(|id| BranchId::try_from(id).expect("known branch IDs are supported"))
                 .unwrap_or(BranchId::Nu5);
 
             let inputs = trans.inputs();
@@ -1005,9 +1001,6 @@ pub fn transaction_to_fake_v5(
 
             Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
         }
-        // unreachable but suppress warning for non-nu7 builds
-        #[allow(unreachable_patterns)]
-        _ => trans.clone(),
     }
 }
 

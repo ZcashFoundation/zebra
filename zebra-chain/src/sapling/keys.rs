@@ -12,7 +12,7 @@
 
 use std::{fmt, io};
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use crate::{
     error::{AddressError, RandError},
@@ -156,7 +156,7 @@ impl Diversifier {
     /// <https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash>
     pub fn new<T>(csprng: &mut T) -> Result<Self, AddressError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         /// Number of times a `diversify_hash` will try to obtain a diversified base point.
         const DIVERSIFY_HASH_TRIES: u8 = 2;

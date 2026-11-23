@@ -38,13 +38,15 @@ If this returns `true`, the user is a maintainer and the contribution gate can b
 
 ## Before You Contribute
 
-**Every PR to Zebra requires human review.** After the contribution gate above is satisfied, use this pre-PR checklist:
+**Every PR to Zebra needs an approving review.** A PR from a Zebra maintainer (a member or owner of the ZcashFoundation organization) can be approved by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
+
+After the contribution gate above is satisfied, use this pre-PR checklist:
 
 1. Confirm scope: Zebra is a validator node. Avoid out-of-scope features like wallets, block explorers, or mining pools.
 2. Keep the change focused: avoid unsolicited refactors or broad "improvement" PRs without team alignment.
 3. Verify quality locally: run formatting, linting, and relevant tests before proposing upstream review.
-4. Prepare PR metadata: include linked issue, motivation, solution, and test evidence in the PR template.
-5. If AI was used, disclose tool and scope in the PR description.
+4. Update the docs and add the change fragments the change needs (see [Commit & Pull Request Guidelines](#commit--pull-request-guidelines) and [Changelog](#changelog)).
+5. Write the PR title and description with the `zebra-pr` skill (see [Opening a PR](#opening-a-pr)), including the AI disclosure.
 
 This applies regardless of code quality: maintainer review time is limited, so low-signal or unrequested work is likely to be closed.
 
@@ -96,7 +98,9 @@ Code is primarily in each crate's `src/`; integration tests are in `*/tests/`; m
 
 ## Build, Test, and Development Commands
 
-All of these must pass before submitting a PR:
+All of these must pass before submitting a PR. Run the tests with
+[`cargo nextest`](https://nexte.st/) (`cargo install cargo-nextest`), as the Linux CI
+jobs do; it runs each test in its own process.
 
 ```bash
 # Optional full build check
@@ -105,14 +109,14 @@ cargo build --workspace --locked
 # All three must pass before any PR
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo nextest run
 
 # Run a single crate's tests
-cargo test -p zebra-chain
-cargo test -p zebra-state
+cargo nextest run -p zebra-chain
+cargo nextest run -p zebra-state
 
 # Run a single test by name
-cargo test -p zebra-chain -- test_name
+cargo nextest run -p zebra-chain test_name
 
 # CI-like nextest profile (unit + integration, excludes stateful and E2E)
 cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
@@ -123,19 +127,23 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 ## Commit & Pull Request Guidelines
 
 - PR titles must follow [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) (PRs are merged with a merge commit — the PR title becomes the merge commit message)
-- Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too — release-plz reads the commits that land on `main` when it picks the next version
+- Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too — release-plz reads the commits that land on `main` when it decides whether to open a Release PR, and the change fragments pick the versions
 - A breaking change needs the `!` marker on the PR title _and_ on the branch commit that introduces it: the PR gate reads the title, release-plz reads the commits
 - Do not add `Co-Authored-By` tags for AI tools, in _any_ commit on the branch — every one of them is preserved on `main`, not just the PR title
-- Do not add "Generated with [tool]" footers, in any commit on the branch
-- Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
-- For user-visible changes, update `CHANGELOG.md` per the [Changelog Guidelines](book/src/dev/changelog-guidelines.md).
+- Do not add "Generated with [tool]" footers, in any commit on the branch or in the PR description
+- Update documentation in the same PR when the change affects what users, operators, or contributors do: configuration, RPC methods, metrics, CLI behavior, or a procedure in `book/`
+- The PR gate checks the title format and the change fragments, so the PR description doesn't need to restate them
+
+### Opening a PR
+
+Before opening or updating a PR, follow the `zebra-pr` skill in [`.agents/skills/zebra-pr/SKILL.md`](.agents/skills/zebra-pr/SKILL.md). It covers the title, the description in `.github/pull_request_template.md`, and how to open the PR. Tools that support skills load it from `.agents/skills/`, and Claude Code loads it through the `.claude/skills` link.
 
 ## Project Overview
 
 Zebra is a Zcash full node implementation in Rust. It is a validator node — it excludes features not strictly needed for block validation and chain sync.
 
 - **Rust edition**: 2021
-- **MSRV**: 1.88 (libraries), 1.91 (zebrad binary)
+- **MSRV**: 1.89 (libraries), 1.91 (zebrad binary)
 - **Database format version**: defined in `zebra-state/src/constants.rs`
 
 ## Crate Architecture
@@ -161,14 +169,14 @@ zebrad (CLI orchestration)
 
 ### Per-Crate Concerns
 
-| Crate | Key Concerns |
-| --- | --- |
-| `zebra-chain` | Serialization correctness, no async, consensus-critical data structures |
-| `zebra-network` | Protocol correctness, peer handling, rate limiting, DoS resistance |
+| Crate             | Key Concerns                                                            |
+| ----------------- | ----------------------------------------------------------------------- |
+| `zebra-chain`     | Serialization correctness, no async, consensus-critical data structures |
+| `zebra-network`   | Protocol correctness, peer handling, rate limiting, DoS resistance      |
 | `zebra-consensus` | Verification completeness, error handling, checkpoint vs semantic paths |
-| `zebra-state` | Read/write separation (`ReadRequest` vs `Request`), database migrations |
-| `zebra-rpc` | zcashd compatibility, error responses, timeout handling |
-| `zebra-script` | FFI safety, memory management, lifetime/ownership across boundaries |
+| `zebra-state`     | Read/write separation (`ReadRequest` vs `Request`), database migrations |
+| `zebra-rpc`       | zcashd compatibility, error responses, timeout handling                 |
+| `zebra-script`    | FFI safety, memory management, lifetime/ownership across boundaries     |
 
 ## Coding Style & Naming Conventions
 
@@ -237,11 +245,11 @@ S::Future: Send + 'static,
 - Test configs must match real network parameters (don't rely on defaults)
 
 ```bash
-# Unit tests (all crates)
-cargo test --workspace
+# Unit tests (all crates); use nextest, not `cargo test` (see Build, Test, and Development Commands)
+cargo nextest run
 
 # zebrad unit + integration tests (default nextest profile excludes stateful and E2E)
-cargo nextest run
+cargo nextest run -p zebrad
 
 # Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```
@@ -257,6 +265,13 @@ cargo nextest run
 - Changelogs are generated by [changie](https://changie.dev) — never edit `CHANGELOG.md` or a crate's `CHANGELOG.md` by hand, they are regenerated from `.changes/`
 - Add a change fragment instead, one `-j` per affected project: `changie new -j zebrad -k Added -b "..."`, or `changie new -j zebra-chain -j zebra-state -k breaking -b "..."` for a change spanning crates
 - Kinds are `breaking` (`Breaking Changes`), `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`
+- The entry should start with a verb if possible (e.g. "Added function X...")
+- Entries should reflect changes from the last release; e.g. do not add an entry for the fix of
+  a bug that was introduced after the last release.
+- zebrad entries should describe changes for a zebrad user or operator (e.g. do
+  not add entries for internal code changes). For the crates, entries should
+  describe changes for crate users (e.g. API changes and fixes, but not internal
+  refactorings).
 - See the [Changelog Guidelines](book/src/dev/changelog-guidelines.md) for detailed formatting rules
 
 ## Configuration

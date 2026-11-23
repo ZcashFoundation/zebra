@@ -17,6 +17,8 @@
 //! Each version is represented by one or more transactions from blocks at the
 //! appropriate network upgrade heights. The benchmark serializes each transaction
 //! to bytes first, then benchmarks both deserialization and serialization.
+//! V4 and V5 each include a transparent coinbase and a transaction with shielded
+//! data. Sample selection and initial serialization happen outside the timed loops.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -81,6 +83,21 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     if let Some(bytes) = first_tx_of_version(&block, 4) {
         tx_samples.push(("V4 sapling", bytes));
     }
+    let block = Block::zcash_deserialize(Cursor::new(
+        zebra_test::vectors::BLOCK_MAINNET_419202_BYTES.as_slice(),
+    ))
+    .expect("valid block");
+    let sapling_tx = block
+        .transactions
+        .iter()
+        .find(|tx| tx.version() == 4 && tx.has_sapling_shielded_data())
+        .expect("block 419202 contains a V4 transaction with Sapling data");
+    tx_samples.push((
+        "V4 sapling shielded",
+        sapling_tx
+            .zcash_serialize_to_vec()
+            .expect("a transaction from a valid block fixture must serialize"),
+    ));
 
     // V5 — NU5 block with Orchard data.
     let block = Block::zcash_deserialize(Cursor::new(
@@ -90,6 +107,17 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     if let Some(bytes) = first_tx_of_version(&block, 5) {
         tx_samples.push(("V5 orchard", bytes));
     }
+    let orchard_tx = block
+        .transactions
+        .iter()
+        .find(|tx| tx.version() == 5 && tx.has_orchard_shielded_data())
+        .expect("block 1687107 contains a V5 transaction with Orchard data");
+    tx_samples.push((
+        "V5 orchard shielded",
+        orchard_tx
+            .zcash_serialize_to_vec()
+            .expect("a transaction from a valid block fixture must serialize"),
+    ));
 
     for (label, tx_bytes) in &tx_samples {
         group.bench_with_input(

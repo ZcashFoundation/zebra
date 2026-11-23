@@ -90,7 +90,7 @@ use tokio::{
     sync::{oneshot, watch},
 };
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
@@ -102,8 +102,12 @@ use crate::{
         health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
+        metrics::node_context,
         notify::{self, BlockNotifyError},
-        sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
+        sync::{
+            self, record_tip_block_delay, show_block_chain_progress,
+            VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
+        },
         tokio::{RuntimeRun, TokioComponent},
         zcashd_compat, ChainSync, Inbound,
     },
@@ -384,7 +388,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) =
+        let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
                 config.network.clone(),
                 inbound,
@@ -423,7 +427,7 @@ impl StartCmd {
         let (mempool, mempool_transaction_subscriber) = Mempool::new(
             &config.network.network,
             &config.mempool,
-            peer_set.clone(),
+            peer_set.background_service(),
             state.clone(),
             tx_verifier,
             sync_status.clone(),
@@ -448,7 +452,7 @@ impl StartCmd {
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
-            block_download_peer_set: peer_set.clone(),
+            block_download_peer_set: peer_set.background_service(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state: state.clone(),
@@ -601,7 +605,7 @@ impl StartCmd {
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
-                peer_set.clone(),
+                block_advertiser,
                 Some(submit_block_channel.receiver()),
             )
             .in_current_span(),
@@ -649,6 +653,17 @@ impl StartCmd {
             )
             .in_current_span(),
         );
+
+        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
+        info!("spawning tip block delay metrics task");
+        node_context::set_network(&config.network.network);
+        let tip_delay_task_handle =
+            tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
+
+        // Like the tip block delay task, this task only reports metrics.
+        info!("spawning process memory metrics task");
+        let process_memory_task_handle =
+            tokio::spawn(crate::components::metrics::record_process_memory().in_current_span());
 
         // Start health server if configured
         info!("initializing health endpoints");
@@ -892,6 +907,8 @@ impl StartCmd {
         rpc_tx_queue_handle.abort();
         block_template_task_handle.abort();
         health_task_handle.abort();
+        tip_delay_task_handle.abort();
+        process_memory_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();

@@ -1,49 +1,56 @@
 <!--
-- Use this template to quickly write the PR description.
-- Skip or delete items that don't fit.
+First lines: how this PR relates to issues and other PRs, one per line:
+- "Fixes #123" for an issue this PR resolves
+- "Part of #123: <the part it covers>" for an issue it only partly resolves
+- "Closes #456: <reason>" for another PR this one replaces
+- "Depends on #789: <the commits to review>" for a PR this one is stacked on
 -->
 
-## Motivation
+## Summary
 
 <!--
-- Describe the goals of the PR.
-- If it closes any issues, enumerate them here.
+What changes and why, in at most three sentences or four short bullets. A
+reviewer should understand the PR from this alone in 30 seconds, without the
+code. Leave how it works to Reviewer Notes.
 -->
 
-## Solution
-
-<!-- Describe the changes in the PR. -->
-
-### Tests
+## Reviewer Notes
 
 <!--
-- Describe how you tested the solution:
-  - Describe any manual or automated tests.
-  - If you could not test the solution, explain why.
+Only what a reviewer needs and can't get from the diff: a design choice or
+tradeoff, what users must do after the change, or an external specification.
+A short paragraph each. Add a diagram, pseudocode, or table only when it shows
+something faster than prose. Delete this section when there is nothing to add.
 -->
 
-### Specifications & References
-
-<!-- Provide any relevant references. -->
-
-### Follow-up Work
+## Evidence
 
 <!--
-- If there's anything missing from the solution, describe it here.
-- List any follow-up issues or PRs.
+Before and after: a test that failed and now passes, real output, or a
+screenshot. Skip what CI already reports (fmt, clippy, the existing suite).
+Delete this section when there is no behavior to show, such as a docs change.
 -->
 
-### AI Disclosure
+## Merge Danger
 
-<!-- If you used AI tools, let us know — it helps reviewers. -->
+<!--
+Door: "two-way" if reverting this PR fully undoes it, or "one-way" if it acts
+outside the repository in a way a revert doesn't undo: a database format
+upgrade, a publish, a production deployment, or deleted data or infrastructure.
+"two-way until the next release" for consensus, peer protocol, crate API,
+configuration, RPC, or metrics changes.
 
-- [ ] No AI tools were used in this PR
-- [ ] AI tools were used: <!-- tool name and what it was used for, e.g., "Claude for test boilerplate" -->
+Blast radius: what a defect would affect, in a few words, such as "sync",
+"RPC clients", "state on disk", "release path", or "CI only".
+-->
 
-### PR Checklist
+**Door:**
 
-- [ ] The PR title follows [conventional commits](https://www.conventionalcommits.org/) format: `type(scope): description`
-- [ ] The PR follows the [contribution guidelines](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md).
-- [ ] This change was discussed in an issue or with the team beforehand.
-- [ ] The solution is tested.
-- [ ] The documentation and changelogs are up to date.
+**Blast radius:**
+
+## AI Disclosure
+
+<!--
+The tool and what it did, for example "Claude Code wrote the implementation and
+tests; I reviewed both." If you used no AI tools, say so.
+-->

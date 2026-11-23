@@ -8,7 +8,7 @@ integration keeps working.
 
 Use this only if you need that integration. If you do not depend on the zcashd
 wallet, just run Zebra. If you can move your wallet now,
-[migrate it to Zallet](https://zcash.github.io/wallet/cli/migrate-zcashd-wallet.html) —
+[migrate it to Zallet](https://zcash.github.io/zallet/cli/migrate-zcashd-wallet.html) —
 that is the supported destination, and the sidecar is a bridge to it.
 
 ## What you need

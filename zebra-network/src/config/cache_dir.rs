@@ -61,7 +61,7 @@ impl CacheDir {
         Some(
             self.cache_dir()?
                 .join("network")
-                .join(format!("{}.peers", network.lowercase_name())),
+                .join(format!("{}.peers", network.directory_name())),
         )
     }
 

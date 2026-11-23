@@ -634,14 +634,17 @@ pub fn tx_transparent_coinbase_spends_maturity(
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), TransactionError> {
+    // The restriction depends only on the transaction, network and height, so compute it once:
+    // it inspects the transaction's transparent outputs, and doing that for every spend makes
+    // this check quadratic in the transaction's inputs and outputs.
+    let spend_restriction = tx.coinbase_spend_restriction(network, height);
+
     for spend in tx.spent_outpoints() {
         let utxo = block_new_outputs
             .get(&spend)
             .map(|ordered_utxo| ordered_utxo.utxo.clone())
             .or_else(|| spent_utxos.get(&spend).cloned())
             .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
-
-        let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
         zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }
@@ -654,6 +657,13 @@ pub fn tx_transparent_coinbase_spends_maturity(
 /// This is zcashd's `MAX_P2SH_SIGOPS` standardness (policy) constant:
 /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L20>
 pub const MAX_P2SH_SIGOPS: u32 = 15;
+
+/// The maximum number of signature operations in a standard transaction: legacy sigops plus P2SH
+/// redeem-script sigops.
+///
+/// This is zcashd's `MAX_STANDARD_TX_SIGOPS` standardness (policy) constant:
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L24>
+pub const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
 
 /// The maximum size in bytes of the scriptSig of a standard transaction input.
 ///

@@ -108,7 +108,7 @@ impl TracingEndpoint {
                             .serve_connection(io, svc)
                             .await
                         {
-                            error!(
+                            warn!(
                                 "Serve connection in {addr:?} failed: {err:?}.",
                                 addr = addr,
                                 err = err

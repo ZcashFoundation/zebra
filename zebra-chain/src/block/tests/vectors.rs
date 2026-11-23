@@ -18,9 +18,229 @@ use crate::{
     },
     transaction::{LockTime, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 use super::generate; // TODO: this should be rewritten as strategies
+
+/// Independent Bitcoin-style reduction: SHA256d, duplicating the last node on odd levels.
+fn serial_transaction_merkle_root(leaves: &[[u8; 32]]) -> Option<[u8; 32]> {
+    let mut level = leaves.to_vec();
+    while level.len() > 1 {
+        if !level.len().is_multiple_of(2) {
+            level.push(*level.last().unwrap());
+        }
+        let mut parents = Vec::new();
+        for pair in level.chunks_exact(2) {
+            let mut writer = sha256d::Writer::default();
+            writer.write_all(&pair[0]).unwrap();
+            writer.write_all(&pair[1]).unwrap();
+            parents.push(writer.finish());
+        }
+        level = parents;
+    }
+    level.first().copied()
+}
+
+/// Independent ZIP-244 reduction: zero-pad once, then hash with the auth-data personalization.
+fn serial_auth_data_root(leaves: &[[u8; 32]]) -> [u8; 32] {
+    let mut level = leaves.to_vec();
+    level.resize(level.len().next_power_of_two(), [0; 32]);
+    while level.len() > 1 {
+        let mut parents = Vec::new();
+        for pair in level.chunks_exact(2) {
+            let digest = blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"ZcashAuthDatHash")
+                .to_state()
+                .update(&pair[0])
+                .update(&pair[1])
+                .finalize();
+            parents.push(digest.as_bytes().try_into().unwrap());
+        }
+        level = parents;
+    }
+    level[0]
+}
+
+/// Both reducers must preserve serial semantics across padding, chunk, and scheduling boundaries.
+#[test]
+fn parallel_merkle_roots_match_serial_reference() {
+    use crate::{
+        block::merkle::{AuthDataRoot, Root, PARALLEL_MERKLE_THRESHOLD},
+        transaction::{AuthDigest, Hash as TransactionHash},
+    };
+
+    let _init_guard = zebra_test::init();
+    let cutoff = PARALLEL_MERKLE_THRESHOLD;
+    let mut state = 0x4d59_5df4_d0f3_3173_u64;
+    let leaves: Vec<[u8; 32]> = (0..20_000)
+        .map(|_| {
+            let mut leaf = [0; 32];
+            for bytes in leaf.chunks_exact_mut(8) {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                bytes.copy_from_slice(&state.to_le_bytes());
+            }
+            leaf
+        })
+        .collect();
+
+    for leaf_count in [
+        0,
+        1,
+        2,
+        3,
+        127,
+        128,
+        129,
+        255,
+        256,
+        257,
+        511,
+        512,
+        513,
+        cutoff - 1,
+        cutoff,
+        cutoff + 1,
+        2_047,
+        2_048,
+        2_049,
+        4_095,
+        4_096,
+        4_097,
+        8_191,
+        8_192,
+        8_193,
+        9_194,
+        16_383,
+        16_384,
+        16_385,
+        19_999,
+        20_000,
+    ] {
+        let leaves = &leaves[..leaf_count];
+        let actual_auth = leaves
+            .iter()
+            .copied()
+            .map(AuthDigest)
+            .collect::<AuthDataRoot>();
+        assert_eq!(
+            actual_auth,
+            AuthDataRoot::from(serial_auth_data_root(leaves)),
+            "auth-data root for {leaf_count} leaves"
+        );
+
+        let transaction_root = || {
+            leaves
+                .iter()
+                .copied()
+                .map(TransactionHash)
+                .collect::<Root>()
+        };
+        match serial_transaction_merkle_root(leaves) {
+            Some(expected) => assert_eq!(
+                transaction_root(),
+                Root::from(expected),
+                "transaction root for {leaf_count} leaves"
+            ),
+            None => assert!(
+                std::panic::catch_unwind(transaction_root).is_err(),
+                "an empty transaction tree must still panic"
+            ),
+        }
+    }
+}
+
+/// Parallel reduction must preserve independent serial roots and block headers.
+#[test]
+fn parallel_merkle_roots_match_serial_vectors() {
+    use crate::{
+        block::merkle::{AuthDataRoot, Root},
+        transaction::AuthDigest,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
+        let block = Block::zcash_deserialize(*block_bytes).unwrap();
+        let auth_digests: Vec<_> = block
+            .transactions
+            .iter()
+            .map(|tx| tx.auth_digest().unwrap_or(AuthDigest([0xFF; 32])).0)
+            .collect();
+        let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash().0).collect();
+
+        assert_eq!(
+            block.auth_data_root(),
+            AuthDataRoot::from(serial_auth_data_root(&auth_digests)),
+            "auth data root at {:?}",
+            block.coinbase_height()
+        );
+        assert_eq!(
+            block.header.merkle_root,
+            Root::from(serial_transaction_merkle_root(&transaction_hashes).unwrap()),
+            "header transaction root at {:?}",
+            block.coinbase_height()
+        );
+        assert_eq!(
+            block.transactions.iter().collect::<Root>(),
+            block.header.merkle_root,
+            "parallel transaction root at {:?}",
+            block.coinbase_height()
+        );
+    }
+}
+
+/// Cover empty, legacy, mixed-version, and padded trees.
+#[test]
+fn parallel_merkle_roots_match_serial_edge_cases() {
+    use crate::{block::merkle::AuthDataRoot, transaction::AuthDigest};
+
+    let _init_guard = zebra_test::init();
+    let legacy =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES).unwrap();
+    let mut mixed =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+
+    assert!(legacy
+        .transactions
+        .iter()
+        .all(|tx| tx.auth_digest().is_none()));
+    assert!(mixed
+        .transactions
+        .iter()
+        .any(|tx| tx.auth_digest().is_some()));
+    mixed.transactions.insert(1, legacy.transactions[0].clone());
+
+    for source in [legacy, mixed] {
+        for tx_count in [0, 1, 2, 3, 7, 15, 16, 17, 32, 257] {
+            let block = Block {
+                header: source.header.clone(),
+                transactions: source
+                    .transactions
+                    .iter()
+                    .cycle()
+                    .take(tx_count)
+                    .cloned()
+                    .collect(),
+            };
+            let digests: Vec<_> = block
+                .transactions
+                .iter()
+                .map(|tx| tx.auth_digest().unwrap_or(AuthDigest([0xFF; 32])).0)
+                .collect();
+            let serial = AuthDataRoot::from(serial_auth_data_root(&digests));
+            let actual = block.auth_data_root();
+
+            assert_eq!(actual, serial, "auth data root for {tx_count} transactions");
+            if tx_count == 0 {
+                assert_eq!(actual, AuthDataRoot::from([0; 32]));
+            }
+        }
+    }
+}
 
 #[test]
 fn blockheaderhash_debug() {
@@ -93,7 +313,7 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
         ],
         LockTime::unlocked(),
     );
-    let utxos = HashMap::new();
+    let utxos = HashMap::<transparent::OutPoint, transparent::Utxo>::new();
 
     assert!(
         coinbase.value_balance(&utxos).is_err(),
@@ -110,10 +330,328 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
 
     assert!(
         block
-            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero())
+            .chain_value_pool_change(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &Network::Mainnet,
+                ValueBalance::zero()
+            )
             .is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
+}
+
+/// Unspendable genesis outputs are not issued supply, even on a custom monetary schedule.
+#[test]
+fn genesis_transparent_outputs_are_not_issued_supply() {
+    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+    let _init_guard = zebra_test::init();
+    for bytes in [
+        &*zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES,
+        &*zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES,
+    ] {
+        let genesis: Block = bytes.zcash_deserialize_into().unwrap();
+        assert!(genesis.transactions[0]
+            .outputs()
+            .iter()
+            .all(|output| output.value.is_zero()));
+    }
+
+    let network = Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
+        .to_network()
+        .unwrap();
+    let genesis: Block = zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    for value in [0, 1, MAX_MONEY] {
+        let mut genesis = genesis.clone();
+        let transaction = Arc::make_mut(&mut genesis.transactions[0]);
+        let mut outputs = transaction.outputs();
+        outputs[0].value = value.try_into().unwrap();
+        transaction.set_outputs(outputs);
+        for network in [&network, &Network::Mainnet] {
+            let change = genesis
+                .chain_value_pool_change(
+                    &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
+                    DeferredPoolBalanceChange::zero(),
+                    network,
+                    ValueBalance::zero(),
+                )
+                .unwrap();
+            let pools = ValueBalance::zero()
+                .add_chain_value_pool_change(change)
+                .unwrap();
+            assert!(pools.transparent_amount().is_zero());
+            assert!(pools.nsm_amount().is_zero());
+            assert!(pools.total().unwrap().is_zero());
+        }
+    }
+}
+
+/// From NU7, 60% of a block's transaction fees accrue to the NSM reserve instead of being
+/// claimed by the miner, so they appear in the block's chain value pool change.
+#[test]
+fn chain_value_pool_change_accrues_the_nsm_reserve() {
+    use crate::{
+        parameters::testnet::ConfiguredActivationHeights, transaction::Hash as TransactionHash,
+        transparent::OutPoint,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let height = Height(1_000);
+    let spent_value: Amount<NonNegative> = 100_000.try_into().expect("valid amount");
+    let change: Amount<NonNegative> = 90_000.try_into().expect("valid amount");
+    // The one non-coinbase transaction below pays a fee of 10,000 zatoshi.
+
+    let coinbase = Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: 0xFFFF_FFFF,
+        }],
+        vec![transparent::Output::new(
+            change,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    );
+
+    let outpoint = OutPoint::from_usize(TransactionHash([0; 32]), 0);
+    let spend = Transaction::test_v1(
+        vec![transparent::Input::PrevOut {
+            outpoint,
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            change,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    );
+
+    let utxos = HashMap::from([(
+        outpoint,
+        transparent::Utxo::new(
+            transparent::Output::new(spent_value, transparent::Script::new(&[])),
+            Height(999),
+            false,
+        ),
+    )]);
+
+    let header: Header = zebra_test::vectors::DUMMY_HEADER
+        .zcash_deserialize_into()
+        .expect("dummy header should deserialize");
+    let block = Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(coinbase), Arc::new(spend)],
+    };
+
+    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000), (Some(999), 6_000)] {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(3),
+                nu6_1: Some(4),
+                nu6_2: Some(5),
+                nu6_3: Some(6),
+                nu7,
+                ..Default::default()
+            }
+            .into(),
+        );
+        let (change, fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("chain value pool change should be calculable");
+        assert_eq!(change.nsm_amount().zatoshis(), expected_reserve);
+        assert_eq!(fees.map(|fees| fees.zatoshis()), nu7.map(|_| 10_000));
+    }
+}
+
+/// Seed, reissue, fund and roll back using the same contextual accounting used by state commits.
+#[test]
+fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::{
+        amount::NegativeAllowed,
+        parameters::{
+            subsidy::{
+                block_subsidy_with_parent_pools, funding_stream_address, funding_stream_values,
+                scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError,
+                FundingStreamReceiver, SubsidyError,
+            },
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams, Parameters,
+            },
+        },
+    };
+    use std::ops::Neg;
+
+    let height = Height(1_000);
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000u64)?;
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(height.0),
+            ..Default::default()
+        })?
+        .with_initial_nsm_value_balance(reserve)
+        .with_nsm_reissuance_height(height)
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(height..Height(1_010)),
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ]),
+        }])
+        .to_network()?;
+    let before_seed = ValueBalance::zero();
+    let header: Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let make_block = |height, outputs| Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(Transaction::test_v1(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            outputs,
+            LockTime::unlocked(),
+        ))],
+    };
+    let before_activation = make_block(
+        Height(999),
+        vec![transparent::Output::new(
+            scheduled_block_subsidy(Height(999), &network)?,
+            transparent::Script::new(&[]),
+        )],
+    );
+    let pre_activation_change = before_activation.chain_value_pool_change(
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        before_seed,
+    )?;
+    let parent = before_seed.add_chain_value_pool_change(pre_activation_change)?;
+    assert!(parent.nsm_amount().is_zero());
+
+    let total = block_subsidy_with_parent_pools(height, &network, parent)?;
+    assert_eq!(
+        (total - scheduled_block_subsidy(height, &network)?)?.zatoshis(),
+        1_375
+    );
+    let funding = funding_stream_values(height, &network, total)?;
+    let grant = funding[&FundingStreamReceiver::MajorGrants];
+    let deferred = funding[&FundingStreamReceiver::Deferred];
+    assert_eq!(grant.zatoshis(), total.zatoshis() * 8 / 100);
+    assert_eq!(deferred.zatoshis(), total.zatoshis() * 12 / 100);
+    let grant_script = funding_stream_address(height, &network, FundingStreamReceiver::MajorGrants)
+        .expect("configured funding address")
+        .script();
+    let miner = (total - grant - deferred)?;
+    let block = make_block(
+        height,
+        vec![
+            transparent::Output::new(miner, transparent::Script::new(&[])),
+            transparent::Output::new(grant, grant_script.clone()),
+        ],
+    );
+    let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
+    let (change, fees) = block.chain_value_pool_change_and_fees(
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
+        deferred_change,
+        &network,
+        parent,
+    )?;
+    assert_eq!(fees, Some(Amount::zero()));
+    assert_eq!(change.nsm_amount().zatoshis(), 9_999_998_625);
+    let after = parent.add_chain_value_pool_change(change)?;
+    assert_eq!(after.nsm_amount().zatoshis(), 9_999_998_625);
+    assert_eq!(after.total()?, (parent.total()? + total)?);
+    let next = make_block(height.next()?, Vec::new());
+    let next_change = next.chain_value_pool_change(
+        &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        after,
+    )?;
+    assert_eq!(next_change.nsm_amount().zatoshis(), -1_375);
+    assert_eq!(ValueBalance::from_bytes(&after.to_bytes())?, after);
+
+    // Keeping the total correct but paying funding from scheduled issuance alone is invalid.
+    let scheduled_grant =
+        funding_stream_values(height, &network, scheduled_block_subsidy(height, &network)?)?
+            [&FundingStreamReceiver::MajorGrants];
+    let underfunded = make_block(
+        height,
+        vec![
+            transparent::Output::new(
+                (total - scheduled_grant - deferred)?,
+                transparent::Script::new(&[]),
+            ),
+            transparent::Output::new(scheduled_grant, grant_script),
+        ],
+    );
+    assert_eq!(
+        underfunded.chain_value_pool_change(
+            &HashMap::<transparent::OutPoint, transparent::Utxo>::new(),
+            deferred_change,
+            &network,
+            parent
+        )?,
+        change,
+        "ledger accounting does not validate funding payouts",
+    );
+    assert!(matches!(
+        subsidy_is_valid(&underfunded, &network, total),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
+    ));
+    assert_eq!(subsidy_is_valid(&block, &network, total)?, deferred_change);
+    let mut other_parent = after;
+    other_parent.set_nsm_amount((reserve * 2)?);
+    let other_total = block_subsidy_with_parent_pools(height.next()?, &network, other_parent)?;
+    assert!(matches!(
+        subsidy_is_valid(&block, &network, other_total),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
+    ));
+
+    // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
+    assert_eq!(after.add_chain_value_pool_change(change.neg())?, parent);
+    assert_eq!(
+        parent.add_chain_value_pool_change(pre_activation_change.neg())?,
+        before_seed
+    );
+    Ok(())
 }
 
 #[test]
@@ -607,12 +1145,222 @@ fn transaction_fees_sum_the_non_coinbase_transactions() {
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    block.transactions = transactions[..1].to_vec();
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(0)));
+    let network = Network::new_regtest(
+        crate::parameters::testnet::ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for (count, fees, contribution) in [(1, 0, 0), (3, 2, 1), (4, 1_002, 601)] {
+        block.transactions = transactions[..count].to_vec();
+        assert_eq!(block.transaction_fees(&utxos), Ok(amount(fees)));
+        let (change, gross_fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("valid transaction balances");
+        assert_eq!(gross_fees, Some(amount(fees)));
+        assert_eq!(change.nsm_amount().zatoshis(), contribution);
+        assert_eq!(change.transparent_amount().zatoshis(), 1_000_000 - fees);
+    }
 
-    block.transactions = transactions[..3].to_vec();
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(2)));
+    // NU7 rejects an individual negative fee even when other fees would offset it.
+    Arc::make_mut(&mut block.transactions[3]).set_outputs(vec![output(10_001)]);
+    assert!(matches!(
+        block.chain_value_pool_change_and_fees(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        ),
+        Err(crate::value_balance::ValueBalanceError::Total(_)),
+    ));
+    let (change, fees) = block
+        .chain_value_pool_change_and_fees(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &Network::Mainnet,
+            ValueBalance::zero(),
+        )
+        .expect("pre-NU7 accounting leaves fee validation to the verifier");
+    assert_eq!(fees, None);
+    assert_eq!(change.transparent_amount().zatoshis(), 999_999);
+    assert_eq!(change.nsm_amount().zatoshis(), 0);
+}
 
-    block.transactions = transactions;
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(1_002)));
+/// Returns a serialized block with a real header and `transactions` copies of `transaction`.
+fn block_with_repeated_transaction(transaction: &[u8], transactions: usize) -> Vec<u8> {
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .expect("genesis block is valid");
+    let mut bytes = genesis
+        .header
+        .zcash_serialize_to_vec()
+        .expect("header serializes");
+    crate::serialization::CompactSizeMessage::try_from(transactions)
+        .expect("count fits")
+        .zcash_serialize(&mut bytes)
+        .expect("count serializes");
+    for _ in 0..transactions {
+        bytes.extend_from_slice(transaction);
+    }
+    bytes
+}
+
+/// A block whose transactions are smaller on average than the smallest valid transaction is
+/// rejected while it's parsed, and a block full of the smallest valid transactions still parses.
+#[test]
+fn block_with_tiny_transactions_is_rejected() {
+    use crate::serialization::TrustedPreallocate;
+
+    let _init_guard = zebra_test::init();
+
+    // A V1 transaction with no inputs and no outputs parses on its own.
+    let empty_v1 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert!(Transaction::zcash_deserialize(&empty_v1[..]).is_ok());
+
+    let count = usize::try_from(Transaction::max_allocation()).expect("fits in usize");
+    let tiny = block_with_repeated_transaction(&empty_v1, count);
+    assert_too_small(&tiny);
+
+    // The block is rejected after its first transaction, before reading any more of them.
+    let first_only = &tiny[..tiny.len() - (count - 1) * empty_v1.len()];
+    assert_too_small(first_only);
+
+    // A V1 transaction with one empty-script input, one empty-script output and a lock time.
+    let mut smallest = vec![1, 0, 0, 0, 1];
+    smallest.extend_from_slice(&[0x11; 32]);
+    smallest.extend_from_slice(&[0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1]);
+    smallest.extend_from_slice(&[0; 9]);
+    smallest.extend_from_slice(&[0; 4]);
+    assert_eq!(smallest.len(), 60);
+    assert!(Transaction::zcash_deserialize(&smallest[..]).is_ok());
+
+    let header_and_count = block_with_repeated_transaction(&smallest, 0).len() + 4;
+    let count =
+        (usize::try_from(MAX_BLOCK_BYTES).expect("fits") - header_and_count) / smallest.len();
+    let full = block_with_repeated_transaction(&smallest, count);
+    assert!(full.len() as u64 <= MAX_BLOCK_BYTES);
+    let block =
+        Block::zcash_deserialize(&full[..]).expect("block of valid-sized transactions parses");
+    assert_eq!(block.transactions.len(), count);
+}
+
+/// Returns a serialized V1 transaction with no inputs and one output whose script has
+/// `script_len` bytes.
+fn v1_transaction_with_output_script(script_len: u8) -> Vec<u8> {
+    let mut transaction = vec![1, 0, 0, 0, 0, 1];
+    transaction.extend_from_slice(&[0; 8]);
+    transaction.push(script_len);
+    transaction.extend(std::iter::repeat_n(0x51, script_len.into()));
+    transaction.extend_from_slice(&[0; 4]);
+    transaction
+}
+
+/// Asserts that `block` is rejected because its transactions are too small.
+fn assert_too_small(block: &[u8]) {
+    match Block::zcash_deserialize(block) {
+        Err(SerializationError::Parse(message)) => assert_eq!(
+            message,
+            "block transactions are smaller than the smallest valid transaction"
+        ),
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+/// The size check accepts transactions that average exactly [`MIN_TRANSPARENT_TX_SIZE`] bytes,
+/// and rejects them one byte below.
+#[test]
+fn block_transaction_size_check_boundary() {
+    use crate::{serialization::TrustedPreallocate, transaction::MIN_TRANSPARENT_TX_SIZE};
+
+    let _init_guard = zebra_test::init();
+
+    let at_minimum = v1_transaction_with_output_script(35);
+    let below_minimum = v1_transaction_with_output_script(34);
+    assert_eq!(at_minimum.len() as u64, MIN_TRANSPARENT_TX_SIZE);
+    assert_eq!(below_minimum.len() as u64, MIN_TRANSPARENT_TX_SIZE - 1);
+
+    let block = block_with_repeated_transaction(&at_minimum, 1000);
+    let block = Block::zcash_deserialize(&block[..]).expect("minimum-sized transactions parse");
+    assert_eq!(block.transactions.len(), 1000);
+    assert_too_small(&block_with_repeated_transaction(&below_minimum, 1000));
+
+    // The check is on the running average: 60 then 48 bytes averages exactly the minimum.
+    let mut mixed = block_with_repeated_transaction(&at_minimum, 0);
+    mixed.pop();
+    mixed.push(2);
+    mixed.extend_from_slice(&v1_transaction_with_output_script(41));
+    mixed.extend_from_slice(&v1_transaction_with_output_script(29));
+    let block = Block::zcash_deserialize(&mixed[..]).expect("average at the minimum parses");
+    assert_eq!(block.transactions.len(), 2);
+
+    let empty = block_with_repeated_transaction(&at_minimum, 0);
+    let block = Block::zcash_deserialize(&empty[..]).expect("an empty transaction list parses");
+    assert!(block.transactions.is_empty());
+
+    let count = usize::try_from(Transaction::max_allocation()).expect("fits in usize") + 1;
+    let mut over = block_with_repeated_transaction(&at_minimum, 0);
+    over.pop();
+    crate::serialization::CompactSizeMessage::try_from(count)
+        .expect("count fits")
+        .zcash_serialize(&mut over)
+        .expect("count serializes");
+    over.extend_from_slice(&at_minimum);
+    assert!(matches!(
+        Block::zcash_deserialize(&over[..]),
+        Err(SerializationError::Parse(
+            "Vector longer than max_allocation"
+        ))
+    ));
+}
+
+/// Blocks filled with the smallest transparent transaction of each version still parse.
+#[test]
+fn blocks_of_smallest_transactions_of_each_version_parse() {
+    use crate::transaction::MIN_TRANSPARENT_TX_SIZE;
+
+    let _init_guard = zebra_test::init();
+
+    let input = || transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint::from_usize(crate::transaction::Hash([0x11; 32]), 0),
+        unlock_script: transparent::Script::new(&[]),
+        sequence: u32::MAX,
+    };
+    let output = || transparent::Output::new(Amount::zero(), transparent::Script::new(&[]));
+    let lock_time = LockTime::unlocked;
+    let expiry = Height(0);
+
+    let transactions = [
+        Transaction::test_v1(vec![input()], vec![output()], lock_time()),
+        Transaction::test_v2(vec![input()], vec![output()], lock_time()),
+        Transaction::test_v3(vec![input()], vec![output()], lock_time(), expiry),
+        Transaction::test_v4(vec![input()], vec![output()], lock_time(), expiry),
+        Transaction::test_v5(Nu5, vec![input()], vec![output()], lock_time(), expiry),
+    ];
+
+    for transaction in transactions {
+        let bytes = transaction
+            .zcash_serialize_to_vec()
+            .expect("transaction serializes");
+        assert!(bytes.len() as u64 >= MIN_TRANSPARENT_TX_SIZE);
+
+        let header_and_count = block_with_repeated_transaction(&bytes, 0).len() + 4;
+        let count =
+            (usize::try_from(MAX_BLOCK_BYTES).expect("fits") - header_and_count) / bytes.len();
+        let block = block_with_repeated_transaction(&bytes, count);
+        assert!(block.len() as u64 <= MAX_BLOCK_BYTES);
+
+        let block = Block::zcash_deserialize(&block[..]).unwrap_or_else(|error| {
+            panic!(
+                "block of {}-byte transactions parses: {error:?}",
+                bytes.len()
+            )
+        });
+        assert_eq!(block.transactions.len(), count);
+    }
 }

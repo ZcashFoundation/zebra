@@ -73,6 +73,7 @@ pub fn wait_for_state_version_message<T>(zebrad: &mut TestChild<T>) -> Result<St
 /// Waits for the `required_version` state upgrade to complete, if needed.
 /// If `extra_required_log_regexes` are supplied, also waits for those logs before returning.
 /// Those extra regexes are also checked even if a state upgrade does not happen.
+/// Returns the matched log lines, including any extra required logs.
 ///
 /// This function should be called with the output of [`wait_for_state_version_message()`].
 #[tracing::instrument(skip(zebrad))]
@@ -81,7 +82,7 @@ pub fn wait_for_state_version_upgrade<T>(
     state_version_message: &str,
     required_version: Version,
     extra_required_log_regexes: impl IntoIterator<Item = String> + std::fmt::Debug,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     tracing::info!(
         zebrad = ?zebrad.cmd,
         %state_version_message,
@@ -90,7 +91,7 @@ pub fn wait_for_state_version_upgrade<T>(
         "waiting for zebrad state upgrade..."
     );
 
-    if state_version_message.contains("launching upgrade task") {
+    let upgrade_messages = if state_version_message.contains("launching upgrade task") {
         let upgrade_pattern = format!(
             "marked database format as upgraded.*format_upgrade_version.*=.*{required_version}"
         );
@@ -109,6 +110,7 @@ pub fn wait_for_state_version_upgrade<T>(
             ?upgrade_messages,
             "zebrad state has been upgraded"
         );
+        upgrade_messages
     } else {
         let required_logs: Vec<String> = extra_required_log_regexes.into_iter().collect();
         let upgrade_messages = zebrad.expect_stdout_line_matches_all_unordered(&required_logs)?;
@@ -120,9 +122,10 @@ pub fn wait_for_state_version_upgrade<T>(
             ?upgrade_messages,
             "no zebrad upgrade needed"
         );
-    }
+        upgrade_messages
+    };
 
-    Ok(())
+    Ok(upgrade_messages)
 }
 
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
@@ -235,18 +238,18 @@ pub async fn raw_future_blocks(
     );
 
     let should_sync = true;
-    let (zebrad, zebra_rpc_address) =
+    let zebrad =
         spawn_zebrad_for_rpc_with_opts(network.clone(), test_name, test_type, should_sync, false)?
             .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
-    let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 
-    let mut zebrad = check_sync_logs_until(
+    let (mut zebrad, rpc_address) = check_sync_logs_until(
         zebrad,
         network,
         SYNC_FINISHED_REGEX,
         MempoolBehavior::ShouldAutomaticallyActivate,
         true,
     )?;
+    let rpc_address = rpc_address.expect("the RPC endpoint must be open before syncing finishes");
 
     // Create an http client
     let rpc_client = RpcRequestClient::new(rpc_address);

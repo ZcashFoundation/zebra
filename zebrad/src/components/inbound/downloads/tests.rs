@@ -2,15 +2,24 @@
 //!
 //! These are the inbound-gossip siblings of the sync-path tests in
 //! `crate::components::sync::downloads::tests`: they cover GHSA-4f6v-mj46-gxg3, where a peer
-//! answers a `BlocksByHash` request with a canonical header and a rewritten coinbase height. The
+//! answers a `BlockDownload` request with a canonical header and a rewritten coinbase height. The
 //! coinbase scriptSig is excluded from the V5 transaction ID (ZIP-244), so the block hash is
 //! unchanged and the response passes the hash check, but the forged height is dropped as too far
 //! ahead of the tip, or behind the finalized tip, before consensus validation. The supplying peer
 //! must be scored only when the parent header Zebra holds proves the height was rewritten.
 
-use std::{iter, sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures::stream::StreamExt;
+use metrics::{
+    Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+};
 
 use zebra_chain::{
     block::{Block, Height},
@@ -30,8 +39,8 @@ use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
-/// These tests run the download task in parallel with the test, so machines under heavy load need a
-/// longer delay.
+/// These tests use only in-process mocks and pause Tokio time, preserving the full no-request
+/// observation window without spending that time idle.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// A peer address used to check whether the supplying peer can be scored.
@@ -122,7 +131,7 @@ fn lookahead_boundary_tip() -> Height {
 /// A peer can answer with a canonical header and rewritten coinbase height because the initial hash
 /// check does not recompute the header's commitment to the body's authorizing data. The parent is
 /// the proof: a block's height is one more than its parent's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -168,7 +177,10 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -216,7 +228,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 ///
 /// Its height agrees with its parent's, so there is no proof of misbehaviour and the drop must stay
 /// anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_old_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -241,7 +253,10 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -290,7 +305,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
 
 /// A peer whose old block has a parent we do not hold is not attributed either: without the parent
 /// there is no proof the height was rewritten.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let _init_guard = zebra_test::init();
 
@@ -315,7 +330,10 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -380,7 +398,10 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -414,7 +435,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
 /// exactly on it is a normal download and the parent is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 
@@ -440,7 +461,10 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -475,7 +499,7 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
 /// the serving peer did not choose the height of a genuine block. Here the parent is the proof, so
 /// scoring is safe: a genuine block whose parent we hold is at most one above the tip, so its real
 /// height is never far ahead.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -518,7 +542,10 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -565,7 +592,7 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
 ///
 /// This is the common case while Zebra is catching up: the block's parent is not in the state yet,
 /// so there is no proof of misbehaviour and the drop must stay anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -590,7 +617,10 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -631,7 +661,7 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block exactly
 /// on it is a normal download and the parent is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 
@@ -656,7 +686,10 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
         .respond(zs::Response::KnownBlock(None));
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -681,4 +714,176 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     // The parent lookup only runs on the height limit drop paths, so a boundary block must not
     // trigger one.
     state.expect_no_requests().await;
+}
+
+mod network_checkpoint;
+
+/// A gossip download cannot wait indefinitely for readiness or reset its budget at dispatch.
+#[tokio::test(start_paused = true)]
+async fn download_deadline_includes_readiness_and_response() {
+    use tokio::time::{sleep, timeout_at, Instant};
+    use tower::{limit::ConcurrencyLimit, ServiceExt};
+
+    let _init_guard = zebra_test::init();
+    let budget = zn::constants::REQUEST_TIMEOUT + super::BLOCK_DOWNLOAD_TIMEOUT;
+    for release_capacity in [false, true] {
+        let mut network: MockNetwork = MockService::build().for_unit_tests();
+        let limited = ConcurrencyLimit::new(network.clone(), 1);
+        let mut reservation = limited.clone();
+        reservation.ready().await.unwrap();
+        let verifier: MockVerifier = MockService::build().for_unit_tests();
+        let mut state: MockState = MockService::build().for_unit_tests();
+        let (tip, _sender) = MockChainTip::new();
+        let mut downloads = Downloads::new(2, limited, verifier, state.clone(), tip);
+        let hash = block_1().hash();
+        assert!(matches!(
+            downloads.download_and_verify(hash, None),
+            DownloadAction::AddedToQueue,
+        ));
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        let started = Instant::now();
+        tokio::task::yield_now().await;
+        let _response = if release_capacity {
+            sleep(budget / 2).await;
+            drop(reservation);
+            Some(
+                network
+                    .expect_request(zn::Request::BlockDownload {
+                        hash,
+                        advertiser: None,
+                    })
+                    .await,
+            )
+        } else {
+            None
+        };
+        let (error, advertiser) =
+            timeout_at(started + budget + Duration::from_secs(1), downloads.next())
+                .await
+                .expect("gossip readiness and response must be bounded")
+                .expect("the queued download has a result")
+                .expect_err("the unanswered download expires");
+        assert!(error.is::<tokio::time::error::Elapsed>());
+        assert_eq!(advertiser, None);
+        assert_eq!(Instant::now() - started, budget);
+    }
+}
+
+/// The sample count and the most recent sample of one histogram.
+#[derive(Default)]
+struct Samples {
+    count: AtomicU64,
+    last: AtomicU64,
+}
+
+impl Samples {
+    fn get(&self) -> (u64, f64) {
+        (
+            self.count.load(Ordering::SeqCst),
+            f64::from_bits(self.last.load(Ordering::SeqCst)),
+        )
+    }
+}
+
+impl HistogramFn for Samples {
+    fn record(&self, value: f64) {
+        self.last.store(value.to_bits(), Ordering::SeqCst);
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Records the gossiped block timing histograms and ignores every other metric.
+#[derive(Default)]
+struct GossipTimingRecorder {
+    download: Arc<Samples>,
+    verify_commit: Arc<Samples>,
+}
+
+impl Recorder for GossipTimingRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+        Counter::noop()
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+        let samples = match key.name() {
+            "gossip.block.download.duration_seconds" => &self.download,
+            "gossip.block.verify_commit.duration_seconds" => &self.verify_commit,
+            _ => return Histogram::noop(),
+        };
+        assert_eq!(
+            key.labels().count(),
+            0,
+            "gossip timing histograms are unlabeled"
+        );
+        Histogram::from_arc(samples.clone())
+    }
+}
+
+/// A verified gossiped block records how long its download and its verification and commit took.
+#[tokio::test(start_paused = true)]
+async fn verified_block_records_download_and_verify_durations() {
+    const DOWNLOAD: Duration = Duration::from_millis(7);
+    const VERIFY: Duration = Duration::from_millis(3);
+
+    // The current-thread runtime runs the download task on this thread, so the local recorder
+    // sees it.
+    let recorder = GossipTimingRecorder::default();
+    let _recorder_guard = metrics::set_default_local_recorder(&recorder);
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    assert!(matches!(
+        downloads.download_and_verify(hash, Some(advertiser)),
+        DownloadAction::AddedToQueue
+    ));
+    state
+        .expect_request(zs::Request::KnownBlock(hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    let download = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
+        .await;
+    tokio::time::advance(DOWNLOAD).await;
+    download.respond(zn::Response::Blocks(vec![Available((
+        block.clone(),
+        Some(advertiser),
+    ))]));
+    let verify = verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await;
+    assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
+    assert_eq!(
+        recorder.verify_commit.get().0,
+        0,
+        "the block is not verified yet"
+    );
+    tokio::time::advance(VERIFY).await;
+    verify.respond(hash);
+
+    assert_eq!(
+        downloads
+            .next()
+            .await
+            .expect("downloads is non-empty")
+            .expect("the block is verified"),
+        hash,
+    );
+    assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
+    assert_eq!(recorder.verify_commit.get(), (1, VERIFY.as_secs_f64()));
 }

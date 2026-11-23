@@ -1,13 +1,38 @@
-//! The set of banned peer groups.
+//! Peer misbehavior reports, and the set of banned peer groups.
 
 use std::{collections::HashMap, net::IpAddr, sync::Arc};
 
 use tokio::time::Instant;
 
-use crate::{constants, protocol::external::connection_limit_key};
+use crate::{constants, protocol::external::connection_limit_key, PeerSocketAddr};
 
 #[cfg(test)]
 mod tests;
+
+/// A peer misbehavior report, sent to the address book.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MisbehaviorReport {
+    /// The peer that misbehaved.
+    pub addr: PeerSocketAddr,
+
+    /// The misbehavior score to add to the peer's group.
+    pub score: u32,
+
+    /// Why the peer was scored, logged if this report bans the peer's group.
+    pub reason: String,
+}
+
+impl MisbehaviorReport {
+    /// Returns a new report that adds `score` to `addr`'s peer group because of `reason`.
+    pub fn new(addr: PeerSocketAddr, score: u32, reason: impl Into<String>) -> Self {
+        Self {
+            addr,
+            score,
+            reason: reason.into(),
+        }
+    }
+}
 
 /// The peer groups Zebra has banned for misbehaviour, and when each was banned.
 ///

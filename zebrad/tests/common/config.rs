@@ -13,11 +13,12 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
+use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
 use zebra_rpc::config::mining::MinerAddressType;
-use zebra_test::{command::TestChild, net::random_known_port};
+use zebra_test::command::TestChild;
 use zebrad::{
     components::{mempool, sync, tracing, With},
     config::ZebradConfig,
@@ -26,10 +27,13 @@ use zebrad::{
 use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 
 /// Returns a config with:
-/// - a Zcash listener on an unused port on IPv4 localhost, and
+/// - a Zcash listener on an unused port on IPv4 localhost,
+/// - no initial peers,
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
+///
+/// Tests that need live network peers must opt in with [`use_live_peers`].
 pub fn default_test_config(net: &Network) -> ZebradConfig {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
@@ -37,6 +41,8 @@ pub fn default_test_config(net: &Network) -> ZebradConfig {
         network: net.clone(),
         // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse().unwrap(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         crawl_new_peer_interval: TEST_DURATION,
         ..zebra_network::Config::default()
     };
@@ -74,6 +80,26 @@ pub fn default_test_config(net: &Network) -> ZebradConfig {
     .with(MinerAddressType::Transparent)
 }
 
+/// Configures `config` to connect to the default DNS seeders for its network.
+///
+/// Only use this in tests that sync from or connect to live network peers. Concurrent live tests
+/// compete for the same peers from one IP address, so they run in the `serial-live-mainnet`
+/// nextest group.
+pub fn use_live_peers(config: &mut ZebradConfig) {
+    let defaults = zebra_network::Config::default();
+    config.network.initial_mainnet_peers = defaults.initial_mainnet_peers;
+    config.network.initial_testnet_peers = defaults.initial_testnet_peers;
+}
+
+/// Returns the default DNS seeders for `network`.
+pub fn live_peers(network: &Network) -> IndexSet<String> {
+    zebra_network::Config {
+        network: network.clone(),
+        ..zebra_network::Config::default()
+    }
+    .initial_peer_hostnames()
+}
+
 pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = default_test_config(network);
     config.state.ephemeral = false;
@@ -102,18 +128,6 @@ pub fn configs_dir() -> PathBuf {
 pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
     let path = configs_dir().join(config_file);
     Path::new(&path).into()
-}
-
-/// Returns a `zebrad` config with a random known RPC port.
-///
-/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
-pub fn random_known_rpc_port_config(
-    parallel_cpu_threads: bool,
-    network: &Network,
-) -> Result<ZebradConfig> {
-    // [Note on port conflict](#Note on port conflict)
-    let listen_port = random_known_port();
-    rpc_port_config(listen_port, parallel_cpu_threads, network)
 }
 
 /// Returns a `zebrad` config with an OS-assigned RPC port.
@@ -153,14 +167,19 @@ pub fn rpc_port_config(
     Ok(config)
 }
 
-/// Reads Zebra's RPC server listen address from a testchild's logs
+/// Reads a server's bound listen address from a test child's logs.
 pub fn read_listen_addr_from_logs(
     child: &mut TestChild<TempDir>,
     expected_msg: &str,
 ) -> Result<SocketAddr> {
     let line = child.expect_stdout_line_matches(expected_msg)?;
-    let rpc_addr_position =
-        line.find(expected_msg).expect("already checked for match") + expected_msg.len();
-    let rpc_addr = line[rpc_addr_position..].trim().to_string();
-    Ok(rpc_addr.parse()?)
+    parse_listen_addr(&line, expected_msg)
+}
+
+/// Parses a bound listen address from a matching server startup log line.
+pub fn parse_listen_addr(line: &str, expected_msg: &str) -> Result<SocketAddr> {
+    let (_, address) = line
+        .split_once(expected_msg)
+        .ok_or_else(|| color_eyre::eyre::eyre!("missing {expected_msg:?} in {line:?}"))?;
+    Ok(address.trim().parse()?)
 }

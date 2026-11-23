@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed OpenTelemetry tracing, which exported either every span or none from each node, because the process-long global span was the root of every trace. Each peer connection attempt, handshake, peer request, checkpoint verification, and RPC or gRPC request now starts its own trace, with any inbound or mempool request it makes inside it, and only WARN and ERROR log events are attached to spans. Long-running spans, such as the syncer and the peer crawler, are no longer exported.
+time: 2026-11-18T19:03:46.02208Z

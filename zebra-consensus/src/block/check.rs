@@ -9,7 +9,7 @@ use zebra_chain::{
     block::{Block, Hash, Header, Height},
     parameters::{
         subsidy::{self, CoinbaseTransactionError},
-        Network,
+        Network, NetworkUpgrade,
     },
     transaction::{self, Transaction},
     work::{
@@ -18,7 +18,7 @@ use zebra_chain::{
     },
 };
 
-use crate::error::*;
+use crate::{block::ShieldedActionCounts, error::*};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
@@ -232,11 +232,6 @@ pub fn merkle_root_validity(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> Result<(), BlockError> {
-    // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
-    block
-        .check_transaction_network_upgrade_consistency(network)
-        .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
-
     let merkle_root = transaction_hashes.iter().cloned().collect();
 
     if block.header.merkle_root != merkle_root {
@@ -266,6 +261,158 @@ pub fn merkle_root_validity(
     // whether the transaction hashes are unique.
     if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
         return Err(BlockError::DuplicateTransaction);
+    }
+
+    // # Security
+    //
+    // The block's network upgrade comes from its coinbase height, which a peer can rewrite. Check
+    // that the transactions are the ones the header commits to first, so a body that doesn't match
+    // its header is reported as a mismatch, whatever height it claims.
+    //
+    // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
+    block
+        .check_transaction_network_upgrade_consistency(network)
+        .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
+
+    Ok(())
+}
+
+/// Returns `Ok(())` if `block`'s header commits to `height`, the height in its coinbase input.
+///
+/// The block hash commits to the header, and the header commits to the transaction IDs through
+/// its Merkle root, so callers must also check [`merkle_root_validity()`] before trusting `height`.
+///
+/// Before V5, the coinbase input script that holds the height is part of the transaction ID. From
+/// V5 onward it is authorizing data, which the transaction ID doesn't commit to ([ZIP 244]), so a
+/// peer can rewrite the height without changing the block hash. But a V5 or later transaction ID
+/// commits to the expiry height, which must equal the block height in every valid coinbase that
+/// can have that version:
+///
+/// > [NU5 onward] The nExpiryHeight field of a coinbase transaction MUST be equal to its block
+/// > height.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// # Security
+///
+/// This checks every V5 or later coinbase, whatever `height` is. The consensus check in
+/// [`crate::transaction::check::coinbase_expiry_height()`] decides whether the rule applies from
+/// the block height, so it can't check that height. A rewritten NU5 coinbase that claims a pre-NU5
+/// height would skip it, and only be rejected later for its consensus branch ID, an error that
+/// doesn't show the body was forged.
+///
+/// [ZIP 244]: https://zips.z.cash/zip-0244
+pub fn coinbase_height_is_committed(block: &Block, height: Height) -> Result<(), BlockError> {
+    let coinbase = block
+        .transactions
+        .first()
+        .ok_or(BlockError::NoTransactions)?;
+
+    if coinbase.version() < 5 {
+        return Ok(());
+    }
+
+    let expiry_height = coinbase.expiry_height();
+    if expiry_height != Some(height) {
+        return Err(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height,
+            block_height: height,
+            transaction_hash: coinbase.hash(),
+        }
+        .into());
+    }
+
+    Ok(())
+}
+
+/// Returns `Ok(())` if `block`'s header commits to its transaction IDs, and to the height in its
+/// coinbase input, if it has one.
+///
+/// A peer that serves a requested block hash can send any body with the header. This shows
+/// whether the body's coinbase height is the block's real height, without any state, so it works
+/// for a block whose parent isn't known. It catches every change to a transaction ID, and a
+/// rewritten height in a V5 or later coinbase. It doesn't check that the block is valid, or catch
+/// other changes to V5 authorizing data, or duplicated transactions, which keep the coinbase.
+///
+/// It hashes the transaction IDs into a Merkle root. The IDs are computed when the block is
+/// deserialized, so this costs much less than deserializing the block. But the block verifiers
+/// compute the same root, so only call it before using a block's height without verifying the
+/// block.
+pub fn body_matches_header(block: &Block) -> Result<(), BlockError> {
+    // A peer can send a body without transactions, which has no Merkle root, so no header can
+    // commit to it.
+    if block.transactions.is_empty() {
+        return Err(BlockError::NoTransactions);
+    }
+
+    let merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    if block.header.merkle_root != merkle_root {
+        return Err(BlockError::BadMerkleRoot {
+            actual: merkle_root,
+            expected: block.header.merkle_root,
+        });
+    }
+
+    match block.coinbase_height() {
+        Some(height) => coinbase_height_is_committed(block, height),
+        None => Ok(()),
+    }
+}
+
+/// Checks the [ZIP 218] per-pool and global shielded action limits for `block`.
+///
+/// # Consensus
+///
+/// > For each block at height `height` where `IsNU7Activated(height)`, the following limits MUST
+/// > be satisfied:
+/// >
+/// > - The total number of Orchard actions across all transactions in the block MUST NOT exceed
+/// >   `OrchardProtocolBlockActionLimit`.
+/// > - The total number of Ironwood actions across all transactions in the block MUST NOT exceed
+/// >   `OrchardProtocolBlockActionLimit`.
+/// > - The total number of Sapling inputs and outputs across all transactions in the block MUST
+/// >   NOT exceed `SaplingBlockIOLimit`.
+/// > - The total number of Sprout JoinSplits across all transactions in the block MUST NOT exceed
+/// >   `SproutBlockJoinSplitLimit`.
+/// >
+/// > In addition to the per-pool limits, the total shielded cost across all pools in a block MUST
+/// > NOT exceed `GlobalShieldedBudget`.
+///
+/// The global shielded cost counts each Sprout JoinSplit twice, because each JoinSplit produces
+/// two shielded outputs.
+///
+/// These limits bound the worst-case block verification time and the worst-case compact sync
+/// bandwidth that lightweight wallets must download, so they are checked before the block's
+/// proofs are queued for verification.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub fn shielded_action_limits_are_valid(
+    block: &Block,
+    network: &Network,
+    height: Height,
+    hash: Hash,
+) -> Result<(), BlockError> {
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+        return Ok(());
+    }
+
+    let counts = block
+        .transactions
+        .iter()
+        .map(|transaction| ShieldedActionCounts::from_transaction(transaction))
+        .fold(ShieldedActionCounts::default(), |acc, counts| {
+            acc.saturating_add(counts)
+        });
+
+    if let Some((pool, count, limit)) = counts.exceeded_limit() {
+        Err(BlockError::TooManyShieldedActions {
+            height,
+            hash,
+            pool,
+            count,
+            limit,
+        })?;
     }
 
     Ok(())

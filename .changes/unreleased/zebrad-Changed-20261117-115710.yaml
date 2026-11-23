@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Updated the `libz-sys` build dependency to 1.1.33, clearing RUSTSEC-2026-0544. Zebra isn''t affected: zebrad only uses it at build time, through `vergen-git2`, and never calls `gzprintf`.'
+time: 2026-11-17T11:57:10.408012807+01:00

@@ -22,7 +22,7 @@ jobs:
       github.event.sender.type != 'Bot' &&
       !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
                 github.event.issue.author_association || github.event.pull_request.author_association)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       issues: write
       pull-requests: write

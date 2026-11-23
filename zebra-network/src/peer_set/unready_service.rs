@@ -12,6 +12,7 @@ use std::{
 };
 
 use futures::{channel::oneshot, ready};
+use tokio::time::Sleep;
 use tower::Service;
 
 use crate::peer_set::set::CancelClientWork;
@@ -21,7 +22,8 @@ mod tests;
 
 /// A Future that becomes satisfied when an `S`-typed service is ready.
 ///
-/// May fail due to cancellation, i.e. if the service is removed from discovery.
+/// May fail due to cancellation or continuous unreadiness for `REQUEST_TIMEOUT`.
+/// This bound is separate from the response timeout, which starts at request dispatch.
 #[pin_project]
 #[derive(Debug)]
 pub(super) struct UnreadyService<K, S, Req> {
@@ -31,6 +33,10 @@ pub(super) struct UnreadyService<K, S, Req> {
     /// A oneshot used to cancel the request the `service` is currently working on, if any.
     #[pin]
     pub(super) cancel: oneshot::Receiver<CancelClientWork>,
+
+    /// Limits continuous unreadiness, starting when the service enters the unready set.
+    #[pin]
+    pub(super) readiness_timeout: Sleep,
 
     /// The `service` that is busy (or newly created).
     pub(super) service: Option<S>,
@@ -45,6 +51,7 @@ pub(super) enum Error<E> {
     Inner(E),
     Canceled,
     CancelHandleDropped(oneshot::Canceled),
+    TimedOut,
 }
 
 impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
@@ -73,15 +80,22 @@ impl<K, S: Service<Req>, Req> Future for UnreadyService<K, S, Req> {
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        //`ready!` returns `Poll::Pending` when the service is unready, and
-        // the inner `poll_ready` schedules this task for wakeup.
-        //
-        // `cancel.poll` also schedules this task for wakeup if it is canceled.
-        let res = ready!(this
+        // Check readiness before the deadline so a service ready at the deadline is retained.
+        // If it is still unready, always poll the timer, even amid repeated service wakeups.
+        // Both the timer and `cancel.poll` also schedule this task for wakeup.
+        let res = match this
             .service
             .as_mut()
             .expect("polled after ready")
-            .poll_ready(cx));
+            .poll_ready(cx)
+        {
+            Poll::Ready(res) => res,
+            Poll::Pending => {
+                ready!(this.readiness_timeout.poll(cx));
+                let key = this.key.take().expect("polled after ready");
+                return Poll::Ready(Err((key, Error::TimedOut)));
+            }
+        };
 
         let key = this.key.take().expect("polled after ready");
         let svc = this.service.take().expect("polled after ready");

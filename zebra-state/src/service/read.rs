@@ -30,8 +30,8 @@ pub use address::{
 };
 pub use block::{
     any_block, any_transaction, any_utxo, block, block_and_size, block_header, block_info,
-    mined_transaction, transaction_hashes_for_any_block, transaction_hashes_for_block,
-    unspent_utxo,
+    mined_transaction, spent_outputs_for_block, transaction_hashes_for_any_block,
+    transaction_hashes_for_block, unspent_utxo,
 };
 
 #[cfg(feature = "indexer")]
@@ -47,7 +47,7 @@ pub use tree::{
     orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree,
 };
 
-#[cfg(any(test, feature = "proptest-impl"))]
+#[cfg(test)]
 #[allow(unused_imports)]
 pub use address::utxo::ADDRESS_HEIGHTS_FULL_RANGE;
 

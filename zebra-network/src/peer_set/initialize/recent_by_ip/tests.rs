@@ -13,62 +13,66 @@ fn old_connection_attempts_are_pruned() {
 
     let _init_guard = zebra_test::init();
 
-    let mut recent_connections = RecentByIp::new(Some(TEST_TIME_LIMIT), None);
     let ip = "127.0.0.1".parse().expect("should parse");
 
-    assert!(
-        !recent_connections.is_past_limit_or_add(ip),
-        "should not be past limit"
-    );
-    assert!(
-        recent_connections.is_past_limit_or_add(ip),
-        "should be past max_connections_per_ip limit"
-    );
+    for max_connections_per_ip in [None, Some(3)] {
+        let mut recent_connections = RecentByIp::new(Some(TEST_TIME_LIMIT), max_connections_per_ip);
+        let limit = recent_connections.max_connections_per_ip;
 
-    std::thread::sleep(TEST_TIME_LIMIT / 3);
-
-    assert!(
-        recent_connections.is_past_limit_or_add(ip),
-        "should still contain entry after a third of the time limit"
-    );
-
-    std::thread::sleep(3 * TEST_TIME_LIMIT / 4);
-
-    assert!(
-        !recent_connections.is_past_limit_or_add(ip),
-        "should prune entry after 13/12 * time_limit"
-    );
-
-    const TEST_MAX_CONNS_PER_IP: usize = 3;
-
-    let mut recent_connections =
-        RecentByIp::new(Some(TEST_TIME_LIMIT), Some(TEST_MAX_CONNS_PER_IP));
-
-    for _ in 0..TEST_MAX_CONNS_PER_IP {
+        for _ in 0..limit {
+            assert!(
+                !recent_connections.is_past_limit_or_add(ip),
+                "should admit connections up to the limit"
+            );
+        }
         assert!(
-            !recent_connections.is_past_limit_or_add(ip),
-            "should not be past limit"
+            recent_connections.is_past_limit_or_add(ip),
+            "should be past max_connections_per_ip limit"
+        );
+
+        // Give all recorded attempts the same instant so the expiry boundary is exact.
+        let recorded_at = recent_connections.by_time[0].1;
+        for (_, time) in &mut recent_connections.by_time {
+            *time = recorded_at;
+        }
+
+        recent_connections.prune_by_time(recorded_at + TEST_TIME_LIMIT / 3);
+        assert_eq!(
+            recent_connections.by_ip.get(&ip),
+            Some(&limit),
+            "should still be at the limit after a third of the reconnection delay",
+        );
+        assert_eq!(recent_connections.by_time.len(), limit);
+
+        recent_connections.prune_by_time(recorded_at + TEST_TIME_LIMIT - Duration::from_nanos(1));
+        assert_eq!(
+            recent_connections.by_ip.get(&ip),
+            Some(&limit),
+            "should retain all attempts just before the expiry cutoff",
+        );
+        assert_eq!(recent_connections.by_time.len(), limit);
+
+        recent_connections.prune_by_time(recorded_at + TEST_TIME_LIMIT);
+        assert!(
+            recent_connections.by_ip.is_empty(),
+            "should prune counts at the cutoff",
+        );
+        assert!(
+            recent_connections.by_time.is_empty(),
+            "should prune attempts at the cutoff",
+        );
+
+        for _ in 0..limit {
+            assert!(
+                !recent_connections.is_past_limit_or_add(ip),
+                "should readmit connections after expiry"
+            );
+        }
+        assert!(
+            recent_connections.is_past_limit_or_add(ip),
+            "readmitted connections should enforce the same limit"
         );
     }
-
-    assert!(
-        recent_connections.is_past_limit_or_add(ip),
-        "should be past max_connections_per_ip limit"
-    );
-
-    std::thread::sleep(TEST_TIME_LIMIT / 3);
-
-    assert!(
-        recent_connections.is_past_limit_or_add(ip),
-        "should still be past limit after a third of the reconnection delay"
-    );
-
-    std::thread::sleep(3 * TEST_TIME_LIMIT / 4);
-
-    assert!(
-        !recent_connections.is_past_limit_or_add(ip),
-        "should prune entry after 13/12 * time_limit"
-    );
 }
 
 /// Connection attempts from different addresses in the same IPv6 `/64` share

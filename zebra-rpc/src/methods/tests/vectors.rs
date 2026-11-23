@@ -3,7 +3,7 @@
 use std::{
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -47,9 +47,10 @@ use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::get_block_template::{
-        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+        constants::{CAPABILITIES_FIELD, NONCE_RANGE_FIELD},
         CoinbaseCache, GetBlockTemplateRequestMode,
     },
+    types::transaction::Input,
 };
 
 use super::super::*;
@@ -98,7 +99,6 @@ async fn rpc_getinfo() {
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
             max_time: zebra_chain::serialization::DateTime32::now(),
-            #[cfg(zcash_unstable = "zip234")]
             chain_value_pools: Default::default(),
         },
     ));
@@ -157,7 +157,11 @@ async fn rpc_getdeprecationinfo() {
         .expect("getdeprecationinfo should succeed");
     assert_eq!(deprecation_info.end_of_service, None);
 
-    let end_of_support_height = 3_546_440;
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis. Place the end of support after it, so the
+    // test doesn't fail when the checkpoints are updated.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let end_of_support_height = checkpoint_height.0 + 20_000;
     let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
     let end_of_service = rpc
         .get_deprecation_info()
@@ -167,9 +171,6 @@ async fn rpc_getdeprecationinfo() {
         .expect("end_of_service should be present when an end of support height is set");
 
     assert_eq!(end_of_service.block_height, end_of_support_height);
-    // This node has no tip, so the estimate counts the blocks remaining after the highest
-    // compiled-in checkpoint, not after genesis.
-    let checkpoint_height = Mainnet.checkpoint_list().max_height();
     let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
     assert!(end_of_service.estimated_time > Utc::now().timestamp());
@@ -206,11 +207,11 @@ async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
         None,
     );
 
-    let end_of_support_height = Height(3_546_440);
+    let end_of_support_height = Height(3_100_000);
     let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
 
-    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
-    // and the estimate is reported 24 hours early.
+    // Both heights are after Blossom and before NU7, so every remaining block is expected to
+    // take 75 seconds, and the estimate is reported 24 hours early.
     let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
 
@@ -384,6 +385,66 @@ async fn get_block_data(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_rejects_incomplete_stored_bodies() {
+    use zebra_state::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let unknown_height = height.next().unwrap();
+        let (state, read_state, tip, _) =
+            zebra_state::populated_state_with_debug(blocks, &Mainnet, true).await;
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &read_state.db().cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        read_state.db().write_batch(batch).unwrap();
+
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool, 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let expected = BlockReadError::BlockBodyUnavailable { height }.to_string();
+        for verbosity in [0, 2, 3] {
+            for query in [height.0.to_string(), block.hash().to_string()] {
+                let error = rpc.get_block(query, Some(verbosity)).await.unwrap_err();
+                assert_eq!(error.message(), expected);
+            }
+        }
+        let error = rpc
+            .get_block(unknown_height.0.to_string(), Some(0))
+            .await
+            .unwrap_err();
+        assert_eq!(error.message(), "Block not found");
+        rpc_tx_queue.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     let _init_guard = zebra_test::init();
 
@@ -533,6 +594,12 @@ async fn rpc_getblock() {
                 value_pools: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
             }))
         );
     }
@@ -588,6 +655,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -635,6 +708,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -667,6 +741,15 @@ async fn rpc_getblock() {
                 block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
             );
             assert_eq!(
                 *value_pools,
@@ -735,6 +818,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -769,6 +853,15 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
             );
             assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
+            );
+            assert_eq!(
                 *value_pools,
                 block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
             );
@@ -791,6 +884,35 @@ async fn rpc_getblock() {
             }
         } else {
             panic!("Expected GetBlock::Object");
+        }
+    }
+
+    // Make height calls with verbosity=3 and check response. These early blocks only contain
+    // coinbase transactions, so every transaction must have no fee and its coinbase input must
+    // have no prevout.
+    for i in 0..blocks.len() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(3u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        let GetBlockResponse::Object(obj) = &get_block else {
+            panic!("Expected GetBlock::Object");
+        };
+
+        for actual_tx in obj.tx.iter() {
+            let GetBlockTransaction::Object(tx_object) = actual_tx else {
+                panic!("verbosity 3 must return transaction objects");
+            };
+
+            // Every transaction in these blocks is a coinbase, so there is no fee and no prevout.
+            assert_eq!(tx_object.fee(), None);
+            for input in &tx_object.inputs {
+                assert!(
+                    matches!(input, Input::Coinbase { .. }),
+                    "these blocks only contain coinbase inputs",
+                );
+            }
         }
     }
 
@@ -845,6 +967,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -902,6 +1030,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -1141,6 +1275,214 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         };
         assert_eq!(tx_obj.height, Some(-1));
         assert_eq!(tx_obj.confirmations, Some(0));
+    }
+}
+
+/// Returns a balance of `zat` zatoshis.
+fn balance_zat(zat: i64) -> Amount<NonNegative> {
+    Amount::try_from(zat).expect("test balances are valid")
+}
+
+/// Returns a change of `zat` zatoshis.
+fn change_zat(zat: i64) -> Amount<NegativeAllowed> {
+    Amount::try_from(zat).expect("test changes are valid")
+}
+
+/// Returns block balances with the given transparent, Orchard, and NSM amounts, in zatoshis.
+fn block_info_with_balances(transparent_zat: i64, orchard_zat: i64, nsm_zat: i64) -> BlockInfo {
+    let mut value_pools = ValueBalance::from_transparent_amount(balance_zat(transparent_zat));
+    value_pools
+        .set_orchard_value_balance(ValueBalance::from_orchard_amount(balance_zat(orchard_zat)));
+    value_pools.set_nsm_amount(balance_zat(nsm_zat));
+    BlockInfo::new(value_pools, 0)
+}
+
+/// Returns the entry with `id` in a `getblock` response's `valuePools`.
+fn value_pool<'a>(obj: &'a BlockObject, id: &str) -> &'a GetBlockchainInfoBalance {
+    obj.value_pools
+        .as_ref()
+        .expect("the response has value pools")
+        .iter()
+        .find(|pool| pool.id() == id)
+        .expect("the response has every value pool")
+}
+
+/// Calls verbose `getblock` for `block` on Mainnet, with a mock state that reports the block at
+/// `height` in the best chain, and the parent and block balances as `prev_block_info` and
+/// `block_info`.
+async fn getblock_with_block_info(
+    block: Arc<Block>,
+    verbosity: u8,
+    height: Height,
+    prev_block_info: Option<BlockInfo>,
+    block_info: BlockInfo,
+) -> BlockObject {
+    let block_hash = block.hash();
+    let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc.get_block(hash_str, Some(verbosity)).await });
+
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block.header.clone(),
+            hash: block_hash,
+            height,
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(Some(0)));
+
+    if verbosity == 3 {
+        read_state
+            .expect_request(ReadRequest::SpentOutputs(block_hash.into()))
+            .await
+            .respond(ReadResponse::SpentOutputs(None));
+    }
+
+    if verbosity == 1 {
+        let tx_ids: Arc<[transaction::Hash]> =
+            block.transactions.iter().map(|tx| tx.hash()).collect();
+        read_state
+            .expect_request(ReadRequest::TransactionIdsForBlock(block_hash.into()))
+            .await
+            .respond(ReadResponse::TransactionIdsForBlock(Some(tx_ids)));
+    } else {
+        read_state
+            .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+    }
+    read_state
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(prev_block_info));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(block_info)));
+
+    let GetBlockResponse::Object(obj) = block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed")
+    else {
+        panic!("verbose getblock returns an object");
+    };
+
+    *obj
+}
+
+/// If the parent block's balances are missing, for example after a reorg between the state
+/// reads, `getblock` reports the block's balances without changes, rather than reporting each
+/// whole balance as the block's change.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_omits_value_changes_without_parent_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(1),
+            None,
+            block_info_with_balances(500_000_000, 300_000_000, 200_000_000),
+        )
+        .await;
+
+        let pools = obj
+            .value_pools
+            .as_ref()
+            .expect("the response has value pools");
+        assert!(pools.iter().all(|pool| pool.value_delta_zat().is_none()));
+        assert!(pools.iter().all(|pool| pool.value_delta().is_none()));
+        assert_eq!(
+            value_pool(&obj, "transparent").chain_value_zat(),
+            balance_zat(500_000_000)
+        );
+
+        let nsm = obj
+            .nsm_value_balance
+            .as_ref()
+            .expect("the response has the NSM balance");
+        assert_eq!(nsm.chain_value_zat(), balance_zat(200_000_000));
+        assert_eq!(nsm.value_delta_zat(), None);
+    }
+}
+
+/// The balances before the genesis block are zero, so the genesis block's changes are its
+/// balances.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_genesis_value_changes_are_its_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(0),
+            None,
+            block_info_with_balances(500_000_000, 0, 0),
+        )
+        .await;
+
+        assert_eq!(
+            value_pool(&obj, "transparent").value_delta_zat(),
+            Some(change_zat(500_000_000))
+        );
+        assert_eq!(
+            value_pool(&obj, "orchard").value_delta_zat(),
+            Some(Amount::zero())
+        );
     }
 }
 
@@ -1615,21 +1957,20 @@ async fn rpc_getaddresstxids_response() {
             zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
-            // Exhaustively test possible block ranges for mainnet.
-            for start in 1..=10 {
-                for end in start..=10 {
-                    rpc_getaddresstxids_response_with(
-                        &network,
-                        Some(start),
-                        Some(end),
-                        &address,
-                        &read_state,
-                        &latest_chain_tip,
-                        (end - start + 1) as usize,
-                    )
-                    .await;
-                }
-            }
+            // Keep every range and its full no-request window, but overlap independent cases.
+            let ranges = (1..=10).flat_map(|start| (start..=10).map(move |end| (start, end)));
+            futures::future::join_all(ranges.map(|(start, end)| {
+                rpc_getaddresstxids_response_with(
+                    &network,
+                    Some(start),
+                    Some(end),
+                    &address,
+                    &read_state,
+                    &latest_chain_tip,
+                    usize::try_from(end - start + 1).expect("range contains at most ten blocks"),
+                )
+            }))
+            .await;
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
@@ -2060,6 +2401,68 @@ async fn rpc_getaddressutxos_limits() {
     mempool.expect_no_requests().await;
 }
 
+/// Checks that the address RPCs reject queries over the result cap, and requests
+/// with too many addresses, instead of doing unbounded work.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_address_queries_are_capped() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &Mainnet).await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        state,
+        Buffer::new(read_state, 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let rpc = rpc.with_max_address_query_results(3);
+
+    // This address receives an output in every block, so it has 10 transactions and UTXOs.
+    let addresses = vec!["t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string()];
+    let invalid_params = i32::from(server::error::LegacyCode::InvalidParameter);
+    let tx_ids = |end| {
+        rpc.get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: Some(1),
+            end: Some(end),
+        })
+    };
+    let utxos = |max_entries| {
+        rpc.get_address_utxos(
+            GetAddressUtxosRequest::new(addresses.clone(), false).with_limits(0, max_entries),
+        )
+    };
+
+    assert_eq!(tx_ids(3).await.expect("at the cap").len(), 3);
+    assert_eq!(tx_ids(4).await.unwrap_err().code(), invalid_params);
+
+    assert!(utxos(3).await.is_ok());
+    assert_eq!(utxos(0).await.unwrap_err().code(), invalid_params);
+    assert_eq!(utxos(4).await.unwrap_err().code(), invalid_params);
+
+    let too_many_addresses = vec![addresses[0].clone(); MAX_REQUEST_ADDRESSES + 1];
+    let error = rpc
+        .get_address_balance(GetAddressBalanceRequest::new(too_many_addresses))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), invalid_params);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount() {
     let _init_guard = zebra_test::init();
@@ -2452,6 +2855,551 @@ async fn rpc_getnetworksolps() {
     }
 }
 
+/// A future height must use the tip's averaging window, not a future upgrade's window.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps_uses_the_effective_height() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = testnet::Parameters::build()
+            .with_slow_start_interval(zebra_chain::block::Height::MIN)
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                before_overwinter: Some(1),
+                nu7: Some(121),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_funding_streams(vec![])
+            .to_network()
+            .unwrap();
+
+        let mut blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        // Extend the checkpoint fixture with fast recent blocks and slow older blocks, so
+        // a 17-block estimate is observably different from a 102-block estimate.
+        for height in 2..=120 {
+            let mut block = (*blocks[1]).clone();
+            let header = Arc::make_mut(&mut block.header);
+            let parent = blocks.last().unwrap();
+            header.previous_block_hash = parent.hash();
+            header.time =
+                parent.header.time + chrono::Duration::seconds(if height > 103 { 1 } else { 100 });
+            let mut inputs = block.transactions[0].inputs();
+            let zebra_chain::transparent::Input::Coinbase {
+                height: input_height,
+                ..
+            } = &mut inputs[0]
+            else {
+                panic!("fixture starts with a coinbase")
+            };
+            *input_height = Height(height);
+            block.transactions[0] = Arc::new(
+                (*block.transactions[0])
+                    .clone()
+                    .with_transparent_inputs(inputs),
+            );
+            blocks.push(Arc::new(block));
+        }
+
+        let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &network).await;
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let recent = rpc.get_network_sol_ps(Some(17), Some(120)).await.unwrap();
+        let long = rpc.get_network_sol_ps(Some(102), Some(120)).await.unwrap();
+        assert!(
+            recent > long,
+            "the fixture must distinguish the two windows"
+        );
+        for height in [None, Some(-1), Some(120), Some(121), Some(i32::MAX)] {
+            for num_blocks in [0, -1] {
+                assert_eq!(
+                    rpc.get_network_sol_ps(Some(num_blocks), height)
+                        .await
+                        .unwrap(),
+                    recent
+                );
+            }
+        }
+        assert_eq!(
+            rpc.get_network_sol_ps(Some(102), Some(121)).await.unwrap(),
+            long
+        );
+        assert_eq!(rpc.get_network_sol_ps(Some(0), Some(0)).await.unwrap(), 0);
+    })
+    .await
+    .expect("solution-rate regression must not stall");
+}
+
+/// A state estimate that exceeds the RPC's integer width must return an error, not panic.
+#[tokio::test]
+async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for rate in [u128::from(u64::MAX), u128::from(u64::MAX) + 1] {
+            let read_state = tower::service_fn(move |request| async move {
+                assert!(matches!(request, ReadRequest::SolutionRate { .. }));
+                Ok::<_, BoxError>(ReadResponse::SolutionRate(Some(rate)))
+            });
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                Mainnet,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let result = rpc.get_network_sol_ps(None, None).await;
+            if rate == u128::from(u64::MAX) {
+                assert_eq!(result.unwrap(), u64::MAX);
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("unrepresentable rates must return an RPC error")
+                        .code(),
+                    i32::from(server::error::LegacyCode::Misc),
+                );
+            }
+        }
+    })
+    .await
+    .expect("solution-rate conversion must not stall");
+}
+
+/// Builds the shared NSM activation fixture with a zero seed and the required funding recipients.
+fn nsm_test_network(
+    height: Height,
+    recipients: Vec<testnet::ConfiguredFundingStreamRecipient>,
+) -> Network {
+    Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_initial_nsm_value_balance(Amount::zero())
+        .with_activation_heights(testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(height.0),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_nsm_reissuance_height(height)
+        .with_funding_streams(vec![testnet::ConfiguredFundingStreams {
+            height_range: Some(height..Height(1_010)),
+            recipients: Some(recipients),
+        }])
+        .to_network()
+        .unwrap()
+}
+
+/// Mandatory payouts must use the proposal parent's reserve before transaction verification.
+#[tokio::test]
+async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
+    use types::get_block_template::{
+        proposal::proposal_block_from_template, BlockProposalResponse,
+    };
+    use zebra_chain::parameters::{
+        subsidy::{
+            scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError, SubsidyError,
+        },
+        testnet::ConfiguredFundingStreamRecipient,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let height = Height(1_000);
+        let network = nsm_test_network(
+            height,
+            vec![ConfiguredFundingStreamRecipient::new_for(
+                FundingStreamReceiver::MajorGrants,
+            )],
+        );
+        let parent_hash = Hash([1; 32]);
+        let template = template_extending(&network, height.previous().unwrap(), parent_hash);
+        let proposal = proposal_block_from_template(&template, None, &network).unwrap();
+        let scheduled = scheduled_block_subsidy(height, &network).unwrap();
+        let mut funded_pools = ValueBalance::zero();
+        funded_pools.set_nsm_amount(10_000_000_000u64.try_into().unwrap());
+        let contextual_subsidy = zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
+            height, &network, funded_pools,
+        )
+        .unwrap();
+        subsidy_is_valid(&proposal, &network, scheduled).unwrap();
+        assert_eq!(
+            subsidy_is_valid(&proposal, &network, contextual_subsidy),
+            Err(CoinbaseTransactionError::Subsidy(SubsidyError::FundingStreamNotFound)),
+        );
+
+        for (tip_height, tip_hash, chain_value_pools, should_verify, forged_height) in [
+            (height.previous().unwrap(), parent_hash, funded_pools, false, false),
+            (height.previous().unwrap(), Hash([2; 32]), ValueBalance::zero(), false, false),
+            (height, parent_hash, ValueBalance::zero(), false, false),
+            (height.previous().unwrap(), parent_hash, ValueBalance::zero(), true, false),
+            // The header has the live parent, but the coinbase claims a pre-reissuance height.
+            (height, parent_hash, ValueBalance::zero(), false, true),
+        ] {
+            let proposal = if forged_height {
+                let template = template_extending(
+                    &network,
+                    height.previous().unwrap().previous().unwrap(),
+                    parent_hash,
+                );
+                proposal_block_from_template(&template, None, &network).unwrap()
+            } else {
+                proposal.clone()
+            };
+            let chain_info = GetBlockTemplateChainInfo {
+                tip_height,
+                tip_hash,
+                chain_value_pools,
+                expected_difficulty: template.bits,
+                cur_time: template.cur_time,
+                min_time: template.min_time,
+                max_time: template.max_time,
+                chain_history_root: fake_history_tree(&network).hash(),
+            };
+            let read_state = tower::service_fn(move |request| {
+                assert!(matches!(request, ReadRequest::ChainInfo));
+                std::future::ready(Ok::<_, BoxError>(ReadResponse::ChainInfo(chain_info.clone())))
+            });
+            let verifier_calls = Arc::new(AtomicUsize::new(0));
+            let calls = verifier_calls.clone();
+            let verifier = tower::service_fn(move |request| {
+                let zebra_consensus::Request::CheckProposal(block) = request else {
+                    panic!("proposal RPC must not commit blocks")
+                };
+                calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok::<_, BoxError>(block.hash()))
+            });
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (mock_tip, tip_sender) = MockChainTip::new();
+            tip_sender.send_best_tip_height(tip_height);
+            tip_sender.send_best_tip_hash(tip_hash);
+            tip_sender.send_best_tip_block_time(chrono::Utc::now());
+            let mut sync_status = MockSyncStatus::default();
+            sync_status.set_is_close_to_tip(true);
+            let (rpc, _) = RpcImpl::new(
+                network.clone(),
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                verifier,
+                sync_status,
+                mock_tip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let response = rpc
+                .get_block_template(Some(GetBlockTemplateParameters {
+                    mode: GetBlockTemplateRequestMode::Proposal,
+                    data: Some(HexData(proposal.zcash_serialize_to_vec().unwrap())),
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+            assert_eq!(
+                verifier_calls.load(Ordering::SeqCst),
+                usize::from(should_verify),
+                "only payouts validated against the proposal parent may reach transaction verification",
+            );
+            if should_verify {
+                assert_eq!(
+                    response,
+                    GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+                );
+            } else {
+                assert!(matches!(
+                    response,
+                    GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+                ));
+            }
+        }
+    })
+    .await
+    .expect("proposal preflight must not stall");
+}
+
+/// Invalid external heights must fail identically with and without reserve-dependent subsidies.
+#[tokio::test]
+async fn rpc_getblocksubsidy_rejects_out_of_range_heights() {
+    let _init_guard = zebra_test::init();
+    for network in [Mainnet, nsm_test_network(Height(1_000), Vec::new())] {
+        let read_state = tower::service_fn(|_| {
+            std::future::ready(Err::<ReadResponse, BoxError>(
+                "unexpected state access".into(),
+            ))
+        });
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            read_state,
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        for height in [Height::MAX.0 + 1, u32::MAX] {
+            assert_eq!(
+                rpc.get_block_subsidy(Some(height))
+                    .await
+                    .unwrap_err()
+                    .code(),
+                i32::from(server::error::LegacyCode::InvalidParameter),
+            );
+        }
+    }
+}
+
+/// Historical RPC rewards and same-height templates must use the parent's reserve, including
+/// the funding and deferred shares. Missing future parents must not become zero-reserve forecasts.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
+    use types::get_block_template::{BlockTemplateResponse, MinerParams};
+    use types::long_poll::LongPollInput;
+    use zebra_chain::parameters::{
+        subsidy::scheduled_block_subsidy, testnet::ConfiguredFundingStreamRecipient,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let height = Height(1_000);
+        let network = nsm_test_network(
+            height.previous().unwrap(),
+            vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ],
+        );
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let miner = MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
+        let cache = CoinbaseCache::default();
+        let scheduled = scheduled_block_subsidy(height, &network)
+            .unwrap()
+            .zatoshis();
+        for (reserve, additional, parent_hash) in [
+            (10_000_000_000u64, 1_375, Hash([1; 32])),
+            (20_000_000_000u64, 2_750, Hash([2; 32])),
+        ] {
+            let mut pools = ValueBalance::zero();
+            pools.set_nsm_amount(reserve.try_into().unwrap());
+            let response = async {
+                read_state
+                    .expect_request(ReadRequest::BlockInfo(Height(999).into()))
+                    .await
+                    .respond(ReadResponse::BlockInfo(Some(BlockInfo::new(pools, 0))));
+            };
+            let (subsidy, ()) = tokio::join!(rpc.get_block_subsidy(Some(height.0)), response);
+            let subsidy = subsidy.unwrap();
+            let total = scheduled + additional;
+            let funding = total * 8 / 100;
+            let deferred = total * 12 / 100;
+            let miner_reward = total - funding - deferred;
+            assert_eq!(subsidy.total_block_subsidy().zatoshis(), total);
+            assert_eq!(subsidy.funding_streams_total().zatoshis(), funding);
+            assert_eq!(subsidy.lockbox_total().zatoshis(), deferred);
+            assert_eq!(subsidy.miner().zatoshis(), miner_reward);
+
+            let chain_info = GetBlockTemplateChainInfo {
+                tip_height: Height(999),
+                tip_hash: parent_hash,
+                chain_value_pools: pools,
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                cur_time: DateTime32::from(1654008617),
+                min_time: DateTime32::from(1654008606),
+                max_time: DateTime32::from(1654008728),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
+            };
+            let long_poll_id = LongPollInput::new(
+                chain_info.tip_height,
+                parent_hash,
+                chain_info.max_time,
+                std::iter::empty(),
+            )
+            .generate_id();
+            let _ = types::get_block_template::zip317::select_mempool_transactions(
+                &network,
+                height,
+                &miner,
+                Vec::new(),
+                Default::default(),
+                Some(&cache),
+                Some(pools.nsm_amount()),
+            );
+            let make_template = |fees: i64| {
+                let mut transaction = Mainnet
+                    .unmined_transactions_in_blocks(..)
+                    .find(|tx| !tx.transaction.transaction.is_coinbase())
+                    .unwrap();
+                transaction.miner_fee = fees.try_into().unwrap();
+                BlockTemplateResponse::new_internal(
+                    &network,
+                    &cache,
+                    &miner,
+                    &chain_info,
+                    long_poll_id,
+                    vec![(0, transaction)],
+                    None,
+                )
+            };
+            // Three and four zatoshis have the same miner share. Returning to three exercises
+            // a cached response without confusing the gross fee with the coinbase payout.
+            for fees in [0, 3, 4, 3] {
+                let template = make_template(fees);
+                let coinbase: Transaction = template
+                    .coinbase_txn
+                    .data
+                    .as_ref()
+                    .zcash_deserialize_into()
+                    .unwrap();
+                let mut values: Vec<_> = coinbase
+                    .outputs()
+                    .iter()
+                    .map(|output| output.value.zatoshis())
+                    .collect();
+                values.sort();
+                assert_eq!(values, vec![funding, miner_reward + fees - fees * 60 / 100]);
+                let reported_fees = template
+                    .transactions
+                    .iter()
+                    .map(|transaction| transaction.fee.zatoshis())
+                    .sum::<i64>();
+                assert_eq!(reported_fees, fees);
+                assert_eq!(
+                    template.coinbase_txn.fee.zatoshis(),
+                    -(fees - fees * 60 / 100)
+                );
+                assert_eq!(template.mutable, ["time"]);
+            }
+        }
+
+        let missing_parent = async {
+            read_state
+                .expect_request(ReadRequest::BlockInfo(Height(1_001).into()))
+                .await
+                .respond(ReadResponse::BlockInfo(None));
+        };
+        let (future, ()) = tokio::join!(rpc.get_block_subsidy(Some(1_002)), missing_parent);
+        assert_eq!(
+            future.unwrap_err().code(),
+            i32::from(server::error::LegacyCode::Misc)
+        );
+    })
+    .await
+    .expect("NSM RPC regression must not stall");
+}
+
+#[test]
+fn getblocktemplate_mutations_preserve_coinbase_balance() {
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::subsidy::{
+            funding_stream_values, miner_fees_are_valid, scheduled_block_subsidy,
+            CoinbaseTransactionError, FundingStreamReceiver::Deferred, SubsidyError,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+    let height = NetworkUpgrade::Nu6.activation_height(&Mainnet).unwrap();
+    let template = template_extending(&Mainnet, height.previous().unwrap(), Hash([1; 32]));
+    let coinbase: Transaction = template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .unwrap();
+    let subsidy = scheduled_block_subsidy(height, &Mainnet).unwrap();
+    let deferred = funding_stream_values(height, &Mainnet, subsidy).unwrap();
+    let deferred = DeferredPoolBalanceChange::new(deferred[&Deferred].constrain().unwrap());
+
+    miner_fees_are_valid(
+        &coinbase,
+        height,
+        Amount::zero(),
+        subsidy,
+        deferred,
+        &Mainnet,
+    )
+    .unwrap();
+    assert!(matches!(
+        miner_fees_are_valid(
+            &coinbase,
+            height,
+            1.try_into().unwrap(),
+            subsidy,
+            deferred,
+            &Mainnet
+        ),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::InvalidMinerFees
+        )),
+    ));
+    // A required coinbase cannot be kept valid by changing its fees or parent independently.
+    assert!(template.coinbase_txn.required);
+    assert_eq!(template.mutable, ["time"]);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
@@ -2501,7 +3449,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2538,7 +3486,6 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     min_time: fake_min_time,
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
-                    #[cfg(zcash_unstable = "zip234")]
                     chain_value_pools: Default::default(),
                 }));
         }
@@ -2596,7 +3543,6 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         .expect("test vector is valid")
     );
     assert_eq!(get_block_template.min_time, fake_min_time);
-    assert_eq!(get_block_template.mutable, MUTABLE_FIELD.to_vec());
     assert_eq!(get_block_template.nonce_range, NONCE_RANGE_FIELD);
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
@@ -2632,11 +3578,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         Amount::<NonNegative>::zero()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when estimated distance to network chain tip is far");
+        .expect_err("a stale tip must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -2645,7 +3591,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(false);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
@@ -2656,11 +3602,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         ErrorCode::ServerError(-10).code()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
+        .expect_err("a stale tip and unsynced node must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -2748,7 +3694,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(true);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (get_block_template, ..) = tokio::join!(
         rpc.get_block_template(None),
@@ -2767,6 +3713,36 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     // mempool transactions should be omitted if the tip hash in the GetChainInfo response from the state
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
     assert!(get_block_template.transactions.is_empty());
+
+    // Simulate a state snapshot captured before a backwards wall-clock adjustment.
+    // Its cur_time still fits, but its advertised maximum no longer does.
+    let mut rollback_state = read_state.clone();
+    let (rollback_result, ..) = tokio::join!(
+        rpc.get_block_template(None),
+        make_mock_mempool_request_handler(vec![], fake_tip_hash),
+        async {
+            rollback_state
+                .expect_request(ReadRequest::ChainInfo)
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    chain_value_pools: Default::default(),
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: DateTime32::now()
+                        .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
+                    chain_history_root: fake_history_tree(&Mainnet).hash(),
+                }));
+        },
+    );
+    assert_eq!(
+        rollback_result
+            .expect_err("the whole range must fit the current clock bound")
+            .code(),
+        i32::from(server::error::LegacyCode::Misc),
+    );
 
     mempool.expect_no_requests().await;
 }
@@ -2813,7 +3789,7 @@ async fn getblocktemplate_precomputed() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -2858,7 +3834,6 @@ async fn getblocktemplate_precomputed() {
                                 min_time: DateTime32::from(1654008606),
                                 max_time: DateTime32::from(1654008728),
                                 chain_history_root,
-                                #[cfg(zcash_unstable = "zip234")]
                                 chain_value_pools: Default::default(),
                             })
                         }
@@ -2911,8 +3886,9 @@ async fn getblocktemplate_precomputed() {
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever.
+    // forever. An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
+    let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
@@ -2933,6 +3909,7 @@ async fn getblocktemplate_precomputed() {
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
     read_state_responder.abort();
+    let _ = read_state_responder.await;
 
     let (read_state_responder, mempool_responder) =
         spawn_responders(next_tip_height, next_tip_hash);
@@ -3002,7 +3979,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3027,6 +4004,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let tip_reads = Arc::new(AtomicUsize::new(0));
 
     let chain_history_root = fake_history_tree(&net).hash();
+    let now = DateTime32::now();
     let read_state_responder = tokio::spawn({
         let mut read_state = read_state.clone();
         let tip_reads = tip_reads.clone();
@@ -3046,11 +4024,12 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                                 ),
                                 tip_height,
                                 tip_hash,
-                                cur_time: DateTime32::from(1654008617),
-                                min_time: DateTime32::from(1654008606),
-                                max_time: DateTime32::from(1654008719),
+                                cur_time: now,
+                                min_time: now,
+                                max_time: now.saturating_add(
+                                    zebra_chain::serialization::Duration32::from_minutes(2),
+                                ),
                                 chain_history_root,
-                                #[cfg(zcash_unstable = "zip234")]
                                 chain_value_pools: Default::default(),
                             })
                         }
@@ -3199,6 +4178,216 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     updater.abort();
 }
 
+/// Expiry notifies a waiting miner once, but re-polling expired work waits for a real change.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_expires_once() {
+    let _init_guard = zebra_test::init();
+
+    for cached in [false, true] {
+        let net = Network::Mainnet;
+        let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+        let tip_hash = Hash([1; 32]);
+        let now = DateTime32::from(1_700_000_000);
+        let max_time = now.saturating_add(Duration32::from_seconds(10));
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            tip_height,
+            tip_hash,
+            cur_time: now,
+            min_time: now,
+            max_time,
+            chain_history_root: fake_history_tree(&net).hash(),
+            chain_value_pools: Default::default(),
+        };
+        let (chain_info_tx, chain_info_rx) = tokio::sync::watch::channel(chain_info.clone());
+        let mempool_tip = chain_info_rx.clone();
+        let state_reads = Arc::new(AtomicUsize::new(0));
+        let read_state = tower::service_fn({
+            let state_reads = state_reads.clone();
+            move |request| {
+                state_reads.fetch_add(1, Ordering::SeqCst);
+                let chain_info = chain_info_rx.borrow().clone();
+                async move {
+                    Ok::<_, BoxError>(match request {
+                        ReadRequest::Tip => {
+                            ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
+                        }
+                        ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            }
+        });
+        let mempool = tower::service_fn(move |request| {
+            let tip_hash = mempool_tip.borrow().tip_hash;
+            async move {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                })
+            }
+        });
+        let (mock_tip, mock_tip_sender) = MockChainTip::new();
+        mock_tip_sender.send_best_tip_height(tip_height);
+        mock_tip_sender.send_best_tip_hash(tip_hash);
+        mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (mut rpc, queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                    NetworkType::Main,
+                    [0x7e; 20],
+                )),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "RPC test",
+            mempool,
+            MockService::build().for_unit_tests(),
+            read_state,
+            MockService::build().for_unit_tests(),
+            sync,
+            mock_tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let clock = Arc::new(AtomicU32::new(now.timestamp()));
+        rpc.template_clock = Some(clock.clone());
+        let cache = rpc.gbt.template_cache().unwrap();
+        let make_template = |chain_info: &GetBlockTemplateChainInfo| {
+            BlockTemplateResponse::new_internal(
+                &net,
+                &rpc.gbt.coinbase_cache(),
+                rpc.gbt.miner_params().unwrap(),
+                chain_info,
+                LongPollInput::new(
+                    chain_info.tip_height,
+                    chain_info.tip_hash,
+                    chain_info.max_time,
+                    std::iter::empty(),
+                )
+                .generate_id(),
+                vec![],
+                None,
+            )
+        };
+        let template = make_template(&chain_info);
+        if cached {
+            cache.publish(template.clone());
+        }
+        let parameters = || {
+            Some(GetBlockTemplateParameters {
+                long_poll_id: Some(template.long_poll_id),
+                ..Default::default()
+            })
+        };
+
+        let waiting = rpc.get_block_template(parameters());
+        tokio::pin!(waiting);
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "cached: {cached}"
+        );
+
+        // The original monotonic deadline has elapsed, but max_time itself is still valid.
+        clock.store(max_time.timestamp(), Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(11)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "max_time is inclusive"
+        );
+
+        // A deadline wakeup after wall-clock rollback must not falsely report expiry.
+        clock.store(now.timestamp(), Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "clock rolled back"
+        );
+
+        // Jump past max_time before the newly armed deadline. A cache/mempool refresh must
+        // notice expiry rather than disable the deadline and keep waiting indefinitely.
+        clock.store(max_time.timestamp() + 1, Ordering::SeqCst);
+        if cached {
+            cache.publish(template.clone());
+        } else {
+            tokio::time::advance(Duration::from_secs(
+                types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+        }
+        let expired = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("a forward clock jump must end the long poll")
+            .expect("expired work can be replaced")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(expired.long_poll_id, template.long_poll_id);
+        assert_eq!(expired.submit_old, Some(false), "cached: {cached}");
+
+        // The miner re-polls the same now-expired ID. It must park, not notify again or
+        // wake every second. Normal mempool refreshes remain enabled on the on-demand path.
+        let waiting = rpc.get_block_template(parameters());
+        tokio::pin!(waiting);
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "cached: {cached}"
+        );
+        let reads_before_wait = state_reads.load(Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "expired ID must wait"
+        );
+        assert_eq!(
+            state_reads.load(Ordering::SeqCst),
+            reads_before_wait,
+            "already-expired work must not recheck every second, cached: {cached}",
+        );
+        if cached {
+            cache.publish(template.clone());
+        } else {
+            tokio::time::advance(Duration::from_secs(
+                types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+        }
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "unchanged refresh must wait"
+        );
+
+        // A new block changes the ID and releases the miner normally.
+        let mut replacement_info = chain_info;
+        replacement_info.tip_height = tip_height.next().unwrap();
+        replacement_info.tip_hash = Hash([2; 32]);
+        replacement_info.max_time = max_time.saturating_add(Duration32::from_seconds(30));
+        let replacement = make_template(&replacement_info);
+        mock_tip_sender.send_best_tip_height(replacement_info.tip_height);
+        mock_tip_sender.send_best_tip_hash(replacement_info.tip_hash);
+        chain_info_tx.send_replace(replacement_info);
+        if cached {
+            cache.publish(replacement.clone());
+        }
+        let response = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("changed work must end the long poll")
+            .expect("replacement template is valid")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(response.long_poll_id, replacement.long_poll_id);
+        assert_eq!(response.submit_old, Some(false));
+        queue.abort();
+    }
+}
+
 /// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
 /// already committed, even while the chain tip channel still names that block's parent.
 ///
@@ -3252,7 +4441,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3294,7 +4483,6 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
                                 min_time: DateTime32::from(1654008606),
                                 max_time: DateTime32::from(1654008728),
                                 chain_history_root,
-                                #[cfg(zcash_unstable = "zip234")]
                                 chain_value_pools: Default::default(),
                             })
                         }
@@ -3690,6 +4878,189 @@ async fn rpc_z_validateaddress() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // ZIP 320 reference test vector: <https://zips.z.cash/zip-0320#reference-implementation>
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    let tex = rpc
+        .z_convert_tex(P2PKH.to_string())
+        .await
+        .expect("a mainnet P2PKH address should convert");
+    assert_eq!(tex, TEX, "conversion should match the ZIP 320 test vector");
+
+    // Round trip: the TEX address is valid, and carries the same 20-byte hash as its source.
+    assert!(
+        rpc.validate_address(tex.clone())
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress"
+    );
+    let source: zebra_chain::transparent::Address = P2PKH.parse().expect("valid P2PKH");
+    let converted: zebra_chain::transparent::Address = tex.parse().expect("valid TEX");
+    assert_eq!(
+        source.hash_bytes(),
+        converted.hash_bytes(),
+        "TEX address should re-encode the P2PKH validating key hash unchanged"
+    );
+
+    // Addresses that decode but aren't transparent P2PKH: zcashd returns -8.
+    for (address, kind) in [
+        ("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR", "P2SH"),
+        (
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya",
+            "Sapling",
+        ),
+        (
+            "u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e",
+            "unified",
+        ),
+        // zcashd can't decode TEX addresses at all and returns -5 here; Zebra can, so it
+        // falls through to the "not P2PKH" check instead. The call is rejected either way.
+        (TEX, "TEX"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("non-P2PKH addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidParameter),
+            "{kind} address should be rejected as an invalid parameter"
+        );
+        assert_eq!(error.message(), "Address is not a transparent p2pkh address");
+    }
+
+    // Addresses that don't decode, or are for another network: zcashd returns -5.
+    for (address, kind) in [
+        ("not an address", "garbage"),
+        ("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx", "Testnet P2PKH"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("undecodable or wrong-network addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "{kind} should be rejected as an invalid address on Mainnet"
+        );
+        assert_eq!(error.message(), "Invalid address");
+    }
+}
+
+/// Addresses produced by `z_converttex` must be rejected by the address-index RPCs, rather
+/// than silently returning an empty result. See the comment in `ValidateAddresses`.
+#[test]
+fn tex_addresses_are_rejected_by_the_address_index() {
+    use crate::{methods::ValidateAddresses, server::error::LegacyCode};
+
+    let _init_guard = zebra_test::init();
+
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    // The underlying P2PKH address is still accepted, including alongside other addresses.
+    GetAddressBalanceRequest::new(vec![P2PKH.to_string()])
+        .valid_addresses()
+        .expect("a P2PKH address should be accepted");
+
+    for addresses in [
+        vec![TEX.to_string()],
+        // A TEX address must not slip through by being mixed in with valid ones.
+        vec![P2PKH.to_string(), TEX.to_string()],
+    ] {
+        let error = GetAddressBalanceRequest::new(addresses.clone())
+            .valid_addresses()
+            .expect_err("a TEX address must be rejected");
+
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "TEX address in {addresses:?} should be rejected as an invalid address"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex_regtest() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Testnet(Arc::new(
+            Parameters::new_regtest(Default::default())
+                .expect("failed to build regtest parameters"),
+        )),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // tm address (P2PKH): Testnet and Regtest share transparent address prefixes, so the input
+    // decodes as Testnet, but the TEX HRP must be the Regtest one.
+    let tex = rpc
+        .z_convert_tex("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx".to_string())
+        .await
+        .expect("a tm address should convert on Regtest");
+    assert_eq!(tex, "texregtest1mjhhrt3ldpw98t2rxd9uzq9c25wer5nrttd29l");
+
+    // The result round trips: Zebra parses the `texregtest` HRP back to a Regtest TEX address.
+    assert!(
+        rpc.validate_address(tex)
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress on Regtest"
+    );
+
+    // t1 address: wrong network
+    let error = rpc
+        .z_convert_tex("t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC".to_string())
+        .await
+        .expect_err("a Mainnet address must be rejected on Regtest");
+    assert_eq!(error.code(), i32::from(LegacyCode::InvalidAddressOrKey));
+    assert_eq!(error.message(), "Invalid address");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_validateaddress_regtest() {
     let _init_guard = zebra_test::init();
 
@@ -3795,7 +5166,7 @@ async fn rpc_getdifficulty() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -3832,7 +5203,6 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
-                #[cfg(zcash_unstable = "zip234")]
                 chain_value_pools: Default::default(),
             }));
     };
@@ -3860,7 +5230,6 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
-                #[cfg(zcash_unstable = "zip234")]
                 chain_value_pools: Default::default(),
             }));
     };
@@ -3885,7 +5254,6 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
-                #[cfg(zcash_unstable = "zip234")]
                 chain_value_pools: Default::default(),
             }));
     };
@@ -3910,7 +5278,6 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
-                #[cfg(zcash_unstable = "zip234")]
                 chain_value_pools: Default::default(),
             }));
     };
@@ -3981,9 +5348,8 @@ async fn rpc_z_listunifiedreceivers() {
     assert_eq!(*response.p2sh(), None);
 }
 
-/// Check that `z_listunifiedreceivers` returns an RPC error (instead of panicking and
-/// aborting `zebrad`) when given a unified address whose Sapling receiver has a valid
-/// length and typecode but a non-canonical Jubjub `pk_d`.
+/// Check that `z_listunifiedreceivers` rejects shielded receivers whose typecode and
+/// length are valid but whose transmission key is not a canonical curve point.
 ///
 /// The unified-address decoder validates only the typecode and length of inner receivers,
 /// not their contents, so this used to reach `sapling_crypto::PaymentAddress::from_bytes`
@@ -3993,8 +5359,8 @@ async fn rpc_z_listunifiedreceivers() {
 /// Regression test for
 /// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_z_listunifiedreceivers_rejects_bad_sapling_receiver() {
-    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver, Revision, Uitem};
 
     let _init_guard = zebra_test::init();
 
@@ -4005,18 +5371,6 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_sapling_receiver() {
     let mut bad_sapling = [0u8; 43];
     bad_sapling[..11].copy_from_slice(&[0x11; 11]);
     bad_sapling[11..].copy_from_slice(&[0xFF; 32]);
-
-    // A placeholder Orchard receiver is needed to satisfy the unified-container rule
-    // that forbids `OnlyTransparent` UAs. The bytes themselves are never validated by
-    // the decoder, so any 43 bytes work.
-    let placeholder_orchard = [0x22u8; 43];
-
-    let unified = UnifiedAddress::try_from_items(vec![
-        Receiver::Sapling(bad_sapling),
-        Receiver::Orchard(placeholder_orchard),
-    ])
-    .expect("unified container construction does not validate inner bytes");
-    let encoded = unified.encode(&NetworkType::Main);
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -4037,12 +5391,22 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_sapling_receiver() {
         None,
     );
 
-    let result = rpc.z_list_unified_receivers(encoded).await;
-    assert!(
-        result.is_err(),
-        "z_listunifiedreceivers must return an error for a malformed Sapling receiver, \
-         got {result:?}",
-    );
+    for receiver in [
+        Receiver::Sapling(bad_sapling),
+        Receiver::Orchard([0xFF; 43]),
+    ] {
+        let encoded = UnifiedAddress::try_from_items(Revision::R0, vec![Uitem::Data(receiver)])
+            .expect("unified container construction does not validate inner bytes")
+            .encode(&NetworkType::Main);
+        let error = rpc
+            .z_list_unified_receivers(encoded)
+            .await
+            .expect_err("malformed shielded receivers must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(crate::server::error::LegacyCode::InvalidParameter),
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4207,37 +5571,60 @@ async fn rpc_gettxout() {
 async fn rpc_get_standard_fee() {
     let _init_guard = zebra_test::init();
 
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    let (tip, _tip_sender) = MockChainTip::new();
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _rpc_tx_queue) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        tip,
-        MockAddressBookPeers::default(),
-        rx,
+    // The fee applies to the block after the tip, so Mainnet switches at a tip one block below
+    // the activation height.
+    let tip_heights = [
         None,
-    );
+        Some(Height(3_589_998)),
+        Some(Height(3_589_999)),
+        Some(Height(3_590_000)),
+    ];
 
-    let response = rpc
-        .get_standard_fee()
-        .await
-        .expect("get_standard_fee should succeed");
+    for (network, expected_fees) in [
+        (Mainnet, [5000, 5000, 1000, 1000]),
+        (Network::new_default_testnet(), [1000; 4]),
+        (Network::new_regtest(Default::default()), [1000; 4]),
+    ] {
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    assert_eq!(response.standard_fee(), 1000);
-    assert_eq!(response.version(), 0);
+        let (tip, tip_sender) = MockChainTip::new();
+
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        for (tip_height, expected_fee) in tip_heights.into_iter().zip(expected_fees) {
+            tip_sender.send_best_tip_height(tip_height);
+
+            let response = rpc
+                .get_standard_fee()
+                .await
+                .expect("get_standard_fee should succeed");
+
+            assert_eq!(
+                response.standard_fee(),
+                expected_fee,
+                "{network} with tip {tip_height:?}"
+            );
+            assert_eq!(response.version(), 0);
+        }
+    }
 }
 
 /// `getblocksubsidy` must report the funding stream metadata era of the height's active upgrade,
@@ -4317,12 +5704,11 @@ async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
     }
 }
 
-/// From the ZIP 234 deployment height, `getblocksubsidy` returns the scheduled
+/// From the NSM reissuance height, `getblocksubsidy` returns the scheduled
 /// block subsidy plus the additional subsidy for the NSM value balance after the parent block, and
 /// returns an error if the parent block isn't in the state yet.
-#[cfg(zcash_unstable = "zip234")]
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblocksubsidy_zip234() {
+async fn rpc_getblocksubsidy_nsm() {
     use zebra_chain::{
         block::Height,
         parameters::{
@@ -4344,6 +5730,7 @@ async fn rpc_getblocksubsidy_zip234() {
             nu7: Some(10),
             ..Default::default()
         },
+        nsm_reissuance_height: Some(Height(10)),
         ..Default::default()
     });
 
@@ -4412,9 +5799,7 @@ async fn rpc_getblocksubsidy_zip234() {
         .expect("getblocksubsidy should not panic")
         .expect_err("getblocksubsidy should fail without the parent block");
 
-    assert!(error
-        .message()
-        .contains("only known up to the block after the best chain tip"));
+    assert_eq!(error.code(), i32::from(server::error::LegacyCode::Misc));
 }
 
 /// A template published during a cache wait must be checked against the new committed tip.
@@ -4455,7 +5840,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -4523,80 +5908,6 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     );
 }
 
-/// Cached `cur_time` must not extend the maximum-time long-poll deadline.
-#[tokio::test(start_paused = true)]
-async fn getblocktemplate_long_poll_accounts_for_template_age() {
-    let _init_guard = zebra_test::init();
-    let net = Network::Mainnet;
-    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
-    let tip_hash = Hash([0xab; 32]);
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (mock_tip, mock_tip_sender) = MockChainTip::new();
-    mock_tip_sender.send_best_tip_height(tip_height);
-    mock_tip_sender.send_best_tip_hash(tip_hash);
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        net.clone(),
-        mining::Config {
-            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
-                NetworkType::Main,
-                [0x7e; 20],
-            )),
-            ..Default::default()
-        },
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool, 1),
-        state,
-        read_state.clone(),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-    let cache = rpc.gbt.template_cache().unwrap();
-    let mut template = template_extending(&net, tip_height, tip_hash);
-    let now = DateTime32::now();
-    template.cur_time = now.saturating_sub(Duration32::from_minutes(5));
-    template.min_time = now
-        .saturating_sub(Duration32::from_minutes(89))
-        .saturating_add(Duration32::from_seconds(1));
-    template.max_time = now.saturating_add(Duration32::from_minutes(1));
-    template.long_poll_id =
-        LongPollInput::new(tip_height, tip_hash, template.max_time, std::iter::empty())
-            .generate_id();
-    let client_id = template.long_poll_id;
-    cache.publish(template);
-
-    let waiting = rpc.precomputed_block_template(Some(client_id));
-    tokio::pin!(waiting);
-    tokio::select! {
-        biased;
-        _ = &mut waiting => panic!("long polling must wait while the template is current"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
-            request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-        }
-    }
-    assert!(futures::poll!(&mut waiting).is_pending());
-
-    // Only one minute remains; restarting max_time - cur_time would wait six minutes.
-    tokio::time::advance(Duration::from_secs(62)).await;
-    let (served, ()) = tokio::join!(waiting, async {
-        read_state
-            .expect_request(ReadRequest::Tip)
-            .await
-            .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-    });
-    let served = served.expect("long polling must return at the maximum-time deadline");
-    assert_eq!(served.previous_block_hash, tip_hash);
-    assert_eq!(served.submit_old, Some(false));
-}
-
 /// Returns a template for the block after `(tip_height, tip_hash)`, as the updater would publish.
 fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> BlockTemplateResponse {
     let miner_params = MinerParams::from(
@@ -4615,7 +5926,6 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         min_time: DateTime32::now().saturating_sub(Duration32::from_seconds(11)),
         max_time: DateTime32::now().saturating_add(Duration32::from_minutes(90)),
         chain_history_root: fake_history_tree(net).hash(),
-        #[cfg(zcash_unstable = "zip234")]
         chain_value_pools: Default::default(),
     };
 
@@ -4636,4 +5946,214 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         vec![],
         None,
     )
+}
+
+/// A contended address book must not prevent other RPC runtime tasks from progressing.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
+    use std::{sync::mpsc, time::Duration};
+
+    let _init_guard = zebra_test::init();
+
+    let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
+        ([127, 0, 0, 1], Mainnet.default_port()).into(),
+        &Mainnet,
+        zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+        tracing::Span::none(),
+    )));
+
+    let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        address_book.clone(),
+        log_rx,
+        None,
+    );
+
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let lock_holder = std::thread::spawn(move || {
+        let guard = address_book
+            .lock()
+            .expect("no previous holder poisoned the mutex");
+        locked_tx.send(()).expect("test is waiting for the lock");
+
+        // An OS-thread watchdog releases the mutex even if the only async worker blocks.
+        let progress = release_rx.recv_timeout(Duration::from_secs(5));
+        drop(guard);
+        progress
+    });
+
+    tokio::time::timeout(Duration::from_secs(10), locked_rx)
+        .await
+        .expect("lock holder should start within the timeout")
+        .expect("lock holder should signal that it holds the mutex");
+
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let request = tokio::spawn(async move {
+        started_tx.send(()).expect("test is waiting for the RPC");
+        rpc.get_network_info().await
+    });
+
+    // On this single-thread runtime, the RPC must yield before this task can resume.
+    tokio::time::timeout(Duration::from_secs(10), started_rx)
+        .await
+        .expect("RPC task should start within the timeout")
+        .expect("RPC task should signal that it started");
+    let _ = release_tx.send(());
+    lock_holder
+        .join()
+        .expect("lock holder should not panic")
+        .expect("RPC blocked the async worker until the address-book watchdog expired");
+
+    let response = tokio::time::timeout(Duration::from_secs(10), request)
+        .await
+        .expect("RPC should complete after the mutex is released")
+        .expect("RPC task should not panic")
+        .expect("RPC should succeed");
+    assert_eq!(response.connections, 0);
+}
+
+/// The NSM value balance is monitored from the block before NU7 activation, also when it is
+/// zero, and not before.
+#[test]
+fn nsm_value_balance_is_monitored_from_the_block_before_nu7_activation() {
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+
+    let monitored = |height, zat| {
+        GetBlockchainInfoBalance::nsm(&Mainnet, height, balance_zat(zat), None).monitored()
+    };
+
+    assert!(monitored(nu7, 0));
+    assert!(monitored(before_nu7, 0));
+    assert!(!monitored(before_nu7.previous().expect("valid height"), 0));
+}
+
+/// Verbose `getblock` reports ZIP 237's NSM value balance at NU7 - 1 and NU7, although the state
+/// credits `INITIAL_NSM_VALUE_BALANCE` in the NU7 activation block.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_the_initial_nsm_value_balance_before_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+    let initial = i64::from(Mainnet.initial_nsm_value_balance());
+
+    // (height, stored parent NSM, stored block NSM, reported NSM, reported change), in zatoshis.
+    let cases = [
+        (before_nu7, 0, 0, initial, initial),
+        (nu7, 0, initial - 7, initial - 7, -7),
+    ];
+
+    for (height, parent_nsm, nsm, reported, reported_change) in cases {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            1,
+            height,
+            Some(block_info_with_balances(0, 0, parent_nsm)),
+            block_info_with_balances(0, 0, nsm),
+        )
+        .await;
+
+        let nsm_balance = obj.nsm_value_balance.as_ref().expect("has the NSM balance");
+        assert!(nsm_balance.monitored());
+        assert_eq!(nsm_balance.chain_value_zat(), balance_zat(reported));
+        assert_eq!(
+            nsm_balance.value_delta_zat(),
+            Some(change_zat(reported_change))
+        );
+    }
+}
+
+/// Verbose `getblock` reports the block's NSM value balance and its signed change to it, separately
+/// from the value pools' changes, for increases and decreases.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_nonzero_nsm_changes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let after_nu7 = (NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet")
+        + 1)
+    .expect("valid height");
+
+    // (parent Orchard, parent NSM, block Orchard, block NSM, NSM change in ZEC), in zatoshis.
+    let cases = [
+        // The NSM value balance increases, and the Orchard pool increases by a different amount.
+        (700_000_000, 100_000_000, 1_000_000_000, 350_000_000, 2.5),
+        // The NSM value balance decreases, and the Orchard pool decreases by a different amount.
+        (1_000_000_000, 350_000_000, 950_000_000, 125_000_000, -2.25),
+    ];
+
+    for (parent_orchard, parent_nsm, orchard, nsm, nsm_change_zec) in cases {
+        for verbosity in 1..=3 {
+            let obj = getblock_with_block_info(
+                block.clone(),
+                verbosity,
+                after_nu7,
+                Some(block_info_with_balances(0, parent_orchard, parent_nsm)),
+                block_info_with_balances(0, orchard, nsm),
+            )
+            .await;
+
+            let nsm_balance = obj
+                .nsm_value_balance
+                .as_ref()
+                .expect("the response has the NSM balance");
+            assert_eq!(nsm_balance.id(), "nsm");
+            assert!(nsm_balance.monitored());
+            assert_eq!(nsm_balance.chain_value_zat(), balance_zat(nsm));
+            assert_eq!(
+                nsm_balance.value_delta_zat(),
+                Some(change_zat(nsm - parent_nsm))
+            );
+
+            let orchard_pool = value_pool(&obj, "orchard");
+            assert_eq!(orchard_pool.chain_value_zat(), balance_zat(orchard));
+            assert_eq!(
+                orchard_pool.value_delta_zat(),
+                Some(change_zat(orchard - parent_orchard))
+            );
+
+            // The NSM value balance is not part of the supply.
+            assert_eq!(
+                obj.chain_supply
+                    .as_ref()
+                    .expect("the response has the chain supply")
+                    .chain_value_zat(),
+                balance_zat(orchard)
+            );
+
+            let json = serde_json::to_value(&obj).expect("the response serializes");
+            let nsm_json = &json["nsmValueBalance"];
+            assert_eq!(nsm_json["chainValueZat"], serde_json::json!(nsm));
+            assert_eq!(
+                nsm_json["valueDeltaZat"],
+                serde_json::json!(nsm - parent_nsm)
+            );
+            assert_eq!(nsm_json["valueDelta"], serde_json::json!(nsm_change_zec));
+            assert_eq!(nsm_json["monitored"], serde_json::json!(true));
+        }
+    }
 }

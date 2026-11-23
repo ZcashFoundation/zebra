@@ -1,7 +1,7 @@
 //! State [`tower::Service`] response types.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -252,7 +252,13 @@ impl NonFinalizedBlocksListener {
         let new_blocks = non_finalized_state.chain_iter().flat_map(move |chain| {
             // Take blocks from the chain in reverse height order until we reach a block the
             // listener already has, then restore ascending height order.
-            let mut blocks: Vec<_> = chain.blocks.values().rev().take_while(take_cond).collect();
+            let mut blocks: Vec<_> = chain
+                .blocks
+                .values()
+                .map(Arc::as_ref)
+                .rev()
+                .take_while(take_cond)
+                .collect();
             blocks.reverse();
             blocks
         });
@@ -405,6 +411,14 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BlockAndSize`] with the specified block and
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
+
+    /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
+    /// non-coinbase inputs of the specified block, keyed by the spending
+    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
+    ///
+    /// An outpoint whose spent output could not be found in the best chain is
+    /// omitted from the map.
+    SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
 
     /// The response to a `BlockHeader` request.
     BlockHeader {
@@ -580,8 +594,7 @@ pub struct GetBlockTemplateChainInfo {
     /// once the [halving-preserving issuance ZIP][zip] is active.
     /// Depends on the `tip_hash`.
     ///
-    /// [zip]: https://github.com/zcash/zips/pull/1354
-    #[cfg(zcash_unstable = "zip234")]
+    /// [zip]: https://zips.z.cash/zip-0237
     pub chain_value_pools:
         zebra_chain::value_balance::ValueBalance<zebra_chain::amount::NonNegative>,
 }
@@ -632,6 +645,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

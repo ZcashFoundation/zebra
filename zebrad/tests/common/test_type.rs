@@ -6,15 +6,13 @@ use std::{
     time::Duration,
 };
 
-use indexmap::IndexSet;
-
 use zebra_chain::parameters::Network;
 use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    config::{default_test_config, random_known_rpc_port_config},
+    config::{default_test_config, os_assigned_rpc_port_config, use_live_peers},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
         PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
@@ -226,7 +224,7 @@ impl TestType {
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
-            random_known_rpc_port_config(true, network)
+            os_assigned_rpc_port_config(true, network)
         } else {
             Ok(default_test_config(network))
         };
@@ -242,9 +240,9 @@ impl TestType {
             config.rpc.parallel_cpu_threads = 0;
         }
 
-        if !use_internet_connection {
-            config.network.initial_mainnet_peers = IndexSet::new();
-            config.network.initial_testnet_peers = IndexSet::new();
+        if use_internet_connection {
+            use_live_peers(&mut config);
+        } else {
             // Avoid reusing cached peers from disk when we're supposed to be a disconnected instance
             config.network.cache_dir = CacheDir::disabled();
 

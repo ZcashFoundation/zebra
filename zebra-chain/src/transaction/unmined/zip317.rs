@@ -4,7 +4,6 @@
 
 use std::cmp::max;
 
-use num_integer::div_ceil;
 use thiserror::Error;
 
 use crate::{
@@ -158,8 +157,8 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
     // the same way. This is zero for pre-v6 transactions.
     let n_actions_ironwood = transaction.ironwood_actions().count();
 
-    let tx_in_logical_actions = div_ceil(tx_in_total_size, P2PKH_STANDARD_INPUT_SIZE);
-    let tx_out_logical_actions = div_ceil(tx_out_total_size, P2PKH_STANDARD_OUTPUT_SIZE);
+    let tx_in_logical_actions = tx_in_total_size.div_ceil(P2PKH_STANDARD_INPUT_SIZE);
+    let tx_out_logical_actions = tx_out_total_size.div_ceil(P2PKH_STANDARD_OUTPUT_SIZE);
 
     let logical_actions = max(tx_in_logical_actions, tx_out_logical_actions)
         + 2 * n_join_split

@@ -25,7 +25,7 @@ PRs are welcome, but every PR requires human review time. To make that time coun
 2. **Coordinate large changes.** For anything beyond a small bug fix, discuss your approach with us via [issue tracker](https://github.com/ZcashFoundation/zebra/issues) or [Discord](https://discord.gg/yVNhQwQE68) before opening a PR.
 3. **Keep PRs focused.** One logical change per PR. If you're planning multiple related PRs, discuss the overall plan with the team first.
 4. **Follow conventional commits.** PRs are merged to main with a merge commit, so the PR title becomes the merge commit message and your branch commits are preserved in history. Follow the [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) standard for both.
-5. **Declare breaking changes.** If your change breaks a published crate's public Rust API, add `!` after the type and scope in the PR title (`feat(zebra-chain)!: ...`) **and** in the branch commit that introduces the break. The PR gate reads the title: that is what skips `semver-checks` and requires a `breaking` change fragment. release-plz reads the commits that land on `main`, which now include your branch commits, so the marker belongs on both for the release to bump the major version.
+5. **Declare breaking changes.** If your change breaks a published crate's public Rust API, add `!` after the type and scope in the PR title (`feat(zebra-chain)!: ...`) **and** in the branch commit that introduces the break. The PR gate reads the title: with `!`, its `api-diff` check accepts the break and the gate requires a `breaking` change fragment. Without `!`, `api-diff` fails on a public API break, lists each one, and says when a break does not need `!`. The check is advisory for now. release-plz reads the commits that land on `main`, which now include your branch commits, so the marker belongs on both for the release to bump the major version.
 
 Zebra is a validator node — it excludes features not strictly needed for block validation and chain sync. Features like wallets, block explorers, and mining pools belong in [Zaino](https://github.com/zingolabs/zaino), [Zallet](https://github.com/zcash/wallet), or [librustzcash](https://github.com/zcash/librustzcash).
 
@@ -62,9 +62,9 @@ This is not personal; it's about managing review capacity. We encourage you to r
 
 Zebra enforces code quality through review. For the full list of architecture rules, code patterns, testing requirements, and security considerations, see [`AGENTS.md`](AGENTS.md). The key points:
 
-- **Build requirements**: `cargo fmt`, `cargo clippy`, and `cargo test` must all pass
+- **Build requirements**: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo nextest run` must all pass.
 - **Architecture**: Dependencies flow downward only; `zebra-chain` is sync-only
 - **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
 - **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
 - **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
+- **Changelog**: Never edit `CHANGELOG.md` by hand. Add a change fragment with `changie new -j <crate> -k <kind> -b "..."` (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))

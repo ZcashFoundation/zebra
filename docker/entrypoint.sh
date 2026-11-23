@@ -14,22 +14,11 @@ set -eo pipefail
 : "${ZEBRA_STATE__CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${ZEBRA_RPC__COOKIE_DIR:=${HOME}/.cache/zebra}"
 
-# Leave zcashd-compat disabled unless the container runtime explicitly opts in.
-# Compat images can set ZCASHD_COMPAT_ENABLED=true to use a vendored
-# /usr/local/bin/zcashd, while still allowing ZEBRA_ZCASHD_COMPAT__* overrides.
+# ZCASHD_COMPAT_ENABLED was the opt-in for the removed zcashd-compat image. Warn
+# rather than exit: saved commands also pass --zcashd-compat, which still works.
 case "${ZCASHD_COMPAT_ENABLED:-}" in
 true | TRUE | 1 | yes | YES | on | ON)
-  export ZEBRA_ZCASHD_COMPAT__ENABLED="${ZEBRA_ZCASHD_COMPAT__ENABLED:-true}"
-  if [[ -x /usr/local/bin/zcashd ]]; then
-    export ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD="${ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD:-true}"
-    export ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE="${ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE:-path}"
-    export ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH="${ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH:-/usr/local/bin/zcashd}"
-  fi
-  ;;
-false | FALSE | 0 | no | NO | off | OFF | "") ;;
-*)
-  echo "ZCASHD_COMPAT_ENABLED must be true or false" >&2
-  exit 1
+  echo "WARNING: ZCASHD_COMPAT_ENABLED is no longer supported and is ignored; pass --zcashd-compat or set ZEBRA_ZCASHD_COMPAT__ENABLED=true instead" >&2
   ;;
 esac
 
@@ -113,6 +102,9 @@ case "$1" in
   ;;
 test)
   shift
+  # Match the image build, which leaves SHORT_SHA unset when it's empty, so cargo doesn't
+  # rebuild zebrad. See the `tests` stage in the Dockerfile.
+  [[ -n "${SHORT_SHA:-}" ]] || unset SHORT_SHA
   if [[ "$1" == "zebrad" ]]; then
     shift
     exec_as_user zebrad "${CONFIG_ARGS[@]}" "$@"

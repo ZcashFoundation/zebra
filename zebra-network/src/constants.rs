@@ -149,8 +149,24 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 
 
 /// Zebra rotates its peer inventory registry every time this interval elapses.
 ///
-/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+/// Available, missing, and failed inventory entries expire after two rotations. Delayed polling
+/// restarts this interval instead of replaying missed rotations.
 pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
+
+/// How long a single-hash [`Request::BlocksByHash`](crate::Request::BlocksByHash) waits for
+/// eligible busy capacity before returning a local refusal.
+///
+/// Sync and gossip downloaders use [`Request::BlockDownload`](crate::Request::BlockDownload)
+/// instead: capacity waits do not consume peer attempts, and the caller bounds the complete
+/// readiness and response operation. The connection's [`REQUEST_TIMEOUT`] starts at wire dispatch.
+pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// How long a find-blocks or find-headers request waits for a busy serving peer before it can
+/// fall back to any ready peer.
+///
+/// This wait starts when the request enters the peer set and counts towards the syncer's
+/// six-second request timeout, leaving time for the fallback peer to respond.
+pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.
 ///
@@ -165,6 +181,25 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// Using a prime number makes sure that peer address crawls
 /// don't synchronise with other crawls.
 pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
+
+/// The minimum time between re-adds of the initial peers, while the peer crawler has
+/// no outbound connections and no candidates ready to dial.
+///
+/// Each re-add resolves the DNS seeders and reloads the disk cache, and lets failed
+/// initial peers be attempted again after [`MIN_PEER_RECONNECTION_DELAY`].
+///
+/// # Security
+///
+/// This interval bounds the DNS query rate of a node that can't connect to any peers,
+/// regardless of the configured
+/// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
+pub const MIN_INITIAL_PEER_RECOVERY_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// The maximum time a re-add of the initial peers waits for them to be resolved and loaded.
+///
+/// Without cached peers, DNS resolution retries until it finds a peer, so this stops a
+/// re-add from running until the next one. It allows one retry of every DNS seeder.
+pub const INITIAL_PEER_RECOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The peer address disk cache update interval.
 ///
@@ -286,6 +321,18 @@ pub const PEER_GET_ADDR_TIMEOUT: Duration = Duration::from_secs(8);
 /// With a fanout of 3, we were dropping a lot of responses, because the overall crawl timed out.
 pub const GET_ADDR_FANOUT: usize = 1;
 
+/// The maximum number of distinct block hashes retained from a peer's `getdata` request.
+///
+/// The inbound service uses the same limit when serving blocks. Additional block hashes are
+/// ignored before allocating and cloning the internal request.
+///
+/// This is the same as `zcashd`'s request limit:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
+///
+/// (Zebra's outbound request limit is one block in transit per peer, because it fans out block
+/// requests to many peers instead of just a few peers.)
+pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
 /// `addr`:
@@ -299,6 +346,10 @@ pub const GET_ADDR_FANOUT: usize = 1;
 ///
 /// <https://zips.z.cash/zip-0155#specification>
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
+
+/// The maximum number of block hashes kept from a `FindBlocks` response, matching the
+/// `MAX_FIND_BLOCK_HASHES_RESULTS` limit that Zebra and zcashd apply when serving `getblocks`.
+pub const MAX_FIND_BLOCKS_RESPONSE_HASHES: usize = 500;
 
 /// The fraction of addresses Zebra sends in response to a `Peers` request.
 ///
@@ -330,6 +381,9 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 /// above does not shrink the address book (see #11103).
 pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
 
+/// The maximum number of gossiped addresses applied to the address book in one request.
+pub(crate) const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY
@@ -347,14 +401,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
 ///
-/// This version of Zebra draws the current network protocol version from
-/// [ZIP-255](https://zips.z.cash/zip-0255).
-// TODO: The NU7 protocol version is provisional; update this constant and the mapping in
-// `Version::min_specified_for_upgrade` once NU7's deployment ZIP is published.
-// Next upgrade values, uncomment on activation:
-//   pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_170); // NU7 Testnet
-//   pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_180); // NU7 Mainnet
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU6.3 (Mainnet + Testnet)
+/// Advertise NU7 support on Mainnet and Testnet.
+/// See [ZIP 204](https://zips.z.cash/zip-0204#assigning-protocol-versions-to-network-upgrades).
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_190);
 
 /// The default RTT estimate for peer responses.
 ///
@@ -403,7 +452,8 @@ pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 /// The interval between flushes of batched peer misbehaviour updates into the address book.
 ///
 /// Misbehaviour updates are batched so peers can't keep the address book mutex locked by
-/// repeatedly sending invalid blocks or transactions.
+/// repeatedly sending invalid blocks or transactions. An update that bans a peer is sent right
+/// away, at most once per peer address and interval.
 #[cfg(not(test))]
 pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 

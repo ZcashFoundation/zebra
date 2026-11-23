@@ -30,13 +30,15 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
-use zebra_network::{AddressBook, InventoryResponse};
+use zebra_network::{
+    constants::GETDATA_MAX_BLOCK_COUNT, AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE,
+};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
 
 // Re-use the syncer timeouts for consistency.
-use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use super::sync::BLOCK_VERIFY_TIMEOUT;
 
 use InventoryResponse::*;
 
@@ -65,15 +67,16 @@ pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 /// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.cpp#L6410-L6412>
 pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
 
-/// The maximum number of blocks the [`Inbound`] service will queue in response to a block request,
-/// before ignoring any additional block IDs in that request.
+/// The maximum number of transaction IDs the [`Inbound`] service will look up in the mempool in
+/// response to a transaction request, before ignoring any additional transaction IDs in that
+/// request.
 ///
-/// This is the same as `zcashd`'s request limit:
-/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
-///
-/// (Zebra's request limit is one block in transit per peer, because it fans out block requests to
-/// many peers instead of just a few peers.)
-pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+/// Derived from [`MAX_TX_INV_IN_SENT_MESSAGE`]: Zebra never advertises more transactions than
+/// that in a single `inv` message, so an honest peer following our advertisements never requests
+/// more than this in a single `getdata`. The wire format allows larger requests
+/// (`MAX_INV_IN_RECEIVED_MESSAGE` is 50,000), so the limit is taken from the protocol constant,
+/// not the message size.
+pub const GETDATA_MAX_TRANSACTION_COUNT: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -83,12 +86,8 @@ type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
 >;
-type GossipedBlockDownloads = BlockDownloads<
-    Timeout<BlockDownloadPeerSet>,
-    Timeout<SemanticBlockVerifier>,
-    State,
-    zs::LatestChainTip,
->;
+type GossipedBlockDownloads =
+    BlockDownloads<BlockDownloadPeerSet, Timeout<SemanticBlockVerifier>, State, zs::LatestChainTip>;
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
@@ -96,6 +95,9 @@ pub struct InboundSetupData {
     pub address_book: Arc<std::sync::Mutex<AddressBook>>,
 
     /// A service that can be used to download gossiped blocks.
+    ///
+    /// Use [`zn::NetworkService::background_service`] so the inbound service does not keep
+    /// its own network alive.
     pub block_download_peer_set: BlockDownloadPeerSet,
 
     /// A service that verifies downloaded blocks.
@@ -113,7 +115,7 @@ pub struct InboundSetupData {
     pub latest_chain_tip: zs::LatestChainTip,
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
-    pub misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+    pub misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -158,7 +160,7 @@ pub enum Setup {
         state: State,
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
-        misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
     },
 
     /// Temporary state used in the inbound service's internal initialization code.
@@ -279,7 +281,7 @@ impl Service<zn::Request> for Inbound {
 
                     let block_downloads = Box::pin(BlockDownloads::new(
                         full_verify_concurrency_limit,
-                        Timeout::new(block_download_peer_set, BLOCK_DOWNLOAD_TIMEOUT),
+                        block_download_peer_set,
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
                         latest_chain_tip,
@@ -369,7 +371,19 @@ impl Service<zn::Request> for Inbound {
                     };
 
                     if score != 0 {
-                        let _ = misbehavior_sender.try_send((advertiser_addr, score));
+                        // Height limit drops are only attributed when the parent proves a rewrite.
+                        let reason = if err.is::<HeightLimitError>() {
+                            format!(
+                                "invalid gossiped block: parent header contradicts coinbase height: {err}"
+                            )
+                        } else {
+                            format!("invalid gossiped block: {err}")
+                        };
+                        let _ = misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                            advertiser_addr,
+                            score,
+                            reason,
+                        ));
                     }
                 }
 
@@ -498,6 +512,19 @@ impl Service<zn::Request> for Inbound {
                     return async { Ok(zn::Response::Nil) }.boxed();
                 }
 
+                // Ignore any transaction IDs past the request limit, before the mempool
+                // lookup, matching the block path above. This saves us mempool lookups,
+                // and bounds the `notfound` response size.
+                let req_tx_ids: HashSet<UnminedTxId> =
+                    if req_tx_ids.len() > GETDATA_MAX_TRANSACTION_COUNT {
+                        req_tx_ids
+                            .into_iter()
+                            .take(GETDATA_MAX_TRANSACTION_COUNT)
+                            .collect()
+                    } else {
+                        req_tx_ids
+                    };
+
                 let request = mempool::Request::TransactionsById(req_tx_ids.clone());
                 mempool.clone().oneshot(request).map_ok(move |resp| {
                     let mut total_size = 0;
@@ -510,8 +537,8 @@ impl Service<zn::Request> for Inbound {
                     // Work out which transaction IDs were missing.
                     let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
                     // We don't need to limit the size of the missing transaction IDs list,
-                    // because it is already limited to the size of the getdata request
-                    // sent by the peer. (Their content and encodings are the same.)
+                    // because it is already limited to `GETDATA_MAX_TRANSACTION_COUNT` by
+                    // the cap above.
                     let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
 
                     // If we skip sending some transactions because the limit has been reached,
@@ -602,7 +629,6 @@ impl Service<zn::Request> for Inbound {
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                    mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                     _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                 })
@@ -612,7 +638,11 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+
+            zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
+
+            zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
 }

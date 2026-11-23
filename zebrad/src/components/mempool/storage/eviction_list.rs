@@ -2,8 +2,13 @@
 //! efficient operations.
 use std::{
     collections::{HashMap, VecDeque},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+#[cfg(not(test))]
+use std::time::Instant;
+#[cfg(test)]
+use tokio::time::Instant;
 
 use zebra_chain::transaction;
 

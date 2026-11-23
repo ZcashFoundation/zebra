@@ -40,8 +40,8 @@ permissions:
 jobs:
   delete-resources:
     name: Delete old GCP resources
-    if: github.repository_owner == 'ZcashFoundation'
-    runs-on: ubuntu-latest
+    if: github.repository == 'ZcashFoundation/zebra'
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -98,12 +98,12 @@ jobs:
 
   delete-resources-success:
     name: Delete GCP resources success
-    runs-on: ubuntu-latest
-    # Only run when the owner-specific cleanup jobs were eligible to execute
+    runs-on: ubuntu-26.04
+    # Only run when the repository-scoped cleanup jobs were eligible to execute
     if: >-
       ${{
         always() &&
-        github.repository_owner == 'ZcashFoundation'
+        github.repository == 'ZcashFoundation/zebra'
       }}
     needs:
       - delete-resources

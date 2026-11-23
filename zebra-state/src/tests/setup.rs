@@ -96,13 +96,9 @@ pub(crate) fn new_state_with_mainnet_genesis(
     let network = Mainnet;
 
     let mut finalized_state = FinalizedState::new_with_debug(
-        &config,
-        &network,
+        &config, &network,
         // The tests that use this setup function also commit invalid blocks to the state.
-        true,
-        #[cfg(feature = "elasticsearch")]
-        false,
-        false,
+        true, false,
     )
     .expect("opening an ephemeral database should succeed");
     let non_finalized_state = NonFinalizedState::new(&network);

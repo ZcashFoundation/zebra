@@ -9,6 +9,18 @@ use super::super::*;
 /// The timeout for each handshake test.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[test]
+fn serialization_error_metric_labels_ignore_details() {
+    for detail in ["first error detail", "second error detail"] {
+        let error = SerializationError::from(std::io::Error::other(detail));
+        assert_eq!(serialization_error_metric_label(&error), "io");
+        assert_eq!(
+            serialization_error_metric_label(&SerializationError::Parse(detail)),
+            "parse",
+        );
+    }
+}
+
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
 /// message advertising `remote_services`, then a verack.
 fn spawn_remote_peer(
@@ -115,7 +127,7 @@ fn chain_tip_at_network_tip() -> (
 ) {
     let (chain_tip, sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
     sender.send_best_tip_height(block::Height(3_000_000));
-    sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    sender.send_best_tip_block_time(chrono::Utc::now());
     (chain_tip, sender)
 }
 
@@ -160,18 +172,54 @@ async fn outbound_proxy_rejects_non_serving_peer_while_syncing() {
     );
 }
 
-/// Inbound handshakes must accept peers that don't advertise `NODE_NETWORK`,
-/// so light clients can connect to us.
+/// Inbound handshakes must accept non-serving peers without advertising their listeners as
+/// full nodes.
 #[tokio::test]
-async fn inbound_direct_accepts_non_serving_peer() {
+async fn inbound_direct_preserves_non_serving_peer_services() {
     let _init_guard = zebra_test::init();
 
-    let connected_addr = ConnectedAddr::new_inbound_direct("127.0.0.1:32000".parse().unwrap());
-    let result =
-        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
+    let network = Network::Mainnet;
+    let handshake = Handshake::builder()
+        .with_config(Config {
+            network: network.clone(),
+            ..Config::default()
+        })
+        .with_inbound_service(service_fn(|_req| async move {
+            Ok::<Response, BoxError>(Response::Nil)
+        }))
+        .finish()
+        .expect("provided mandatory builder parameters");
 
-    let connection_info = result.expect("inbound handshake with a non-serving peer succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    let (local_stream, remote_stream) = tokio::io::duplex(65536);
+    let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::empty());
+    let connected_addr = ConnectedAddr::new_inbound_direct("127.0.0.1:32000".parse().unwrap());
+    let connection_tracker = ActiveConnectionCounter::new_counter().track_connection();
+
+    let mut client = timeout(
+        TEST_TIMEOUT,
+        handshake.oneshot(HandshakeRequest {
+            data_stream: local_stream,
+            connected_addr,
+            connection_tracker,
+        }),
+    )
+    .await
+    .expect("handshake must not time out")
+    .expect("inbound handshake with a non-serving peer succeeds");
+
+    let response = timeout(TEST_TIMEOUT, (&mut client).oneshot(Request::Peers))
+        .await
+        .expect("cached peer addresses must not time out")
+        .expect("handshake-derived addresses are available");
+    remote_peer.abort();
+
+    let Response::Peers(addrs) = response else {
+        panic!("expected handshake-derived peer addresses");
+    };
+    assert!(!addrs.is_empty());
+    for addr in addrs {
+        assert_eq!(addr.services(), Some(PeerServices::empty()));
+    }
 }
 
 /// Isolated handshakes must accept peers that don't advertise `NODE_NETWORK`.

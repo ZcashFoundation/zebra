@@ -25,7 +25,7 @@ The version number is incremented based on the level of change included in the r
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **12 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **8 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
@@ -46,22 +46,25 @@ You can update to any version of Zebra, provided that the following criteria are
 
 ### Preview releases
 
-We let you preview what's coming by providing Release Candidate \(`rc`\) pre-releases for some major releases:
+We let you preview what's coming with pre-releases:
 
-| Pre-release type  | Details                                                                                                                                                                |
-| :---------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as `8.1.0-beta.0`. |
-| Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`.       |
+| Pre-release type  | Details                                                                                                        |
+| :---------------- | :------------------------------------------------------------------------------------------------------------- |
+| Alpha             | An early preview of work on the [`next` branch](next-branch.md#publish-a-pre-release), tagged `X.Y.Z-alpha.N`. |
+| Beta              | A release under active development and testing, from the `next` branch, tagged `X.Y.Z-beta.N`.                 |
+| Release candidate | A release for final testing of new features, cut from `main` and tagged `X.Y.Z-rc.N`.                          |
+
+Any other pre-release identifier also marks a release from `next`. Every pre-release has signed Linux binaries attached to its GitHub Release, and a Docker Hub image tagged with its exact version.
 
 ### Distribution tags
 
 Zebra's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
-| Tag    | Description                                                                                         |
-| :----- | :-------------------------------------------------------------------------------------------------- |
-| latest | The most recent stable version.                                                                     |
-| beta   | The most recent pre-release version of Zebra for testing. May not always exist.                     |
-| rc     | The most recent release candidate of Zebra, meant to become a stable version. May not always exist. |
+| Tag         | Description                                                               |
+| :---------- | :------------------------------------------------------------------------ |
+| latest      | The most recent stable version.                                           |
+| edge        | The most recent pre-release from the `next` branch. May not always exist. |
+| `<version>` | One exact release or pre-release, such as `X.Y.Z` or `X.Y.Z-rc.N`.        |
 
 ### Feature Flags
 
@@ -123,19 +126,31 @@ The normal release path requires 2 maintainer actions:
 1. Review the latest Release PR after every required check passes.
 2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, the Release workflow sets its versions and changelogs from the unreleased change fragments, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
 
-A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
-
-Approve and merge only after every required check passes and every checkbox is complete. A later release-plz update invalidates the earlier review and checklist.
+To check the bumps, read the "Public API diff since zebrad vX" comment on the Release PR. `PR Gate / release-api-diff` refreshes it on every Release PR update with each crate's public API and dependency changes since the last zebrad release, and names any crate whose own last release is older.
 
 ### What Release Readiness Reports
 
-Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
+Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, then runs these checks independently, so the summary reports every outcome even when one fails:
+
+- **Changelogs:** each released package has a non-empty versioned changelog.
+- **Versions:** each package moves to the version its change fragments plan. A new prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is also accepted, unless the planned version is compatible with the current one and another workspace package depends on it. Its dependents' requirements would reject the prerelease, and the plan doesn't release them. A package that is a prerelease and has no new fragments may keep its version, graduate to its release version, or move to another prerelease. The workflow always applies the release version. To release a prerelease, such as `zebrad` `7.0.0-rc.1`, save the plan with `.github/scripts/plan-release-versions.sh <base> > releases.tsv`, change that package's version in `releases.tsv`, then run `.github/scripts/apply-release-plan.sh <base> releases.tsv` on the Release PR branch and push the result. The next workflow update replaces it with the release version.
+- **Manifests:** a package whose `Cargo.toml` changes is released.
+- **Fragments:** a released package has no fragments left in `.changes/unreleased`, so the next plan doesn't count them again.
+- **Cargo release:** Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
+
+`.github/scripts/plan-release-versions.sh <base>` prints the plan. It follows these rules:
+
+- Each package's fragments pick its level from their kinds: `breaking` and `Removed` are major, `Added`, `Changed`, and `Deprecated` are minor, and `Fixed` and `Security` are patch. The highest level wins.
+- Below 1.0.0, Cargo treats the minor version as the major one, so each level bumps one place lower.
+- `zebrad`'s major version marks a network upgrade, so `zebrad` stops at a minor version unless one of its fragments has the `network-upgrade` kind.
+- A prerelease version graduates to its release version.
+- A path dependency that moves to an incompatible version raises a package to at least a patch release, so its new requirement is published. When the package's library sources outside `src/bin` name that dependency, it inherits the break, even if its own fragments plan a smaller change, because a public signature can expose the dependency's types without a `pub use`. `zebrad` has no library API, so it only gets the patch.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 
@@ -156,6 +171,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
+| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let the Release workflow refresh the PR. Otherwise the workflow's apply step failed, and its log names the problem. After fixing it, freeze `main` in Merge Freeze, run `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and `.github/scripts/apply-release-plan.sh <base> releases.tsv` on the Release PR branch, then commit and push the result (see [Review the Release PR](#review-the-release-pr)). |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 
@@ -184,3 +200,61 @@ gh workflow run release.yml --ref main \
 Do not retry immutable contradictions: a crate archive from another source commit, a tag that points to another commit, or a GitHub Release with a conflicting channel must stop for maintainer review. Do not manually repeat publication or overwrite external state.
 
 If the automated workflow remains unavailable and a maintainer authorizes a break-glass manual release, follow the [manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+
+### Withdraw a Bad Release
+
+Withdraw a release when it has a defect that operators must not install or keep running, such as a consensus failure, data corruption, a security vulnerability, or a sync regression that stalls nodes. Fix any other defect in a regular release. A maintainer makes the call, then works through these steps for each affected version. Steps 1 to 4 can run in any order; start with the step that limits harm fastest. Start step 5 as soon as a fix is ready; step 6 waits for the release it publishes.
+
+In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback target, both without the `v` prefix. `<good>` is the newest release that lacks the defect, has not reached its end-of-support height (see [Supported Releases](#supported-releases)), and supports every network upgrade that is active, or activates before the fix ships, on each network being rolled back. Compare the activation heights in `zebra-chain/src/parameters/constants.rs` at `v<good>` with the chain. A node on a release that lacks an active upgrade follows the old-rules chain, and the fixed release stops at startup on that state with "Cached state contains a legacy chain". If no release qualifies, do not point Latest, `latest`, or production at an older release; ship the fix.
+
+1. Edit the GitHub Release. Put a warning block at the top of the notes that names the withdrawn versions and the version to install, if there is one, and keep the rest of the notes:
+
+   ```sh
+   gh release view v<bad> --json body --jq .body > notes.md
+   # Add a "> [!WARNING]" block at the top of notes.md
+   gh release edit v<bad> --notes-file notes.md
+   ```
+
+   If the withdrawn release is marked Latest, mark `v<good>` instead with `gh release edit v<good> --latest`. Delete the binaries so nobody installs them, after downloading any that the analysis needs:
+
+   ```sh
+   gh release view v<bad> --json assets --jq '.assets[].name' | xargs -I{} gh release delete-asset v<bad> {} --yes
+   ```
+
+   Keep the release and its git tag as the record of what shipped. Leave it a full release, not a pre-release or draft: `resume` treats a changed channel as a conflict. Do not run `resume` for the withdrawn version's Release PR, because it can restore the planned release notes and Latest selection.
+
+2. Fix the Docker Hub tags. If `zfnd/zebra:latest` has the digest of the withdrawn image, point it at `<good>`. The copy keeps the image digest, so signatures and attestations still verify:
+
+   ```sh
+   docker buildx imagetools inspect --format '{{.Manifest.Digest}}' zfnd/zebra:latest
+   docker buildx imagetools inspect --format '{{.Manifest.Digest}}' zfnd/zebra:<bad>
+   docker buildx imagetools create -t zfnd/zebra:latest zfnd/zebra:<good>
+   ```
+
+   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag and, if the withdrawn image has one, the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit, which older releases were also tagged with), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
+
+3. Roll production back to `<good>`. `zfnd-deploy-nodes-gcp.yml` builds and deploys the commit of the ref it runs from, so dispatch it from the good release tag, once per network and zone. Leave out a network whose active upgrades `<good>` does not support. The production state disks already exist, so skip the cached-disk lookup:
+
+   ```sh
+   for network in Mainnet Testnet; do
+     for zone in us-east1-b us-east1-c us-east1-d; do
+       gh workflow run zfnd-deploy-nodes-gcp.yml --ref v<good> \
+         -f network="${network}" -f zone="${zone}" \
+         -f environment=prod -f need_cached_disk=false
+     done
+   done
+   ```
+
+   A dispatch waits for the new template to roll out, not for node health, so check each MIG with the commands in [GCP Deployment Operations](gcp-deployment-operations.md#diagnose-a-stuck-mig), using `P=zfnd-prod-zebra` and the production MIG names, which use the lowercase network, such as `MIG=zebrad-mainnet-b`. If the withdrawn release changed the major `DATABASE_FORMAT_VERSION` in `zebra-state/src/constants.rs`, `<good>` cannot use the upgraded disks. The [rollback for that case](gcp-deployment-operations.md#db-format-version-break-release) deletes each disk and recreates it from its `-pre-major-<timestamp>` snapshot, so confirm the snapshots exist first; they exist only if that section's snapshot loop ran before the release.
+
+4. Tell operators. The warning on the GitHub Release is the primary notice. If the defect is a vulnerability, publish a GitHub Security Advisory that names the affected and fixed versions, as described in [SECURITY.md](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md#advisories-cves-and-credit).
+
+5. Ship the fix through the normal process, with a change fragment (`changie new`) that names the withdrawn versions. Version numbers are never reused.
+
+6. Yank the crate versions that carry the defect, only after step 5 has published the fixed versions. release-plz ignores yanked versions, so yanking the version that `main` still carries breaks the fix's Release PR. Always yank `zebrad`; yank a library crate only if its own code has the defect. The plan in the job summary of the release run's `Publish crates and GitHub Release` job lists every published crate version. Use a crates.io token limited to yanking (see [Zebra crates](crate-owners.md#logging-in-to-cratesio)):
+
+   ```sh
+   cargo yank zebrad@<bad>
+   ```
+
+   Existing `Cargo.lock` files keep working.

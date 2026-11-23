@@ -2,16 +2,14 @@
 
 use group::{
     ff::{FromUniformBytes, PrimeField},
-    prime::PrimeCurveAffine,
+    CurveAffine,
 };
 use halo2::pasta::pallas;
 use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, VerificationKeyBytes};
 
 use proptest::{array, collection::vec, prelude::*};
 
-use super::{
-    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment,
-};
+use super::{keys::*, note, tree, Action, AuthorizedAction, Flags, ValueCommitment};
 
 impl Arbitrary for Action {
     type Parameters = ();
@@ -27,7 +25,7 @@ impl Arbitrary for Action {
                 cv: ValueCommitment(pallas::Affine::identity()),
                 nullifier,
                 rk: rk.0,
-                cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
+                cm_x: pallas::Base::zero(),
                 ephemeral_key: EphemeralPublicKey(pallas::Affine::generator()),
                 enc_ciphertext,
                 out_ciphertext,
@@ -105,7 +103,7 @@ impl Arbitrary for SpendAuthVerificationKeyBytes {
                 // Convert that back to a (canonical) encoding
                 let sk_bytes = sk_scalar.to_repr();
                 // Decode it into a signing key
-                let sk = SigningKey::try_from(sk_bytes).unwrap();
+                let sk = SigningKey::from_bytes(&sk_bytes).unwrap();
                 let pk = VerificationKey::<SpendAuth>::from(&sk);
                 SpendAuthVerificationKeyBytes(pk.into())
             })

@@ -101,7 +101,7 @@ proptest! {
     /// Confirm that each AddrV1 takes exactly ADDR_V1_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
-    fn addr_v1_size_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v1_size_is_correct(addr in MetaAddr::known_services_strategy()) {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
@@ -124,7 +124,7 @@ proptest! {
     /// (not derived from the message size limit) to prevent resource exhaustion.
     /// See GHSA-xr93-pcq3-pxf8.
     #[test]
-    fn addr_v1_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v1_max_allocation_is_correct(addr in MetaAddr::known_services_strategy()) {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
@@ -160,7 +160,7 @@ proptest! {
     /// Confirm that each AddrV2 takes at least ADDR_V2_MIN_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
-    fn addr_v2_size_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v2_size_is_correct(addr in MetaAddr::known_services_strategy()) {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
@@ -183,7 +183,7 @@ proptest! {
     /// (not derived from the message size limit) to prevent resource exhaustion.
     /// See GHSA-xr93-pcq3-pxf8.
     #[test]
-    fn addr_v2_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
+    fn addr_v2_max_allocation_is_correct(addr in MetaAddr::known_services_strategy()) {
         let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization

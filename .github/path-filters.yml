@@ -16,6 +16,8 @@ lint:
   - "deny.toml"
   - "supply-chain/**"
   - ".github/workflows/lint.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 hadolint:
@@ -28,7 +30,7 @@ shellcheck:
   - ".github/workflows/lint.yml"
   - ".github/path-filters.yml"
 
-semver:
+api_diff:
   - "**/*.rs"
   - "**/Cargo.toml"
   - "**/Cargo.lock"
@@ -40,7 +42,11 @@ unit_tests:
   - "**/Cargo.toml"
   - "**/Cargo.lock"
   - ".config/nextest.toml"
+  # zebrad's metric catalog tests read the dashboards, alert rules, and catalog here.
+  - "docker/observability/**"
   - ".github/workflows/tests-unit.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 test_crates:
@@ -50,6 +56,8 @@ test_crates:
   - ".cargo/config.toml"
   - "**/clippy.toml"
   - ".github/workflows/test-crates.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 test_docker:
