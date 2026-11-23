@@ -54,10 +54,11 @@ jobs:
           sudo sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list
           .github/scripts/apt-install.sh clang libclang-dev cmake protobuf-compiler
 
-      # Toolchain version comes from rust-toolchain.toml.
+      # Toolchain version comes from rust-toolchain.toml. Release builds don't
+      # restore caches written by other runs (see workflows README).
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          cache-on-failure: true
+          cache: false
 
       - name: Build and package zebrad
         run: |
