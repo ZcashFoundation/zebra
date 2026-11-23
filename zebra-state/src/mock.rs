@@ -29,6 +29,11 @@ use crate::{
 mod blocks;
 use blocks::{child, commit};
 
+#[cfg(feature = "snapshot-trial")]
+mod serving;
+#[cfg(feature = "snapshot-trial")]
+pub use serving::{prepare_header_context, prepare_serving_state};
+
 const COINBASE_MATURITY: u32 = 100;
 const SPEND_INTERVAL: u32 = 7;
 const COINBASE_VALUE: u64 = 1_000;

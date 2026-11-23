@@ -39,6 +39,11 @@ path = "src/bin/spentness-hints/main.rs"
 required-features = ["spentness-hints"]
 
 [[bin]]
+name = "synthetic-snapshot"
+path = "src/bin/synthetic-snapshot/main.rs"
+required-features = ["synthetic-snapshot"]
+
+[[bin]]
 name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
@@ -65,6 +70,19 @@ spentness-hints = [
     "sha2",
     "tempfile",
     "zebra-state"
+]
+
+synthetic-snapshot = [
+    "dep:chrono",
+    "dep:serde",
+    "dep:toml",
+    "dep:zebra-consensus",
+    "dep:zebra-network",
+    "sha2",
+    "tempfile",
+    "tokio",
+    "zebra-node-services/rpc-client",
+    "zebra-state/snapshot-trial",
 ]
 
 # Matches the state's experimental elasticsearch indexing, which changes its API
@@ -101,6 +119,13 @@ sha2 = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 zebra-state = { path = "../zebra-state", version = "16.0.0", optional = true }
 
+# Tool-only synthetic snapshot preparation.
+chrono = { workspace = true, features = ["clock"], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+zebra-consensus = { path = "../zebra-consensus", version = "18.0.0", optional = true }
+toml = { workspace = true, optional = true }
+zebra-network = { path = "../zebra-network", version = "15.0.0", optional = true }
+
 # These crates are needed for the search-issue-refs binary
 regex = { workspace = true, optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts.
@@ -114,6 +139,7 @@ zcash_protocol.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tower = { workspace = true, features = ["util"] }
 zebra-state = { path = "../zebra-state", version = "16.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test/", version = "5.0.0" }

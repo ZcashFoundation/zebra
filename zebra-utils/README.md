@@ -4,12 +4,62 @@ Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
 - [known-hashes](#known-hashes)
+- [synthetic-snapshot](#synthetic-snapshot)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
 - [scanning-results-reader](#scanning-results-reader)
 
 Binaries are easier to use if they are located in your system execution path.
+
+## synthetic-snapshot
+
+Run an end-to-end snapshot bootstrap on a local synthetic Regtest chain:
+
+```sh
+cargo build --locked -p zebrad --bin zebrad
+cargo build --locked -p zebra-utils --features synthetic-snapshot --bin synthetic-snapshot
+```
+
+Save a trial configuration as `trial.json`:
+
+```json
+{
+  "state": "prepared-a",
+  "height": 120,
+  "tail": 2,
+  "trials": 2
+}
+```
+
+```sh
+target/debug/synthetic-snapshot prepare --config trial.json
+target/debug/synthetic-snapshot run --config trial.json \
+  --zebrad "$PWD/target/debug/zebrad" --output trial-run
+target/debug/synthetic-snapshot verify --config trial.json --state trial-run/trial-1/cache
+```
+
+`state` is relative to the config file; it and `--output` must name new
+directories. `prepare` writes the snapshot commitment and checkpoints back
+to the config after an export/import check. `tail` is the number of headers
+after the snapshot height, not a block-sync trial. `run` records timings,
+logical database and snapshot sizes, and per-trial results in
+`trial-run/report.json`. Standalone `verify` requires a stopped trial node and
+compares only snapshot-selected rows, not rebuilt indexes or later headers.
+
+To run the production-serving and cleanup regressions, build stock `zebrad`
+as above and use:
+
+```sh
+ZEBRAD_BIN="$PWD/target/debug/zebrad" cargo test --locked -p zebra-utils \
+  --features synthetic-snapshot --bin synthetic-snapshot serving_tests:: -- --ignored
+ZEBRAD_BIN="$PWD/target/debug/zebrad" SYNTHETIC_SNAPSHOT_TEST_HOOK=1 \
+  cargo test --locked -p zebra-utils --features synthetic-snapshot \
+  --test synthetic_snapshot_failures -- --ignored
+```
+
+The cleanup regression runs on Linux. Its compile-time hook is used only to
+inject a mismatch after shutdown; ordinary builds don't include it.
 
 ## zebra-checkpoints
 

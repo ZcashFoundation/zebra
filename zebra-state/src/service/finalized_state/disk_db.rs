@@ -1030,18 +1030,79 @@ impl DiskDb {
             .into_iter()
             .chain(column_families_in_code)
             .unique()
-            .map(move |cf_name: String| {
-                let mut cf_options = db_options.clone();
+            .map(move |name| Self::column_family_descriptor(&db_options, name))
+    }
 
-                if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
-                    cf_options.set_merge_operator_associative(
-                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
-                        fetch_add_balance_and_received,
-                    );
-                }
+    fn column_family_descriptor(db_options: &Options, name: String) -> ColumnFamilyDescriptor {
+        let mut cf_options = db_options.clone();
+        if name == BALANCE_BY_TRANSPARENT_ADDR {
+            cf_options.set_merge_operator_associative(
+                BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                fetch_add_balance_and_received,
+            );
+        }
+        ColumnFamilyDescriptor::new(name, cf_options)
+    }
 
-                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
-            })
+    /// Opens an existing state for the snapshot comparison tool without allowing creation.
+    /// A secondary follows the source; a primary holds the imported state's writer lock.
+    #[cfg(feature = "snapshot-trial")]
+    pub(super) fn open_for_snapshot_comparison(
+        path: &Path,
+        network: &Network,
+        format_version_in_code: &Version,
+        secondary_path: Option<&Path>,
+    ) -> Result<Self, BoxError> {
+        // RocksDB defaults to opening existing files without creating databases or families.
+        // The exclusive primary is only used to read, so it need not compact the database.
+        let mut options = Options::default();
+        if secondary_path.is_none() {
+            options.set_disable_auto_compactions(true);
+        }
+        let names = DB::list_cf(&options, path)
+            .map_err(|error| format!("{} is not a database: {error}", path.display()))?;
+        if let Some(missing) = super::STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .find(|family| !names.iter().any(|name| name.as_str() == **family))
+        {
+            return Err(format!("state is missing column family {missing}").into());
+        }
+        let descriptors = names
+            .into_iter()
+            .map(|name| Self::column_family_descriptor(&options, name));
+        let (db, mode) = if let Some(secondary_path) = secondary_path {
+            (
+                DB::open_cf_descriptors_as_secondary(&options, path, secondary_path, descriptors)?,
+                DbMode::ReadOnlySecondary,
+            )
+        } else {
+            (
+                DB::open_cf_descriptors(&options, path, descriptors)?,
+                DbMode::Persistent,
+            )
+        };
+        if db
+            .iterator(rocksdb::IteratorMode::Start)
+            .next()
+            .transpose()?
+            .is_some()
+        {
+            return Err("snapshot trial state has a nonempty default column family".into());
+        }
+
+        Ok(Self::from_open_db(
+            db,
+            crate::constants::STATE_DATABASE_KIND,
+            format_version_in_code,
+            network,
+            mode,
+        ))
+    }
+
+    /// Creates an independent mock fixture, sharing immutable SSTs where possible.
+    #[cfg(feature = "snapshot-trial")]
+    pub(crate) fn checkpoint(&self, path: &Path) -> Result<(), rocksdb::Error> {
+        rocksdb::checkpoint::Checkpoint::new(self.db.as_ref())?.create_checkpoint(path)
     }
 
     /// Opens or creates the database at a path based on the kind, major version and network,
@@ -1148,15 +1209,7 @@ impl DiskDb {
             Ok(db) => {
                 info!("Opened Zebra state cache at {}", path.display());
 
-                let db = DiskDb {
-                    db_kind: db_kind.to_string(),
-                    format_version_in_code: format_version_in_code.clone(),
-                    network: network.clone(),
-                    mode,
-                    db: Arc::new(db),
-                    finished_format_upgrades: Arc::new(AtomicBool::new(false)),
-                    cached_size: Arc::new(AtomicU64::new(0)),
-                };
+                let db = Self::from_open_db(db, db_kind, format_version_in_code, network, mode);
 
                 // Guard the lowest writable entry point before launching migrations or checks.
                 let history = db.history_capabilities()?;
@@ -1224,6 +1277,24 @@ impl DiskDb {
                         Hint: Try changing the state cache_dir in the Zebra config. \
                         Error: {e}",
             ),
+        }
+    }
+
+    fn from_open_db(
+        db: DB,
+        db_kind: &str,
+        format_version_in_code: &Version,
+        network: &Network,
+        mode: DbMode,
+    ) -> Self {
+        Self {
+            db_kind: db_kind.to_string(),
+            format_version_in_code: format_version_in_code.clone(),
+            network: network.clone(),
+            mode,
+            db: Arc::new(db),
+            finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+            cached_size: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -1369,7 +1440,7 @@ impl DiskDb {
 
     /// Reads the `snapshot_base` marker of a database imported from a state snapshot, checking
     /// that its heights are ordered and that the stored hash at the snapshot height is its hash.
-    fn snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
+    pub(super) fn snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
         let Some(marker) = self.cf_handle(SNAPSHOT_BASE) else {
             return Ok(None);
         };

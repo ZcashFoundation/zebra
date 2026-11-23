@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Added
+body: Added a synthetic-snapshot development command that serves a mock Regtest snapshot, bootstraps fresh pruned nodes over loopback QUIC, and checks their stopped databases against the source.
+time: 2026-11-23T21:43:20Z
