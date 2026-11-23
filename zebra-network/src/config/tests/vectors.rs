@@ -716,8 +716,8 @@ fn initial_peer_metric_labels_only_name_default_seeders() {
     use super::super::seed_metric_label;
 
     assert_eq!(
-        seed_metric_label("dnsseed.z.cash:8233"),
-        "dnsseed.z.cash:8233"
+        seed_metric_label("mainnet.zodl.com:8233"),
+        "mainnet.zodl.com:8233"
     );
     assert_eq!(
         seed_metric_label("testnet.seeder.zfnd.org:18233"),
@@ -728,10 +728,10 @@ fn initial_peer_metric_labels_only_name_default_seeders() {
 
     // Near misses of a default seeder are custom entries too.
     for near_miss in [
-        "DNSSEED.Z.CASH:8233",
-        "dnsseed.z.cash.:8233",
-        "dnsseed.z.cash:18233",
-        "dnsseed.z.cash:8233x",
+        "MAINNET.ZODL.COM:8233",
+        "mainnet.zodl.com.:8233",
+        "mainnet.zodl.com:18233",
+        "mainnet.zodl.com:8233x",
     ] {
         assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
     }
