@@ -12,6 +12,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 
 use chrono::Utc;
@@ -115,6 +116,25 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns `true` if the block was rejected because its transactions don't match its header,
+    /// in one of the checks that run before its height is used:
+    /// - the transaction IDs don't match the header's Merkle root,
+    /// - the transactions contain duplicates that keep the Merkle root (CVE-2012-2459), or
+    /// - a V5 or later coinbase claims a height other than its expiry height.
+    ///
+    /// The block hash only commits to the header, so a peer that serves a body for a requested
+    /// block hash can still send the wrong transactions. The block itself can still be valid.
+    pub fn is_body_header_mismatch(&self) -> bool {
+        matches!(
+            self,
+            VerifyBlockError::Block {
+                source: BlockError::BadMerkleRoot { .. }
+                    | BlockError::DuplicateTransaction
+                    | BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight { .. }),
+            }
+        )
+    }
+
     /// Returns `true` if the block was rejected only because an ancestor's authorizing
     /// data didn't match the commitment in its header.
     ///
@@ -139,6 +159,15 @@ impl VerifyBlockError {
             _other => 0,
         }
     }
+}
+
+/// Records the time since `phase_start` as the block verifier phase `phase`, then restarts the
+/// timer for the next phase.
+fn record_phase(phase: &'static str, phase_start: &mut Instant) {
+    let now = Instant::now();
+    metrics::histogram!("zebra.consensus.block.phase.duration_seconds", "phase" => phase)
+        .record(now.duration_since(*phase_start).as_secs_f64());
+    *phase_start = now;
 }
 
 /// Converts an error from a `CommitSemanticallyVerifiedBlock` state request
@@ -327,7 +356,7 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
-        let received_time = std::time::Instant::now();
+        let received_time = Instant::now();
 
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
@@ -358,6 +387,10 @@ where
             }
 
             tracing::trace!("performing block checks");
+            // The template precompute verifies every template as a proposal, so timing proposals
+            // would mix template checks into the timings of blocks that are committed.
+            let record_phases = !request.is_proposal();
+            let mut phase_start = Instant::now();
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
@@ -379,6 +412,20 @@ where
                 check::difficulty_is_valid(&block.header, &network, &height, &hash)?;
                 check::equihash_solution_is_valid(&block.header)?;
             }
+
+            // # Security
+            //
+            // Check that the header commits to the coinbase height before anything uses it, as the
+            // checkpoint verifier does. A peer can rewrite the height of a V5 coinbase without
+            // changing the Merkle root. `merkle_root_validity()` uses the height to pick the
+            // network upgrade for its consensus branch ID check, and the checks after it use the
+            // height before the transaction verifier checks the coinbase expiry height against it.
+            // So a rewritten height would get the block checked at that height, or rejected for an
+            // error that doesn't show the body was forged (GHSA-g9rc-89v4-hhvf).
+            //
+            // The height is only authenticated once the Merkle root check also passes, but either
+            // failure shows that the body was forged.
+            check::coinbase_height_is_committed(&block, height)?;
 
             // Next, check the Merkle root validity, to ensure that
             // the header binds to the transactions in the blocks.
@@ -426,6 +473,10 @@ where
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
+
+            if record_phases {
+                record_phase("block_checks", &mut phase_start);
+            }
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
@@ -505,6 +556,10 @@ where
                 )?;
             }
 
+            if record_phases {
+                record_phase("transaction_verification", &mut phase_start);
+            }
+
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
@@ -542,6 +597,7 @@ where
             {
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
+                    record_phase("state_commit", &mut phase_start);
                     Ok(hash)
                 }
 

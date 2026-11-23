@@ -315,7 +315,10 @@ fuzz_target!(|data: &[u8]| {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut codec_e = Codec::builder().for_network(&Network::Mainnet).finish();
             let mut out = BytesMut::new();
-            if codec_e.encode(Message::Addr(addrs.clone()), &mut out).is_err() {
+            if codec_e
+                .encode(Message::Addr(addrs.clone()), &mut out)
+                .is_err()
+            {
                 return;
             }
             let mut codec_d = Codec::builder().for_network(&Network::Mainnet).finish();

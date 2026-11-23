@@ -5,7 +5,6 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use color_eyre::eyre::Result;
 use zebra_chain::parameters::{testnet::ConfiguredActivationHeights, Network, NetworkKind};
 use zebra_rpc::config::mining::MinerAddressType;
-use zebra_test::net::random_known_port;
 use zebrad::{
     components::{mempool, With},
     config::ZebradConfig,
@@ -19,10 +18,8 @@ pub struct ZcashdCompatConfig {
     pub zebrad_config: ZebradConfig,
     /// Zcashd datadir prepared for managed regtest mode.
     pub zcashd_datadir: PathBuf,
-    /// Zebrad's main (unauthenticated) RPC listen address.
+    /// Configured main RPC address; the bound port is discovered from startup logs.
     pub zebra_rpc_addr: SocketAddr,
-    /// Zcashd's own RPC listen address (user/pass authenticated).
-    pub zcashd_own_rpc_addr: SocketAddr,
 }
 
 /// Hardcoded test credentials injected into zcashd via `-rpcuser`/`-rpcpassword`.
@@ -42,7 +39,10 @@ pub const MINER_T_ADDR: &str = "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs";
 /// `work_dir` is the test scratch directory used for the supervised zcashd
 /// datadir. In managed-spawn mode this is the testdir (kept alive by the
 /// `TestChild`).
-pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfig> {
+pub fn build_zcashd_compat_config(
+    work_dir: PathBuf,
+    zcashd_own_rpc_addr: SocketAddr,
+) -> Result<ZcashdCompatConfig> {
     let net = Network::new_regtest(
         ConfiguredActivationHeights {
             nu5: Some(1),
@@ -51,11 +51,7 @@ pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfi
         .into(),
     );
 
-    let zebra_rpc_port = random_known_port();
-    let zcashd_own_rpc_port = random_known_port();
-
-    let zebra_rpc_addr: SocketAddr = format!("127.0.0.1:{zebra_rpc_port}").parse()?;
-    let zcashd_own_rpc_addr: SocketAddr = format!("127.0.0.1:{zcashd_own_rpc_port}").parse()?;
+    let zebra_rpc_addr = "127.0.0.1:0".parse()?;
 
     let mut config = default_test_config(&net).with(MinerAddressType::Transparent);
 
@@ -97,7 +93,8 @@ pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfi
 
     // Expose zcashd's own RPC on a known port with simple test credentials
     config.zcashd_compat.zcashd_extra_args = vec![
-        format!("-rpcport={zcashd_own_rpc_port}"),
+        format!("-rpcport={}", zcashd_own_rpc_addr.port()),
+        format!("-rpcbind={}", zcashd_own_rpc_addr.ip()),
         format!("-rpcuser={ZCASHD_TEST_RPC_USER}"),
         format!("-rpcpassword={ZCASHD_TEST_RPC_PASS}"),
         "-rpcallowip=127.0.0.1".to_string(),
@@ -119,7 +116,6 @@ pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfi
         zebrad_config: config,
         zcashd_datadir,
         zebra_rpc_addr,
-        zcashd_own_rpc_addr,
     })
 }
 

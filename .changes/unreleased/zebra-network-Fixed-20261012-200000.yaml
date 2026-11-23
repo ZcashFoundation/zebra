@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Fixed
-body: "Applying a large batch of gossiped peer addresses no longer blocks other address book users until the whole batch is done ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702))."
-time: 2026-10-12T20:00:00.000000000+00:00

@@ -119,7 +119,8 @@ jobs:
             - Breaking for a crate (`kind: breaking`): a removal, a signature, field,
               or type change, reduced visibility, an MSRV bump, new feature-gating, or an
               addition that breaks downstream builds, meaning a new variant on an enum that is
-              NOT marked `#[non_exhaustive]`, or a new field on a struct callers build by literal.
+              NOT marked `#[non_exhaustive]`, a new field on a struct callers build by literal,
+              or a new required method on a public trait that downstream code implements.
             - Breaking for operators (`kind: breaking` on the zebrad fragment): a removed,
               renamed, or retyped config field or environment variable, a changed CLI argument,
               a changed or removed RPC response or endpoint, a database-format bump, or a changed

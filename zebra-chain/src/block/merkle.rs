@@ -3,6 +3,7 @@
 use std::{fmt, io::Write};
 
 use hex::{FromHex, ToHex};
+use rayon::prelude::*;
 
 use crate::{
     serialization::{sha256d, BytesInDisplayOrder},
@@ -11,6 +12,12 @@ use crate::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+/// Keep levels below 1,024 input nodes serial to amortize Rayon scheduling over enough hashes.
+pub(crate) const PARALLEL_MERKLE_THRESHOLD: usize = 1_024;
+
+/// Each parallel task hashes up to 128 contiguous pairs into its own contiguous output slice.
+const MERKLE_PAIRS_PER_CHUNK: usize = 128;
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
 /// block header to the transactions in the block.
@@ -155,6 +162,35 @@ fn auth_data_hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
         .expect("32 byte array")
 }
 
+/// Reduce ordered leaves, duplicating an unpaired final node at each level.
+///
+/// Auth-data trees are padded before calling this helper, so their levels always contain pairs.
+/// Reuse two buffers across levels, with disjoint output chunks preserving left/right order.
+fn reduce_merkle_root(
+    mut hashes: Vec<[u8; 32]>,
+    hash_pair: impl Fn(&[u8; 32], &[u8; 32]) -> [u8; 32] + Sync,
+) -> [u8; 32] {
+    let mut next = Vec::new();
+    while hashes.len() > 1 {
+        next.resize(hashes.len().div_ceil(2), [0; 32]);
+        let reduce_chunk = |(output, input): (&mut [[u8; 32]], &[[u8; 32]])| {
+            for (parent, pair) in output.iter_mut().zip(input.chunks(2)) {
+                *parent = hash_pair(&pair[0], pair.get(1).unwrap_or(&pair[0]));
+            }
+        };
+
+        if hashes.len() >= PARALLEL_MERKLE_THRESHOLD {
+            next.par_chunks_mut(MERKLE_PAIRS_PER_CHUNK)
+                .zip(hashes.par_chunks(2 * MERKLE_PAIRS_PER_CHUNK))
+                .for_each(reduce_chunk);
+        } else {
+            reduce_chunk((&mut next, &hashes));
+        }
+        std::mem::swap(&mut hashes, &mut next);
+    }
+    hashes[0]
+}
+
 impl<T> std::iter::FromIterator<T> for Root
 where
     T: std::convert::AsRef<Transaction>,
@@ -212,18 +248,8 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
     where
         I: IntoIterator<Item = transaction::Hash>,
     {
-        let mut hashes = hashes.into_iter().map(|hash| hash.0).collect::<Vec<_>>();
-        while hashes.len() > 1 {
-            hashes = hashes
-                .chunks(2)
-                .map(|chunk| match chunk {
-                    [h1, h2] => hash(h1, h2),
-                    [h1] => hash(h1, h1),
-                    _ => unreachable!("chunks(2)"),
-                })
-                .collect();
-        }
-        Self(hashes[0])
+        let hashes = hashes.into_iter().map(|hash| hash.0).collect::<Vec<_>>();
+        Self(reduce_merkle_root(hashes, hash))
     }
 }
 
@@ -381,17 +407,7 @@ impl std::iter::FromIterator<transaction::AuthDigest> for AuthDataRoot {
         hashes.extend(std::iter::repeat_n([0u8; 32], pad_count));
         assert!(hashes.len().is_power_of_two());
 
-        while hashes.len() > 1 {
-            hashes = hashes
-                .chunks(2)
-                .map(|chunk| match chunk {
-                    [h1, h2] => auth_data_hash(h1, h2),
-                    _ => unreachable!("number of nodes is always even since tree is full"),
-                })
-                .collect();
-        }
-
-        Self(hashes[0])
+        Self(reduce_merkle_root(hashes, auth_data_hash))
     }
 }
 

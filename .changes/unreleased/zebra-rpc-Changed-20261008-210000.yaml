@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: 'The JSON-RPC version compatibility middleware no longer copies the request body an extra time when building the rewritten request ([#10574](https://github.com/ZcashFoundation/zebra/issues/10574)).'
-time: 2026-10-08T21:00:00.000000000Z

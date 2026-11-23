@@ -75,9 +75,10 @@ One MIG per matrix cell. Names encode every identity axis:
 | -------------------- | -------------------- | ---------------------------------------- | --------------------------------------------- |
 | `release`            | `zfnd-prod-zebra`    | `zebrad-${network}-${zone-letter}`       | `zebrad-cache-${network}-${zone-letter}`      |
 | `push` to `main`     | `zfnd-dev-zebra`     | `zebrad-main-${network}-${zone-letter}`  | `zebrad-cache-main-${network}-${zone-letter}` |
+| `push` to `next`     | `zfnd-dev-zebra`     | `zebrad-next-${network}-${zone-letter}`  | `zebrad-cache-next-${network}-${zone-letter}` |
 | `workflow_dispatch`  | `zfnd-dev-zebra`     | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
 
-`zone-letter` is `b`, `c`, or `d` (the last segment of `us-east1-b`, etc.). Push and release fan out to six zonal MIGs (2 networks × 3 zones). A `workflow_dispatch` deploys a single zonal MIG with user-selected network and zone (default `us-east1-b`).
+`zone-letter` is `b`, `c`, or `d` (the last segment of `us-east1-b`, etc.). Push and release fan out to six zonal MIGs (2 networks × 3 zones). The `next` environment deploys from the long-lived [`next` branch](../../../book/src/dev/next-branch.md), so the team can compare its sync with stage on identical infrastructure. Its fixed `next-` prefix keeps it apart from stage's `main-` resources in the shared project. A `workflow_dispatch` deploys a single zonal MIG with user-selected network and zone (default `us-east1-b`).
 
 ### Update mechanics
 
@@ -94,11 +95,13 @@ Deterministic zone-to-IP mapping for `stage` and `prod`:
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-The deployment workflow takes this as an explicit `use_reserved_ip` input rather than inferring it, so each caller states whether its deploy is stable-addressed. The event-driven wrapper sets it for `push` and `release`, and for a workflow_dispatch that either selects `prod` or runs from the `main` ref — the latter because a dispatch selecting `dev` from `main` resolves to the `main-` prefix, i.e. the stage MIG, which must keep advertising the stage address. Every other dev workflow_dispatch gets no external address: the template passes `--no-address`, so those instances are outbound-only.
+Stage and prod reuse the names because they live in different projects. `next` shares stage's project, so it uses `zebra-next-${network}` with the same suffixes.
+
+The deployment workflow takes this as an explicit `use_reserved_ip` input rather than inferring it, so each caller states whether its deploy is stable-addressed. The event-driven wrapper sets it for `push` and `release`, and for a workflow_dispatch that selects `prod` or `next`, or runs from the `main` or `next` ref — the latter because a dispatch selecting `dev` from `main` or `next` resolves to the `main-` or `next-` prefix, i.e. the stage or next MIG, which must keep advertising that MIG's address. Every other dev workflow_dispatch gets no external address: the template passes `--no-address`, so those instances are outbound-only.
 
 ### Labels
 
-Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, `github_sha`. The `environment` label is standardized as `dev`, `stage`, or `prod`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) discriminates the deploy kind for cleanup and inspection. PR-deploy cleanup uses `keep_until=YYYY-MM-DD` and `delete_protection=true` opt-out labels.
+Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, `github_sha`. The `environment` label is standardized as `dev`, `stage`, `next`, or `prod`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) discriminates the deploy kind for cleanup and inspection. PR-deploy cleanup uses `keep_until=YYYY-MM-DD` and `delete_protection=true` opt-out labels.
 
 ### Accepted trade-offs
 
@@ -112,3 +115,7 @@ Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `
 - [GCP Deployment Operations runbook](../../../book/src/dev/gcp-deployment-operations.md): PR-deploy cleanup, disk-corruption recovery, DB-format-version-break release procedure, regional-to-zonal migration procedure.
 - [Continuous Delivery overview](../../../book/src/dev/continuous-delivery.md): the high-level model.
 - GCP documentation on [instance groups](https://cloud.google.com/compute/docs/instance-groups), [stateful MIGs](https://cloud.google.com/compute/docs/instance-groups/stateful-migs), and [persistent disk attachment limits](https://cloud.google.com/compute/docs/disks#pd_modes).
+
+## Revision History
+
+- 2026-10-21: Added the `next` environment, deployed on push to `next` with the `next-` prefix and its own reserved addresses.

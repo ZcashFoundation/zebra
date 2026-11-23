@@ -1446,3 +1446,61 @@ fn shielded_action_counts_limits() {
     );
     assert_eq!(saturated.shielded_cost(), usize::MAX);
 }
+
+/// A peer can serve a requested block hash with a rewritten V5 coinbase height, which keeps the
+/// transaction IDs (GHSA-g9rc-89v4-hhvf). The semantic verifier must reject that body as not
+/// matching its header before it uses the height, whatever height the body claims, and before it
+/// verifies any transactions.
+#[tokio::test]
+async fn rewritten_v5_coinbase_height_is_rejected_before_it_is_used() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES.zcash_deserialize_into()?;
+    let height = block.coinbase_height().expect("test vectors have a height");
+    let nu5_height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 is active on Mainnet");
+
+    for claimed_height in [
+        Height(nu5_height.0 - 1),
+        Height(height.0 - 1),
+        Height(height.0 + 1),
+        Height(height.0 + 100_000),
+    ] {
+        let forged =
+            crate::checkpoint::tests::rewrite_coinbase_height(&block, claimed_height, None)?;
+
+        let state = tower::service_fn(|request| async move {
+            assert!(matches!(request, zs::Request::KnownBlock(_)));
+            Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+        });
+        let transactions = tower::service_fn(|_| async {
+            unreachable!("a forged body must not queue transaction verification")
+        });
+
+        let error = SemanticBlockVerifier::new(&network, state, transactions)
+            .oneshot(Request::Commit(forged))
+            .await
+            .expect_err("a rewritten coinbase height must be rejected");
+
+        assert!(
+            matches!(
+                error,
+                VerifyBlockError::Block {
+                    source: BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight {
+                        expiry_height: Some(expiry_height),
+                        block_height,
+                        ..
+                    }),
+                } if expiry_height == height && block_height == claimed_height
+            ),
+            "unexpected error for claimed height {claimed_height:?}: {error:?}"
+        );
+        assert!(error.is_body_header_mismatch());
+        assert!(crate::router::RouterError::from(error).is_body_header_mismatch());
+    }
+
+    Ok(())
+}

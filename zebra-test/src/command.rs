@@ -463,6 +463,14 @@ impl CommandExt for Command {
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports using the original `command_path`
     fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report> {
+        // Tests usually kill their children, which then can't remove their temporary files, such
+        // as ephemeral Zebra states. Their temporary directory goes with the `TestChild` instead.
+        // Unix uses `TMPDIR`, and Windows uses `TMP` or `TEMP`.
+        let tmp_dir = tempfile::tempdir().wrap_err("failed to create the child's TMPDIR")?;
+        for var in ["TMPDIR", "TMP", "TEMP"] {
+            self.env(var, tmp_dir.path());
+        }
+
         let command_and_args = format!("{self:?}");
         let child = process_group::spawn(self);
 
@@ -484,6 +492,7 @@ impl CommandExt for Command {
             deadline: None,
             timeout: None,
             bypass_test_capture: false,
+            _tmp_dir: tmp_dir,
         })
     }
 }
@@ -625,6 +634,9 @@ pub struct TestChild<T> {
     /// If true, write child output directly to standard output,
     /// bypassing the Rust test harness output capture.
     bypass_test_capture: bool,
+
+    /// The child's `TMPDIR`, removed after the child is killed or reaped.
+    _tmp_dir: tempfile::TempDir,
 }
 
 /// Checks command output log `line` from `cmd` against a `failure_regexes` regex set,

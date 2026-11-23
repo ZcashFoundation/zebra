@@ -457,6 +457,11 @@ impl Block {
                 for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
                     let mut transaction = (*transaction).clone();
                     if transaction.is_coinbase() {
+                        if NetworkUpgrade::current(&current.network, *height) >= NetworkUpgrade::Nu5
+                        {
+                            transaction.set_expiry_height(*height);
+                        }
+
                         // Arbitrary output values must not mint more than scheduled issuance.
                         // Generated shielded bundles have zero value balance; leave fees unclaimed.
                         let mut remaining_subsidy =
@@ -513,6 +518,11 @@ impl Block {
 
                 // fix commitment (must be done after finishing changing the block)
                 if generate_valid_commitments {
+                    // The history tree commits to the block hash, so the merkle root must
+                    // already match the fixed transactions.
+                    Arc::make_mut(&mut block.header).merkle_root =
+                        block.transactions.iter().collect();
+
                     let current_height = block.coinbase_height().unwrap();
                     let heartwood_height = NetworkUpgrade::Heartwood
                         .activation_height(&current.network)

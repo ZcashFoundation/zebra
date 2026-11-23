@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Cap queued block-discovery requests at 16 and fall back to any ready peer when the queue is full. Report queued discovery requests in `zcash.net.peer_set.find_queued` and non-serving fallbacks in `zcash.net.peer_set.find_fallback` with `reason` labels `queue_full`, `no_serving_peer`, and `expired` ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).'
-time: 2026-09-25T14:13:45.816222697Z

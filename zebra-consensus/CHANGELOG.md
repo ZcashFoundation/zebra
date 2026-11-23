@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [19.0.0] - 2026-11-16
+
+### Breaking Changes
+
+- Builds against the `zebra-chain` value-balance methods that take `HashMap<OutPoint, U: AsRef<Utxo>>`; `zebra-chain` types appear in the public API, so upgrade both together.
+- New `TransactionError::NonStandardSigops` variant: exhaustive matches on `TransactionError` need to handle it.
+
+### Added
+
+- Added `error::TransactionError::NonStandardSigops { sigops }` and `transaction::check::MAX_STANDARD_TX_SIGOPS`.
+- Added `block::check::body_matches_header()`, and `is_body_header_mismatch()` on `VerifyBlockError`, `VerifyCheckpointError` and `RouterError`.
+
+### Changed
+
+- Remove unused dependencies and restrict test-only dependencies to development builds.
+
+### Security
+
+- `MempoolTxVerifier` now checks nullifiers and anchors against the best chain tip before it queues proof and signature verification, so a transaction rejected by that check no longer reaches the batch verifiers, and an error that doesn't score can no longer return while an invalid proof from the same transaction is still being verified ([GHSA-2wx4-g5cf-32pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2wx4-g5cf-32pf)).
+- Check that a block's header commits to its coinbase height before the checkpoint and semantic verifiers use that height, so a body with a rewritten height is rejected as not matching its header, instead of being dropped as already verified or finished, or checked or queued at another height ([GHSA-g9rc-89v4-hhvf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g9rc-89v4-hhvf), [GHSA-hvw5-x88g-2q8w](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hvw5-x88g-2q8w)).
+- The mempool transaction verifier rejects transactions with more than `MAX_STANDARD_TX_SIGOPS` legacy and P2SH signature operations before script verification, instead of verifying every signature first ([GHSA-423j-2vj4-j5x4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-423j-2vj4-j5x4)). Thanks to @janneh2000 for reporting the issue.
+- Limit blocks queued for checkpoint verification to about 4 GB of estimated block memory, and limit the blocks kept alive by queued, committing, cancelled, or failed requests to four per configured checkpoint gap or 2,000 blocks, whichever is greater. Both limits count estimated block sizes, not the process's measured memory. When the queue is full, the verifier keeps the blocks linked to the next checkpoint and returns `VerifyCheckpointError::QueuedLimit`, which doesn't score the peer, for the requests it drops or rejects ([GHSA-8qxv-5f2c-452c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8qxv-5f2c-452c)).
+
+## [18.0.0] - 2026-10-22
+
+### Breaking Changes
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0, `zcash_transparent` to 0.11.0 and `zcash_protocol` to 0.11.0 ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784), [#11877](https://github.com/ZcashFoundation/zebra/pull/11877)).
+- Updated to the new major versions of `zebra-chain`, `zebra-state`, `zebra-script` and `zebra-node-services`, whose types appear in the public API.
+
+### Changed
+
+- `CheckpointVerifier` queues the children of a checkpoint block that failed to commit again, so only the invalid block needs to be submitted again. It sends verified blocks to the state in height order, and ignores late commit failures from before its last reset.
+- Raised the MSRV to 1.89.
+
+### Fixed
+
+- `tx_transparent_coinbase_spends_maturity()` computes the transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost.
+
+### Security
+
+- `CheckpointVerifier` now resets its progress to the state tip after a failed checkpoint block commit even if the caller dropped the verify future ([GHSA-2w9f-9wx8-f5c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2w9f-9wx8-f5c8)).
+- Converted failed transparent script checks into `TransactionError::Script`, so they get its misbehaviour score of 100. Previously, every transparent script failure became an unscored `InternalDowncastError` ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x)).
+
 ## [17.0.0] - 2026-10-01
 
 ### Breaking Changes

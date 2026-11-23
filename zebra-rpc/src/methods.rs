@@ -36,8 +36,8 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     ops::RangeInclusive,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -60,16 +60,16 @@ use tracing::Instrument;
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
         subsidy::{
             block_subsidy, founders_reward, funding_stream_address, funding_stream_values,
-            miner_subsidy, FundingStreamReceiver,
+            miner_subsidy, nsm_value_balance_before, FundingStreamReceiver,
         },
-        ConsensusBranchId, Network, NetworkUpgrade,
+        ConsensusBranchId, Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::{
         BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
@@ -689,6 +689,26 @@ pub trait Rpc {
     #[method(name = "z_validateaddress")]
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
 
+    /// Converts a transparent P2PKH address to a ZIP 320 TEX address.
+    ///
+    /// zcashd reference: [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)
+    /// method: post
+    /// tags: util
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The transparent P2PKH address to convert.
+    ///
+    /// # Notes
+    ///
+    /// - Addresses that don't decode, or are for another network, return error `-5`; addresses
+    ///   that decode but aren't transparent P2PKH return error `-8`. This follows zcashd for the
+    ///   common cases, but not exactly: zcashd returns `-8` for Sprout addresses and for unified
+    ///   addresses with unknown receivers, where Zebra returns `-5`, because Zebra's
+    ///   `primitives::Address` can't represent them at all. Zallet differs from both.
+    #[method(name = "z_converttex")]
+    async fn z_convert_tex(&self, address: String) -> Result<String>;
+
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
     /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
@@ -916,9 +936,43 @@ where
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
 
+    /// The last best tip publication a template was served for, shared by all RPC clones.
+    first_template_tip: FirstTemplateTip,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
+}
+
+/// The last best tip publication that a block template was served for, shared by all RPC clones.
+#[derive(Clone, Debug, Default)]
+struct FirstTemplateTip(Arc<Mutex<Option<(block::Hash, Instant)>>>);
+
+impl FirstTemplateTip {
+    /// Records the time from the publication of the best tip `hash` to now, if `hash` is still
+    /// the best tip and no template was recorded for this publication yet, including a return
+    /// to an earlier tip.
+    ///
+    /// Returns whether it recorded a sample.
+    fn record(&self, chain_tip: &impl ChainTip, hash: block::Hash) -> bool {
+        // Reading the publication while holding the lock stops a clone that read an older
+        // publication from replacing a newer one that another clone recorded.
+        let mut recorded = self
+            .0
+            .lock()
+            .expect("the lock is only held to compare and replace a value, which can't panic");
+        let Some(changed_at) = chain_tip.best_tip_changed_at(hash) else {
+            return false;
+        };
+        if *recorded == Some((hash, changed_at)) {
+            return false;
+        }
+
+        metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
+            .record(changed_at.elapsed().as_secs_f64());
+        *recorded = Some((hash, changed_at));
+        true
+    }
 }
 
 /// A type alias for the last event logged by the server.
@@ -1016,6 +1070,7 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            first_template_tip: Default::default(),
             #[cfg(test)]
             template_clock: None,
         };
@@ -1028,6 +1083,14 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Records the first template served on the current best tip publication, then converts
+    /// `template` into the RPC response.
+    fn served_block_template(&self, template: BlockTemplateResponse) -> GetBlockTemplateResponse {
+        self.first_template_tip
+            .record(&self.latest_chain_tip, template.previous_block_hash);
+        template.into()
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -1342,6 +1405,8 @@ where
             )
         };
 
+        // The fallback tip below has no balances, so it has no NSM value balance either.
+        let tip_pool_values_found = tip_pool_values_rsp.is_ok();
         let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
             use zebra_state::ReadResponse::*;
 
@@ -1444,6 +1509,9 @@ where
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
+            nsm_value_balance: tip_pool_values_found.then(|| {
+                nsm_value_balance_entry(network, tip_height, value_balance.nsm_amount(), None)
+            }),
             upgrades,
             consensus,
             headers: tip_height,
@@ -1777,12 +1845,18 @@ where
                 unreachable!("unmatched response to a BlockInfo request");
             };
 
+            // The balances before the genesis block are zero. For other blocks, the parent's
+            // balances can be missing if a reorg occurs between the two reads. In that case, the
+            // change is not known, so the response does not include it.
             let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
-                let prev_value_pools = prev_block_info
-                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
-                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
-                    .ok()?;
+                let prev_value_pools = match prev_block_info {
+                    Some(prev) => prev.value_pools().constrain::<NegativeAllowed>().ok()?,
+                    None if previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH => {
+                        ValueBalance::<NegativeAllowed>::zero()
+                    }
+                    None => return None,
+                };
                 (value_pools - prev_value_pools).ok()
             });
             let size = size.or(block_info.as_ref().map(|d| d.size() as usize));
@@ -1804,6 +1878,14 @@ where
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| {
+                    nsm_value_balance_entry(
+                        &network,
+                        height,
+                        d.value_pools().nsm_amount(),
+                        delta.map(|delta| delta.nsm_amount()),
+                    )
+                }),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
@@ -2749,7 +2831,7 @@ where
             .precomputed_block_template(client_long_poll_id, long_poll_started)
             .await
         {
-            return Ok(template.into());
+            return Ok(self.served_block_template(template));
         }
 
         // - Checks and fetches that can change during long polling
@@ -2894,7 +2976,7 @@ where
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
                         .await
                     {
-                        return Ok(template.into());
+                        return Ok(self.served_block_template(template));
                     }
                 }
 
@@ -2930,6 +3012,7 @@ where
         );
 
         let height = chain_info.tip_height.next().map_misc_error()?;
+        let build_started = std::time::Instant::now();
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
@@ -2964,6 +3047,8 @@ where
             mempool_txs,
             submit_old,
         );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(build_started.elapsed().as_secs_f64());
 
         // Coinbase construction can take seconds. Recheck the whole advertised range after it,
         // just as the cache does, rather than returning timestamps invalidated by clock rollback.
@@ -2971,7 +3056,7 @@ where
             <= self
                 .template_clock_now()
                 .saturating_add(Duration32::from_hours(2)))
-        .then(|| template.into())
+        .then(|| self.served_block_template(template))
         .ok_or_misc_error("local clock moved backwards while building the block template")
     }
 
@@ -2990,7 +3075,9 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
+                return Ok(
+                    SubmitBlockResponse::from(SubmitBlockErrorResponse::Rejected).with_metrics(),
+                );
             }
         };
 
@@ -3020,7 +3107,7 @@ where
                     .advertise_mined_block(hash, height)
                     .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
 
-                return Ok(SubmitBlockResponse::Accepted);
+                return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -3066,7 +3153,7 @@ where
             Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
-        Ok(response.into())
+        Ok(SubmitBlockResponse::from(response).with_metrics())
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {
@@ -3225,6 +3312,39 @@ where
         let network = self.network.clone();
 
         z_validate_address(network, raw_address)
+    }
+
+    async fn z_convert_tex(&self, address: String) -> Result<String> {
+        use zcash_address::{ToAddress, ZcashAddress};
+        use zebra_chain::{parameters::NetworkKind, primitives};
+
+        let address = address
+            .parse::<ZcashAddress>()
+            .ok()
+            .and_then(|address| address.convert::<primitives::Address>().ok())
+            // zcashd decodes against the active chain params, so a wrong-network address is
+            // just "invalid". Testnet and Regtest share an encoding; only Mainnet differs.
+            .filter(|address| {
+                (address.network() == NetworkKind::Mainnet)
+                    == (self.network.kind() == NetworkKind::Mainnet)
+            })
+            .ok_or("Invalid address")
+            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+        let primitives::Address::Transparent(Address::PayToPublicKeyHash { pub_key_hash, .. }) =
+            address
+        else {
+            return Err("Address is not a transparent p2pkh address")
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        };
+
+        // Encode for the configured network, not the parsed address's network: Testnet and
+        // Regtest share transparent address prefixes, so a `tm...` input always decodes as
+        // Testnet, but their TEX HRPs differ (`textest` vs `texregtest`).
+        //
+        // Encode via `zcash_address`: `transparent::Address`'s `Display` impl Base58Check-encodes
+        // the `Tex` variant with the P2PKH version bytes, which would yield a `t1...` string.
+        Ok(ZcashAddress::from_tex(self.network.kind().into(), pub_key_hash).encode())
     }
 
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
@@ -3971,6 +4091,16 @@ pub struct GetBlockchainInfoResponse {
     #[serde(rename = "valuePools")]
     value_pools: BlockchainValuePoolBalances,
 
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7). It is not part of the
+    /// chain supply, so it is not in `valuePools`. It is `monitored` from the block before NU7
+    /// activation. It is absent in responses from nodes that don't report it.
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
+
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
@@ -3988,6 +4118,12 @@ impl Default for GetBlockchainInfoResponse {
             estimated_height: Height(1),
             chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
             value_pools: GetBlockchainInfoBalance::zero_pools(),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                &Network::Mainnet,
+                Height(1),
+                Amount::zero(),
+                None,
+            )),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
@@ -4016,6 +4152,7 @@ impl GetBlockchainInfoResponse {
         estimated_height: Height,
         chain_supply: GetBlockchainInfoBalance,
         value_pools: BlockchainValuePoolBalances,
+        nsm_value_balance: Option<GetBlockchainInfoBalance>,
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,
@@ -4033,6 +4170,7 @@ impl GetBlockchainInfoResponse {
             estimated_height,
             chain_supply,
             value_pools,
+            nsm_value_balance,
             upgrades,
             consensus,
             headers,
@@ -4107,9 +4245,25 @@ pub trait ValidateAddresses {
             .addresses()
             .iter()
             .map(|address| {
-                address
+                let address: Address = address
                     .parse()
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+                // Reject TEX addresses, which parse but can never match an index entry.
+                //
+                // Transparent outputs are only ever classified as P2PKH or P2SH by
+                // `Output::address()`, since the output script has no TEX discriminator, and the
+                // index keys on the `Address` variant as well as the hash. So a TEX address would
+                // silently return an empty result rather than the balance of the P2PKH address it
+                // was derived from. zcashd's address index never sees TEX addresses at all, so an
+                // error is also the compatible behaviour here.
+                if matches!(address, Address::Tex { .. }) {
+                    return Err("TEX addresses are not supported by the address index, \
+                         use the transparent P2PKH address they were derived from")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey);
+                }
+
+                Ok(address)
             })
             .collect::<Result<_>>()?;
 
@@ -4431,6 +4585,7 @@ impl Default for GetBlockResponse {
             difficulty: None,
             chain_supply: None,
             value_pools: None,
+            nsm_value_balance: None,
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
@@ -4545,6 +4700,21 @@ pub struct BlockObject {
     #[serde(rename = "valuePools")]
     #[serde(skip_serializing_if = "Option::is_none")]
     value_pools: Option<BlockchainValuePoolBalances>,
+
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7) after this block, and the
+    /// block's change to it. It is not part of the chain supply, so it is not in `valuePools`.
+    /// It is `monitored` from the block before NU7 activation.
+    ///
+    /// At the block before NU7 activation, the balance and change are `INITIAL_NSM_VALUE_BALANCE`
+    /// as [ZIP 237] defines it, not fees burned in that block.
+    ///
+    /// [ZIP 237]: https://zips.z.cash/zip-0237
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
 
     /// Information about the note commitment trees.
     #[getter(copy)]
@@ -5058,6 +5228,41 @@ impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }
+}
+
+/// Returns the `nsmValueBalance` entry for the block at `height`, converting the state's stored
+/// balance and change to [ZIP 237]'s. They differ only at NU7 - 1 and NU7: ZIP 237 sets the balance
+/// at NU7 - 1, but the state credits it in the NU7 block ([`nsm_value_balance_before`]).
+///
+/// [ZIP 237]: https://zips.z.cash/zip-0237
+//
+// TODO: credit the seed at NU7 - 1 in the state and remove this conversion (#12556)
+pub(crate) fn nsm_value_balance_entry(
+    network: &Network,
+    height: Height,
+    stored_balance: Amount<NonNegative>,
+    stored_change: Option<Amount<NegativeAllowed>>,
+) -> GetBlockchainInfoBalance {
+    // The part of `NSMValueBalance(height)` that the state credits in the next block instead.
+    let unstored_seed = |height: Height| match height.next() {
+        Ok(next) => nsm_value_balance_before(next, network, Amount::zero()),
+        Err(_) => Amount::zero(),
+    };
+
+    let balance = (stored_balance + unstored_seed(height))
+        .expect("the state stores a zero NSM value balance before NU7 activation");
+    // The balance before the genesis block is zero.
+    let parent_unstored_seed = height
+        .previous()
+        .map_or_else(|_| Amount::zero(), unstored_seed);
+
+    // A reorg between the state reads can put the change out of range; omit it then.
+    let change = stored_change.and_then(|stored_change| {
+        let change = (stored_change + unstored_seed(height).constrain().ok()?).ok()?;
+        (change - parent_unstored_seed.constrain().ok()?).ok()
+    });
+
+    GetBlockchainInfoBalance::nsm(network, height, balance, change)
 }
 
 /// Runs `read` against the address book on a blocking thread, so waiting on its

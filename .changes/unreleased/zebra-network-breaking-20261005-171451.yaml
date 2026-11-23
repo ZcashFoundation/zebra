@@ -1,4 +1,0 @@
-project: zebra-network
-kind: breaking
-body: The misbehavior sender returned by `init` and `init_with_block_gossip_peer_ips` now takes a `MisbehaviorReport` instead of a `(PeerSocketAddr, u32)` tuple; the report also carries the `reason` the peer was scored. `MetaAddrChange::UpdateMisbehavior` has a new `reason` field, `MetaAddr::new_misbehavior` takes a `reason` argument, and `MetaAddrChange::misbehavior_reason` returns it.
-time: 2026-10-05T17:14:51.510087278+00:00

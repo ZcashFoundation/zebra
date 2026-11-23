@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "7.0.0-rc.0"
+version = "7.1.0"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -60,6 +60,11 @@ features = [
 name = "zebrad-tests"
 path = "tests/main.rs"
 
+[[bench]]
+name = "telemetry"
+harness = false
+required-features = ["sentry", "prometheus"]
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry"]
@@ -81,13 +86,8 @@ internal-miner = [
     "zebra-rpc/internal-miner",
 ]
 
-# Experimental elasticsearch indexing
-elasticsearch = [
-    "zebra-state/elasticsearch",
-]
-
 # Tracing and monitoring
-sentry = ["dep:sentry"]
+sentry = ["dep:sentry", "metrics-util"]
 journald = ["tracing-journald"]
 filter-reload = []
 opentelemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
@@ -100,7 +100,7 @@ progress-bar = [
     "zebra-network/progress-bar",
 ]
 
-prometheus = ["metrics-exporter-prometheus"]
+prometheus = ["metrics-exporter-prometheus", "metrics-util"]
 
 # Production features that modify dependency behaviour
 
@@ -157,24 +157,24 @@ tokio-console = ["console-subscriber"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "14.0.0" }
-zebra-consensus = { path = "../zebra-consensus", version = "17.0.0" }
-zebra-network = { path = "../zebra-network", version = "14.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "12.0.0", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "18.0.0" }
-zebra-state = { path = "../zebra-state", version = "15.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "16.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "19.0.0" }
+zebra-network = { path = "../zebra-network", version = "16.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "14.0.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "20.0.0" }
+zebra-state = { path = "../zebra-state", version = "17.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "13.0.0" }
+zebra-script = { path = "../zebra-script", version = "15.0.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "10.0.3", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "11.0.0", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-chrono = { workspace = true, features = ["clock", "std"] }
+chrono = { workspace = true }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true }
 lazy_static = { workspace = true }
@@ -185,7 +185,6 @@ toml = { workspace = true }
 futures = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process"] }
-tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
 
@@ -194,9 +193,9 @@ color-eyre = { workspace = true, features = ["issue-url"] }
 thiserror = { workspace = true }
 
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-log = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-error = { workspace = true }
-tracing-futures = { workspace = true }
 tracing = { workspace = true }
 
 metrics = { workspace = true }
@@ -221,14 +220,13 @@ hyper-util = { workspace = true, features = ["service", "server", "tokio"] }
 # Configuration management
 config = { workspace = true }
 
-num-integer = { workspace = true }
 rand = { workspace = true }
 
 # prod feature internal-miner
 thread-priority = { workspace = true, optional = true }
 
 # prod feature sentry
-sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"], optional = true }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "metrics", "rustls", "tracing", "ureq"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { workspace = true, optional = true }
@@ -249,6 +247,9 @@ bytes = { workspace = true }
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
 
+# prod features prometheus and sentry
+metrics-util = { workspace = true, features = ["registry"], optional = true }
+
 # prod feature release_max_level_info
 #
 # zebrad uses tracing for logging,
@@ -268,6 +269,10 @@ console-subscriber = { workspace = true, optional = true }
 
 derive-new.workspace = true
 
+# `metrics-process` 2.4.3 writes through a dangling pointer when it reads memory on Windows.
+[target.'cfg(not(windows))'.dependencies]
+metrics-process = { workspace = true }
+
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
@@ -276,21 +281,15 @@ tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
-anyhow = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
-once_cell = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json", "redactions"] }
-bytes = { workspace = true }
-http-body-util = { workspace = true }
-hyper-util = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
 strum = { workspace = true }
-strum_macros = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
-tempfile = { workspace = true }
 
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
@@ -298,7 +297,11 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
 
-zcash_keys = { workspace = true }
+# test feature sentry
+sentry = { workspace = true, features = ["test"] }
+
+# test feature opentelemetry
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
@@ -308,13 +311,11 @@ tonic-prost = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 
-# enable span traces and track caller in tests
-color-eyre = { workspace = true }
-
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl", "json-conversion"] }
 zebra-consensus = { path = "../zebra-consensus", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-node-services = { path = "../zebra-node-services", features = ["rpc-client"] }
 
 zebra-test = { path = "../zebra-test" }
 

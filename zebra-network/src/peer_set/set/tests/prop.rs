@@ -6,7 +6,7 @@ use futures::{stream, FutureExt, StreamExt};
 use proptest::prelude::*;
 use tower::{
     discover::{Change, Discover},
-    BoxError, ServiceExt,
+    BoxError, Service, ServiceExt,
 };
 
 use zebra_chain::{
@@ -360,24 +360,25 @@ fn sidecar_peer_always_receives_block_gossip() {
         let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
         assert_eq!(number_of_peers_to_broadcast, 20);
 
-        let response_future =
-            peer_set.route_sidecar_broadcast(Request::AdvertiseBlock(block_hash, None));
-        std::mem::drop(response_future);
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(crate::constants::PEERSET_BUFFER_SIZE);
+        let response_future = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlock(block_hash, None));
 
         let mut block_gossip_received = 0;
         let mut sidecar_received = false;
         for (index, handle) in handles.iter_mut().enumerate() {
-            if let ReceiveRequestAttempt::Request(client_request) =
-                handle.try_to_receive_outbound_client_request()
-            {
-                assert_eq!(
-                    client_request.request,
-                    Request::AdvertiseBlock(block_hash, None)
-                );
+            if let Ok(advert) = handle.block_advert_receiver.try_recv() {
+                assert_eq!(advert.hash, block_hash);
+                advert.result.send(Ok(())).unwrap();
                 block_gossip_received += 1;
                 sidecar_received |= index == SIDECAR_INDEX;
             }
         }
+        response_future.await.unwrap();
 
         assert!(
             sidecar_received,

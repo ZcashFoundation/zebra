@@ -152,6 +152,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub mod address_book_peers;
 pub mod config;
 pub mod constants;
+pub mod metrics;
 
 mod address_book;
 mod address_book_updater;
@@ -196,7 +197,10 @@ pub use crate::{
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
-    peer_set::{init, init_with_block_gossip_peer_ips, NetworkResponseFuture, NetworkService},
+    peer_set::{
+        init, init_with_block_gossip_peer_ips, BlockAdvertiser, NetworkResponseFuture,
+        NetworkService,
+    },
     policies::RetryLimit,
     protocol::{
         external::{Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},

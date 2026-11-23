@@ -9,7 +9,7 @@ use crate::{
         network::error::ParametersBuilderError,
         subsidy::{self, block_subsidy, funding_stream_values, FundingStreamReceiver},
         testnet::{
-            self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            self, check_branch_id, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
             ConfiguredFundingStreams, ConfiguredLockboxDisbursement, RegtestParameters,
             MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
         },
@@ -304,6 +304,32 @@ fn activation_order_is_checked_before_coalescing_heights() {
         testnet::Parameters::build().with_activation_heights(activation_heights),
         Err(ParametersBuilderError::OutOfOrderUpgrades),
     ));
+}
+
+/// An upgrade with no consensus branch ID in this build can't be given an activation height.
+#[test]
+fn activation_heights_need_a_branch_id() {
+    let mut branch_ids = NetworkUpgrade::branch_id_list();
+    branch_ids.remove(&NetworkUpgrade::Nu7);
+
+    assert_eq!(
+        check_branch_id(NetworkUpgrade::Nu7, &branch_ids),
+        Err(ParametersBuilderError::MissingBranchId {
+            upgrade: NetworkUpgrade::Nu7
+        }),
+    );
+    assert_eq!(check_branch_id(NetworkUpgrade::Nu6_3, &branch_ids), Ok(()));
+    // Upgrades before Overwinter have no branch ID and need none.
+    assert_eq!(
+        check_branch_id(NetworkUpgrade::BeforeOverwinter, &branch_ids),
+        Ok(())
+    );
+
+    // Every upgrade in this build has a branch ID, so each one can be configured.
+    let branch_ids = NetworkUpgrade::branch_id_list();
+    for upgrade in NetworkUpgrade::iter() {
+        assert_eq!(check_branch_id(upgrade, &branch_ids), Ok(()), "{upgrade}");
+    }
 }
 
 #[test]

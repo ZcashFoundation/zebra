@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use tokio::{task::JoinHandle, time::sleep};
 use tower::{BoxError, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use crate::components::mempool;
 

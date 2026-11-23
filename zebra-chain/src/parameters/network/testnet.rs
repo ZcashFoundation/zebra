@@ -1,7 +1,7 @@
 //! Types and implementation for Testnet consensus parameters
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     sync::{Arc, LazyLock},
 };
@@ -27,7 +27,7 @@ use crate::{
             scheduled_block_subsidy, FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
             ParameterSubsidy, LN2_SCALED, TESTNET_INITIAL_NSM_VALUE_BALANCE,
         },
-        Network, NetworkKind, NetworkUpgrade,
+        ConsensusBranchId, Network, NetworkKind, NetworkUpgrade,
     },
     transparent,
     work::difficulty::{ExpandedDifficulty, U256},
@@ -525,6 +525,20 @@ impl From<bool> for ConfiguredCheckpoints {
     }
 }
 
+/// Returns an error if `upgrade` needs a consensus branch ID and `branch_ids` has none for it.
+///
+/// Every ZIP 221 history tree node commits to its network upgrade's branch ID, so `zebrad` would
+/// panic at the activation block of an upgrade without one. Upgrades before Overwinter need none.
+pub(crate) fn check_branch_id(
+    upgrade: NetworkUpgrade,
+    branch_ids: &HashMap<NetworkUpgrade, ConsensusBranchId>,
+) -> Result<(), ParametersBuilderError> {
+    if upgrade >= NetworkUpgrade::Overwinter && !branch_ids.contains_key(&upgrade) {
+        return Err(ParametersBuilderError::MissingBranchId { upgrade });
+    }
+    Ok(())
+}
+
 /// Builder for the [`Parameters`] struct.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParametersBuilder {
@@ -726,6 +740,7 @@ impl ParametersBuilder {
             .zip(NetworkUpgrade::iter().skip(1))
             .filter_map(|(height, upgrade)| height.map(|height| (height, upgrade)));
 
+            let branch_ids = NetworkUpgrade::branch_id_list();
             let mut previous_height = Height::MIN;
             activation_heights
                 .map(|(h, nu)| {
@@ -737,6 +752,7 @@ impl ParametersBuilder {
                     if height < previous_height {
                         return Err(ParametersBuilderError::OutOfOrderUpgrades);
                     }
+                    check_branch_id(nu, &branch_ids)?;
                     previous_height = height;
                     Ok((height, nu))
                 })

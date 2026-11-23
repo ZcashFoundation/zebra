@@ -42,6 +42,7 @@ fn new_test_connection<A>() -> (
 ) {
     let mock_inbound_service = MockService::build().finish();
     let (client_tx, client_rx) = mpsc::channel(0);
+    let (_block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
     let shared_error_slot = ErrorSlot::default();
 
     // Normally the network has more capacity than the sender's single implicit slot,
@@ -81,7 +82,15 @@ fn new_test_connection<A>() -> (
 
     let connection = Connection::new(
         mock_inbound_service.clone(),
-        client_rx,
+        (
+            client_rx,
+            block_advert_rx,
+            crate::peer::MinimumPeerVersion::new(
+                zebra_chain::chain_tip::NoChainTip,
+                &zebra_chain::parameters::Network::Mainnet,
+            ),
+            tokio::sync::watch::channel(crate::BanList::default()).1,
+        ),
         shared_error_slot.clone(),
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),

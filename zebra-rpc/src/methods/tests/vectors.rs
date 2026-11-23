@@ -157,7 +157,11 @@ async fn rpc_getdeprecationinfo() {
         .expect("getdeprecationinfo should succeed");
     assert_eq!(deprecation_info.end_of_service, None);
 
-    let end_of_support_height = 3_546_440;
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis. Place the end of support after it, so the
+    // test doesn't fail when the checkpoints are updated.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let end_of_support_height = checkpoint_height.0 + 20_000;
     let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
     let end_of_service = rpc
         .get_deprecation_info()
@@ -167,9 +171,6 @@ async fn rpc_getdeprecationinfo() {
         .expect("end_of_service should be present when an end of support height is set");
 
     assert_eq!(end_of_service.block_height, end_of_support_height);
-    // This node has no tip, so the estimate counts the blocks remaining after the highest
-    // compiled-in checkpoint, not after genesis.
-    let checkpoint_height = Mainnet.checkpoint_list().max_height();
     let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
     assert!(end_of_service.estimated_time > Utc::now().timestamp());
@@ -384,6 +385,66 @@ async fn get_block_data(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_rejects_incomplete_stored_bodies() {
+    use zebra_state::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let unknown_height = height.next().unwrap();
+        let (state, read_state, tip, _) =
+            zebra_state::populated_state_with_debug(blocks, &Mainnet, true).await;
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &read_state.db().cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        read_state.db().write_batch(batch).unwrap();
+
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool, 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let expected = BlockReadError::BlockBodyUnavailable { height }.to_string();
+        for verbosity in [0, 2, 3] {
+            for query in [height.0.to_string(), block.hash().to_string()] {
+                let error = rpc.get_block(query, Some(verbosity)).await.unwrap_err();
+                assert_eq!(error.message(), expected);
+            }
+        }
+        let error = rpc
+            .get_block(unknown_height.0.to_string(), Some(0))
+            .await
+            .unwrap_err();
+        assert_eq!(error.message(), "Block not found");
+        rpc_tx_queue.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     let _init_guard = zebra_test::init();
 
@@ -533,6 +594,12 @@ async fn rpc_getblock() {
                 value_pools: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
             }))
         );
     }
@@ -588,6 +655,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -635,6 +708,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -667,6 +741,15 @@ async fn rpc_getblock() {
                 block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
             );
             assert_eq!(
                 *value_pools,
@@ -735,6 +818,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -767,6 +851,15 @@ async fn rpc_getblock() {
                 block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
             );
             assert_eq!(
                 *value_pools,
@@ -874,6 +967,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -931,6 +1030,12 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -1170,6 +1275,214 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         };
         assert_eq!(tx_obj.height, Some(-1));
         assert_eq!(tx_obj.confirmations, Some(0));
+    }
+}
+
+/// Returns a balance of `zat` zatoshis.
+fn balance_zat(zat: i64) -> Amount<NonNegative> {
+    Amount::try_from(zat).expect("test balances are valid")
+}
+
+/// Returns a change of `zat` zatoshis.
+fn change_zat(zat: i64) -> Amount<NegativeAllowed> {
+    Amount::try_from(zat).expect("test changes are valid")
+}
+
+/// Returns block balances with the given transparent, Orchard, and NSM amounts, in zatoshis.
+fn block_info_with_balances(transparent_zat: i64, orchard_zat: i64, nsm_zat: i64) -> BlockInfo {
+    let mut value_pools = ValueBalance::from_transparent_amount(balance_zat(transparent_zat));
+    value_pools
+        .set_orchard_value_balance(ValueBalance::from_orchard_amount(balance_zat(orchard_zat)));
+    value_pools.set_nsm_amount(balance_zat(nsm_zat));
+    BlockInfo::new(value_pools, 0)
+}
+
+/// Returns the entry with `id` in a `getblock` response's `valuePools`.
+fn value_pool<'a>(obj: &'a BlockObject, id: &str) -> &'a GetBlockchainInfoBalance {
+    obj.value_pools
+        .as_ref()
+        .expect("the response has value pools")
+        .iter()
+        .find(|pool| pool.id() == id)
+        .expect("the response has every value pool")
+}
+
+/// Calls verbose `getblock` for `block` on Mainnet, with a mock state that reports the block at
+/// `height` in the best chain, and the parent and block balances as `prev_block_info` and
+/// `block_info`.
+async fn getblock_with_block_info(
+    block: Arc<Block>,
+    verbosity: u8,
+    height: Height,
+    prev_block_info: Option<BlockInfo>,
+    block_info: BlockInfo,
+) -> BlockObject {
+    let block_hash = block.hash();
+    let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc.get_block(hash_str, Some(verbosity)).await });
+
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block.header.clone(),
+            hash: block_hash,
+            height,
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(Some(0)));
+
+    if verbosity == 3 {
+        read_state
+            .expect_request(ReadRequest::SpentOutputs(block_hash.into()))
+            .await
+            .respond(ReadResponse::SpentOutputs(None));
+    }
+
+    if verbosity == 1 {
+        let tx_ids: Arc<[transaction::Hash]> =
+            block.transactions.iter().map(|tx| tx.hash()).collect();
+        read_state
+            .expect_request(ReadRequest::TransactionIdsForBlock(block_hash.into()))
+            .await
+            .respond(ReadResponse::TransactionIdsForBlock(Some(tx_ids)));
+    } else {
+        read_state
+            .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+    }
+    read_state
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(prev_block_info));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(block_info)));
+
+    let GetBlockResponse::Object(obj) = block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed")
+    else {
+        panic!("verbose getblock returns an object");
+    };
+
+    *obj
+}
+
+/// If the parent block's balances are missing, for example after a reorg between the state
+/// reads, `getblock` reports the block's balances without changes, rather than reporting each
+/// whole balance as the block's change.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_omits_value_changes_without_parent_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(1),
+            None,
+            block_info_with_balances(500_000_000, 300_000_000, 200_000_000),
+        )
+        .await;
+
+        let pools = obj
+            .value_pools
+            .as_ref()
+            .expect("the response has value pools");
+        assert!(pools.iter().all(|pool| pool.value_delta_zat().is_none()));
+        assert!(pools.iter().all(|pool| pool.value_delta().is_none()));
+        assert_eq!(
+            value_pool(&obj, "transparent").chain_value_zat(),
+            balance_zat(500_000_000)
+        );
+
+        let nsm = obj
+            .nsm_value_balance
+            .as_ref()
+            .expect("the response has the NSM balance");
+        assert_eq!(nsm.chain_value_zat(), balance_zat(200_000_000));
+        assert_eq!(nsm.value_delta_zat(), None);
+    }
+}
+
+/// The balances before the genesis block are zero, so the genesis block's changes are its
+/// balances.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_genesis_value_changes_are_its_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(0),
+            None,
+            block_info_with_balances(500_000_000, 0, 0),
+        )
+        .await;
+
+        assert_eq!(
+            value_pool(&obj, "transparent").value_delta_zat(),
+            Some(change_zat(500_000_000))
+        );
+        assert_eq!(
+            value_pool(&obj, "orchard").value_delta_zat(),
+            Some(Amount::zero())
+        );
     }
 }
 
@@ -1644,21 +1957,20 @@ async fn rpc_getaddresstxids_response() {
             zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
-            // Exhaustively test possible block ranges for mainnet.
-            for start in 1..=10 {
-                for end in start..=10 {
-                    rpc_getaddresstxids_response_with(
-                        &network,
-                        Some(start),
-                        Some(end),
-                        &address,
-                        &read_state,
-                        &latest_chain_tip,
-                        (end - start + 1) as usize,
-                    )
-                    .await;
-                }
-            }
+            // Keep every range and its full no-request window, but overlap independent cases.
+            let ranges = (1..=10).flat_map(|start| (start..=10).map(move |end| (start, end)));
+            futures::future::join_all(ranges.map(|(start, end)| {
+                rpc_getaddresstxids_response_with(
+                    &network,
+                    Some(start),
+                    Some(end),
+                    &address,
+                    &read_state,
+                    &latest_chain_tip,
+                    usize::try_from(end - start + 1).expect("range contains at most ten blocks"),
+                )
+            }))
+            .await;
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
@@ -3574,8 +3886,9 @@ async fn getblocktemplate_precomputed() {
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever.
+    // forever. An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
+    let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
@@ -3596,6 +3909,7 @@ async fn getblocktemplate_precomputed() {
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
     read_state_responder.abort();
+    let _ = read_state_responder.await;
 
     let (read_state_responder, mempool_responder) =
         spawn_responders(next_tip_height, next_tip_hash);
@@ -4564,6 +4878,189 @@ async fn rpc_z_validateaddress() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // ZIP 320 reference test vector: <https://zips.z.cash/zip-0320#reference-implementation>
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    let tex = rpc
+        .z_convert_tex(P2PKH.to_string())
+        .await
+        .expect("a mainnet P2PKH address should convert");
+    assert_eq!(tex, TEX, "conversion should match the ZIP 320 test vector");
+
+    // Round trip: the TEX address is valid, and carries the same 20-byte hash as its source.
+    assert!(
+        rpc.validate_address(tex.clone())
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress"
+    );
+    let source: zebra_chain::transparent::Address = P2PKH.parse().expect("valid P2PKH");
+    let converted: zebra_chain::transparent::Address = tex.parse().expect("valid TEX");
+    assert_eq!(
+        source.hash_bytes(),
+        converted.hash_bytes(),
+        "TEX address should re-encode the P2PKH validating key hash unchanged"
+    );
+
+    // Addresses that decode but aren't transparent P2PKH: zcashd returns -8.
+    for (address, kind) in [
+        ("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR", "P2SH"),
+        (
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya",
+            "Sapling",
+        ),
+        (
+            "u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e",
+            "unified",
+        ),
+        // zcashd can't decode TEX addresses at all and returns -5 here; Zebra can, so it
+        // falls through to the "not P2PKH" check instead. The call is rejected either way.
+        (TEX, "TEX"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("non-P2PKH addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidParameter),
+            "{kind} address should be rejected as an invalid parameter"
+        );
+        assert_eq!(error.message(), "Address is not a transparent p2pkh address");
+    }
+
+    // Addresses that don't decode, or are for another network: zcashd returns -5.
+    for (address, kind) in [
+        ("not an address", "garbage"),
+        ("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx", "Testnet P2PKH"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("undecodable or wrong-network addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "{kind} should be rejected as an invalid address on Mainnet"
+        );
+        assert_eq!(error.message(), "Invalid address");
+    }
+}
+
+/// Addresses produced by `z_converttex` must be rejected by the address-index RPCs, rather
+/// than silently returning an empty result. See the comment in `ValidateAddresses`.
+#[test]
+fn tex_addresses_are_rejected_by_the_address_index() {
+    use crate::{methods::ValidateAddresses, server::error::LegacyCode};
+
+    let _init_guard = zebra_test::init();
+
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    // The underlying P2PKH address is still accepted, including alongside other addresses.
+    GetAddressBalanceRequest::new(vec![P2PKH.to_string()])
+        .valid_addresses()
+        .expect("a P2PKH address should be accepted");
+
+    for addresses in [
+        vec![TEX.to_string()],
+        // A TEX address must not slip through by being mixed in with valid ones.
+        vec![P2PKH.to_string(), TEX.to_string()],
+    ] {
+        let error = GetAddressBalanceRequest::new(addresses.clone())
+            .valid_addresses()
+            .expect_err("a TEX address must be rejected");
+
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "TEX address in {addresses:?} should be rejected as an invalid address"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex_regtest() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Testnet(Arc::new(
+            Parameters::new_regtest(Default::default())
+                .expect("failed to build regtest parameters"),
+        )),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // tm address (P2PKH): Testnet and Regtest share transparent address prefixes, so the input
+    // decodes as Testnet, but the TEX HRP must be the Regtest one.
+    let tex = rpc
+        .z_convert_tex("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx".to_string())
+        .await
+        .expect("a tm address should convert on Regtest");
+    assert_eq!(tex, "texregtest1mjhhrt3ldpw98t2rxd9uzq9c25wer5nrttd29l");
+
+    // The result round trips: Zebra parses the `texregtest` HRP back to a Regtest TEX address.
+    assert!(
+        rpc.validate_address(tex)
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress on Regtest"
+    );
+
+    // t1 address: wrong network
+    let error = rpc
+        .z_convert_tex("t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC".to_string())
+        .await
+        .expect_err("a Mainnet address must be rejected on Regtest");
+    assert_eq!(error.code(), i32::from(LegacyCode::InvalidAddressOrKey));
+    assert_eq!(error.message(), "Invalid address");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_validateaddress_regtest() {
     let _init_guard = zebra_test::init();
 
@@ -5525,4 +6022,138 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
         .expect("RPC task should not panic")
         .expect("RPC should succeed");
     assert_eq!(response.connections, 0);
+}
+
+/// The NSM value balance is monitored from the block before NU7 activation, also when it is
+/// zero, and not before.
+#[test]
+fn nsm_value_balance_is_monitored_from_the_block_before_nu7_activation() {
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+
+    let monitored = |height, zat| {
+        GetBlockchainInfoBalance::nsm(&Mainnet, height, balance_zat(zat), None).monitored()
+    };
+
+    assert!(monitored(nu7, 0));
+    assert!(monitored(before_nu7, 0));
+    assert!(!monitored(before_nu7.previous().expect("valid height"), 0));
+}
+
+/// Verbose `getblock` reports ZIP 237's NSM value balance at NU7 - 1 and NU7, although the state
+/// credits `INITIAL_NSM_VALUE_BALANCE` in the NU7 activation block.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_the_initial_nsm_value_balance_before_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+    let initial = i64::from(Mainnet.initial_nsm_value_balance());
+
+    // (height, stored parent NSM, stored block NSM, reported NSM, reported change), in zatoshis.
+    let cases = [
+        (before_nu7, 0, 0, initial, initial),
+        (nu7, 0, initial - 7, initial - 7, -7),
+    ];
+
+    for (height, parent_nsm, nsm, reported, reported_change) in cases {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            1,
+            height,
+            Some(block_info_with_balances(0, 0, parent_nsm)),
+            block_info_with_balances(0, 0, nsm),
+        )
+        .await;
+
+        let nsm_balance = obj.nsm_value_balance.as_ref().expect("has the NSM balance");
+        assert!(nsm_balance.monitored());
+        assert_eq!(nsm_balance.chain_value_zat(), balance_zat(reported));
+        assert_eq!(
+            nsm_balance.value_delta_zat(),
+            Some(change_zat(reported_change))
+        );
+    }
+}
+
+/// Verbose `getblock` reports the block's NSM value balance and its signed change to it, separately
+/// from the value pools' changes, for increases and decreases.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_nonzero_nsm_changes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let after_nu7 = (NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet")
+        + 1)
+    .expect("valid height");
+
+    // (parent Orchard, parent NSM, block Orchard, block NSM, NSM change in ZEC), in zatoshis.
+    let cases = [
+        // The NSM value balance increases, and the Orchard pool increases by a different amount.
+        (700_000_000, 100_000_000, 1_000_000_000, 350_000_000, 2.5),
+        // The NSM value balance decreases, and the Orchard pool decreases by a different amount.
+        (1_000_000_000, 350_000_000, 950_000_000, 125_000_000, -2.25),
+    ];
+
+    for (parent_orchard, parent_nsm, orchard, nsm, nsm_change_zec) in cases {
+        for verbosity in 1..=3 {
+            let obj = getblock_with_block_info(
+                block.clone(),
+                verbosity,
+                after_nu7,
+                Some(block_info_with_balances(0, parent_orchard, parent_nsm)),
+                block_info_with_balances(0, orchard, nsm),
+            )
+            .await;
+
+            let nsm_balance = obj
+                .nsm_value_balance
+                .as_ref()
+                .expect("the response has the NSM balance");
+            assert_eq!(nsm_balance.id(), "nsm");
+            assert!(nsm_balance.monitored());
+            assert_eq!(nsm_balance.chain_value_zat(), balance_zat(nsm));
+            assert_eq!(
+                nsm_balance.value_delta_zat(),
+                Some(change_zat(nsm - parent_nsm))
+            );
+
+            let orchard_pool = value_pool(&obj, "orchard");
+            assert_eq!(orchard_pool.chain_value_zat(), balance_zat(orchard));
+            assert_eq!(
+                orchard_pool.value_delta_zat(),
+                Some(change_zat(orchard - parent_orchard))
+            );
+
+            // The NSM value balance is not part of the supply.
+            assert_eq!(
+                obj.chain_supply
+                    .as_ref()
+                    .expect("the response has the chain supply")
+                    .chain_value_zat(),
+                balance_zat(orchard)
+            );
+
+            let json = serde_json::to_value(&obj).expect("the response serializes");
+            let nsm_json = &json["nsmValueBalance"];
+            assert_eq!(nsm_json["chainValueZat"], serde_json::json!(nsm));
+            assert_eq!(
+                nsm_json["valueDeltaZat"],
+                serde_json::json!(nsm - parent_nsm)
+            );
+            assert_eq!(nsm_json["valueDelta"], serde_json::json!(nsm_change_zec));
+            assert_eq!(nsm_json["monitored"], serde_json::json!(true));
+        }
+    }
 }

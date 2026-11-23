@@ -3,11 +3,13 @@ use color_eyre::eyre::{Result, WrapErr};
 use serde_json::Value;
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::prelude::*;
 
 use crate::common::{
     cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
+    config::{parse_listen_addr, read_listen_addr_from_logs},
     launch::spawn_zebrad_for_rpc,
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
@@ -19,23 +21,21 @@ use crate::common::{
 async fn rpc_get_block_from_cached_state() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let test_type = TestType::UpdateCachedState;
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
     let network = Network::Mainnet;
 
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let mut zebrad = if let Some(zebrad) =
         spawn_zebrad_for_rpc(network, "rpc_get_block_from_cached_state", test_type, false)?
     {
         tracing::info!("running fully synced zebrad RPC test");
 
-        zebrad_and_address
+        zebrad
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
     };
 
-    let zebra_rpc_address = zebra_rpc_address.expect("cached-state RPC test must have RPC port");
-
-    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+    let zebra_rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     let client = RpcRequestClient::new(zebra_rpc_address);
 
@@ -69,7 +69,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     let test_type = TestType::UpdateZebraCachedStateWithRpc;
     let network = Network::Mainnet;
 
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+    let mut zebrad = if let Some(zebrad) = spawn_zebrad_for_rpc(
         network,
         "rpc_z_getsubtreesbyindex_sync_snapshots",
         test_type,
@@ -77,7 +77,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     )? {
         tracing::info!("running fully synced zebrad z_getsubtreesbyindex RPC test");
 
-        zebrad_and_address
+        zebrad
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
@@ -88,19 +88,23 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 
     // It doesn't matter how long the state version upgrade takes,
     // because the sync finished regex is repeated every minute.
-    wait_for_state_version_upgrade(
+    let startup_logs = wait_for_state_version_upgrade(
         &mut zebrad,
         &state_version_message,
         state_database_format_version_in_code(),
-        None,
+        [OPENED_RPC_ENDPOINT_MSG.to_string()],
     )?;
+    let rpc_log = startup_logs
+        .iter()
+        .find(|line| line.contains(OPENED_RPC_ENDPOINT_MSG))
+        .expect("the RPC endpoint log was matched");
+    let zebra_rpc_address = parse_listen_addr(rpc_log, OPENED_RPC_ENDPOINT_MSG)?;
 
     // Wait for zebrad to load the full cached blockchain.
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     // Create an http client
-    let client =
-        RpcRequestClient::new(zebra_rpc_address.expect("already checked that address is valid"));
+    let client = RpcRequestClient::new(zebra_rpc_address);
 
     // Create test vector matrix
     let zcashd_test_vectors = vec![

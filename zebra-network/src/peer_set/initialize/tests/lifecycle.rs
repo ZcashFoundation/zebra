@@ -298,7 +298,7 @@ async fn dropping_network_handles_stops_owned_tasks() {
         peerset_initial_target_size: 1,
         ..Config::default()
     };
-    let (network, address_book, misbehavior) = timeout(
+    let (network, address_book, misbehavior, advertiser) = timeout(
         SHUTDOWN_BOUND,
         crate::init(config, inbound, NoChainTip, "lifecycle test".to_owned()),
     )
@@ -335,6 +335,7 @@ async fn dropping_network_handles_stops_owned_tasks() {
     .await
     .expect("the remaining external handle must still route requests")
     .expect("the real connected peer must respond successfully");
+    // The non-owning advertiser must not keep the network alive after its last owner is dropped.
     drop(last_external_handle);
 
     let listener_closed = async {
@@ -369,4 +370,5 @@ async fn dropping_network_handles_stops_owned_tasks() {
     .expect(
         "listener, peer connection and crawler-owned inbound service must stop with runtime alive",
     );
+    drop(advertiser);
 }

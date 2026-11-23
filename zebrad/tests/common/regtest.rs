@@ -28,7 +28,7 @@ use zebra_test::args;
 
 use crate::common::{
     config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
 };
 
 /// Number of blocks that should be submitted before the test is considered successful.
@@ -53,9 +53,8 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
 
     for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
         let (mut block, height) = client.block_from_template(&net).await?;

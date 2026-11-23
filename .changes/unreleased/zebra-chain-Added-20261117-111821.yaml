@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `ChainTip::best_tip_changed_at`, which returns when the current best tip was published if its hash matches, with a default implementation that returns `None`.
+time: 2026-11-17T11:18:21.345217Z

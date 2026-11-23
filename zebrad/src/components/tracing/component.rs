@@ -3,24 +3,24 @@
 use std::{
     fs::{self, File},
     io::Write,
+    path::Path,
 };
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
 
 use tokio::sync::watch;
 use tracing::{field::Visit, Level};
-use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
-    fmt::{format, Formatter},
-    layer::SubscriberExt,
-    reload::Handle,
-    util::SubscriberInitExt,
-    EnvFilter, Layer,
+    fmt, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter, Layer, Registry,
 };
 use zebra_chain::parameters::Network;
 
-use crate::{application::build_version, components::tracing::Config};
+use crate::{
+    application::build_version,
+    components::tracing::{Config, LogFormat},
+};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -51,15 +51,8 @@ pub type BoxWrite = Box<dyn Write + Send + Sync + 'static>;
 
 /// Abscissa component for initializing the `tracing` subsystem
 pub struct Tracing {
-    /// The installed filter reloading handle, if enabled.
-    //
-    // TODO: when fmt::Subscriber supports per-layer filtering, remove the Option
-    filter_handle: Option<
-        Handle<
-            EnvFilter,
-            Formatter<format::DefaultFields, format::Format<format::Full>, NonBlocking>,
-        >,
-    >,
+    /// The installed filter reloading handle, if the `filter-reload` feature is enabled.
+    filter_handle: Option<Handle<EnvFilter, Registry>>,
 
     /// The originally configured filter.
     initial_filter: String,
@@ -101,8 +94,9 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         // Only show the intro for user-focused node server commands like `start`
-        // Also skip the intro for regtest, since it pollutes the QA test logs
-        if uses_intro && !network.is_regtest() {
+        // Also skip the intro for regtest, since it pollutes the QA test logs,
+        // and for JSON logs, since log collectors usually read standard error as well.
+        if uses_intro && !network.is_regtest() && config.log_format == LogFormat::Text {
             // If it's a terminal and color escaping is enabled: clear screen and
             // print Zebra logo (here `use_color` is being interpreted as
             // "use escape codes")
@@ -127,35 +121,8 @@ impl Tracing {
         }
 
         let writer = if let Some(log_file) = config.log_file.as_ref() {
-            // Make sure the directory for the log file exists.
-            // If the log is configured in the current directory, it won't have a parent directory.
-            //
-            // # Security
-            //
-            // If the user is running Zebra with elevated permissions ("root"), they should
-            // create the log file directory before running Zebra, and make sure the Zebra user
-            // account has exclusive access to that directory, and other users can't modify
-            // its parent directories.
-            //
-            // This avoids a TOCTOU security issue in the Rust filesystem API.
-            let log_file_dir = log_file.parent();
-            if let Some(log_file_dir) = log_file_dir {
-                if !log_file_dir.exists() {
-                    eprintln!("Directory for log file {log_file:?} does not exist, trying to create it...");
-
-                    if let Err(create_dir_error) = fs::create_dir_all(log_file_dir) {
-                        eprintln!("Failed to create directory for log file: {create_dir_error}");
-                        eprintln!("Trying log file anyway...");
-                    }
-                }
-            }
-
-            if uses_intro {
-                // We want this to appear on stdout instead of the usual log messages.
-                println!("Sending logs to {log_file:?}...");
-            }
-            let log_file = File::options().append(true).create(true).open(log_file)?;
-            Box::new(log_file) as BoxWrite
+            let text_logs = config.log_format == LogFormat::Text;
+            Box::new(open_log_file(log_file, text_logs, uses_intro)?) as BoxWrite
         } else {
             let stdout = std::io::stdout();
             Box::new(stdout) as BoxWrite
@@ -168,66 +135,53 @@ impl Tracing {
             .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(writer);
 
-        // Construct a format subscriber with the supplied global logging filter,
-        // and optionally enable reloading.
+        let (event_format, field_format) = super::format::EventFormat::new(config.log_format);
+        let logger = fmt::layer()
+            .fmt_fields(field_format)
+            .event_format(event_format)
+            .with_ansi(use_color)
+            .with_writer(non_blocking);
+        let warn_error_layer = LastWarnErrorLayer {
+            last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
+        };
+
+        // The subscriber is built on `Registry`, so individual layers can add their own filters.
         //
-        // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
+        // The configured filter applies to every layer, except in tokio-console builds, where
+        // the console layer needs every tokio span and event.
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
         let (subscriber, filter_handle) = {
-            use tracing_subscriber::FmtSubscriber;
+            let env_filter = EnvFilter::from(&filter);
 
-            let logger = FmtSubscriber::builder()
-                .with_ansi(use_color)
-                .with_writer(non_blocking)
-                .with_env_filter(&filter);
-
-            // Enable reloading if that feature is selected.
+            // A reloadable filter takes a lock on every filter check, so it is only installed
+            // when that feature is selected.
             #[cfg(feature = "filter-reload")]
-            let (filter_handle, logger) = {
-                let logger = logger.with_filter_reloading();
-
-                (Some(logger.reload_handle()), logger)
+            let (env_filter, filter_handle) = {
+                let (env_filter, handle) = tracing_subscriber::reload::Layer::new(env_filter);
+                (env_filter, Some(handle))
             };
 
             #[cfg(not(feature = "filter-reload"))]
             let filter_handle = None;
 
-            let warn_error_layer = LastWarnErrorLayer {
-                last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
-            };
-            let subscriber = logger
-                .finish()
+            let subscriber = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(logger)
                 .with(warn_error_layer)
-                .with(ErrorLayer::default());
+                .with(ErrorLayer::new(field_format));
 
             (subscriber, filter_handle)
         };
 
-        // Construct a tracing registry with the supplied per-layer logging filter,
-        // and disable filter reloading.
-        //
-        // TODO: when fmt::Subscriber supports per-layer filtering,
-        //       remove this registry code, and layer tokio-console on top of fmt::Subscriber
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         let (subscriber, filter_handle) = {
-            use tracing_subscriber::{fmt, Layer};
-
-            let subscriber = tracing_subscriber::registry();
             // TODO: find out why crawl_and_dial and try_to_sync evade this filter,
             //       and why they also don't get the global net/commit span.
             // Note: this might have been fixed by tracing 0.3.15, or by recent Zebra refactors.
-            //
-            // Using `registry` as the base subscriber, the logs from most other functions get filtered.
-            // Using `FmtSubscriber` as the base subscriber, all the logs get filtered.
-            let logger = fmt::Layer::new()
-                .with_ansi(use_color)
-                .with_writer(non_blocking)
-                .with_filter(EnvFilter::from(&filter));
-
-            let subscriber = subscriber.with(logger);
-
-            let span_logger = ErrorLayer::default().with_filter(EnvFilter::from(&filter));
-            let subscriber = subscriber.with(span_logger);
+            let subscriber = tracing_subscriber::registry()
+                .with(logger.with_filter(EnvFilter::from(&filter)))
+                .with(warn_error_layer.with_filter(EnvFilter::from(&filter)))
+                .with(ErrorLayer::new(field_format).with_filter(EnvFilter::from(&filter)));
 
             (subscriber, None)
         };
@@ -253,13 +207,8 @@ impl Tracing {
             let layer = tracing_journald::layer()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
 
-            // If the global filter can't be used, add a per-layer filter instead.
-            // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
             #[cfg(all(feature = "tokio-console", tokio_unstable))]
-            let layer = {
-                use tracing_subscriber::Layer;
-                layer.with_filter(EnvFilter::from(&filter))
-            };
+            let layer = layer.with_filter(EnvFilter::from(&filter));
 
             Some(layer)
         } else {
@@ -269,7 +218,11 @@ impl Tracing {
         let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "sentry")]
-        let subscriber = subscriber.with(crate::sentry::tracing_layer());
+        let sentry_layer = crate::sentry::tracing_layer();
+        #[cfg(feature = "sentry")]
+        let sentry_installed = sentry_layer.is_some();
+        #[cfg(feature = "sentry")]
+        let subscriber = subscriber.with(sentry_layer);
 
         // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
         #[cfg(feature = "opentelemetry")]
@@ -283,17 +236,22 @@ impl Tracing {
                 .opentelemetry_service_name
                 .clone()
                 .or_else(|| std::env::var("OTEL_SERVICE_NAME").ok());
-            let sample_percent = config.opentelemetry_sample_percent.or_else(|| {
-                std::env::var("OTEL_TRACES_SAMPLER_ARG")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-            });
+            let sample_percent = config.opentelemetry_sample_percent;
 
-            // Capture resolved values for logging
+            // Capture resolved values for logging once the subscriber is installed
+            let sampler_problem = if sample_percent.is_none() {
+                super::otel::sampler_env_problem(
+                    std::env::var("OTEL_TRACES_SAMPLER").ok().as_deref(),
+                    std::env::var("OTEL_TRACES_SAMPLER_ARG").ok().as_deref(),
+                )
+            } else {
+                None
+            };
             let resolved_config = (
                 endpoint.clone(),
                 service_name.clone().unwrap_or_else(|| "zebra".to_string()),
-                sample_percent.unwrap_or(100),
+                super::otel::sampler_description(sample_percent),
+                sampler_problem,
             );
 
             match super::otel::layer(endpoint.as_deref(), service_name.as_deref(), sample_percent) {
@@ -350,7 +308,9 @@ impl Tracing {
         }
 
         #[cfg(feature = "sentry")]
-        info!("installed sentry tracing layer");
+        if sentry_installed {
+            info!("installed sentry tracing layer");
+        }
 
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         info!(
@@ -362,13 +322,17 @@ impl Tracing {
         // Log OpenTelemetry status
         #[cfg(feature = "opentelemetry")]
         if otel_provider.is_some() {
-            let (ref endpoint, ref service_name, sample_percent) = otel_resolved_config;
+            let (ref endpoint, ref service_name, ref sampler, sampler_problem) =
+                otel_resolved_config;
             info!(
                 ?endpoint,
                 %service_name,
-                sample_percent,
+                %sampler,
                 "installed OpenTelemetry tracing layer",
             );
+            if let Some(problem) = sampler_problem {
+                warn!(%sampler, "{problem}");
+            }
         }
 
         // Warning if OpenTelemetry is configured but feature not compiled
@@ -468,6 +432,43 @@ impl Tracing {
             );
         }
     }
+}
+
+/// Opens `log_file` for appending, and creates its directory if it doesn't exist.
+///
+/// Plain text notices are printed only with text logs, because log collectors usually read
+/// standard output and standard error as well. Opening the file reports any error.
+///
+/// # Security
+///
+/// If the user is running Zebra with elevated permissions ("root"), they should create the log
+/// file directory before running Zebra, and make sure the Zebra user account has exclusive
+/// access to that directory, and other users can't modify its parent directories.
+///
+/// This avoids a TOCTOU security issue in the Rust filesystem API.
+#[allow(clippy::print_stdout, clippy::print_stderr)]
+fn open_log_file(log_file: &Path, text_logs: bool, uses_intro: bool) -> std::io::Result<File> {
+    // If the log is configured in the current directory, it won't have a parent directory.
+    let missing_dir = log_file.parent().filter(|dir| !dir.exists());
+
+    if let Some(log_file_dir) = missing_dir {
+        if text_logs {
+            eprintln!("Directory for log file {log_file:?} does not exist, trying to create it...");
+        }
+
+        let created = fs::create_dir_all(log_file_dir);
+        if let (Err(create_dir_error), true) = (created, text_logs) {
+            eprintln!("Failed to create directory for log file: {create_dir_error}");
+            eprintln!("Trying log file anyway...");
+        }
+    }
+
+    if uses_intro && text_logs {
+        // We want this to appear on stdout instead of the usual log messages.
+        println!("Sending logs to {log_file:?}...");
+    }
+
+    File::options().append(true).create(true).open(log_file)
 }
 
 impl std::fmt::Debug for Tracing {

@@ -3,7 +3,7 @@
 
 use std::{io, ops::Deref, sync::Arc};
 
-use zcash_primitives::transaction::{self as zp_tx, TxDigests};
+use zcash_primitives::transaction::{self as zp_tx, sighash::PrecomputedSighashData};
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 use zcash_script::script;
 
@@ -211,8 +211,11 @@ impl From<Script> for zcash_transparent::address::Script {
 /// Precomputed data used for sighash or txid computation.
 #[derive(Debug)]
 pub(crate) struct PrecomputedTxData {
-    tx_data: zp_tx::TransactionData<PrecomputedAuth>,
-    txid_parts: TxDigests<blake2b_simd::Hash>,
+    /// The transaction, and the digests that every signature hash of it commits to.
+    ///
+    /// Computing these once per transaction keeps the cost of computing the signature
+    /// hashes of all of its inputs linear in the number of inputs.
+    sighash_data: PrecomputedSighashData<PrecomputedAuth>,
     all_previous_outputs: Arc<Vec<transparent::Output>>,
 }
 
@@ -252,7 +255,6 @@ impl PrecomputedTxData {
         all_previous_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<PrecomputedTxData, Error> {
         let inner = tx.inner();
-        let txid_parts = inner.deref().digest(zp_tx::txid::TxIdDigester);
 
         // Clone the transaction to get an owned TransactionData we can transform.
         // Reconstruct with the correct branch_id (the stored value may differ for
@@ -288,34 +290,33 @@ impl PrecomputedTxData {
             );
 
         Ok(PrecomputedTxData {
-            tx_data,
-            txid_parts,
+            sighash_data: PrecomputedSighashData::new(tx_data),
             all_previous_outputs,
         })
     }
 
-    /// Returns the Orchard bundle in `tx_data`.
+    /// Returns the Orchard bundle of the transaction.
     pub fn orchard_bundle(
         &self,
     ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
-        self.tx_data.orchard_bundle().cloned()
+        self.sighash_data.tx().orchard_bundle().cloned()
     }
 
-    /// Returns the Ironwood bundle in `tx_data` (NU6.3 onward).
+    /// Returns the Ironwood bundle of the transaction (NU6.3 onward).
     ///
     /// The Ironwood bundle reuses the Orchard bundle type; it differs only by pool (separate tree,
     /// nullifier set, and value balance) and is verified under the NU6.3 Action circuit key.
     pub fn ironwood_bundle(
         &self,
     ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
-        self.tx_data.ironwood_bundle().cloned()
+        self.sighash_data.tx().ironwood_bundle().cloned()
     }
 
-    /// Returns the Sapling bundle in `tx_data`.
+    /// Returns the Sapling bundle of the transaction.
     pub fn sapling_bundle(
         &self,
     ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
-        self.tx_data.sapling_bundle().cloned()
+        self.sighash_data.tx().sapling_bundle().cloned()
     }
 }
 
@@ -493,7 +494,8 @@ fn sighash_inner(
             // a `None` here means the caller violated the precondition or
             // librustzcash changed its behaviour.
             let bundle = precomputed_tx_data
-                .tx_data
+                .sighash_data
+                .tx()
                 .transparent_bundle()
                 .ok_or(SighashError::NoTransparentBundle)?;
             lock_script = output.lock_script.clone().into();
@@ -521,11 +523,9 @@ fn sighash_inner(
     };
 
     Ok(SigHash(
-        *zp_tx::sighash::signature_hash(
-            &precomputed_tx_data.tx_data,
-            &signable_input,
-            &precomputed_tx_data.txid_parts,
-        )
-        .as_ref(),
+        *precomputed_tx_data
+            .sighash_data
+            .signature_hash(&signable_input)
+            .as_ref(),
     ))
 }

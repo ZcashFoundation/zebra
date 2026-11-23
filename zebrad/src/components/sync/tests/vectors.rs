@@ -5,7 +5,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, StreamExt};
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -14,7 +14,8 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_consensus::{
-    error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+    error::TransactionError, BlockError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+    VerifyCheckpointError,
 };
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
@@ -25,7 +26,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        sync::{self, downloads::BlockDownloadVerifyError, SyncStatus},
+        sync::{self, downloads::BlockDownloadVerifyError, RestartReason, SyncStatus},
         ChainSync,
     },
     config::ZebradConfig,
@@ -35,10 +36,8 @@ use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
-/// The default [`MockService`] value can be too short for some of these tests that take a little
-/// longer than expected to actually send the request.
-///
-/// Increasing this value causes the tests to take longer to complete, so it can't be too large.
+/// Mock-only tests pause Tokio time, preserving the full no-request observation window without
+/// spending that time idle.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
@@ -293,7 +292,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -415,7 +414,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 /// stay there, so a peer response can contain a missing parent followed by its queued children.
 /// If queued blocks were treated as present, obtain_tips would reject every such download set with
 /// "queued download of hash behind our chain tip", and the sync would stall forever.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -539,7 +538,7 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -993,7 +992,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that zebra-network rejects blocks that are a long way ahead of the state tip.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1054,7 +1053,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in obtain_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1227,7 +1226,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in extend_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1608,7 +1607,7 @@ async fn invalid_height_does_not_restart_sync() {
 }
 
 /// A concrete `ChainSync` type for calling associated functions in tests.
-type TestChainSync = ChainSync<
+pub(super) type TestChainSync = ChainSync<
     MockService<zn::Request, zn::Response, PanicAssertion>,
     MockService<zs::Request, zs::Response, PanicAssertion>,
     MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
@@ -1616,8 +1615,7 @@ type TestChainSync = ChainSync<
     MockChainTip,
 >;
 
-/// Verifies fix for #11168 and #11132: a `TransparentInputNotFound` from an `AwaitUtxo`
-/// timeout does not trigger a sync restart, but other transaction errors still do.
+/// A UTXO lookup timeout and an invalid transaction both leave unrelated downloads running.
 #[tokio::test]
 async fn transparent_input_not_found_does_not_restart_sync() {
     let make_invalid = |tx_error| BlockDownloadVerifyError::Invalid {
@@ -1637,8 +1635,8 @@ async fn transparent_input_not_found_does_not_restart_sync() {
     );
 
     assert!(
-        TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
-        "other transaction errors should still trigger sync restart"
+        !TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
+        "an invalid transaction must not cancel unrelated downloads"
     );
 }
 
@@ -1741,6 +1739,33 @@ async fn verify_timeout_elapsed_does_not_restart_sync() {
             .contains(&block::Hash::from([0xCD; 32])),
         "a block dropped on the post-checkpoint verify timeout must be re-requested"
     );
+}
+
+/// A verifier can drop a valid block because its queue is full of blocks a peer sent, so the
+/// syncer requests the block again instead of restarting, which would cancel the downloads that
+/// are draining the queue.
+#[tokio::test]
+async fn queue_full_errors_rerequest_block_without_restart() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let errors = [
+        RouterError::from(VerifyCheckpointError::QueuedLimit),
+        RouterError::from(VerifyBlockError::Commit(
+            zs::CommitBlockError::OrphanQueueFull,
+        )),
+    ];
+    for (i, error) in errors.into_iter().enumerate() {
+        let hash = block::Hash::from([u8::try_from(i).expect("few errors"); 32]);
+        let response = Err(BlockDownloadVerifyError::Invalid {
+            error,
+            height: block::Height(1),
+            hash,
+            advertiser_addr: None,
+        });
+
+        assert!(chain_sync.handle_block_response(response).is_ok());
+        assert!(chain_sync.reobtain_hashes.contains(&hash));
+    }
 }
 
 /// Regression test for GHSA-g95h-hw6g-pvgv: a behind-tip drop scores the supplying peer and
@@ -1957,11 +1982,84 @@ async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
     );
 }
 
+/// A block body that doesn't match its header must score the serving peer and re-request the
+/// hash, without cancelling the sync round, whichever component found the mismatch.
+///
+/// A peer can serve a requested hash with the requested header and a rewritten coinbase height
+/// (GHSA-g9rc-89v4-hhvf). Before the block verifiers and the downloader checked that the header
+/// commits to that height, the claimed height could get the block dropped as a duplicate, as
+/// `Finished`, or as too far ahead or behind, unscored and not re-requested, so its checkpoint
+/// range never verified. The errors are wrapped as the router and the downloader wrap them.
+#[tokio::test]
+async fn body_header_mismatch_scores_peer_and_requeues_hash_without_restart() {
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x9C; 32]);
+
+    for source in [
+        // A rewritten coinbase height in a V5 or later coinbase.
+        BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(Height(43)),
+            block_height: Height(42),
+            transaction_hash: [3; 32].into(),
+        }),
+        // Any rewritten transaction ID, including a coinbase height before V5.
+        BlockError::BadMerkleRoot {
+            actual: block::merkle::Root([1; 32]),
+            expected: block::merkle::Root([2; 32]),
+        },
+        BlockError::DuplicateTransaction,
+    ] {
+        let invalid = |error| BlockDownloadVerifyError::Invalid {
+            error,
+            height: Height(42),
+            hash,
+            advertiser_addr: Some(advertiser),
+        };
+        let errors = [
+            // The checkpoint verifier.
+            invalid(RouterError::from(VerifyCheckpointError::from(
+                source.clone(),
+            ))),
+            // The semantic verifier, for a claimed height above the final checkpoint.
+            invalid(RouterError::from(VerifyBlockError::from(source.clone()))),
+            // The downloader, for a claimed height that would get the block dropped.
+            BlockDownloadVerifyError::BodyHeaderMismatch {
+                error: source.clone(),
+                hash,
+                advertiser_addr: Some(advertiser),
+            },
+        ];
+
+        for error in errors {
+            let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+            let description = format!("{error:?}");
+
+            chain_sync
+                .handle_block_response(Err(error))
+                .expect("a forged body is non-fatal and must not restart the syncer");
+
+            assert_eq!(
+                misbehavior_rx
+                    .try_recv()
+                    .ok()
+                    .map(|report| (report.addr, report.score)),
+                Some((advertiser, 100)),
+                "the peer that served the forged body must be scored at the ban threshold: \
+                 {description}"
+            );
+            assert!(
+                chain_sync.reobtain_hashes.contains(&hash),
+                "the hash is still wanted, so it must be re-requested: {description}"
+            );
+        }
+    }
+}
+
 /// The forged-body re-request is bounded, so a peer cannot turn it into an unbounded
 /// download loop.
 ///
-/// Misbehaviour reports only reach the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so
-/// the first re-request can briefly land on the same peer again. This bound is what makes
+/// The ban for the serving peer is sent to the address book right away, but the first
+/// re-request can still reach the same peer before the ban does. This bound is what makes
 /// that acceptable.
 #[tokio::test]
 async fn auth_commitment_mismatch_requeue_is_bounded() {
@@ -2019,36 +2117,235 @@ async fn auth_commitment_mismatch_without_advertiser_is_still_requeued() {
     );
 }
 
-/// The new handling is scoped to the commitment mismatch: every other consensus failure
-/// still restarts the sync round and is not re-requested.
+/// Invalid headers and a finished checkpoint verifier do not need a different body.
 ///
-/// A genuinely invalid block was rejected by the network, so re-downloading it is
-/// pointless. Only the commitment mismatch proves the *body* was forged while the hash
-/// stayed valid.
+/// A full checkpoint queue is different: the block might be valid, so it is re-requested a
+/// bounded number of times (see `queue_pressure`).
 #[tokio::test]
-async fn other_invalid_errors_still_restart_sync_and_are_not_requeued() {
+async fn other_invalid_errors_are_dropped_without_restart_or_requeue() {
+    use zebra_consensus::VerifyCheckpointError;
+
     let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
 
     let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
     let hash = block::Hash::from([0x4D; 32]);
 
-    let err = BlockDownloadVerifyError::Invalid {
-        error: RouterError::Block {
-            source: Box::new(VerifyBlockError::Subsidy(SubsidyError::NoCoinbase)),
+    let errors = [
+        RouterError::Block {
+            source: Box::new(VerifyBlockError::Block {
+                source: zebra_consensus::BlockError::InvalidDifficulty(Height(42), hash),
+            }),
         },
-        height: block::Height(42),
-        hash,
-        advertiser_addr: Some(advertiser),
-    };
+        RouterError::Checkpoint {
+            source: Box::new(VerifyCheckpointError::Finished),
+        },
+    ];
 
-    assert!(
-        chain_sync.handle_block_response(Err(err)).is_err(),
-        "an ordinary consensus failure must still restart the syncer"
+    for error in errors {
+        let err = BlockDownloadVerifyError::Invalid {
+            error,
+            height: block::Height(42),
+            hash,
+            advertiser_addr: Some(advertiser),
+        };
+
+        assert!(
+            chain_sync.handle_block_response(Err(err)).is_ok(),
+            "a block-specific failure must not cancel unrelated downloads"
+        );
+        assert!(
+            !chain_sync.reobtain_hashes.contains(&hash),
+            "a block the verifier rejected must not be re-requested"
+        );
+    }
+}
+
+/// Body validation errors share the bounded retry path in both verifier routes.
+#[tokio::test]
+async fn body_validation_failures_have_bounded_retries() {
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let hash = block::Hash::from([0x5D; 32]);
+    let errors = [
+        BlockError::NoTransactions,
+        BlockError::BadMerkleRoot {
+            actual: block::merkle::Root([0; 32]),
+            expected: block::merkle::Root([1; 32]),
+        },
+        BlockError::DuplicateTransaction,
+        BlockError::WrongTransactionConsensusBranchId,
+        BlockError::MissingHeight(hash),
+        BlockError::MaxHeight(Height::MAX, hash, Height(1)),
+        BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase)),
+        BlockError::Transaction(TransactionError::Groth16("invalid proof".into())),
+        BlockError::Transaction(TransactionError::MalformedGroth16(
+            "invalid encoding".into(),
+        )),
+        BlockError::Transaction(TransactionError::SaplingVerificationFailed),
+        BlockError::Transaction(TransactionError::Halo2VerificationFailed),
+        BlockError::Transaction(TransactionError::OrchardProofSize),
+        BlockError::Transaction(TransactionError::IronwoodProofSize),
+        BlockError::Transaction(TransactionError::Other(
+            "transaction has Orchard actions (temporarily disabled)".into(),
+        )),
+    ];
+    for checkpoint in [false, true] {
+        for source in &errors {
+            for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+                let error = VerifyBlockError::from(source.clone());
+                let error = if checkpoint {
+                    RouterError::Checkpoint {
+                        source: Box::new(VerifyCheckpointError::VerifyBlock(error)),
+                    }
+                } else {
+                    RouterError::Block {
+                        source: Box::new(error),
+                    }
+                };
+                chain_sync
+                    .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                        error,
+                        height: Height(42),
+                        hash,
+                        advertiser_addr: None,
+                    }))
+                    .unwrap();
+                assert_eq!(
+                    chain_sync.reobtain_hashes.shift_remove(&hash),
+                    attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES,
+                    "retry {attempt} for {source:?} with checkpoint={checkpoint}"
+                );
+            }
+        }
+    }
+}
+
+/// Canonical headers do not make a peer's transaction body trustworthy.
+#[tokio::test(start_paused = true)]
+async fn checkpoint_modified_body_is_retried() {
+    canonical_header_modified_body_is_retried(true).await;
+}
+
+/// Full verification must recover the same hash after a body-only failure.
+#[tokio::test(start_paused = true)]
+async fn semantic_modified_body_is_retried() {
+    canonical_header_modified_body_is_retried(false).await;
+}
+
+async fn canonical_header_modified_body_is_retried(checkpoint_sync: bool) {
+    use tower::ServiceExt;
+    use zebra_chain::parameters::Network;
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let _init_guard = zebra_test::init();
+    let honest: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = honest.hash();
+    let height = honest.coinbase_height().unwrap();
+    let parent_hash = honest.header.previous_block_hash;
+    let parent_height = (height - 1).unwrap();
+    let mut forged = honest.as_ref().clone();
+    assert!(forged.transactions.len() > 1);
+    forged.transactions.pop();
+    let forged = Arc::new(forged);
+    assert_eq!(
+        forged.hash(),
+        hash,
+        "the peer preserves the canonical header"
     );
-    assert!(
-        !chain_sync.reobtain_hashes.contains(&hash),
-        "a block the network rejected must not be re-requested"
+    assert_ne!(
+        forged
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<block::merkle::Root>(),
+        honest.header.merkle_root
     );
+
+    let state = tower::service_fn(move |request| {
+        futures::future::ok::<_, crate::BoxError>(match request {
+            zs::Request::Tip => zs::Response::Tip(Some((parent_height, parent_hash))),
+            zs::Request::BestChainBlockHash(_) => zs::Response::BlockHash(None),
+            zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+            _ => unreachable!("a forged body must fail before transaction or state verification"),
+        })
+    });
+    let (router, _mempool, tasks, max_checkpoint_height) = zebra_consensus::router::init_test(
+        ConsensusConfig { checkpoint_sync },
+        &Network::Mainnet,
+        state,
+    )
+    .await;
+    assert_eq!(height <= max_checkpoint_height, checkpoint_sync);
+    let mut network = MockService::build().for_unit_tests();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(parent_height);
+    let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        max_checkpoint_height,
+        network.clone(),
+        router.map_err(crate::BoxError::from),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    chain_sync
+        .downloads
+        .download_and_verify(hash)
+        .await
+        .unwrap();
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            forged,
+            Some(advertiser),
+        ))]));
+    let error = chain_sync.downloads.next().await.unwrap().unwrap_err();
+    let BlockDownloadVerifyError::Invalid {
+        error: ref router_error,
+        ..
+    } = error
+    else {
+        panic!("expected a body validation failure, got {error:?}");
+    };
+    let block_error = match router_error {
+        RouterError::Block { source } => source.as_ref(),
+        RouterError::Checkpoint { source } => match source.as_ref() {
+            VerifyCheckpointError::VerifyBlock(error) => error,
+            other => panic!("unexpected checkpoint error: {other:?}"),
+        },
+    };
+    assert!(matches!(
+        block_error,
+        VerifyBlockError::Block {
+            source: BlockError::BadMerkleRoot { .. }
+        }
+    ));
+    chain_sync.handle_block_response(Err(error)).unwrap();
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "a bad body must not discard its still-needed canonical block hash"
+    );
+    assert_eq!(misbehavior_rx.try_recv().unwrap().score, 100);
+    chain_sync.reobtain_missing_blocks().await;
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((honest, None))]));
+    chain_sync.downloads.cancel_all();
+    tasks.state_checkpoint_verify_handle.abort();
 }
 
 /// An honest body whose authorizing data matches its header must not be classified as a
@@ -2121,11 +2418,11 @@ async fn honest_bodies_are_not_classified_as_forgeries() {
     );
 }
 
-/// The pre-existing `NotFound` re-request (#5709) still works, and only fires for `NotFound`.
+/// Every failed block download is re-requested without restarting the sync (#5709).
 ///
-/// Both cases now share one bounded re-queue, so this pins the behavior the behind-tip fix reuses.
+/// Both cases share one bounded re-queue with the behind-tip fix.
 #[tokio::test]
-async fn download_failed_is_only_requeued_for_not_found() {
+async fn download_failures_are_requeued_without_restart() {
     let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
 
     let missing_hash = block::Hash::from([0xDE; 32]);
@@ -2141,7 +2438,7 @@ async fn download_failed_is_only_requeued_for_not_found() {
         "a block no peer delivered must be re-queued (#5709)"
     );
 
-    // A download that failed for any other reason is a syncer restart, and is not re-queued.
+    // Other download failures do not restart the sync, so they need the same retry.
     let failed_hash = block::Hash::from([0xEF; 32]);
     let restart = chain_sync
         .handle_block_response(Err(BlockDownloadVerifyError::DownloadFailed {
@@ -2151,13 +2448,13 @@ async fn download_failed_is_only_requeued_for_not_found() {
         }))
         .is_err();
     assert!(
-        restart,
-        "a download that failed for another reason must restart the syncer"
+        !restart,
+        "a failed download must not cancel unrelated downloads"
     );
 
     assert!(
-        !chain_sync.reobtain_hashes.contains(&failed_hash),
-        "a download that failed for another reason must not be re-queued"
+        chain_sync.reobtain_hashes.contains(&failed_hash),
+        "a download that failed for another reason must be re-queued"
     );
 
     // Neither case attributes misbehavior: the download never produced a block to judge.
@@ -2167,6 +2464,688 @@ async fn download_failed_is_only_requeued_for_not_found() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty)
         ),
         "a failed download must not score any peer"
+    );
+}
+
+/// A download round that expires is re-requested like a missing block, instead of restarting sync.
+///
+/// When one hedged request fails with `NotFound`, it waits for its sibling, so the round deadline
+/// can drop that `NotFound`.
+#[tokio::test]
+async fn download_round_timeout_is_requeued_without_restart() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let timed_out_hash = block::Hash::from([0xA5; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadTimedOut {
+            hash: timed_out_hash,
+        }))
+        .expect("a download round timeout is non-fatal and must not restart the syncer");
+
+    assert!(
+        chain_sync.reobtain_hashes.contains(&timed_out_hash),
+        "a block no peer delivered within the download round must be re-queued"
+    );
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "a timed out download must not score any peer"
+    );
+}
+
+/// A block that arrives while its hash is queued for re-download is not re-requested.
+#[tokio::test]
+async fn verified_block_is_removed_from_reobtain_queue() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0xC3; 32]);
+    chain_sync.reobtain_hashes.insert(hash);
+    chain_sync.block_reobtain_retries.insert(hash, 1);
+
+    chain_sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .expect("a verified block is not an error");
+
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&hash),
+        "a verified block must not be re-requested"
+    );
+    assert!(!chain_sync.block_reobtain_retries.contains_key(&hash));
+}
+
+/// Records counters, so tests can check what the syncer counts.
+#[derive(Default)]
+struct CounterRecorder(std::sync::Mutex<HashMap<metrics::Key, Arc<std::sync::atomic::AtomicU64>>>);
+
+impl CounterRecorder {
+    /// Returns the count of the counter with `name` and `labels`, in the order they're recorded.
+    fn count(&self, name: &'static str, labels: &[(&'static str, &'static str)]) -> u64 {
+        let labels: Vec<_> = labels
+            .iter()
+            .map(|&(key, value)| metrics::Label::new(key, value))
+            .collect();
+
+        self.0
+            .lock()
+            .expect("test recorder mutex is unpoisoned")
+            .get(&metrics::Key::from_parts(name, labels))
+            .map_or(0, |count| count.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl metrics::Recorder for CounterRecorder {
+    fn describe_counter(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn describe_gauge(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn describe_histogram(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn register_counter(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Counter {
+        metrics::Counter::from_arc(
+            self.0
+                .lock()
+                .expect("test recorder mutex is unpoisoned")
+                .entry(key.clone())
+                .or_default()
+                .clone(),
+        )
+    }
+
+    fn register_gauge(&self, _: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
+        metrics::Gauge::noop()
+    }
+
+    fn register_histogram(
+        &self,
+        _: &metrics::Key,
+        _: &metrics::Metadata<'_>,
+    ) -> metrics::Histogram {
+        metrics::Histogram::noop()
+    }
+}
+
+/// Block errors are counted by bounded kind, and restarts track whether the state tip advanced.
+#[tokio::test]
+async fn sync_diagnostics_count_block_errors_and_restarts() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let diagnostics = chain_sync.diagnostics.subscribe();
+    let hash = block::Hash::from([0xC1; 32]);
+    let recorder = CounterRecorder::default();
+
+    metrics::with_local_recorder(&recorder, || {
+        for error in [
+            BlockDownloadVerifyError::DownloadTimedOut { hash },
+            BlockDownloadVerifyError::DownloadTimedOut { hash },
+            BlockDownloadVerifyError::CancelledDuringDownload { hash },
+        ] {
+            let _ = chain_sync.handle_block_response(Err(error));
+        }
+
+        chain_sync.record_restart(RestartReason::BlockError, false);
+        chain_sync.record_restart(RestartReason::ExhaustedTips, false);
+        assert_eq!(diagnostics.borrow().restarts_without_progress, 2);
+
+        chain_sync.record_restart(RestartReason::ExhaustedTips, true);
+    });
+
+    let error_count = |kind| recorder.count("sync.block.error.count", &[("kind", kind)]);
+    assert_eq!(error_count("download_timed_out"), 2);
+    assert_eq!(error_count("cancelled"), 1);
+
+    let restart_count = |reason, made_progress| {
+        recorder.count(
+            "sync.restart.count",
+            &[("reason", reason), ("made_progress", made_progress)],
+        )
+    };
+    assert_eq!(restart_count("block_error", "false"), 1);
+    assert_eq!(restart_count("exhausted_tips", "false"), 1);
+    assert_eq!(restart_count("exhausted_tips", "true"), 1);
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.last_restart, Some(RestartReason::ExhaustedTips));
+    assert_eq!(diagnostics.restarts_without_progress, 0);
+}
+
+/// Re-downloads retain the queue if dispatch is cancelled or network readiness times out.
+#[tokio::test(start_paused = true)]
+async fn reobtain_keeps_blocks_when_cancelled_or_network_readiness_times_out() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        never_ready_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let missing = [block::Hash::from([0xB1; 32]), block::Hash::from([0xB2; 32])];
+    chain_sync.reobtain_hashes.extend(missing);
+
+    assert!(
+        tokio::time::timeout(
+            sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT / 2,
+            chain_sync.reobtain_missing_blocks(),
+        )
+        .await
+        .is_err(),
+        "the dispatch must still be waiting for network capacity"
+    );
+    assert_eq!(
+        chain_sync
+            .reobtain_hashes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        missing,
+        "cancelling dispatch must preserve all queued retries"
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+    let started = tokio::time::Instant::now();
+    chain_sync.reobtain_missing_blocks().await;
+    drop(metrics_guard);
+
+    assert_eq!(
+        chain_sync
+            .reobtain_hashes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        missing,
+        "blocks that couldn't be re-requested must stay queued for the next sync round"
+    );
+    assert_eq!(
+        tokio::time::Instant::now() - started,
+        sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+        "only the first block waits out its download deadline"
+    );
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+        "a block that never got network capacity is counted once"
+    );
+}
+
+/// Blocks that fail to queue while obtaining or extending tips restart the sync as block errors,
+/// while other tip failures keep their stage.
+#[test]
+fn tip_block_submission_failures_restart_as_block_errors() {
+    let block = TestChainSync::tips_restart_error(
+        RestartReason::ExtendTipsError,
+        BlockDownloadVerifyError::Timeout.into(),
+    );
+    assert_eq!(block.reason, RestartReason::BlockError);
+    assert_eq!(block.kind, Some("network_ready_timeout"));
+
+    let other = TestChainSync::tips_restart_error(
+        RestartReason::ObtainTipsError,
+        color_eyre::eyre::eyre!("queued download of hash behind our chain tip"),
+    );
+    assert_eq!(other.reason, RestartReason::ObtainTipsError);
+    assert_eq!(other.kind, None);
+}
+
+/// A genesis block that can't get network capacity is counted as a block error.
+#[tokio::test(start_paused = true)]
+async fn genesis_submission_failures_are_counted() {
+    let _init_guard = zebra_test::init();
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+    assert!(chain_sync.request_genesis_once().await.is_err());
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
+/// A genesis retry that finds the block still queued from a timed-out attempt doesn't count a
+/// block error, because the syncer ignores it and keeps waiting for that download.
+#[tokio::test(start_paused = true)]
+async fn genesis_retries_while_the_block_is_queued_are_not_counted() {
+    let _init_guard = zebra_test::init();
+
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
+        MockService::build().for_unit_tests(),
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    for attempt in ["first", "retry"] {
+        let genesis =
+            tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+        assert!(
+            genesis.await.is_err(),
+            "the {attempt} attempt never downloads"
+        );
+    }
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "duplicate_queued")]),
+        0,
+    );
+}
+
+/// A wait for network capacity that the obtain tips or genesis timeout cancels, because both are
+/// shorter than the readiness deadline, is counted once as a network readiness timeout.
+#[tokio::test(start_paused = true)]
+async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    let batch = IndexSet::from([block::Hash::from([0xE1; 32])]);
+    let tips = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch));
+    assert!(tips.await.is_err(), "the block waits for network capacity");
+    assert!(chain_sync.count_cancelled_network_wait());
+
+    let genesis = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+    assert!(
+        genesis.await.is_err(),
+        "the genesis block waits for network capacity"
+    );
+    assert!(chain_sync.count_cancelled_network_wait());
+
+    assert!(!chain_sync.count_cancelled_network_wait());
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        2,
+    );
+}
+
+/// A download that failed before a restart is counted when the restart drops the downloads the
+/// syncer hasn't read yet.
+#[tokio::test(start_paused = true)]
+async fn finished_block_errors_are_counted_before_a_restart_drops_them() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(Err(zebra_consensus::BoxError::from(
+            "synthetic test verifier error",
+        )));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+    chain_sync.count_finished_block_errors();
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "validation_request")]),
+        1,
+    );
+    assert_eq!(chain_sync.downloads.in_flight(), 0);
+}
+
+/// A timeout that cancels a queued block after it got network capacity isn't counted as a wait for
+/// network capacity, even when it fires before the queue call returns.
+#[tokio::test(start_paused = true)]
+async fn timeouts_after_network_capacity_arrives_are_not_counted_as_network_waits() {
+    let _init_guard = zebra_test::init();
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+    );
+
+    // The peer set is ready at once, so this poll sends the download and then yields.
+    let mut queueing = Box::pin(chain_sync.queue_block(block::Hash::from([0xE3; 32])));
+    assert!(futures::poll!(&mut queueing).is_pending());
+    drop(queueing);
+
+    assert!(!chain_sync.count_cancelled_network_wait());
+}
+
+/// An obtain tips or sync step timeout that cancels a block's wait for network capacity restarts
+/// the sync as that block's network readiness timeout, and counts it. Otherwise the timeout keeps
+/// its own restart reason.
+#[tokio::test(start_paused = true)]
+async fn stage_timeouts_that_cancel_a_network_wait_restart_as_block_errors() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    let batch = IndexSet::from([block::Hash::from([0xE2; 32])]);
+    let elapsed = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch))
+        .await
+        .expect_err("the block waits for network capacity");
+    let waiting = chain_sync.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed);
+    assert_eq!(waiting.reason, RestartReason::BlockError);
+    assert_eq!(waiting.kind, Some("network_ready_timeout"));
+
+    let elapsed = tokio::time::timeout(Duration::from_secs(1), std::future::pending::<()>())
+        .await
+        .expect_err("the future never finishes");
+    let idle = chain_sync.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed);
+    assert_eq!(idle.reason, RestartReason::SyncStepTimeout);
+    assert_eq!(idle.kind, None);
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
+/// A genesis attempt that times out while its queued block downloads is a genesis timeout, which
+/// isn't counted, and one that times out waiting for network capacity is a network readiness
+/// timeout.
+#[tokio::test(start_paused = true)]
+async fn genesis_timeouts_are_told_apart_from_network_readiness_timeouts() {
+    let _init_guard = zebra_test::init();
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let (mut downloading, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
+        MockService::build().for_unit_tests(),
+    );
+    let genesis = tokio::time::timeout(Duration::from_secs(1), downloading.request_genesis_once());
+    assert!(genesis.await.is_err(), "the genesis block never downloads");
+    assert!(matches!(
+        downloading.genesis_timeout(),
+        BlockDownloadVerifyError::GenesisTimeout
+    ));
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut waiting, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+    let genesis = tokio::time::timeout(Duration::from_secs(1), waiting.request_genesis_once());
+    assert!(
+        genesis.await.is_err(),
+        "the genesis block waits for network capacity"
+    );
+    assert!(matches!(
+        waiting.genesis_timeout(),
+        BlockDownloadVerifyError::Timeout
+    ));
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "genesis_timeout")]),
+        0,
+    );
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
+/// While a batch waits for network capacity, the published download state includes the blocks
+/// queued earlier in that batch.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    // The first download holds the only permit, so the second waits for network capacity.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
+        MockService::build().for_unit_tests(),
+    );
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let batch = IndexSet::from([block::Hash::from([0xD1; 32]), block::Hash::from([0xD2; 32])]);
+    let waiting = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch));
+    assert!(
+        waiting.await.is_err(),
+        "the second block waits for network capacity"
+    );
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.in_flight, 1);
+    assert!(diagnostics
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
+}
+
+/// A genesis block download that never finishes is published as in flight, so the progress task
+/// reports its age before the node has a chain tip.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_include_a_genesis_block_that_never_downloads() {
+    let _init_guard = zebra_test::init();
+
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
+        MockService::build().for_unit_tests(),
+    );
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let waiting = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+    assert!(waiting.await.is_err(), "the genesis block never downloads");
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.in_flight, 1);
+    assert!(diagnostics
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
+}
+
+/// A download that finished isn't reported as in flight while the syncer hasn't read its result,
+/// which a node at the tip can leave unread for several sync rounds after queueing the one block
+/// it was missing.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_leave_out_finished_downloads_the_syncer_has_not_read() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    assert!(diagnostics
+        .borrow()
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
+
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert!(diagnostics
+        .borrow()
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_none());
+}
+
+/// When the oldest download finishes before the syncer reads its result, the age is that of the
+/// next download that is still running, even though the syncer hasn't republished since.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_report_the_next_running_download_when_the_oldest_finishes() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+    // The mock peer set never answers this download.
+    let stuck_hash = block::Hash::from([0xD4; 32]);
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    let stuck_queued_after = std::time::Instant::now();
+    chain_sync
+        .request_blocks(IndexSet::from([stuck_hash]))
+        .await
+        .expect("the peer set has capacity");
+
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let now = std::time::Instant::now();
+    let age = diagnostics
+        .borrow()
+        .oldest_in_flight_age(now)
+        .expect("the stuck download is still running");
+    assert!(
+        age <= now.saturating_duration_since(stuck_queued_after),
+        "the age is measured from the stuck download, not the finished one"
     );
 }
 
@@ -2250,6 +3229,36 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
 ) {
     let _init_guard = zebra_test::init();
 
+    new_chain_sync_with(
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+    )
+}
+
+/// Builds a [`ChainSync`] like [`new_chain_sync_with_misbehavior`], downloading from `peer_set`
+/// and verifying with `block_verifier_router`.
+#[allow(clippy::type_complexity)]
+pub(super) fn new_chain_sync_with<ZN>(
+    peer_set: ZN,
+    block_verifier_router: MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+) -> (
+    ChainSync<
+        ZN,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >,
+    tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
+)
+where
+    ZN: tower::Service<zn::Request, Response = zn::Response, Error = crate::BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send + 'static,
+{
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
@@ -2262,8 +3271,8 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     let (chain_sync, _sync_status) = ChainSync::new(
         &config,
         Height(0),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
+        peer_set,
+        block_verifier_router,
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
@@ -2271,6 +3280,15 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     );
 
     (chain_sync, misbehavior_rx)
+}
+
+/// A mock peer set that never answers, and serves at most `permits` requests at a time.
+///
+/// With no permits, it never becomes ready.
+fn peer_set_with_permits(
+    permits: usize,
+) -> tower::limit::ConcurrencyLimit<MockService<zn::Request, zn::Response, PanicAssertion>> {
+    tower::limit::ConcurrencyLimit::new(MockService::build().for_unit_tests(), permits)
 }
 
 fn setup() -> (
@@ -2295,9 +3313,8 @@ fn setup() -> (
         ..Default::default()
     };
 
-    // These tests run multiple tasks in parallel.
-    // So machines under heavy load need a longer delay.
-    // (For example, CI machines with limited cores.)
+    // All services are in-process mocks, so paused Tokio time cannot race real I/O.
+    // Keep the full observation windows for absence assertions.
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
@@ -2339,4 +3356,714 @@ fn setup() -> (
         state_service,
         mock_chain_tip_sender,
     )
+}
+
+/// A hash advertised once must exhaust its retry budget across empty and singleton tip rounds.
+#[tokio::test(start_paused = true)]
+async fn singleton_tip_rounds_reap_completed_downloads() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let hash = block::Hash::from([0xF1; 32]);
+    let known_hash = block::Hash::from([0xF2; 32]);
+    for singleton in [false, true] {
+        for download_timeout in [false, true] {
+            let advertised = Arc::new(AtomicBool::new(false));
+            let network_advertised = advertised.clone();
+            let network = tower::service_fn(move |request| {
+                let response = match request {
+                    zn::Request::FindBlocks { .. } => {
+                        let hashes = if !network_advertised.load(Ordering::SeqCst) {
+                            vec![hash]
+                        } else if singleton {
+                            vec![known_hash]
+                        } else {
+                            Vec::new()
+                        };
+                        Some(Ok(zn::Response::BlockHashes(hashes)))
+                    }
+                    zn::Request::BlockDownload {
+                        hash: requested, ..
+                    } => {
+                        assert_eq!(requested, hash);
+                        if download_timeout {
+                            None
+                        } else {
+                            Some(Err(crate::BoxError::from("NotFoundResponse")))
+                        }
+                    }
+                    _ => unreachable!("the syncer only requests tips and blocks"),
+                };
+                async move {
+                    match response {
+                        Some(response) => response,
+                        None => futures::future::pending().await,
+                    }
+                }
+            });
+            let state = tower::service_fn(move |request| {
+                futures::future::ok::<_, crate::BoxError>(match request {
+                    zs::Request::BlockLocator => zs::Response::BlockLocator(vec![known_hash]),
+                    zs::Request::KnownBlock(requested) => zs::Response::KnownBlock(
+                        (requested == known_hash).then_some(zs::KnownBlock::BestChain),
+                    ),
+                    _ => unreachable!("the syncer only checks known blocks and the locator"),
+                })
+            });
+            let (tip, _tip_sender) = MockChainTip::new();
+            let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+            let (mut chain_sync, _status) = ChainSync::new(
+                &ZebradConfig::default(),
+                Height(0),
+                network,
+                MockService::build().for_unit_tests(),
+                state,
+                MockService::build().for_unit_tests(),
+                tip,
+                misbehavior_tx,
+            );
+            chain_sync.full_verify_concurrency_limit = 2;
+            chain_sync.try_to_sync().await.unwrap();
+            assert_eq!(chain_sync.downloads.in_flight(), 1);
+            advertised.store(true, Ordering::SeqCst);
+
+            for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+                tokio::time::sleep(sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT + sync::SYNC_RESTART_DELAY)
+                    .await;
+                tokio::time::timeout(sync::SYNC_RESTART_DELAY, chain_sync.try_to_sync())
+                    .await
+                    .expect("an empty or singleton tip round must finish")
+                    .unwrap();
+                assert!(chain_sync.prospective_tips.is_empty());
+                let retrying = attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES;
+                assert_eq!(
+                    chain_sync.downloads.in_flight(),
+                    usize::from(retrying),
+                    "the hash must be dropped after its retry budget is exhausted"
+                );
+                assert_eq!(
+                    chain_sync.block_reobtain_retries.get(&hash).copied(),
+                    retrying.then_some(attempt),
+                    "retry counts must survive the inter-round sleep"
+                );
+            }
+            assert!(chain_sync.reobtain_hashes.is_empty());
+            chain_sync.try_to_sync().await.unwrap();
+            assert!(chain_sync.downloads.is_empty());
+            chain_sync
+                .downloads
+                .download_and_verify(hash)
+                .await
+                .expect("reaping the exhausted download must remove its cancellation handle");
+            chain_sync.downloads.cancel_all();
+        }
+    }
+}
+
+/// A terminal header rejection must not leave its previous retry budget behind.
+#[tokio::test(start_paused = true)]
+async fn terminal_header_failure_reaps_retry_counter_next_round() {
+    let _init_guard = zebra_test::init();
+    let hash = block::Hash::from([0xE1; 32]);
+    let network = tower::service_fn(|request| {
+        assert!(matches!(request, zn::Request::FindBlocks { .. }));
+        futures::future::ok::<_, crate::BoxError>(zn::Response::BlockHashes(Vec::new()))
+    });
+    let state = tower::service_fn(move |request| {
+        assert!(matches!(request, zs::Request::BlockLocator));
+        futures::future::ok::<_, crate::BoxError>(zs::Response::BlockLocator(vec![hash]))
+    });
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadTimedOut { hash }))
+        .unwrap();
+    assert!(chain_sync.reobtain_hashes.shift_remove(&hash));
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+            error: RouterError::Block {
+                source: Box::new(VerifyBlockError::Block {
+                    source: zebra_consensus::BlockError::InvalidDifficulty(Height(1), hash),
+                }),
+            },
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        }))
+        .unwrap();
+    assert!(chain_sync.block_reobtain_retries.contains_key(&hash));
+    chain_sync.try_to_sync().await.unwrap();
+    assert!(
+        !chain_sync.block_reobtain_retries.contains_key(&hash),
+        "terminal failures must release retry bookkeeping before the next tip round"
+    );
+}
+
+/// A failed ancestor is retried after the inter-round sleep, even without fresh tip hashes.
+#[tokio::test(start_paused = true)]
+async fn inter_round_ancestor_failure_is_retried() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let parent: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let child: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let parent_hash = parent.hash();
+    let child_hash = child.hash();
+    for singleton in [false, true] {
+        let recovered = Arc::new(AtomicBool::new(false));
+        let network_recovered = recovered.clone();
+        let parent = parent.clone();
+        let network_child = child.clone();
+        let network = tower::service_fn(move |request| {
+            let response = match request {
+                zn::Request::FindBlocks { .. } => {
+                    let hashes = if !network_recovered.load(Ordering::SeqCst) {
+                        vec![parent_hash]
+                    } else if singleton {
+                        vec![child_hash]
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(zn::Response::BlockHashes(hashes))
+                }
+                zn::Request::BlockDownload { hash, .. } if hash == child_hash => Ok(
+                    zn::Response::Blocks(vec![Available((network_child.clone(), None))]),
+                ),
+                zn::Request::BlockDownload { hash, .. } if hash == parent_hash => {
+                    if network_recovered.load(Ordering::SeqCst) {
+                        Ok(zn::Response::Blocks(vec![Available((
+                            parent.clone(),
+                            None,
+                        ))]))
+                    } else {
+                        Err(crate::BoxError::from("NotFoundResponse"))
+                    }
+                }
+                _ => unreachable!("only the parent, child, and tips are requested"),
+            };
+            futures::future::ready(response)
+        });
+        let state = tower::service_fn(move |request| {
+            futures::future::ok::<_, crate::BoxError>(match request {
+                zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent_hash]),
+                zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                _ => unreachable!("only known blocks and the locator are queried"),
+            })
+        });
+        let mut verifier = MockService::build().for_unit_tests();
+        let (tip, _tip_sender) = MockChainTip::new();
+        let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+        let (mut chain_sync, _status) = ChainSync::new(
+            &ZebradConfig::default(),
+            Height(0),
+            network,
+            verifier.clone(),
+            state,
+            MockService::build().for_unit_tests(),
+            tip,
+            misbehavior_tx,
+        );
+        chain_sync
+            .downloads
+            .download_and_verify(child_hash)
+            .await
+            .unwrap();
+        let pending_child = verifier
+            .expect_request(zebra_consensus::Request::Commit(child.clone()))
+            .await;
+        chain_sync.try_to_sync().await.unwrap();
+        tokio::time::sleep(sync::SYNC_RESTART_DELAY).await;
+        recovered.store(true, Ordering::SeqCst);
+        chain_sync.try_to_sync().await.unwrap();
+        verifier
+            .expect_request_that(|request: &zebra_consensus::Request| {
+                request.block().hash() == parent_hash
+            })
+            .await
+            .respond(parent_hash);
+        pending_child.respond(child_hash);
+        let results = tokio::time::timeout(Duration::from_secs(1), async {
+            let mut hashes = Vec::new();
+            while let Some(response) = chain_sync.downloads.next().await {
+                hashes.push(response.unwrap().1);
+            }
+            hashes
+        })
+        .await
+        .expect("the recovered parent and retained child must both finish");
+        assert!(results.contains(&parent_hash) && results.contains(&child_hash));
+    }
+}
+
+/// A first responder must not fill the batch before another peer's next block is admitted.
+#[tokio::test(start_paused = true)]
+async fn sync_tip_responses_share_batch_capacity() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let [honest, adversary_first, adversary_second, overlap] =
+        [1, 98, 99, 97].map(|byte| block::Hash::from([byte; 32]));
+
+    for extend in [false, true] {
+        for duplicate in [false, true] {
+            let response_index = Arc::new(AtomicUsize::new(0));
+            let network = tower::service_fn(move |request| {
+                let response = match request {
+                    zn::Request::FindBlocks { .. } => {
+                        let mut hashes = match response_index.fetch_add(1, Ordering::SeqCst) {
+                            0 => {
+                                let mut hashes = vec![adversary_first, adversary_second];
+                                if duplicate {
+                                    hashes.push(honest);
+                                }
+                                hashes
+                            }
+                            1 => vec![honest],
+                            _ => Vec::new(),
+                        };
+                        if extend {
+                            hashes.insert(0, overlap);
+                        }
+                        Some(zn::Response::BlockHashes(hashes))
+                    }
+                    zn::Request::BlockDownload { .. } => None,
+                    _ => unreachable!("the syncer only requests tips and blocks"),
+                };
+                // Each tip response completes before the fanout yields to dispatch the next.
+                async move {
+                    match response {
+                        Some(response) => Ok::<_, crate::BoxError>(response),
+                        None => futures::future::pending().await,
+                    }
+                }
+            });
+            let state = tower::service_fn(|request| {
+                let response = match request {
+                    zs::Request::BlockLocator => {
+                        zs::Response::BlockLocator(vec![block::Hash::from([0; 32])])
+                    }
+                    zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                    _ => unreachable!("the syncer only checks known blocks and the locator"),
+                };
+                futures::future::ok::<_, crate::BoxError>(response)
+            });
+            let (tip, tip_sender) = MockChainTip::new();
+            tip_sender.send_best_tip_height(Height(0));
+            let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+            let (mut chain_sync, _status) = ChainSync::new(
+                &ZebradConfig::default(),
+                Height(0),
+                network,
+                MockService::build().for_unit_tests(),
+                state,
+                MockService::build().for_unit_tests(),
+                tip,
+                misbehavior_tx,
+            );
+            chain_sync.full_verify_concurrency_limit = 2;
+            if extend {
+                chain_sync.prospective_tips.insert(sync::CheckedTip {
+                    tip: block::Hash::from([0; 32]),
+                    expected_next: overlap,
+                });
+            }
+
+            let extra = tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, async {
+                if extend {
+                    chain_sync.extend_tips().await
+                } else {
+                    chain_sync.obtain_tips().await
+                }
+            })
+            .await
+            .expect("a tip round must finish without waiting for pending block downloads")
+            .unwrap();
+
+            assert_eq!(
+                extra.into_iter().collect::<Vec<_>>(),
+                vec![adversary_second],
+                "the honest successor must be admitted in this round"
+            );
+            assert_eq!(chain_sync.downloads.in_flight(), 2);
+            assert!(matches!(
+                chain_sync.downloads.download_and_verify(honest).await,
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. })
+            ));
+            chain_sync.downloads.cancel_all();
+        }
+    }
+}
+
+/// New batches use only the remaining lookahead capacity and preserve the unqueued suffix.
+#[tokio::test(start_paused = true)]
+async fn request_blocks_respects_remaining_capacity() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    chain_sync.full_verify_concurrency_limit = 2;
+    let hashes = [1, 2, 3].map(|byte| block::Hash::from([byte; 32]));
+
+    assert!(chain_sync
+        .request_blocks([hashes[0]].into_iter().collect())
+        .await
+        .unwrap()
+        .is_empty());
+    let extra = chain_sync
+        .request_blocks(hashes[1..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(extra.iter().copied().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+
+    let extra = chain_sync.request_blocks(extra).await.unwrap();
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+    chain_sync.downloads.cancel_all();
+}
+
+/// Delayed retries retain capacity so a fresh batch cannot overfill the queue when they resume.
+#[tokio::test(start_paused = true)]
+async fn request_blocks_reserves_capacity_for_retries() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    chain_sync.full_verify_concurrency_limit = 2;
+    let hashes = [1, 2, 3].map(|byte| block::Hash::from([byte; 32]));
+    chain_sync.reobtain_hashes.insert(hashes[0]);
+
+    let extra = chain_sync
+        .request_blocks(hashes[1..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+
+    chain_sync.reobtain_missing_blocks().await;
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+    assert!(chain_sync.reobtain_hashes.is_empty());
+    chain_sync.downloads.cancel_all();
+}
+
+/// A partially queued final checkpoint must leave room for its missing blocks.
+#[tokio::test(start_paused = true)]
+async fn partial_final_checkpoint_keeps_admission_capacity() {
+    let _init_guard = zebra_test::init();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(1..=9)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let hashes: Vec<_> = blocks.iter().map(|block| block.hash()).collect();
+    let network = tower::service_fn(move |request| {
+        let zn::Request::BlockDownload { hash, .. } = request else {
+            panic!("only block downloads are expected");
+        };
+        let block = blocks.iter().find(|block| block.hash() == hash).unwrap();
+        futures::future::ok::<_, crate::BoxError>(zn::Response::Blocks(vec![Available((
+            block.clone(),
+            None,
+        ))]))
+    });
+    let mut verifier = MockService::build().for_unit_tests();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(0));
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let mut config = ZebradConfig::default();
+    config.sync.full_verify_concurrency_limit = 1;
+    let (mut chain_sync, _status) = ChainSync::new(
+        &config,
+        Height(5),
+        network,
+        verifier.clone(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    assert!(chain_sync
+        .request_blocks(hashes[..3].iter().copied().collect())
+        .await
+        .unwrap()
+        .is_empty());
+    let mut pending_checkpoint = Vec::new();
+    for _ in 0..3 {
+        pending_checkpoint.push(verifier.expect_request_that(|_| true).await);
+    }
+    let extra = chain_sync
+        .request_blocks(hashes[3..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(chain_sync.downloads.in_flight(), 6);
+    assert_eq!(extra.iter().copied().collect::<Vec<_>>(), hashes[6..]);
+    for _ in 0..3 {
+        pending_checkpoint.push(verifier.expect_request_that(|_| true).await);
+    }
+    assert!(pending_checkpoint
+        .iter()
+        .any(|request| request.request().block().coinbase_height() == Some(Height(5))));
+
+    // The final checkpoint and first fully verified block can now finish.
+    for request in pending_checkpoint {
+        request.respond_with(|request| request.block().hash());
+    }
+    tip_sender.send_best_tip_height(Height(6));
+    let extra = tokio::time::timeout(
+        MAX_SERVICE_REQUEST_DELAY,
+        chain_sync.try_to_sync_once(extra),
+    )
+    .await
+    .expect("a completed final checkpoint must not block the full-verification pipeline")
+    .unwrap();
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), hashes[7..]);
+    chain_sync.downloads.cancel_all();
+}
+
+/// A stale height-pause flag must not make a single-slot queue wait for a nonexistent task.
+#[tokio::test(start_paused = true)]
+async fn high_invalid_block_does_not_pause_an_empty_queue() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let next_hash = block::Hash::from([0xA7; 32]);
+    let network = tower::service_fn(move |request| {
+        let block = block.clone();
+        async move {
+            match request {
+                zn::Request::BlockDownload {
+                    hash: requested, ..
+                } if requested == hash => Ok(zn::Response::Blocks(vec![Available((block, None))])),
+                zn::Request::BlockDownload { hash, .. } if hash == next_hash => {
+                    futures::future::pending::<Result<zn::Response, crate::BoxError>>().await
+                }
+                _ => unreachable!("only the advertised blocks are requested"),
+            }
+        }
+    });
+    let verifier = tower::service_fn(move |_| {
+        futures::future::err::<block::Hash, crate::BoxError>(
+            RouterError::Block {
+                source: Box::new(VerifyBlockError::Block {
+                    source: zebra_consensus::BlockError::InvalidDifficulty(Height(347_499), hash),
+                }),
+            }
+            .into(),
+        )
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(300_000));
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let mut config = ZebradConfig::default();
+    config.sync.full_verify_concurrency_limit = 1;
+    let (mut chain_sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        network,
+        verifier,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    chain_sync
+        .request_blocks([hash].into_iter().collect())
+        .await
+        .unwrap();
+    let extra = tokio::time::timeout(
+        MAX_SERVICE_REQUEST_DELAY,
+        chain_sync.try_to_sync_once([next_hash].into_iter().collect()),
+    )
+    .await
+    .expect("a failed block must release the only download slot")
+    .unwrap();
+    assert!(chain_sync.past_lookahead_limit_receiver.cloned_watch_data());
+    assert!(extra.is_empty());
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+    chain_sync.downloads.cancel_all();
+}
+
+/// One invalid block or exhausted download must not cancel an honest pending verification.
+#[tokio::test(start_paused = true)]
+async fn failed_block_preserves_honest_pending_verification() {
+    let _init_guard = zebra_test::init();
+    let honest: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let invalid: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let honest_hash = honest.hash();
+    let invalid_hash = invalid.hash();
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    for download_failure in [false, true] {
+        let blocks = [honest.clone(), invalid.clone()];
+        let network = tower::service_fn(move |request| {
+            let zn::Request::BlockDownload { hash, .. } = request else {
+                panic!("no tip requests are needed without prospective tips");
+            };
+            let response = if download_failure && hash == invalid_hash {
+                Err(crate::BoxError::from("connection reset"))
+            } else {
+                let block = blocks.iter().find(|block| block.hash() == hash).unwrap();
+                Ok(zn::Response::Blocks(vec![Available((
+                    block.clone(),
+                    Some(advertiser),
+                ))]))
+            };
+            futures::future::ready(response)
+        });
+        let mut verifier = MockService::build().for_unit_tests();
+        let (tip, _tip_sender) = MockChainTip::new();
+        let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(4);
+        let (mut chain_sync, _status) = ChainSync::new(
+            &ZebradConfig::default(),
+            Height(0),
+            network,
+            verifier.clone(),
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            tip,
+            misbehavior_tx,
+        );
+        chain_sync.full_verify_concurrency_limit = 2;
+
+        chain_sync
+            .request_blocks([invalid_hash].into_iter().collect())
+            .await
+            .unwrap();
+        let invalid_request = if download_failure {
+            None
+        } else {
+            Some(
+                verifier
+                    .expect_request(zebra_consensus::Request::Commit(invalid.clone()))
+                    .await,
+            )
+        };
+        chain_sync
+            .request_blocks([honest_hash].into_iter().collect())
+            .await
+            .unwrap();
+        let honest_request = verifier
+            .expect_request(zebra_consensus::Request::Commit(honest.clone()))
+            .await;
+
+        let error = RouterError::Block {
+            source: Box::new(VerifyBlockError::Block {
+                source: zebra_consensus::BlockError::InvalidDifficulty(Height(2), invalid_hash),
+            }),
+        };
+        let expected_score = error.misbehavior_score();
+        if let Some(request) = invalid_request {
+            request.respond_error(error.into());
+        }
+        tokio::time::timeout(
+            sync::BLOCK_DOWNLOAD_TIMEOUT,
+            chain_sync.try_to_sync_once(Default::default()),
+        )
+        .await
+        .expect("handling a failed block must not wait for the honest verification")
+        .expect("a failed block must not restart the sync round");
+
+        // A failed download is re-requested while the honest block waits, until its bounded
+        // retries are exhausted. An invalid header is not re-requested.
+        assert_eq!(chain_sync.downloads.in_flight(), 1);
+        assert!(chain_sync.reobtain_hashes.is_empty());
+        assert!(chain_sync.block_reobtain_retries.is_empty());
+        if download_failure {
+            assert!(misbehavior_rx.try_recv().is_err());
+        } else {
+            let report = misbehavior_rx.try_recv().unwrap();
+            assert_ne!(expected_score, 0);
+            assert_eq!((report.addr, report.score), (advertiser, expected_score));
+        }
+
+        honest_request.respond(honest_hash);
+        let committed =
+            tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, chain_sync.downloads.next())
+                .await
+                .expect("the honest verification must still complete")
+                .expect("the honest download must still be tracked")
+                .expect("the honest download must not be cancelled");
+        assert_eq!(committed, (Height(1), honest_hash));
+        assert!(chain_sync.downloads.is_empty());
+    }
+}
+
+/// Wrapped service, state, and shutdown errors still require a sync restart.
+#[test]
+fn infrastructure_verification_errors_restart_sync() {
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let hash = block::Hash::from([0xD1; 32]);
+    let block_errors = [
+        VerifyBlockError::Depth {
+            source: "state depth failed".into(),
+            hash,
+        },
+        VerifyBlockError::StateService {
+            source: "state failed".into(),
+            hash,
+        },
+        VerifyBlockError::Commit(zs::CommitBlockError::new_write_task_exited()),
+        VerifyBlockError::Block {
+            source: BlockError::Other("internal failure".into()),
+        },
+        VerifyBlockError::Transaction(TransactionError::InternalDowncastError(
+            "unknown verifier failure".into(),
+        )),
+    ];
+    let mut errors: Vec<_> = block_errors
+        .into_iter()
+        .map(|error| RouterError::Block {
+            source: Box::new(error),
+        })
+        .collect();
+    errors.extend(
+        [
+            VerifyCheckpointError::VerifyBlock(VerifyBlockError::Depth {
+                source: "state depth failed".into(),
+                hash,
+            }),
+            VerifyCheckpointError::CommitCheckpointVerified(
+                zs::CommitCheckpointVerifiedError::from(
+                    zs::CommitBlockError::new_write_task_exited(),
+                )
+                .into(),
+            ),
+            VerifyCheckpointError::CommitCheckpointVerified("state commit failed".into()),
+            VerifyCheckpointError::Tip("state tip failed".into()),
+            VerifyCheckpointError::CheckpointList("checkpoint list failed".into()),
+            VerifyCheckpointError::Dropped,
+            VerifyCheckpointError::ShuttingDown,
+        ]
+        .into_iter()
+        .map(|error| RouterError::Checkpoint {
+            source: Box::new(error),
+        }),
+    );
+
+    for error in errors {
+        let error = BlockDownloadVerifyError::Invalid {
+            error,
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        };
+        assert!(TestChainSync::should_restart_sync(&error), "{error:?}");
+    }
 }

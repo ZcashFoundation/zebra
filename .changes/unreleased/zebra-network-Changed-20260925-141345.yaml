@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Limit the combined `FindBlocks` and `FindHeaders` queue to 16 requests, falling back to any ready peer on overflow. Count queued requests in `zcash.net.peer_set.find_queued` and non-serving discovery fallbacks in `zcash.net.peer_set.find_fallback` with `reason` labels `queue_full`, `no_serving_peer`, and `expired` ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).'
-time: 2026-09-25T14:13:45.816226397Z

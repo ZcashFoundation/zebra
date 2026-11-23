@@ -57,6 +57,7 @@ where
             &addresses,
             finalized_tip_range,
             query_height_range.clone(),
+            max_entries,
         );
 
         // If the tx IDs are valid, return them, otherwise, retry or return an error.
@@ -116,6 +117,7 @@ fn finalized_transparent_tx_ids(
 
 /// Returns the extra transaction IDs for `addresses` in the non-finalized chain `query_height_range`,
 /// matching or overlapping the transaction IDs for the `finalized_tip_range`,
+/// at most `max_entries` of them, the first in chain order.
 ///
 /// If the addresses do not exist in the non-finalized `chain`, returns an empty list.
 //
@@ -125,6 +127,7 @@ fn chain_transparent_tx_id_changes<C>(
     addresses: &HashSet<transparent::Address>,
     finalized_tip_range: Option<RangeInclusive<Height>>,
     query_height_range: RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -270,7 +273,7 @@ where
         }
     }
 
-    Ok(chain.partial_transparent_tx_ids(addresses, query_height_range))
+    Ok(chain.partial_transparent_tx_ids(addresses, query_height_range, max_entries))
 }
 
 /// Returns the combined finalized and non-finalized transaction IDs, truncated to `max_entries`.

@@ -490,7 +490,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-      "description": "Distribution of connected peers by client software",
+      "description": "Cumulative successful handshakes by client implementation, not live peer counts",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -510,12 +510,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "sum by (user_agent) (zcash_net_peers_connected)",
-          "legendFormat": "{{user_agent}}",
+          "expr": "sum by (implementation) (zcash_net_peer_version_outcomes_total{outcome=\"success\"})",
+          "legendFormat": "{{implementation}}",
           "refId": "A"
         }
       ],
-      "title": "Peer Distribution",
+      "title": "Successful Handshakes by Implementation",
       "type": "piechart"
     },
     {
@@ -613,7 +613,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_halo2_verified[1m])", "legendFormat": "Halo2", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_groth16_verified[1m])", "legendFormat": "Groth16", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_sapling_verified[1m])", "legendFormat": "Sapling", "refId": "B" }
       ],
       "title": "Proof Verification Rate",
       "type": "timeseries"
@@ -714,7 +714,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-      "description": "RPC endpoint p99 latency (5m window)",
+      "description": "RPC endpoint p99 latency (5m window), excluding getblocktemplate long polls",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -745,7 +745,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "A"
         }
@@ -855,7 +855,7 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-              "expr": "rate(process_cpu_seconds_total{job=~\"$job\"}[1m])",
+              "expr": "rate(process_cpu_seconds_total{job=~\"$job\"}[5m])",
               "legendFormat": "CPU",
               "refId": "A"
             }

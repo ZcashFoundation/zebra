@@ -130,6 +130,14 @@ expression: block
       "valueDeltaZat": 0
     }
   ],
+  "nsmValueBalance": {
+    "id": "nsm",
+    "chainValue": 0.0,
+    "chainValueZat": 0,
+    "monitored": false,
+    "valueDelta": 0.0,
+    "valueDeltaZat": 0
+  },
   "trees": {},
   "previousblockhash": "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38",
   "nextblockhash": "00f1a49e54553ac3ef735f2eb1d8247c9a87c22a47dbd7823ae70adcd6c21a18"

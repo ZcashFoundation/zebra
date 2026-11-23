@@ -41,13 +41,8 @@ fn state_from_chain(network: &Network, blocks: &[Arc<Block>]) -> NonFinalizedSta
 /// committed as a child, so a fork only needs to list the blocks above its fork point. Each chain
 /// must be in ascending height order.
 fn state_from_chains(network: &Network, chains: &[&[Arc<Block>]]) -> NonFinalizedState {
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network)
+        .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
 
     let (best_chain, forks) = chains

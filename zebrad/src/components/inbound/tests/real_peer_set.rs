@@ -341,8 +341,8 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 }
 
 /// Check that a network stack:
-/// - returns a `NotFound` error when a peer responds with an unrelated transaction, and
-/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
+/// - returns a `NotFound` error after an unrelated transaction followed by explicit missing IDs, and
+/// - returns a `NotFoundRegistry` error for repeated requests for those missing IDs.
 ///
 /// The requests are coming from the full stack to the isolated peer,
 /// so this is the reverse of the previous tests.
@@ -351,7 +351,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 /// with an unrelated transaction test responder.
 #[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError> {
-    // We respond with an unrelated transaction, so the peer gives up on the request.
+    // Send an unrelated transaction before explicitly reporting the requested IDs as missing.
     let unrelated_response: Transaction =
         zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let unrelated_response = Response::Transactions(vec![Available((
@@ -453,11 +453,8 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
                 .oneshot(Request::TransactionsById(iter::once(tx).copied().collect()))
                 .await;
 
-            // The only ready peer in the PeerSet failed the same request,
-            // so we expect the peer set to return a `NotFoundRegistry` error immediately.
-            //
-            // If these asserts fail, then the PeerSet isn't returning inv routing error responses.
-            // (Or the missing inventory from the previous timeout wasn't registered correctly.)
+            // The only ready peer explicitly reported this ID as missing, so the registry
+            // must reject the repeated request without another network round trip.
             if let Err(missing_error) = response.as_ref() {
                 let missing_error = missing_error
                     .downcast_ref::<SharedPeerError>()
@@ -495,12 +492,12 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 
 /// Check that a network stack:
 /// - returns a partial notfound response, when a peer partially responds to a multi-transaction request,
-/// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
+/// - returns a `NotFoundRegistry` error for repeated requests for explicitly missing IDs.
 ///
 /// The requests are coming from the full stack to the isolated peer.
 #[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> {
-    // We repeatedly respond with the same transaction, so the peer gives up on the second response.
+    // Send a duplicate transaction before explicitly reporting the remaining IDs as missing.
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let repeated_tx: UnminedTx = std::sync::Arc::new(repeated_tx).into();
     let repeated_response = Response::Transactions(vec![
@@ -707,8 +704,9 @@ async fn dropping_network_owner_stops_real_inbound_consumers() {
 
 /// Setup a real Zebra network stack, with a connected peer using a real isolated network stack.
 ///
-/// The isolated peer responds to every request with `isolated_peer_response`.
-/// (If no response is provided, the isolated peer ignores inbound requests.)
+/// The isolated peer responds to every request with `isolated_peer_response`, adding explicit
+/// missing IDs for requested transactions absent from that response.
+/// If no response is provided, the isolated peer ignores inbound requests.
 ///
 /// Uses fake verifiers, and does not run a block syncer task.
 async fn setup(
@@ -776,7 +774,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book, _) = zebra_network::init(
+    let (mut peer_set, address_book, _, block_advertiser) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -855,7 +853,7 @@ async fn setup(
     let block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change,
-        peer_set.clone(),
+        block_advertiser,
         Some(submitblock_channel.receiver()),
     ));
 
@@ -866,8 +864,20 @@ async fn setup(
 
     // Set up the inbound service response for the isolated peer
     let isolated_peer_response = isolated_peer_response.unwrap_or(Response::Nil);
-    let response_inbound_service = tower::service_fn(move |_req| {
-        let isolated_peer_response = isolated_peer_response.clone();
+    let response_inbound_service = tower::service_fn(move |req| {
+        let mut isolated_peer_response = isolated_peer_response.clone();
+        if let (Request::TransactionsById(ids), Response::Transactions(transactions)) =
+            (req, &mut isolated_peer_response)
+        {
+            for id in ids {
+                if !transactions.iter().any(|transaction| match transaction {
+                    Available((tx, _)) => tx.id == id,
+                    Missing(missing_id) => *missing_id == id,
+                }) {
+                    transactions.push(Missing(id));
+                }
+            }
+        }
         async move { Ok::<Response, BoxError>(isolated_peer_response) }
     });
     let user_agent = "test".to_string();
@@ -914,22 +924,22 @@ async fn setup(
 mod submitblock_test {
     use std::io;
     use std::sync::{Arc, Mutex};
+    use tokio::sync::Notify;
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
     use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 
-    use crate::components::sync::PEER_GOSSIP_DELAY;
-
     // Custom in-memory writer to capture logs
-    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+    struct TestWriter(Arc<Mutex<Vec<u8>>>, Arc<Notify>);
 
     impl io::Write for TestWriter {
         #[allow(clippy::unwrap_in_result)]
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut logs = self.0.lock().unwrap();
             logs.extend_from_slice(buf);
+            self.1.notify_one();
             Ok(buf.len())
         }
 
@@ -941,12 +951,14 @@ mod submitblock_test {
     #[tokio::test]
     async fn submitblock_channel() -> Result<(), crate::BoxError> {
         let logs = Arc::new(Mutex::new(Vec::new()));
+        let log_written = Arc::new(Notify::new());
+        let writer_notify = log_written.clone();
         let log_sink = logs.clone();
 
         // Set up a tracing subscriber with a custom writer
         let subscriber = fmt()
             .with_max_level(Level::INFO)
-            .with_writer(move || TestWriter(log_sink.clone())) // Write logs to an in-memory buffer
+            .with_writer(move || TestWriter(log_sink.clone(), writer_notify.clone()))
             .finish();
 
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -981,7 +993,7 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
+        let (_peer_set, _address_book, _misbehavior_tx, block_advertiser) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),
@@ -1001,16 +1013,28 @@ mod submitblock_test {
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change,
-                peer_set.clone(),
+                block_advertiser,
                 Some(submitblock_channel.receiver()),
             )
             .in_current_span(),
         );
 
-        // Wait for the block gossip task to process the block
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Wait for the gossip task's log instead of the unrelated periodic gossip delay.
+        tokio::time::timeout(Duration::from_secs(7), async {
+            loop {
+                let notified = log_written.notified();
+                if String::from_utf8_lossy(&logs.lock().unwrap())
+                    .contains("sending mined block broadcast")
+                {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("the gossip task must process the submitted block");
 
-        // Check that the block was processed as a mnined block by the gossip task
+        // Check that the block was processed as a mined block by the gossip task.
         let captured_logs = logs.lock().unwrap();
         let log_output = String::from_utf8(captured_logs.clone()).unwrap();
 

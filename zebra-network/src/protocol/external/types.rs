@@ -24,6 +24,35 @@ impl fmt::Display for Version {
 }
 
 impl Version {
+    /// Returns the version as a metric label if Zebra defines it, or `other` otherwise.
+    pub(crate) fn metric_label(&self) -> &'static str {
+        // Keep these labels in sync with min_specified_for_upgrade and the current version.
+        match self.0 {
+            170_002 => "170002",
+            170_003 => "170003",
+            170_005 => "170005",
+            170_006 => "170006",
+            170_007 => "170007",
+            170_008 => "170008",
+            170_009 => "170009",
+            170_010 => "170010",
+            170_011 => "170011",
+            170_012 => "170012",
+            170_013 => "170013",
+            170_050 => "170050",
+            170_100 => "170100",
+            170_110 => "170110",
+            170_120 => "170120",
+            170_130 => "170130",
+            170_140 => "170140",
+            170_150 => "170150",
+            170_160 => "170160",
+            170_180 => "170180",
+            170_190 => "170190",
+            _ => "other",
+        }
+    }
+
     /// Returns the minimum remote node network protocol version for `network` and
     /// `height`. Zebra disconnects from peers with lower versions.
     ///

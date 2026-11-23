@@ -64,25 +64,27 @@ use tower::{BoxError, Service};
 
 /// The default size of the channel that forwards received requests.
 ///
-/// If requests are received faster than the test code can consume them, some requests may be
-/// ignored.
+/// If requests are received faster than the test code can consume them, reading from the lagged
+/// receiver panics rather than silently ignoring requests.
 ///
 /// This value can be configured in the [`MockService`] using
 /// [`MockServiceBuilder::with_proxy_channel_size`].
 const DEFAULT_PROXY_CHANNEL_SIZE: usize = 100;
 
-/// The default timeout before considering a request has not been received.
+/// The default observation window for absence checks and optional request reads.
 ///
-/// This is the time that the mocked service waits before considering a request will not be
-/// received. It can be configured in the [`MockService`] using
-/// [`MockServiceBuilder::with_max_request_delay`].
+/// Positive expectations use a separate 10-second default so slow scheduling does not fail tests.
+/// Both deadlines can be overridden with [`MockServiceBuilder::with_max_request_delay`].
 ///
 /// Note that if a test checks that no requests are received, each check has to wait for this
 /// amount of time, so this may affect the test execution time.
 ///
 /// We've seen delays up to 67ms on busy Linux and macOS machines,
 /// and some other timeout failures even with a 150ms timeout.
-pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(300);
+pub const DEFAULT_REQUEST_OBSERVATION_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// Maximum wait for positive expectations, which only costs time when a request is missing.
+const DEFAULT_EXPECTED_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An internal type representing the item that's sent in the [`broadcast`] channel.
 ///
@@ -115,7 +117,8 @@ pub struct MockService<Request, Response, Assertion, Error = BoxError> {
     receiver: broadcast::Receiver<ProxyItem<Request, Response, Error>>,
     sender: broadcast::Sender<ProxyItem<Request, Response, Error>>,
     poll_count: Arc<AtomicUsize>,
-    max_request_delay: Duration,
+    request_observation_timeout: Duration,
+    expected_request_timeout: Duration,
     _assertion_type: PhantomData<Assertion>,
 }
 
@@ -135,8 +138,8 @@ pub struct MockServiceBuilder {
 /// contains the received request and a [`oneshot::Sender`] that can be used to respond to the
 /// request.
 ///
-/// If a response is not sent, the channel is closed and a [`BoxError`] is returned by the service
-/// to the caller that sent the request.
+/// If dropped without sending a response, the channel is closed and the caller's response future
+/// panics when polled.
 #[must_use = "Tests may fail if a response is not sent back to the caller"]
 pub struct ResponseSender<Request, Response, Error> {
     request: Request,
@@ -192,8 +195,8 @@ impl MockServiceBuilder {
     /// Configure the size of the proxy channel used for sending intercepted requests.
     ///
     /// This determines the maximum amount of requests that are kept in queue before the oldest
-    /// request is dropped. This means that any tests that receive too many requests might ignore
-    /// some requests if this parameter isn't properly configured.
+    /// request is dropped. Reading from a lagged receiver panics, so tests must configure enough
+    /// capacity for all requests sent between expectations.
     ///
     /// The default value of 100 should be enough for most cases.
     ///
@@ -214,12 +217,12 @@ impl MockServiceBuilder {
         self
     }
 
-    /// Configure the time to wait for a request before considering no requests will be received.
+    /// Configure the maximum wait for both positive expectations and absence checks.
     ///
-    /// This determines the maximum amount of time that the [`MockService`] will wait for a request
-    /// to be received before considering that a request will not be received.
-    ///
-    /// The default value of 25 ms should be enough for most cases.
+    /// Without an override, positive expectations (`expect_request` and `expect_request_that`)
+    /// wait up to 10 seconds, while absence checks (`expect_no_requests`) and optional reads
+    /// (`try_next_request`) wait up to 300 ms. Setting this value overrides both deadlines,
+    /// including on clones.
     ///
     /// # Example
     ///
@@ -277,7 +280,12 @@ impl MockServiceBuilder {
             receiver,
             sender,
             poll_count: Arc::new(AtomicUsize::new(0)),
-            max_request_delay: self.max_request_delay.unwrap_or(DEFAULT_MAX_REQUEST_DELAY),
+            request_observation_timeout: self
+                .max_request_delay
+                .unwrap_or(DEFAULT_REQUEST_OBSERVATION_TIMEOUT),
+            expected_request_timeout: self
+                .max_request_delay
+                .unwrap_or(DEFAULT_EXPECTED_REQUEST_TIMEOUT),
             _assertion_type: PhantomData,
         }
     }
@@ -292,8 +300,8 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// [`MockServiceBuilder::with_max_request_delay`].
     ///
     /// If the received request matches the expected request, a [`ResponseSender`] is returned
-    /// which can be used to inspect the request and respond to it. If no response is sent, the
-    /// sender of the requests receives an error.
+    /// which can be used to inspect the request and respond to it. If dropped without responding,
+    /// the caller's response future panics when polled.
     ///
     /// # Panics
     ///
@@ -350,7 +358,7 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// The received request is passed to the `condition` function, which should return `true` if
     /// it matches the expected condition or `false` otherwise. If `true` is returned, a
     /// [`ResponseSender`] is returned which can be used to inspect the request again and respond
-    /// to it. If no response is sent, the sender of the requests receives an error.
+    /// to it. If dropped without responding, the caller's response future panics when polled.
     ///
     /// # Panics
     ///
@@ -440,7 +448,7 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     }
 
     /// Returns the next request from the queue,
-    /// or panics if there are no requests after a short timeout.
+    /// or panics if there are no requests before the positive expectation deadline.
     ///
     /// Returns the next request in the internal queue or waits at most the max delay time
     /// configured by [`MockServiceBuilder::with_max_request_delay`] for a new request to be
@@ -451,7 +459,10 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
     /// If the queue is empty and a request is not received before the max request delay timeout
     /// expires.
     async fn next_request(&mut self) -> ResponseSender<Request, Response, Error> {
-        match self.try_next_request().await {
+        match self
+            .try_next_request_with_timeout(self.expected_request_timeout)
+            .await
+        {
             Some(request) => request,
             None => panic!(
                 "timeout while waiting for a request\n \
@@ -478,8 +489,8 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// [`MockServiceBuilder::with_max_request_delay`].
     ///
     /// If the received request matches the expected request, a [`ResponseSender`] is returned
-    /// which can be used to inspect the request and respond to it. If no response is sent, the
-    /// sender of the requests receives an error.
+    /// which can be used to inspect the request and respond to it. If dropped without responding,
+    /// the caller's response future panics when polled.
     ///
     /// If no request is received or if a request is received that's not equal to the expected
     /// request, this method returns an error generated by a [`mod@proptest`] assertion.
@@ -545,7 +556,7 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     /// The received request is passed to the `condition` function, which should return `true` if
     /// it matches the expected condition or `false` otherwise. If `true` is returned, a
     /// [`ResponseSender`] is returned which can be used to inspect the request again and respond
-    /// to it. If no response is sent, the sender of the requests receives an error.
+    /// to it. If dropped without responding, the caller's response future panics when polled.
     ///
     /// If the `condition` function returns `false`, this method returns an error generated by a
     /// [`mod@proptest`] assertion.
@@ -667,7 +678,10 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
     async fn next_request(
         &mut self,
     ) -> Result<ResponseSender<Request, Response, Error>, TestCaseError> {
-        match self.try_next_request().await {
+        match self
+            .try_next_request_with_timeout(self.expected_request_timeout)
+            .await
+        {
             Some(request) => Ok(request),
             None => {
                 prop_assert!(
@@ -697,24 +711,40 @@ impl<Request, Response, Assertion, Error> MockService<Request, Response, Asserti
     /// delay configured by [`MockServiceBuilder::with_max_request_delay`] for a request, and
     /// returns it.
     ///
-    /// If no request is received, returns `None`.
+    /// If no request is received, returns `None`. The default observation window is 300 ms.
     ///
-    /// If too many requests are received and the queue fills up, the oldest requests are dropped
-    /// and ignored. This means that calling this may not receive the next request if the queue is
-    /// not dimensioned properly with the [`MockServiceBuilder::with_proxy_channel_size`] method.
+    /// # Panics
+    ///
+    /// If the receiver has lagged and lost requests, this method panics. Increase
+    /// [`MockServiceBuilder::with_proxy_channel_size`] to hold the expected request burst.
     pub async fn try_next_request(&mut self) -> Option<ResponseSender<Request, Response, Error>> {
-        loop {
-            match timeout(self.max_request_delay, self.receiver.recv()).await {
-                Ok(Ok(item)) => {
-                    if let Some(proxy_item) = item.lock().await.take() {
-                        return Some(proxy_item);
+        self.try_next_request_with_timeout(self.request_observation_timeout)
+            .await
+    }
+
+    /// Receive an unclaimed request within one deadline, including any already-claimed items.
+    async fn try_next_request_with_timeout(
+        &mut self,
+        max_request_delay: Duration,
+    ) -> Option<ResponseSender<Request, Response, Error>> {
+        timeout(max_request_delay, async {
+            loop {
+                match self.receiver.recv().await {
+                    Ok(item) => {
+                        if let Some(proxy_item) = item.lock().await.take() {
+                            return proxy_item;
+                        }
                     }
+                    Err(RecvError::Lagged(dropped)) => panic!(
+                        "MockService dropped {dropped} requests: \
+                         increase with_proxy_channel_size to hold all requests between expectations"
+                    ),
+                    Err(RecvError::Closed) => unreachable!("sender is never closed"),
                 }
-                Ok(Err(RecvError::Lagged(_))) => continue,
-                Ok(Err(RecvError::Closed)) => unreachable!("sender is never closed"),
-                Err(_timeout) => return None,
             }
-        }
+        })
+        .await
+        .ok()
     }
 }
 
@@ -729,7 +759,8 @@ impl<Request, Response, Assertion, Error> Clone
             receiver: self.sender.subscribe(),
             sender: self.sender.clone(),
             poll_count: self.poll_count.clone(),
-            max_request_delay: self.max_request_delay,
+            request_observation_timeout: self.request_observation_timeout,
+            expected_request_timeout: self.expected_request_timeout,
             _assertion_type: PhantomData,
         }
     }
@@ -761,11 +792,6 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
-    ///
-    /// # Panics
-    ///
-    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
-    /// timeout error.
     ///
     /// # Example
     ///
@@ -816,11 +842,6 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
-    ///
-    /// # Panics
-    ///
-    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
-    /// timeout error.
     ///
     /// # Example
     ///
@@ -877,11 +898,6 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
     ///
-    /// # Panics
-    ///
-    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
-    /// timeout error.
-    ///
     /// # Example
     ///
     /// ```
@@ -929,11 +945,6 @@ impl<Request, Response, Error> ResponseSender<Request, Response, Error> {
     ///
     /// This method takes ownership of the [`ResponseSender`] so that only one response can be
     /// sent.
-    ///
-    /// # Panics
-    ///
-    /// If one of the `respond*` methods isn't called, the [`MockService`] might panic with a
-    /// timeout error.
     ///
     /// # Example
     ///

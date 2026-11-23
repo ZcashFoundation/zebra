@@ -8,12 +8,15 @@ If the diff or PR description is incomplete, ask questions before making strong 
 
 Before reviewing code quality, verify:
 
-- [ ] PR links to a pre-discussed issue
-- [ ] PR description includes Motivation, Solution, and Tests sections
-- [ ] PR title follows conventional commits
+- [ ] PR links to a pre-discussed issue that a Zebra team member acknowledged
+- [ ] PR description says what changes and why
+- [ ] Behavior changes have test evidence in the PR description or the diff
 - [ ] If AI tools were used, disclosure is present in the PR description
+- [ ] Merge Danger matches the diff: database format changes, publishing, deployments, and deleted infrastructure are one-way doors, and consensus, peer protocol, crate API, configuration, RPC, and metrics changes are two-way only until the next release
 
 If these are missing, note it in the review.
+
+Skip the issue check when the PR author is a member or owner of the ZcashFoundation organization. Maintainers set their own priorities and don't need prior issue discussion for their own work, so a missing issue link on their PRs is not a reason to withhold approval. The other checks still apply.
 
 ## Architecture Constraints
 
@@ -44,10 +47,12 @@ If the PR touches a Tower `Service` implementation:
 
 - Prefer `thiserror` with `#[from]` / `#[source]`
 - `expect()` messages must explain **why** the invariant holds:
+
   ```rust
   .expect("block hash exists because we just inserted it")  // good
   .expect("failed to get block")                            // bad
   ```
+
 - Don't turn invariant violations into misleading `None`/defaults
 
 ### Numeric Safety
@@ -106,14 +111,7 @@ When the PR adds abstraction, flags, generics, or refactors:
 - **`zebra-rpc`**: zcashd compatibility (response shapes, errors, timeouts), user-facing behavior
 - **`zebra-script`**: FFI memory safety, lifetime/ownership across boundaries
 
-## Output Format
+## Review findings
 
-Categorize findings by severity:
-
-- **BLOCKER**: Must fix (bugs, security, correctness, consensus safety)
-- **IMPORTANT**: Should fix (maintainability, likely future bugs)
-- **SUGGESTION**: Optional improvement
-- **NITPICK**: Minor style/clarity (keep brief)
-- **QUESTION**: Clarification needed
-
-For each finding, include the file path and an actionable suggestion explaining the "why".
+- Flag a concrete issue the diff introduces or extends. Identify the affected line, explain the consequence, and suggest a targeted correction.
+- Raise each issue once. Skip style-only feedback and duplicate reports from automated checks.

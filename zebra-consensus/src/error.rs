@@ -19,7 +19,11 @@ use zebra_chain::{
 };
 use zebra_state::ValidateContextError;
 
-use crate::{block::MAX_BLOCK_SIGOPS, transaction::check::MAX_STANDARD_SCRIPTSIG_SIZE, BoxError};
+use crate::{
+    block::MAX_BLOCK_SIGOPS,
+    transaction::check::{MAX_STANDARD_SCRIPTSIG_SIZE, MAX_STANDARD_TX_SIGOPS},
+    BoxError,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -276,6 +280,16 @@ pub enum TransactionError {
     #[error("mempool transaction has non-standard transparent inputs")]
     NonStandardInputs,
 
+    /// A mempool transaction exceeds the total legacy and P2SH sigop standardness limit.
+    #[error(
+        "mempool transaction has {sigops} signature operations, \
+         above the {MAX_STANDARD_TX_SIGOPS} standardness limit"
+    )]
+    NonStandardSigops {
+        /// The transaction's total number of legacy and P2SH signature operations.
+        sigops: u32,
+    },
+
     #[error("transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,
 
@@ -360,6 +374,14 @@ impl From<BoxError> for TransactionError {
         // Halo2 proof, Orchard binding signature, or Sprout JoinSplit signature would collapse to
         // `InternalDowncastError` (score 0), letting a peer force verification without being banned.
         // See <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2p4c-3q4q-p463>.
+        //
+        // Transparent script failures need the same treatment, see
+        // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x>.
+        match err.downcast::<zebra_script::Error>() {
+            Ok(e) => return TransactionError::Script(*e),
+            Err(e) => err = e,
+        }
+
         match err.downcast::<zebra_chain::primitives::ed25519::Error>() {
             Ok(e) => return TransactionError::Ed25519(*e),
             Err(e) => err = e,

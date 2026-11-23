@@ -2,18 +2,23 @@
 
 use std::sync::Arc;
 
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, error::TryRecvError};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transparent,
 };
 use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    service::queued_blocks::{QueuedBlocks, QueuedSemanticallyVerified, SentHashes},
+    service::queued_blocks::{
+        QueuedBlocks, QueuedSemanticallyVerified, SentHashes, MAX_QUEUED_BLOCKS, MAX_QUEUED_BYTES,
+    },
     tests::FakeChainHelper,
+    CommitBlockError,
 };
 
 // Quick helper trait for making queued blocks with throw away channels
@@ -123,9 +128,9 @@ fn prune_removes_right_children() -> Result<()> {
     assert_eq!(2, queue.blocks.len());
     assert_eq!(1, queue.by_parent.len());
     assert_eq!(1, queue.by_height.len());
-    assert!(queue.get_mut(&block1.hash()).is_none());
-    assert!(queue.get_mut(&child1.hash()).is_some());
-    assert!(queue.get_mut(&child2.hash()).is_some());
+    assert!(!queue.has(block1.hash()));
+    assert!(queue.has(child1.hash()));
+    assert!(queue.has(child2.hash()));
     assert_eq!(632, queue.known_utxos.len());
 
     // Pruning the children of the first block removes both of the other
@@ -134,14 +139,14 @@ fn prune_removes_right_children() -> Result<()> {
     assert_eq!(0, queue.blocks.len());
     assert_eq!(0, queue.by_parent.len());
     assert_eq!(0, queue.by_height.len());
-    assert!(queue.get_mut(&child1.hash()).is_none());
-    assert!(queue.get_mut(&child2.hash()).is_none());
+    assert!(!queue.has(child1.hash()));
+    assert!(!queue.has(child2.hash()));
     assert_eq!(0, queue.known_utxos.len());
 
     Ok(())
 }
 
-/// `SentHashes::remove` must drop the hash, its outpoints from `known_utxos`,
+/// `SentHashes::remove_all` must drop a single hash, its outpoints from `known_utxos`,
 /// and the corresponding `(hash, height)` entry from `curr_buf` (or whichever
 /// batch buffer holds it). Without this, a rejected same-hash block would
 /// keep a later honest re-delivery of a block at the same hash locked out as
@@ -172,7 +177,7 @@ fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
     // Remove block1. block1's hash disappears, block2's stays, and the
     // total number of known utxos shrinks by exactly block1's contribution.
     let block1_utxos = prepared1.new_outputs.len();
-    sent.remove(&prepared1.hash);
+    sent.remove_all([prepared1.hash]);
 
     assert!(
         !sent.contains(&prepared1.hash),
@@ -195,8 +200,57 @@ fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
 
     // Removing a hash that isn't tracked is a no-op.
     let block3 = block1.make_fake_child();
-    sent.remove(&block3.hash());
+    sent.remove_all([block3.hash()]);
     assert!(sent.contains(&prepared2.hash));
+
+    Ok(())
+}
+
+/// `SentHashes::remove_all` must drop every listed hash and its outpoints from
+/// all batch buffers, ignore untracked hashes, and keep unlisted hashes.
+#[test]
+fn sent_hashes_remove_all_drops_batch_across_buffers() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let block3: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419202_BYTES.zcash_deserialize_into()?;
+
+    let prepared1 = block1.clone().prepare();
+    let prepared2 = block2.prepare();
+    let prepared3 = block3.prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.finish_batch();
+    sent.add(&prepared2);
+    sent.add(&prepared3);
+
+    let utxos_after_add = sent.known_utxos.len();
+    let untracked = block1.make_fake_child().hash();
+
+    sent.remove_all([prepared1.hash, untracked, prepared3.hash]);
+
+    assert!(!sent.contains(&prepared1.hash));
+    assert!(!sent.contains(&prepared3.hash));
+    assert!(sent.contains(&prepared2.hash));
+    assert_eq!(
+        sent.known_utxos.len(),
+        utxos_after_add - prepared1.new_outputs.len() - prepared3.new_outputs.len(),
+        "remove_all must drop only the removed blocks' outpoints"
+    );
+
+    let buffered: Vec<_> = sent
+        .bufs
+        .iter()
+        .chain(std::iter::once(&sent.curr_buf))
+        .flatten()
+        .map(|(hash, _)| *hash)
+        .collect();
+    assert_eq!(buffered, vec![prepared2.hash]);
 
     Ok(())
 }
@@ -266,10 +320,10 @@ fn sent_hashes_keep_shared_outpoints_until_last_owner_is_removed() -> Result<()>
     sent.add(&first);
     sent.add(&second);
 
-    sent.remove(&first.hash);
+    sent.remove_all([first.hash]);
     assert!(sent.utxo(&shared).is_some());
 
-    sent.remove(&second.hash);
+    sent.remove_all([second.hash]);
     assert!(sent.utxo(&shared).is_none());
 
     Ok(())
@@ -299,6 +353,11 @@ fn queued_blocks_keep_shared_outpoints_until_last_owner_is_dequeued() -> Result<
     queue.queue(block.clone().into_queued());
     queue.queue(other.clone().into_queued());
 
+    let removed = queue.remove_queued(&block.hash()).expect("block is queued");
+    assert!(queue.utxo(&shared).is_some());
+    assert!(!queue.has_queued_children(block.header.previous_block_hash));
+    queue.queue(removed);
+
     queue.dequeue_children(block.header.previous_block_hash);
     assert!(queue.utxo(&shared).is_some());
 
@@ -326,8 +385,261 @@ fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
     sent.add(&prepared);
     sent.add(&prepared);
 
-    sent.remove(&prepared.hash);
+    sent.remove_all([prepared.hash]);
     assert!(sent.utxo(&outpoint).is_none());
+
+    Ok(())
+}
+
+/// Once a sent block is committed, the sent hashes forget its UTXOs, which readers then find in
+/// the non-finalized state, but still treat the block as sent. Later removals and pruning don't
+/// forget the outputs again.
+#[test]
+fn sent_hashes_forget_committed_utxos_but_keep_the_hash() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let prepared1 = block1.prepare();
+    let prepared2 = block2.prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.add(&prepared2);
+    let outpoint1 = *prepared1.new_outputs.keys().next().unwrap();
+    let outpoint2 = *prepared2.new_outputs.keys().next().unwrap();
+    assert!(sent.utxo(&outpoint1).is_some());
+
+    sent.forget_utxos(&prepared1.hash);
+    assert!(sent.contains(&prepared1.hash));
+    assert!(sent.utxo(&outpoint1).is_none());
+    assert!(sent.utxo(&outpoint2).is_some());
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    // Forgetting twice, then removing, doesn't touch the other block's outputs.
+    sent.forget_utxos(&prepared1.hash);
+    sent.remove_all([prepared1.hash]);
+    assert!(!sent.contains(&prepared1.hash));
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    sent.prune_by_height(prepared2.height);
+    assert_eq!(sent.known_utxos.len(), 0);
+
+    Ok(())
+}
+
+/// A full queue fails its highest blocks, so a peer can't fill it with blocks whose parents never
+/// arrive. It keeps the lower blocks, because their parents are needed first.
+#[test]
+fn full_queue_fails_highest_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+    let mut receivers = Vec::new();
+    for _ in 0..=MAX_QUEUED_BLOCKS {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((block.clone().prepare(), rsp_tx));
+        receivers.push(rsp_rx);
+        block = block.make_fake_child();
+    }
+
+    queue.prune_overflow();
+
+    assert_eq!(queue.blocks.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(queue.by_height.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(queue.by_parent.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(
+        queue.queued_bytes,
+        queue
+            .blocks
+            .values()
+            .map(|(_, bytes)| *bytes)
+            .sum::<usize>()
+    );
+    assert_eq!(
+        receivers.pop().expect("blocks were queued").try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+    assert!(receivers
+        .iter_mut()
+        .all(|rsp_rx| rsp_rx.try_recv() == Err(TryRecvError::Empty)));
+
+    Ok(())
+}
+
+/// A block with many small outputs uses many times its serialized size in memory, mostly in
+/// its outputs and their copies. The queue limits that memory, not just the number of blocks.
+#[test]
+fn queue_limits_memory_of_blocks_with_many_small_outputs() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut block = Block::clone(&block);
+    let output = transparent::Output {
+        value: Amount::zero(),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let coinbase = (*block.transactions[0])
+        .clone()
+        .with_transparent_outputs(vec![output; 100_000]);
+    block.transactions[0] = Arc::new(coinbase);
+    let mut block = Arc::new(block);
+    assert!(
+        block.clone().prepare().retained_bytes() > 10 * block.zcash_serialized_size(),
+        "the memory estimate counts the decoded outputs, not just the serialized block"
+    );
+
+    let mut queue = QueuedBlocks::default();
+    let mut receivers = Vec::new();
+    while queue.queued_bytes <= MAX_QUEUED_BYTES {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((block.clone().prepare(), rsp_tx));
+        receivers.push(rsp_rx);
+        block = block.make_fake_child();
+    }
+
+    queue.prune_overflow();
+
+    assert!(queue.queued_bytes <= MAX_QUEUED_BYTES);
+    assert_eq!(
+        receivers.pop().expect("blocks were queued").try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+    assert_eq!(queue.blocks.len(), receivers.len());
+
+    // Removing the other blocks releases all their memory.
+    let highest = *queue
+        .by_height
+        .keys()
+        .next_back()
+        .expect("blocks are queued");
+    queue.prune_by_height(highest);
+    assert_eq!(queue.queued_bytes, 0);
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+
+    Ok(())
+}
+
+/// Draining releases indexes and memory charges even if response receivers were cancelled, and
+/// the empty queue can admit and dequeue the same blocks again.
+#[test]
+fn drain_releases_accounting_and_allows_requeue() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let child = block.make_fake_child();
+    let mut queue = QueuedBlocks::default();
+    let (cancelled_tx, cancelled_rx) = oneshot::channel();
+    queue.queue((block.clone().prepare(), cancelled_tx));
+    drop(cancelled_rx);
+    let (response_tx, mut response_rx) = oneshot::channel();
+    queue.queue((child.clone().prepare(), response_tx));
+    assert!(queue.queued_bytes > 0);
+
+    let drained = queue.drain().collect::<Vec<_>>();
+    assert_eq!(drained.len(), 2);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert_eq!(queue.queued_bytes, 0);
+    for (_, (_, response)) in drained {
+        let _ = response.send(Err(CommitBlockError::OrphanQueueFull.into()));
+    }
+    assert_eq!(
+        response_rx.try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+
+    queue.queue(child.clone().into_queued());
+    queue.prune_overflow();
+    assert_eq!(queue.blocks.len(), 1);
+    let dequeued = queue.dequeue_children(block.hash());
+    assert_eq!(dequeued.len(), 1);
+    assert_eq!(queue.queued_bytes, 0);
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(CommitBlockError::OrphanQueueFull.misbehavior_score(), 0);
+    Ok(())
+}
+
+/// A full queue fails abandoned leaves before live higher blocks, so a peer can't pin the queue
+/// with low blocks whose callers stopped waiting.
+#[test]
+fn full_queue_fails_abandoned_leaves_first() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+
+    // Low leaves with made-up parents, whose callers have stopped waiting.
+    for i in 0..MAX_QUEUED_BLOCKS {
+        block = block.make_fake_child();
+        let mut leaf = Block::clone(&block);
+        let mut parent = [0xA5; 32];
+        parent[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        Arc::make_mut(&mut leaf.header).previous_block_hash = block::Hash(parent);
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((Arc::new(leaf).prepare(), rsp_tx));
+        drop(rsp_rx);
+    }
+
+    // A higher block that a caller is still waiting for.
+    let (live_tx, mut live_rx) = oneshot::channel();
+    queue.queue((block.make_fake_child().prepare(), live_tx));
+
+    queue.prune_overflow();
+
+    assert_eq!(queue.blocks.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(
+        live_rx.try_recv(),
+        Err(TryRecvError::Empty),
+        "the live block must outlive abandoned leaves"
+    );
+
+    Ok(())
+}
+
+/// Removing and reinserting a queued block releases its indexes and UTXOs exactly once.
+#[test]
+fn queued_blocks_remove_and_reinsert_releases_retained_data() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+    queue.queue(block.clone().into_queued());
+    let queued_bytes = queue.queued_bytes;
+    assert!(queued_bytes > 0);
+
+    let removed = queue.remove_queued(&block.hash()).expect("block is queued");
+    assert_eq!(removed.0.block, block);
+    assert_eq!(queue.queued_bytes, 0);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.remove_queued(&block.hash()).is_none());
+
+    queue.queue(removed);
+    assert_eq!(queue.queued_bytes, queued_bytes);
+    let children = queue.dequeue_children(block.header.previous_block_hash);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].0.block, block);
+    assert_eq!(queue.queued_bytes, 0);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
 
     Ok(())
 }

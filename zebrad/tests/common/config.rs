@@ -18,7 +18,7 @@ use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
 use zebra_rpc::config::mining::MinerAddressType;
-use zebra_test::{command::TestChild, net::random_known_port};
+use zebra_test::command::TestChild;
 use zebrad::{
     components::{mempool, sync, tracing, With},
     config::ZebradConfig,
@@ -130,18 +130,6 @@ pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
     Path::new(&path).into()
 }
 
-/// Returns a `zebrad` config with a random known RPC port.
-///
-/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
-pub fn random_known_rpc_port_config(
-    parallel_cpu_threads: bool,
-    network: &Network,
-) -> Result<ZebradConfig> {
-    // [Note on port conflict](#Note on port conflict)
-    let listen_port = random_known_port();
-    rpc_port_config(listen_port, parallel_cpu_threads, network)
-}
-
 /// Returns a `zebrad` config with an OS-assigned RPC port.
 ///
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
@@ -179,14 +167,19 @@ pub fn rpc_port_config(
     Ok(config)
 }
 
-/// Reads Zebra's RPC server listen address from a testchild's logs
+/// Reads a server's bound listen address from a test child's logs.
 pub fn read_listen_addr_from_logs(
     child: &mut TestChild<TempDir>,
     expected_msg: &str,
 ) -> Result<SocketAddr> {
     let line = child.expect_stdout_line_matches(expected_msg)?;
-    let rpc_addr_position =
-        line.find(expected_msg).expect("already checked for match") + expected_msg.len();
-    let rpc_addr = line[rpc_addr_position..].trim().to_string();
-    Ok(rpc_addr.parse()?)
+    parse_listen_addr(&line, expected_msg)
+}
+
+/// Parses a bound listen address from a matching server startup log line.
+pub fn parse_listen_addr(line: &str, expected_msg: &str) -> Result<SocketAddr> {
+    let (_, address) = line
+        .split_once(expected_msg)
+        .ok_or_else(|| color_eyre::eyre::eyre!("missing {expected_msg:?} in {line:?}"))?;
+    Ok(address.trim().parse()?)
 }

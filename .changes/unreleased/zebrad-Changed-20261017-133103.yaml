@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Peers now receive an empty inventory reply when the mempool is empty instead of waiting for their request to time out, avoiding block relay delays of up to 6 seconds on single-peer Zebra links.
-time: 2026-10-17T13:31:03.085738297+02:00

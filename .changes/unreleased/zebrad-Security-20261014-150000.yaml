@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: "Update `rustls` to 0.23.46 to fix RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as `sentry`, OpenTelemetry and Elasticsearch are affected."
-time: 2026-10-14T15:00:00.000000000-03:00

@@ -22,7 +22,7 @@ use tokio::{
     time::{timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Height, HeightDiff},
@@ -32,8 +32,8 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    BLOCK_DOWNLOAD_ROUND_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
 #[cfg(test)]
@@ -70,6 +70,25 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Returns a [`BlockDownloadVerifyError::BodyHeaderMismatch`] if `block`'s transactions don't
+/// match its header, so its coinbase height can't be trusted.
+///
+/// Only call this before using a block's height without verifying the block, because the block
+/// verifiers compute the same Merkle root. See [`zebra_consensus::body_matches_header()`].
+fn check_body_matches_header(
+    block: &block::Block,
+    hash: block::Hash,
+    advertiser_addr: Option<PeerSocketAddr>,
+) -> Result<(), BlockDownloadVerifyError> {
+    zebra_consensus::body_matches_header(block).map_err(|error| {
+        BlockDownloadVerifyError::BodyHeaderMismatch {
+            error,
+            hash,
+            advertiser_addr,
+        }
+    })
+}
+
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
@@ -80,7 +99,7 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
     },
 
-    #[error("permanent readiness error from the verifier service: {error:?}")]
+    #[error("readiness error from the verifier service: {error:?}")]
     VerifierServiceError {
         #[source]
         error: BoxError,
@@ -95,6 +114,14 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
         hash: block::Hash,
     },
+
+    /// No peer delivered the block before the download round's deadline.
+    ///
+    /// The round covers waiting for a peer that might have the block, retries, and both hedged
+    /// requests. The syncer treats this like a missing block: a hedged request that already
+    /// failed with `NotFound` can still be waiting for its sibling when the deadline drops both.
+    #[error("block download round timed out: {hash:?}")]
+    DownloadTimedOut { hash: block::Hash },
 
     /// A downloaded block was a long way ahead of the state chain tip.
     /// This error should be very rare during normal operation.
@@ -115,9 +142,10 @@ pub enum BlockDownloadVerifyError {
     /// A peer can answer with a canonical header and a rewritten coinbase height because the
     /// initial hash check does not recompute the header's commitment to the body's authorizing data
     /// (GHSA-g95h-hw6g-pvgv). Peers also legitimately serve blocks that are genuinely this old, so
-    /// the block is always dropped, but `advertiser_addr` is only set when the parent Zebra already
-    /// holds proves the claimed height wrong — a block's height is one more than its parent's. An
-    /// authentic old block, or one whose parent Zebra does not hold, is dropped anonymously.
+    /// the block is dropped, but `advertiser_addr` is only set when the parent Zebra already holds
+    /// proves the claimed height wrong — a block's height is one more than its parent's. An
+    /// authentic old block is dropped anonymously. When Zebra doesn't hold the parent, a body that
+    /// doesn't match its header returns [`Self::BodyHeaderMismatch`] instead.
     #[error("downloaded block was too far behind the chain tip: {height:?} {hash:?}")]
     BehindTipHeightLimit {
         height: block::Height,
@@ -127,6 +155,20 @@ pub enum BlockDownloadVerifyError {
 
     #[error("downloaded block had an invalid height: {hash:?}")]
     InvalidHeight {
+        hash: block::Hash,
+        advertiser_addr: Option<PeerSocketAddr>,
+    },
+
+    /// A downloaded block was going to be dropped for its height, or to pause or resume new
+    /// downloads, but its transactions don't match its header.
+    ///
+    /// The block hash only commits to the header, so a peer can answer a request for a block hash
+    /// with a body that claims any coinbase height (GHSA-g9rc-89v4-hhvf). That height can't be
+    /// trusted, so the requested block is still wanted.
+    #[error("downloaded block body did not match its header: {error} {hash:?}")]
+    BodyHeaderMismatch {
+        #[source]
+        error: zebra_consensus::BlockError,
         hash: block::Hash,
         advertiser_addr: Option<PeerSocketAddr>,
     },
@@ -168,10 +210,11 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
-    #[error(
-        "timeout during service readiness, download, verification, or internal downloader operation"
-    )]
+    #[error("timeout waiting for the network service to be ready")]
     Timeout,
+
+    #[error("the genesis block wasn't downloaded and verified before the genesis timeout")]
+    GenesisTimeout,
 }
 
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
@@ -240,8 +283,17 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// verify tasks, with the time each task was queued.
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, std::time::Instant)>,
+
+    /// The pending tasks in `cancel_handles` that might still be running.
+    in_flight_blocks: InFlightBlocks,
+
+    /// Whether [`Self::download_and_verify`] is waiting for network capacity.
+    ///
+    /// It stays set when an enclosing timeout cancels that wait, so the syncer can count the
+    /// timeout as the block's error.
+    awaiting_network_capacity: bool,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -271,17 +323,15 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
-
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
-                }
+            let result = join_result.expect("block download and verify tasks must not panic");
+            let hash = match &result {
+                Ok((_, hash)) | Err((_, hash)) => *hash,
+            };
+            if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
+                this.in_flight_blocks.remove(queued_at, hash);
             }
+
+            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
         } else {
             Poll::Ready(None)
         }
@@ -339,6 +389,8 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            in_flight_blocks: InFlightBlocks::default(),
+            awaiting_network_capacity: false,
         }
     }
 
@@ -351,7 +403,7 @@ where
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_handles.contains_key(&hash) {
+        if self.is_queued(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
@@ -364,8 +416,10 @@ where
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
         let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        let block_req = timeout_at(deadline, self.network.ready())
-            .await?
+        self.awaiting_network_capacity = true;
+        let ready = timeout_at(deadline, self.network.ready()).await;
+        self.awaiting_network_capacity = false;
+        let block_req = ready?
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
             .call(zn::Request::BlockDownload {
                 hash,
@@ -399,7 +453,8 @@ where
                             .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = timeout_at(deadline, block_req) => rsp?
+                    rsp = timeout_at(deadline, block_req) => rsp
+                        .map_err(|_| BlockDownloadVerifyError::DownloadTimedOut { hash })?
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
@@ -467,6 +522,10 @@ where
                 let block_height = if let Some(block_height) = block.coinbase_height() {
                     block_height
                 } else {
+                    // Security: every valid block has a height, so a block without one is only
+                    // dropped if its body is the one its header commits to.
+                    check_body_matches_header(&block, hash, advertiser_addr)?;
+
                     debug!(
                         ?hash,
                         "synced block with no height: dropped downloaded block"
@@ -477,6 +536,12 @@ where
                 };
 
                 if block_height > lookahead_drop_height {
+                    // Security: a peer can serve a requested block hash with a body that claims a
+                    // height far ahead, so only drop the block if its body is the one its header
+                    // commits to. A genuine block this far ahead is still dropped without scoring
+                    // the peer that served it (GHSA-qhr3-cvch-5fh2).
+                    check_body_matches_header(&block, hash, advertiser_addr)?;
+
                     Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
                         height: block_height,
                         hash,
@@ -485,6 +550,13 @@ where
                     // This log can be very verbose, usually hundreds of blocks are dropped.
                     // So we only log at info level for the first above-height block.
                     if !past_lookahead_limit_receiver.cloned_watch_data() {
+                        // Security: a peer can serve a requested block hash with a body that
+                        // claims a height in this range, so only pause new downloads if the body
+                        // is the one its header commits to (GHSA-g9rc-89v4-hhvf). This only checks
+                        // the block that sets the pause, so the blocks that follow it, which the
+                        // verifier checks anyway, aren't checked twice.
+                        check_body_matches_header(&block, hash, advertiser_addr)?;
+
                         info!(
                             ?hash,
                             ?block_height,
@@ -516,6 +588,10 @@ where
 
                     metrics::counter!("sync.max.height.limit.paused.count").increment(1);
                 } else if block_height <= lookahead_reset_height && past_lookahead_limit_receiver.cloned_watch_data() {
+                    // Security: like the pause, only a body that its header commits to can end
+                    // it. This only checks the block that ends the pause.
+                    check_body_matches_header(&block, hash, advertiser_addr)?;
+
                     // Reset the watched value to false, since we're well under the limit.
                     // We need to block here, because if we don't the syncer can hang.
 
@@ -548,39 +624,49 @@ where
                     // Peers legitimately serve genuinely old blocks: the syncer tolerates an
                     // out-of-order first hash in `FindBlocks` responses, so a requested hash can
                     // resolve to an old side-chain block that an honest peer still has. Those
-                    // responses are consistent with their parent, or have a parent we don't hold, so
-                    // they are dropped without scoring.
-                    let advertiser_addr = match advertiser_addr {
-                        Some(advertiser_addr) => match timeout(
-                            PARENT_LOOKUP_TIMEOUT,
-                            read_state.oneshot(zs::ReadRequest::BlockHeader(
-                                block.header.previous_block_hash.into(),
-                            )),
-                        )
-                        .await
-                        {
+                    // responses are consistent with their parent, or have a parent we don't hold
+                    // and a body that matches their header, so they are dropped without scoring.
+                    let parent_contradicts_height = match advertiser_addr {
+                        Some(_) => matches!(
+                            timeout(
+                                PARENT_LOOKUP_TIMEOUT,
+                                read_state.oneshot(zs::ReadRequest::BlockHeader(
+                                    block.header.previous_block_hash.into(),
+                                )),
+                            )
+                            .await,
                             Ok(Ok(zs::ReadResponse::BlockHeader {
                                 height: parent_height,
                                 ..
-                            })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
-                            // Parent unknown, height consistent with it, or the lookup failed or
-                            // timed out: there is no proof of misbehaviour, so the peer is not
-                            // scored.
-                            _ => None,
-                        },
+                            })) if (parent_height + 1) != Some(block_height)
+                        ),
                         // There is no peer to score, so skip the state lookup.
-                        None => None,
+                        None => false,
                     };
+
+                    if parent_contradicts_height {
+                        return Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+                            height: block_height,
+                            hash,
+                            advertiser_addr,
+                        });
+                    }
+
+                    // Parent unknown, height consistent with it, or the lookup failed or timed
+                    // out: the parent doesn't prove misbehaviour. During checkpoint sync, Zebra
+                    // only holds the parent of the first block in each checkpoint range, so check
+                    // the body against its header instead (GHSA-g9rc-89v4-hhvf).
+                    check_body_matches_header(&block, hash, advertiser_addr)?;
 
                     return Err(BlockDownloadVerifyError::BehindTipHeightLimit {
                         height: block_height,
                         hash,
-                        advertiser_addr,
+                        advertiser_addr: None,
                     });
                 }
 
-                // Wait for the verifier service to be ready.
-                let readiness = verifier.ready();
+                // Bound readiness separately: the verifier's request timeout starts at `call`.
+                let readiness = timeout(BLOCK_VERIFY_TIMEOUT, verifier.ready());
                 // Prefer the cancel handle if both are ready.
                 let verifier = tokio::select! {
                     biased;
@@ -589,7 +675,8 @@ where
                         metrics::counter!("sync.cancelled.verify.ready.count").increment(1);
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
                     }
-                    verifier = readiness => verifier,
+                    verifier = readiness => verifier
+                        .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error: error.into() })?,
                 };
 
                 // Verify the block.
@@ -647,11 +734,16 @@ where
         // Try to start the spawned task before queueing the next block request
         tokio::task::yield_now().await;
 
+        let queued_at = std::time::Instant::now();
+        let task_handle = task.abort_handle();
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(hash, (cancel_tx, queued_at))
+                .is_none(),
             "blocks are only queued once"
         );
+        self.in_flight_blocks.insert(queued_at, hash, task_handle);
 
         Ok(())
     }
@@ -664,9 +756,11 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        for (_hash, (cancel, _queued_at)) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
+        self.in_flight_blocks.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -682,13 +776,28 @@ where
             .send(false);
     }
 
+    /// Returns whether an enclosing timeout cancelled a wait for network capacity, and forgets
+    /// that wait.
+    pub fn take_cancelled_network_wait(&mut self) -> bool {
+        std::mem::take(&mut self.awaiting_network_capacity)
+    }
+
+    /// Returns true while a hash is queued, including completed tasks whose results are unread.
+    pub fn is_queued(&self, hash: &block::Hash) -> bool {
+        self.cancel_handles.contains_key(hash)
+    }
+
     /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
     }
 
+    /// Returns the tasks that might still be running, which the sync diagnostics share.
+    pub fn in_flight_blocks(&self) -> InFlightBlocks {
+        self.in_flight_blocks.clone()
+    }
+
     /// Returns true if there are no in-flight download and verify tasks.
-    #[allow(dead_code)]
     pub fn is_empty(&mut self) -> bool {
         self.pending.is_empty()
     }

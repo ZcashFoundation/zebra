@@ -125,7 +125,7 @@ pub fn init() -> impl Drop {
                     "<std::panic::AssertUnwindSafe",
                     "core::result::Result",
                     "<T as futures_util",
-                    "<tracing_futures::Instrumented",
+                    "<tracing::instrument::Instrumented",
                     "test::assert_test_result",
                     "spandoc::",
                 ];

@@ -99,10 +99,15 @@ fn adjusted_mempool_misbehavior_score(
     verification_height: Height,
     network: &Network,
 ) -> u32 {
-    let is_grace_mismatch = matches!(error, TransactionError::WrongConsensusBranchId)
-        && transaction_upgrade.is_some_and(|transaction_upgrade| {
-            is_in_branch_id_grace_period(transaction_upgrade, verification_height, network)
-        });
+    let is_grace_mismatch =
+        match (error, transaction_upgrade) {
+            (TransactionError::WrongConsensusBranchId, Some(_)) => true,
+            // V4 and older transactions commit to the branch ID only in their signatures, so one
+            // signed for an adjacent upgrade fails its scripts instead. zcashd checks the previous
+            // branch ID explicitly; Zebra doesn't, so it forgives any script failure in the window.
+            (TransactionError::Script(_), None) => true,
+            _ => false,
+        } && is_in_branch_id_grace_period(transaction_upgrade, verification_height, network);
 
     // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
     // relay a transaction we reject.
@@ -121,8 +126,9 @@ fn adjusted_mempool_misbehavior_score(
 
 /// Returns `true` if `transaction_upgrade` activates immediately before or after the upgrade
 /// current at `height` on `network`, and `height` is within the grace window of that boundary.
+/// `None` matches either adjacent upgrade.
 fn is_in_branch_id_grace_period(
-    transaction_upgrade: NetworkUpgrade,
+    transaction_upgrade: Option<NetworkUpgrade>,
     height: Height,
     network: &Network,
 ) -> bool {
@@ -132,17 +138,18 @@ fn is_in_branch_id_grace_period(
     };
     let grace_blocks =
         BRANCH_ID_GRACE_PERIOD.num_seconds() / current.target_spacing().num_seconds();
+    let matches = |upgrade| transaction_upgrade.is_none_or(|tx_upgrade| tx_upgrade == upgrade);
 
     let previous = activations.range(..current_height).next_back();
     let next = activations
         .range((Bound::Excluded(height), Bound::Unbounded))
         .next();
 
-    previous.is_some_and(|(_, &previous)| {
-        previous == transaction_upgrade && height - current_height < grace_blocks
-    }) || next.is_some_and(|(&next_height, &next)| {
-        next == transaction_upgrade && next_height - height <= grace_blocks
-    })
+    previous
+        .is_some_and(|(_, &previous)| matches(previous) && height - current_height < grace_blocks)
+        || next.is_some_and(|(&next_height, &next)| {
+            matches(next) && next_height - height <= grace_blocks
+        })
 }
 
 /// The state of the mempool.
@@ -421,11 +428,18 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.state.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.state.clone(),
+            )
+            .with_max_datacarrier_bytes(
+                self.config
+                    .max_datacarrier_bytes
+                    .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
+            ),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
@@ -778,7 +792,7 @@ impl Service<Request> for Mempool {
 
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
-                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
+                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.metric_label()).increment(1);
 
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
@@ -800,6 +814,7 @@ impl Service<Request> for Mempool {
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
                 *last_seen_tip_hash = block.hash;
+                let cleanup_start = std::time::Instant::now();
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -813,6 +828,8 @@ impl Service<Request> for Mempool {
                 // Clear any transaction rejections if they might have become valid after
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
+                metrics::histogram!("mempool.tip_cleanup.duration_seconds")
+                    .record(cleanup_start.elapsed().as_secs_f64());
 
                 mined_mempool_ids.extend(mined);
                 invalidated_ids.extend(invalidated);
@@ -823,7 +840,10 @@ impl Service<Request> for Mempool {
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
             if let Some(tip_height) = best_tip_height {
+                let expiry_start = std::time::Instant::now();
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
+                metrics::histogram!("mempool.expiry.duration_seconds")
+                    .record(expiry_start.elapsed().as_secs_f64());
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);

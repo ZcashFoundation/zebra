@@ -30,15 +30,19 @@ which are shared by all tests. Tests prefer the latest image generated from the 
 But if a state from the same commit is not available, tests will use the latest image from
 any branch and commit, as long as the state version is the same.
 
+If no image exists for the current state version, tests use the newest image from the previous
+state version, when zebrad can upgrade it in place.
+
 Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml) on tier 2 platforms using GitHub actions runners.
 
 ## Automated Merges
 
 We use [GitHub's merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
-to merge pull requests. To merge, a PR has to pass all required `main` checks and be approved
-by a Zebra developer, as stated by the `PR Requirements` ruleset.
+to merge pull requests. To merge, a PR has to pass all required `main` checks and have one
+approving review, as stated by the `PR Requirements` ruleset. A maintainer's PR can be approved
+by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
 
-After approving a green PR, a Zebra maintainer presses **Merge when ready**. This
+Once a PR is approved and green, a Zebra maintainer presses **Merge when ready**. This
 manual enrollment applies to Zebra-owned and fork PRs; authors do not need write access
 to the queue. The queue builds the PR on top of `main` plus every PR ahead of it,
 re-runs the required checks against that merged result, and merges it if they pass. A
@@ -51,6 +55,8 @@ Some PRs don't use the queue:
 
 - Admin merges, which happen when there are multiple failures on the `main` branch
   (see `Admin: Manually Merging PRs` below)
+- PRs into the [`next` branch](next-branch.md), which run the same required checks
+  except `mergefreeze`, need no approval, and merge directly
 
 ### Holding a Pull Request Back
 
@@ -92,7 +98,7 @@ enrollment and high/low priority rules.
 
 | Queue behavior | GitHub merge queue policy |
 | --- | --- |
-| Enrollment | An approving Zebra maintainer selects **Merge when ready** |
+| Enrollment | A Zebra maintainer selects **Merge when ready** on an approved PR |
 | Ordering | FIFO; a maintainer can manually jump an urgent PR to the top |
 | CI concurrency | Up to five cumulative merge-group builds |
 | Final merges | One merge commit per PR |
@@ -222,8 +228,10 @@ workflow automatically deletes test instances, instance templates, disks, and im
 
 If you want to keep instances, instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
 
-- deleted instances, instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
-- deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
+- deleted instances and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
+- deleted instance templates start with `zebrad-`, and deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
+
+A template that a managed instance group still uses is never deleted.
 
 Our production Google Cloud project doesn't have automated deletion.
 

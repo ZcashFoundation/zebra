@@ -23,7 +23,10 @@ use zebra_state::{
 
 use crate::{
     commands::EntryPoint,
-    components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
+    components::{
+        sync::end_of_support::EOS_PANIC_MESSAGE_HEADER,
+        tracing::{json_panic_line, LogFormat, Tracing},
+    },
     config::ZebradConfig,
 };
 
@@ -48,6 +51,9 @@ lazy_static::lazy_static! {
 /// - the number of commits since the last version tag, and
 /// - the git commit.
 ///
+/// Otherwise, includes the git commit alone if it is known, such as in Docker images, which are
+/// built without `.git`.
+///
 /// For details, see <https://semver.org/>
 pub fn build_version() -> Version {
     // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
@@ -61,7 +67,23 @@ pub fn build_version() -> Version {
         )
     });
 
-    vergen_build_version().unwrap_or(fallback_version)
+    with_git_commit(
+        vergen_build_version().unwrap_or(fallback_version),
+        ZebradApp::git_commit(),
+    )
+}
+
+/// Adds `git.<git_commit>` build metadata to `version`, if it has no build metadata.
+fn with_git_commit(mut version: Version, git_commit: Option<&str>) -> Version {
+    if version.build.is_empty() {
+        if let Some(build) =
+            git_commit.and_then(|commit| BuildMetadata::new(&format!("git.{commit}")).ok())
+        {
+            version.build = build;
+        }
+    }
+
+    version
 }
 
 /// Returns the `zebrad` version from this build, if available from `vergen`.
@@ -401,24 +423,17 @@ impl Application for ZebradApp {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        if env::var_os("SENTRY_DSN").is_some() {
-            #[cfg(feature = "sentry")]
-            let guard = crate::sentry::init();
+        let uses_sentry = env::var_os("SENTRY_DSN").is_some();
+        let json_logs = config.tracing.log_format == LogFormat::Json;
 
-            std::panic::set_hook(Box::new(move |panic_info| {
-                let panic_report = panic_hook.panic_report(panic_info);
-                eprintln!("{panic_report}");
+        #[cfg(feature = "sentry")]
+        if uses_sentry {
+            crate::sentry::init(&config.network.network);
+        }
 
-                #[cfg(feature = "sentry")]
-                {
-                    let event = crate::sentry::panic_event_from(panic_report);
-                    sentry::capture_event(event);
-
-                    if !guard.close(None) {
-                        warn!("unable to flush sentry events during panic");
-                    }
-                }
-            }));
+        // Otherwise, the default panic hook prints the panic.
+        if uses_sentry || json_logs {
+            install_panic_hook(panic_hook, uses_sentry, json_logs);
         }
 
         // Apply the configured number of threads to the thread pool.
@@ -545,6 +560,18 @@ impl Application for ZebradApp {
 
         let shutdown_result = self.state().components().shutdown(self, shutdown);
 
+        #[cfg(feature = "sentry")]
+        {
+            let status = match shutdown {
+                Shutdown::Graceful => sentry::protocol::SessionStatus::Exited,
+                Shutdown::Forced | Shutdown::Crash => sentry::protocol::SessionStatus::Crashed,
+            };
+
+            if !crate::sentry::end(status) {
+                warn!("unable to flush sentry events during shutdown");
+            }
+        }
+
         self.state()
             .components_mut()
             .get_downcast_mut::<Tracing>()
@@ -572,4 +599,69 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
 
     ZebradApp::run(app_cell, args);
     process::exit(0);
+}
+
+/// Installs a panic hook that writes the panic to standard error, as one JSON line with JSON
+/// logs, and sends it to Sentry when Sentry is enabled.
+///
+/// Logs are written by another thread, which doesn't run again after a panic, so the panic is
+/// written to standard error directly.
+#[allow(clippy::print_stderr)]
+fn install_panic_hook(
+    panic_hook: color_eyre::config::PanicHook,
+    #[cfg_attr(not(feature = "sentry"), allow(unused_variables))] uses_sentry: bool,
+    json_logs: bool,
+) {
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let panic_report = panic_hook.panic_report(panic_info);
+
+        if json_logs {
+            eprintln!("{}", json_panic_line(panic_info));
+        } else {
+            eprintln!("{panic_report}");
+        }
+
+        #[cfg(feature = "sentry")]
+        if uses_sentry {
+            let event = crate::sentry::panic_event_from(panic_info, panic_report);
+            sentry::capture_event(event);
+
+            if !crate::sentry::end(sentry::protocol::SessionStatus::Crashed) {
+                warn!("unable to flush sentry events during panic");
+            }
+        }
+    }));
+}
+
+#[cfg(test)]
+mod tests {
+    use semver::Version;
+
+    use super::with_git_commit;
+
+    #[test]
+    fn with_git_commit_adds_commit_without_build_metadata() {
+        let version = with_git_commit(Version::new(7, 0, 0), Some("6d1e414"));
+
+        assert_eq!(version.to_string(), "7.0.0+git.6d1e414");
+    }
+
+    #[test]
+    fn with_git_commit_keeps_git_describe_metadata() {
+        let version =
+            Version::parse("7.0.0-rc.0+12.g6d1e414").expect("hard-coded version is valid");
+
+        assert_eq!(with_git_commit(version.clone(), Some("6d1e414")), version);
+    }
+
+    #[test]
+    fn with_git_commit_skips_missing_or_invalid_commits() {
+        let version = Version::new(7, 0, 0);
+
+        assert_eq!(with_git_commit(version.clone(), None), version);
+        assert_eq!(
+            with_git_commit(version.clone(), Some("not a commit")),
+            version
+        );
+    }
 }

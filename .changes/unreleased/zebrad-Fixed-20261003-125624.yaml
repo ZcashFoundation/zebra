@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: Zebra no longer gets stuck on a losing branch when many competing blocks arrive at once, as in Testnet minimum-difficulty bursts. Thanks to @tuan-phan and @SphereDonout ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
-time: 2026-10-03T12:56:24.000000+00:00

@@ -20,26 +20,6 @@ use crate::{
     },
 };
 
-use super::sinsemilla::*;
-
-/// Used to derive a diversified base point from a diversifier value.
-///
-/// DiversifyHash^Orchard(d) := {︃ GroupHash^P("z.cash:Orchard-gd",""), if P = 0_P
-///                               P,                                   otherwise
-///
-/// where P = GroupHash^P(("z.cash:Orchard-gd", LEBS2OSP_l_d(d)))
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash>
-fn diversify_hash(d: &[u8]) -> pallas::Point {
-    let p = pallas_group_hash(b"z.cash:Orchard-gd", d);
-
-    if <bool>::from(p.is_identity()) {
-        pallas_group_hash(b"z.cash:Orchard-gd", b"")
-    } else {
-        p
-    }
-}
-
 /// A _diversifier_, as described in [protocol specification §4.2.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
@@ -70,29 +50,9 @@ impl From<Diversifier> for [u8; 11] {
     }
 }
 
-impl From<Diversifier> for pallas::Point {
-    /// Derive a _diversified base_ point.
-    ///
-    /// g_d := DiversifyHash^Orchard(d)
-    ///
-    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    fn from(d: Diversifier) -> Self {
-        diversify_hash(&d.0)
-    }
-}
-
 impl PartialEq<[u8; 11]> for Diversifier {
     fn eq(&self, other: &[u8; 11]) -> bool {
         self.0 == *other
-    }
-}
-
-impl From<Diversifier> for pallas::Affine {
-    /// Get a diversified base point from a diversifier value in affine
-    /// representation.
-    fn from(d: Diversifier) -> Self {
-        let projective_point = pallas::Point::from(d);
-        projective_point.into()
     }
 }
 

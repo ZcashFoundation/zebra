@@ -537,13 +537,8 @@ fn side_chain_fixture() -> Result<SideChainFixture> {
 
     // Create state with a finalized and non-finalized component
     let mut non_finalized_state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -591,7 +586,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.chain_iter(),
         &finalized_state.db,
         side_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "any_block should find side chain block by hash"
@@ -603,7 +598,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.best_chain(),
         &finalized_state.db,
         side_hash.into(),
-    );
+    )?;
     assert!(
         found.is_none(),
         "block should NOT find side chain block by hash"
@@ -614,7 +609,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.chain_iter(),
         &finalized_state.db,
         best_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "any_block should find best chain block by hash"
@@ -626,7 +621,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.best_chain(),
         &finalized_state.db,
         best_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "block should find best chain block by hash"

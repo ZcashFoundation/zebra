@@ -45,6 +45,7 @@ use zebra_chain::{
     },
     serialization::ZcashDeserializeInto,
 };
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::state_database_format_version_in_code;
 
 use crate::common::{
@@ -52,6 +53,7 @@ use crate::common::{
         wait_for_state_version_message, wait_for_state_version_upgrade,
         DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
+    config::{parse_listen_addr, read_listen_addr_from_logs},
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -87,7 +89,7 @@ pub async fn run() -> Result<()> {
 
     // Launch zebra with peers and using a predefined zebrad state path.
     // These tests only make queries, so they can run while new blocks arrive.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+    let mut zebrad = if let Some(zebrad) = spawn_zebrad_for_rpc(
         network.clone(),
         test_name,
         test_type,
@@ -99,20 +101,17 @@ pub async fn run() -> Result<()> {
             "running gRPC query tests using lightwalletd & zebrad...",
         );
 
-        zebrad_and_address
+        zebrad
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
     };
-
-    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
     // Store the state version message so we can wait for the upgrade later if needed.
     let state_version_message = wait_for_state_version_message(&mut zebrad)?;
 
     tracing::info!(
         ?test_type,
-        ?zebra_rpc_address,
         "launched zebrad, waiting for zebrad to open its RPC port..."
     );
 
@@ -121,16 +120,21 @@ pub async fn run() -> Result<()> {
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
     //
-    // If this line hangs, move it before the RPC port check.
-    // (The RPC port is usually much faster than even a quick state upgrade.)
-    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
-        wait_for_state_version_upgrade(
+    let zebra_rpc_address = if DATABASE_FORMAT_UPGRADE_IS_LONG {
+        read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?
+    } else {
+        let startup_logs = wait_for_state_version_upgrade(
             &mut zebrad,
             &state_version_message,
             state_database_format_version_in_code(),
-            [format!("Opened RPC endpoint at {zebra_rpc_address}")],
+            [OPENED_RPC_ENDPOINT_MSG.to_string()],
         )?;
-    }
+        let rpc_log = startup_logs
+            .iter()
+            .find(|line| line.contains(OPENED_RPC_ENDPOINT_MSG))
+            .expect("the RPC endpoint log was matched");
+        parse_listen_addr(rpc_log, OPENED_RPC_ENDPOINT_MSG)?
+    };
 
     tracing::info!(
         ?zebra_rpc_address,

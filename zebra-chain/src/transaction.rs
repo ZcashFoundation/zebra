@@ -213,13 +213,23 @@ impl Transaction {
     }
 
     /// Returns `true` if this transaction has transparent inputs.
+    ///
+    /// Reads the bundle's input count directly: `inputs()` rebuilds and converts the whole
+    /// input vector, which is wasteful when only the count is needed.
     pub fn has_transparent_inputs(&self) -> bool {
-        !self.inputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vin.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent outputs.
+    ///
+    /// Reads the bundle's output count directly: `outputs()` rebuilds and converts the whole
+    /// output vector, which is wasteful when only the count is needed.
     pub fn has_transparent_outputs(&self) -> bool {
-        !self.outputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vout.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent inputs or outputs.
@@ -668,17 +678,25 @@ impl Transaction {
 
     /// Return the transparent value balance,
     /// the change in the transaction value pool due to transparent inputs and outputs.
-    #[allow(clippy::unwrap_in_result)]
     pub fn transparent_value_balance_from_outputs(
         &self,
         outputs: &std::collections::HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        self.transparent_value_balance_with(|input| input.value_from_outputs(outputs))
+    }
+
+    /// Computes the transparent balance using borrowed input values.
+    #[allow(clippy::unwrap_in_result)]
+    fn transparent_value_balance_with(
+        &self,
+        input_value: impl Fn(&transparent::Input) -> Amount<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
         use crate::amount::Error as AmountError;
 
         let input_value = self
             .inputs()
             .iter()
-            .map(|i| i.value_from_outputs(outputs))
+            .map(input_value)
             .sum::<Result<Amount<NonNegative>, AmountError>>()
             .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
@@ -721,24 +739,16 @@ impl Transaction {
         Ok(ValueBalance::from_sprout_amount(total))
     }
 
-    /// Get the overall value balance for this transaction.
-    pub fn value_balance(
+    /// Get the overall value balance using plain or ordered UTXOs, without copying outputs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `utxos` omits a transparent input's UTXO.
+    pub fn value_balance<U: AsRef<transparent::Utxo>>(
         &self,
-        utxos: &std::collections::HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos: &std::collections::HashMap<transparent::OutPoint, U>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        // Collect only the outputs this transaction spends. Cloning the whole UTXO map here
-        // would make block validation quadratic in the number of transactions, since
-        // `remaining_transaction_value` calls this once per transaction.
-        let outputs: std::collections::HashMap<_, _> = self
-            .spent_outpoints()
-            .filter_map(|outpoint| {
-                utxos
-                    .get(&outpoint)
-                    .map(|utxo| (outpoint, utxo.output.clone()))
-            })
-            .collect();
-
-        let transparent = self.transparent_value_balance_from_outputs(&outputs)?;
+        let transparent = self.transparent_value_balance_with(|input| input.value(utxos))?;
         let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();
@@ -754,7 +764,7 @@ impl Transaction {
         network: &crate::parameters::Network,
         spend_height: block::Height,
     ) -> transparent::CoinbaseSpendRestriction {
-        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
+        if !self.has_transparent_outputs() || network.should_allow_unshielded_coinbase_spends() {
             transparent::CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height }
         } else {
             transparent::CoinbaseSpendRestriction::DisallowCoinbaseSpend
@@ -1107,10 +1117,10 @@ impl Clone for Transaction {
     }
 }
 
-// Human-readable Serialize for elasticsearch, tests, and snapshots.
+// Human-readable Serialize for tests and snapshots.
 // Produces structured output matching the old Transaction enum format
 // so that RON snapshot tests remain human-readable.
-#[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl serde::Serialize for Transaction {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStructVariant;

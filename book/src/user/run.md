@@ -56,7 +56,6 @@ Zebra release builds include several features by default:
 
 Additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options) that require explicit enabling:
 
-- `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
 - `internal-miner` for [Regtest internal mining](https://zebra.zfnd.org/user/regtest.html)
 
 You can combine multiple features by listing them as parameters of the

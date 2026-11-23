@@ -21,7 +21,7 @@ use crate::common::{
     config::{
         default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
 };
 
@@ -116,35 +116,54 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
 
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
 
     // Get an initial template, and take the long poll id a miner would hold work against.
-    let initial_template: BlockTemplateResponse = client
+    let mut initial_template: BlockTemplateResponse = client
         .json_result_from_call("getblocktemplate", "[]")
         .await
         .map_err(|err| eyre!(err))?;
-    let initial_long_poll_id = initial_template.long_poll_id();
 
-    // Start a long poll against that id. It must block until the template is invalidated.
-    let long_poll_client = client.clone();
-    let long_poll = tokio::spawn(async move {
-        long_poll_client
-            .json_result_from_call::<BlockTemplateResponse>(
-                "getblocktemplate",
-                format!(r#"[{{"longpollid":"{initial_long_poll_id}"}}]"#),
-            )
-            .await
-            .map_err(|err| eyre!(err))
-    });
+    // The template updater can replace the startup template without a tip change, for example
+    // when its first build raced the genesis block commit. A long poll may return for such a
+    // replacement, but never for an unchanged template, so hold the first one that keeps waiting.
+    let mut replacements = 0;
+    let long_poll = loop {
+        let initial_long_poll_id = initial_template.long_poll_id().to_string();
+        let long_poll_client = client.clone();
+        let params = format!(r#"[{{"longpollid":"{initial_long_poll_id}"}}]"#);
+        let long_poll = tokio::spawn(async move {
+            long_poll_client
+                .json_result_from_call::<BlockTemplateResponse>("getblocktemplate", params)
+                .await
+                .map_err(|err| eyre!(err))
+        });
 
-    // Let the long poll reach the RPC and start waiting before the tip moves under it.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert!(
-        !long_poll.is_finished(),
-        "long poll must keep waiting while the template is still valid",
-    );
+        // Let the long poll reach the RPC and start waiting before the tip moves under it.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if !long_poll.is_finished() {
+            break long_poll;
+        }
+
+        let replacement = long_poll.await??;
+        assert_ne!(
+            replacement.long_poll_id().to_string(),
+            initial_long_poll_id,
+            "long poll must keep waiting while the template is still valid",
+        );
+        assert_eq!(
+            replacement.height(),
+            initial_template.height(),
+            "the tip must not move before the test advances it",
+        );
+        replacements += 1;
+        assert!(
+            replacements < 3,
+            "the startup template must settle, it was replaced {replacements} times",
+        );
+        initial_template = replacement;
+    };
 
     // Invalidate the template by advancing the tip from a second client.
     client.generate(1).await?;
@@ -300,9 +319,8 @@ async fn block_template_includes_mempool_transactions_in_dependency_order() -> R
 
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
 
     // Mine a coinbase to our key at height 1, then enough blocks for it to mature.
     client.generate(COINBASE_MATURITY + 1).await?;
@@ -471,9 +489,8 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=4 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -491,9 +508,8 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     client.submit_block(blocks[0].clone()).await?;
     client.submit_block(blocks[1].clone()).await?;
 
@@ -595,9 +611,8 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=4 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -764,9 +779,8 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=3 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -784,9 +798,8 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     client.submit_block(blocks[0].clone()).await?;
     client.submit_block(blocks[1].clone()).await?;
 
@@ -848,12 +861,11 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     // Use a longer timeout because generating MAX_BLOCK_REORG_HEIGHT + 10 blocks
     // in a single RPC call takes ~400s at ~400ms per block.
     let client =
         RpcRequestClient::new_with_timeout(rpc_address, std::time::Duration::from_secs(15 * 60));
+    wait_for_mempool_activation(&client).await?;
 
     // Mine enough blocks to push the first few blocks into the finalized state.
     // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT (= 1002).
@@ -1459,11 +1471,10 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tracing::info!("waiting for Zebra state cache to be opened");
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    tracing::info!("waiting for the genesis block and mempool");
 
     let rpc_client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&rpc_client).await?;
     let mut blocks = Vec::new();
     for _ in 0..50 {
         let (block, _) = rpc_client.block_from_template(&net).await?;

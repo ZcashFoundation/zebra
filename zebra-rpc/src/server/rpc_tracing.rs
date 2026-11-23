@@ -14,11 +14,15 @@
 //! - Hyperledger Besu (Ethereum execution client)
 //! - Hyperledger Fabric
 
+use std::{collections::HashSet, sync::Arc};
+
 use jsonrpsee::{
     server::middleware::rpc::{layer::ResponseFuture, RpcServiceT},
     MethodResponse,
 };
 use tracing::{info_span, Instrument};
+
+use super::rpc_metrics::method_label;
 
 /// Middleware that creates SERVER spans for each RPC request.
 ///
@@ -29,19 +33,25 @@ use tracing::{info_span, Instrument};
 ///
 /// Each span includes:
 /// - `otel.kind = "server"` - Marks this as a server span for SPM
-/// - `rpc.method` - The JSON-RPC method name (e.g., "getinfo", "getblock")
+/// - `rpc.method` - The registered JSON-RPC method name (e.g., "getinfo", "getblock"), or
+///   `unknown` for unregistered names, since span metrics turn it into a label
 /// - `rpc.system = "jsonrpc"` - The RPC protocol
 /// - `otel.status_code` - "ERROR" on failure (empty on success)
 /// - `rpc.error_code` - JSON-RPC error code on failure
 #[derive(Clone)]
 pub struct RpcTracingMiddleware<S> {
     service: S,
+    registered_methods: Arc<HashSet<&'static str>>,
 }
 
 impl<S> RpcTracingMiddleware<S> {
-    /// Create a new `RpcTracingMiddleware` with the given `service`.
-    pub fn new(service: S) -> Self {
-        Self { service }
+    /// Create a new `RpcTracingMiddleware` with the given `service` and registered method names,
+    /// collected from the server's `RpcModule::method_names()` iterator.
+    pub fn new(service: S, registered_methods: Arc<HashSet<&'static str>>) -> Self {
+        Self {
+            service,
+            registered_methods,
+        }
     }
 }
 
@@ -53,14 +63,14 @@ where
 
     fn call(&self, request: jsonrpsee::types::Request<'a>) -> Self::Future {
         let service = self.service.clone();
-        let method = request.method_name().to_owned();
+        let method = method_label(&self.registered_methods, request.method_name());
 
         // Create span OUTSIDE the async block so it's properly registered
         // with the tracing subscriber before the future starts.
         let span = info_span!(
             "rpc_request",
             otel.kind = "server",
-            rpc.method = %method,
+            rpc.method = method,
             rpc.system = "jsonrpc",
             otel.status_code = tracing::field::Empty,
             rpc.error_code = tracing::field::Empty,

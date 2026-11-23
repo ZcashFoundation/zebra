@@ -14,10 +14,7 @@ use futures::{
     channel::{mpsc, oneshot},
     future::{self, AbortHandle, Future, FutureExt},
 };
-use tokio::{
-    sync::broadcast::{self, error::TryRecvError},
-    task::JoinHandle,
-};
+use tokio::task::JoinHandle;
 
 use zebra_chain::block::Height;
 
@@ -27,7 +24,6 @@ use crate::{
         error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectedAddr,
         ConnectionInfo, ErrorSlot,
     },
-    peer_set::InventoryChange,
     protocol::{
         external::{types::Version, AddrInVersion},
         types::{Nonce, PeerServices},
@@ -41,16 +37,16 @@ mod vectors;
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
     client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
+    /// Receives response-free block adverts from the mocked connection.
+    pub(crate) block_advert_receiver: tokio::sync::mpsc::Receiver<crate::peer_set::BlockAdvert>,
     shutdown_receiver: Option<oneshot::Receiver<CancelHeartbeatTask>>,
-    #[allow(dead_code)]
-    inv_receiver: Option<broadcast::Receiver<InventoryChange>>,
     error_slot: ErrorSlot,
     remote_version: Version,
     connection_aborter: AbortHandle,
     heartbeat_aborter: AbortHandle,
 }
 
-/// A client request using the same response and missing-inventory handling as a connection.
+/// A client request using the same response handling as a connection.
 pub struct ReceivedClientRequest(super::InProgressClientRequest);
 
 impl ReceivedClientRequest {
@@ -59,7 +55,7 @@ impl ReceivedClientRequest {
         &self.0.request
     }
 
-    /// Sends a response through the production response sender and inventory collector.
+    /// Sends a response through the production response sender.
     pub fn respond(self, response: Result<crate::Response, SharedPeerError>) {
         let _ = self.0.tx.send(response);
     }
@@ -87,6 +83,19 @@ impl ClientTestHarness {
     /// Gets the remote peer protocol version reported by the [`Client`].
     pub fn remote_version(&self) -> Version {
         self.remote_version
+    }
+
+    /// Acknowledge a mock connection's queued advert; real-write tests use `Connection::run`.
+    pub(crate) fn receive_block_advert(&mut self) -> zebra_chain::block::Hash {
+        let advert = self
+            .block_advert_receiver
+            .try_recv()
+            .expect("an advert was queued");
+        advert
+            .result
+            .send(Ok(()))
+            .expect("the advertiser is awaiting delivery");
+        advert.hash
     }
 
     /// Returns true if the [`Client`] instance still wants connection heartbeats to be sent.
@@ -159,43 +168,6 @@ impl ClientTestHarness {
             Ok(request) => ReceiveRequestAttempt::Request(request),
             Err(mpsc::TryRecvError::Closed) => ReceiveRequestAttempt::Closed,
             Err(mpsc::TryRecvError::Empty) => ReceiveRequestAttempt::Empty,
-        }
-    }
-
-    /// Drops the receiver endpoint of [`InventoryChange`]s, forcefully closing the channel.
-    ///
-    /// The inventory registry that would track the changes is mocked for testing.
-    ///
-    /// Note: this closes the broadcast receiver, it doesn't have a separate `close()` method.
-    #[allow(dead_code)]
-    pub fn drop_inventory_change_receiver(&mut self) {
-        self.inv_receiver
-            .take()
-            .expect("inventory change receiver endpoint has already been dropped");
-    }
-
-    /// Tries to receive an [`InventoryChange`] sent by the [`Client`] instance.
-    ///
-    /// This method acts like a mock inventory registry, allowing tests to track the changes.
-    ///
-    /// TODO: make ReceiveRequestAttempt generic, and use it here.
-    #[allow(dead_code)]
-    #[allow(clippy::unwrap_in_result)]
-    pub(crate) fn try_to_receive_inventory_change(&mut self) -> Option<InventoryChange> {
-        let receive_result = self
-            .inv_receiver
-            .as_mut()
-            .expect("inventory change receiver endpoint has been dropped")
-            .try_recv();
-
-        match receive_result {
-            Ok(change) => Some(change),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Closed) => None,
-            Err(TryRecvError::Lagged(skipped_messages)) => unreachable!(
-                "unexpected lagged inventory receiver in tests, skipped {} messages",
-                skipped_messages,
-            ),
         }
     }
 
@@ -349,7 +321,7 @@ where
     pub fn finish(self) -> (Client, ClientTestHarness) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (client_request_sender, client_request_receiver) = mpsc::channel(1);
-        let (inv_sender, inv_receiver) = broadcast::channel(5);
+        let (block_advert_tx, block_advert_receiver) = tokio::sync::mpsc::channel(4);
 
         let error_slot = ErrorSlot::default();
         let remote_version = self.version.unwrap_or(Version(0));
@@ -390,7 +362,7 @@ where
             connection_info,
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
-            inv_collector: inv_sender,
+            block_advert_tx,
             error_slot: error_slot.clone(),
             connection_task,
             heartbeat_task,
@@ -398,8 +370,8 @@ where
 
         let harness = ClientTestHarness {
             client_request_receiver: Some(client_request_receiver),
+            block_advert_receiver,
             shutdown_receiver: Some(shutdown_receiver),
-            inv_receiver: Some(inv_receiver),
             error_slot,
             remote_version,
             connection_aborter,

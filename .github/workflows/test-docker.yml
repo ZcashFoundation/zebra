@@ -3,6 +3,9 @@ name: Test Docker Config
 on:
   pull_request:
     branches: [main]
+    # `ready_for_review` runs the tests once a skipped draft is ready;
+    # `converted_to_draft` cancels a run in progress.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
   merge_group:
@@ -28,6 +31,9 @@ env:
 
 jobs:
   changes:
+    # Draft pull requests skip every job here, because the image build uses a billed
+    # larger runner. This workflow is not a required check.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
@@ -58,6 +64,9 @@ jobs:
           persist-credentials: false
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+        with:
+          # Hosted VMs discard the local builder after the job; persistent runners still clean up.
+          cleanup: ${{ runner.environment != 'github-hosted' }}
       - name: Build & push
         id: docker_build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
@@ -83,7 +92,8 @@ jobs:
       contents: read
       actions: read
       checks: read
-    runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-26.04' }}
+    # Each check runs the prebuilt image for under a minute, so a billed larger runner gains nothing.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
