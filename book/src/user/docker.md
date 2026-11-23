@@ -117,13 +117,13 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
 
   - If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
-Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default). Configuring static credentials also stops Zebra from creating the cookie.
 
 #### Static credentials
 
-In builds with static JSON-RPC authentication, clients can use a fixed
-username and password across restarts without reading the validator's cookie.
-Zebra 7.1.0 supports only cookie authentication.
+Static credentials give clients a fixed username and password that survive
+restarts, so they don't need to read the validator's cookie. They are not
+available in Zebra 7.1.0, which supports only cookie authentication.
 
 ```toml
 [rpc]
@@ -135,20 +135,13 @@ rpc_password_file = "/run/secrets/rpc_password"
 Mount a long, randomly generated password read-only. The password file takes
 precedence over an inline TOML `rpc_password`. Zebra reads it once when the
 listener starts and trims trailing line endings. Set both credentials. The
-username cannot contain a colon. Configured credentials replace the cookie.
+username cannot contain a colon.
 
 For a container, set `ZEBRA_RPC__RPC_USER` and `ZEBRA_RPC__RPC_PASSWORD_FILE`.
 Zebra rejects `ZEBRA_RPC__RPC_PASSWORD`. Configure clients such as `zcash-cli`
 with matching `rpcuser` and `rpcpassword`. Protect cross-host HTTP Basic
 traffic with TLS. Coordinate client updates with server restarts when rotating
 the password. These settings protect only the JSON-RPC listener.
-
-Environment variable examples for health endpoints:
-
-- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
-- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
-- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
-- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
 
 ### Health Endpoints
 
@@ -166,6 +159,13 @@ min_connected_peers = 1
 ready_max_blocks_behind = 2
 enforce_on_test_networks = false
 ```
+
+To set the same values with environment variables:
+
+- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
 
 If you want to expose the endpoints to the host, add a port mapping to your compose file:
 

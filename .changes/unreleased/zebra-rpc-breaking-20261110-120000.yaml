@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: breaking
-body: 'Added optional static credentials to `config::rpc::Config`. Update exhaustive struct literals with the new fields or use `..Default::default()`. ([#12403](https://github.com/ZcashFoundation/zebra/pull/12403))'
+body: 'Added optional static credentials to `config::rpc::Config`, with the public `config::rpc::RedactedString` password type and `config::rpc::StaticCredentialsError` validation error. Update exhaustive struct literals with the new fields or use `..Default::default()`. ([#12403](https://github.com/ZcashFoundation/zebra/pull/12403))'
 time: 2026-11-10T12:00:00.000000+00:00
