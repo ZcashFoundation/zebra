@@ -19,7 +19,7 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, StreamExt};
 use futures_util::FutureExt;
 use rayon::prelude::*;
 use thiserror::Error;
@@ -91,6 +91,22 @@ async fn run_blocking<T: Send + 'static>(
     }))
     .await
     .expect("block checks operate on decoded blocks")
+}
+
+/// Make an exhausted Tokio budget visible to `FuturesUnordered` as a self-wake.
+///
+/// Tokio otherwise defers the inner waker, causing the ready backlog to be re-polled on each
+/// reschedule. Keep the budget active for dispatch and in-memory UTXO reads.
+async fn budget_aware<F: Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        if !tokio::task::coop::has_budget_remaining() {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        future.as_mut().poll(cx)
+    })
+    .await
 }
 
 /// Retry unavailable context only before scoring a negotiated body's post-admission failure.
@@ -1414,7 +1430,7 @@ where
                     height,
                     time: block.header.time,
                 };
-                async_checks.push(async move {
+                async_checks.push(budget_aware(async move {
                     // Dispatch and poll each verification together without monopolizing the executor.
                     tokio::task::consume_budget().await;
                     transaction_verifier
@@ -1423,7 +1439,7 @@ where
                         .expect("transaction verifier is always ready")
                         .call(request)
                         .await
-                });
+                }));
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
@@ -1434,7 +1450,6 @@ where
             let mut block_miner_fees = Ok(Amount::zero());
             let mut transaction_error = None;
 
-            use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
                 let response = match result {

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Block verification of proposals and peer blocks collects ready transaction results without repeatedly re-polling them when the async runtime yields.'
+time: 2026-11-23T00:00:00Z

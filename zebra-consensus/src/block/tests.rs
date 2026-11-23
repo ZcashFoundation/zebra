@@ -27,6 +27,7 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod cooperative_drain;
 mod decoded_size;
 mod dispatch;
 mod early_relay;
