@@ -1071,6 +1071,22 @@ fn config_zebra_rpc_listen_addr_env() {
 }
 
 #[test]
+fn config_zebra_rpc_static_credentials_env() {
+    let env = EnvGuard::new();
+
+    env.set_var("ZEBRA_RPC__RPC_USER", "zebra");
+    env.set_var("ZEBRA_RPC__RPC_PASSWORD_FILE", "/run/secrets/rpc_password");
+
+    let config = ZebradConfig::load(None).expect("load config with static RPC credential env vars");
+    assert_eq!(config.rpc.rpc_user.as_deref(), Some("zebra"));
+    assert_eq!(
+        config.rpc.rpc_password_file.as_deref(),
+        Some(std::path::Path::new("/run/secrets/rpc_password"))
+    );
+    assert!(config.rpc.rpc_password.is_none());
+}
+
+#[test]
 fn config_zebra_state_cache_dir_env() {
     let env = EnvGuard::new();
 
@@ -1165,12 +1181,12 @@ fn config_env_unknown_sensitive_key_errors() {
 fn config_env_password_key_errors() {
     let env = EnvGuard::new();
 
-    // Keys ending in `password` are rejected even when no such field exists
-    env.set_var("ZEBRA_RPC__PASSWORD", "topsecret");
+    env.set_var("ZEBRA_RPC__RPC_PASSWORD", "topsecret");
 
     let result = ZebradConfig::load(None);
     assert!(result.is_err(), "Sensitive env key should cause an error");
 
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("sensitive key"), "error message: {}", msg);
+    assert!(!msg.contains("topsecret"));
 }

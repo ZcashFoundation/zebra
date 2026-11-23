@@ -39,6 +39,7 @@ async fn rpc_server_spawn() {
         cookie_dir: Default::default(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
+        ..Default::default()
     };
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -109,6 +110,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         cookie_dir: Default::default(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
+        ..Default::default()
     };
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -167,6 +169,7 @@ async fn rpc_server_spawn_port_conflict() {
         cookie_dir: Default::default(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
+        ..Default::default()
     };
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
