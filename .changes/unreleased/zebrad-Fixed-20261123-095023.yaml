@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: Fixed Docker containers failing to start when run as a non-root user (for example with `--user 10001:10001`), because the entrypoint aborted after it could not take ownership of the cache directory. The entrypoint now prepares directories only when it is running as root, so a non-root start relies on the directory's existing permissions.
+body: Fixed Docker containers failing to start when run as a non-root user (for example with `--user 10001:10001`), because the entrypoint aborted after it could not take ownership of the cache directory. The entrypoint now prepares directories only when it is running as root, so a non-root start relies on the directory's existing permissions. ([#12590](https://github.com/ZcashFoundation/zebra/pull/12590))
 time: 2026-11-23T09:50:23.335714575Z
