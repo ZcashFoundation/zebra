@@ -125,6 +125,20 @@ Zebra](https://zebra.zfnd.org/user/install.html) and [Running
 Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for enabling
 optional features, detailed configuration and further details.
 
+### Populated local Regtest
+
+`mock-state` creates a local Regtest database with transparent spends and
+shielded fixture data, without mining its history. Run it from the source
+checkout, then start a stock `zebrad` from the generated directory:
+
+```sh
+cargo run -p zebra-state --features mock-state --bin mock-state -- /tmp/zebra-mock
+(cd /tmp/zebra-mock && zebrad --config zebrad.toml start)
+```
+
+Use a new directory. The generated history is synthetic and is not
+consensus-valid; use it only for local development.
+
 ## CI/CD Architecture
 
 Zebra uses a comprehensive CI/CD system built on GitHub Actions to ensure code
