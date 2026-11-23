@@ -76,6 +76,27 @@ docker build -f ./docker/Dockerfile --target runtime \
 All available Cargo features are listed at
 <https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags>.
 
+## Startup and permissions
+
+The image starts as `root` so the entrypoint can prepare directories, then drops
+privileges and runs `zebrad` as the `zebra` user (UID and GID `10001`).
+
+To start the published Zebra 7.1.0 image directly as UID 10001, bypass its
+root-oriented entrypoint and mount a writable cache directory:
+
+```shell
+mkdir -p /srv/zebra-cache
+chgrp 10001 /srv/zebra-cache
+chmod 0770 /srv/zebra-cache
+docker run --user 10001:10001 --cap-drop=ALL --entrypoint zebrad \
+  -v /srv/zebra-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.1.0 start
+```
+
+Images with the non-root entrypoint fix can use the default command. The
+entrypoint skips ownership changes when started as a non-root user. Each
+configured data directory must already be writable by that user or its group.
+
 ## Configuring Zebra
 
 Zebra uses [config-rs](https://crates.io/crates/config) to layer configuration from defaults, an optional TOML file, and `ZEBRA_`-prefixed environment variables. When running with Docker, configure Zebra using any of the following (later items override earlier ones):
