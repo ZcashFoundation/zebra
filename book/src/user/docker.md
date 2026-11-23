@@ -125,23 +125,36 @@ Static credentials give clients a fixed username and password that survive
 restarts, so they don't need to read the validator's cookie. They are not
 available in Zebra 7.1.0, which supports only cookie authentication.
 
+On a private Docker network, use this configuration to accept RPC connections
+from outside the container.
+
 ```toml
 [rpc]
-listen_addr = "127.0.0.1:8232"
+listen_addr = "0.0.0.0:8232"
 rpc_user = "zebra"
 rpc_password_file = "/run/secrets/rpc_password"
 ```
 
-Mount a long, randomly generated password read-only. The password file takes
-precedence over an inline TOML `rpc_password`. Zebra reads it once when the
-listener starts and trims trailing line endings. Set both credentials. The
-username cannot contain a colon.
+Clients on the same user-defined Docker network can reach a container named
+`zebra` at `zebra:8232` without publishing a port. For clients on the Docker
+host, publish RPC on host loopback with `-p 127.0.0.1:8232:8232`.
+
+Store a long, randomly generated password in the file and mount it read-only.
+Restrict read access to the user running Zebra (for example, mode
+`0400` with that user as owner). Apply the same permissions to any TOML file
+containing an inline `rpc_password`. The password file takes precedence. Zebra
+reads it at listener startup and trims trailing line endings. Set both a
+password and a username. The username cannot contain a colon.
 
 For a container, set `ZEBRA_RPC__RPC_USER` and `ZEBRA_RPC__RPC_PASSWORD_FILE`.
 Zebra rejects `ZEBRA_RPC__RPC_PASSWORD`. Configure clients such as `zcash-cli`
-with matching `rpcuser` and `rpcpassword`. Protect cross-host HTTP Basic
-traffic with TLS. Coordinate client updates with server restarts when rotating
-the password. These settings protect only the JSON-RPC listener.
+with matching `rpcuser` and `rpcpassword`. Coordinate client updates with
+server restarts when rotating the password.
+
+Zebra's JSON-RPC listener serves plain HTTP. For cross-host clients, terminate
+TLS at a reverse proxy or use an encrypted tunnel. Keep the listener on
+loopback or a private network so remote clients can reach it only through the
+proxy or tunnel. These settings protect only JSON-RPC.
 
 ### Health Endpoints
 
