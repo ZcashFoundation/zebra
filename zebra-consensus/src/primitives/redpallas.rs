@@ -90,6 +90,7 @@ pub static VERIFIER: Lazy<
             super::MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
+            super::MAX_BATCH_IDLE,
         ),
         // We want to fallback to individual verification if batch verification fails,
         // so we need a Service to use.
