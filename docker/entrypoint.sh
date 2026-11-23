@@ -75,11 +75,15 @@ create_owned_zcashd_datadir() {
     echo "WARNING: could not chown zcashd datadir ${dir}; relying on existing permissions" >&2
 }
 
-# Create and own cache and config directories based on ZEBRA_* environment variables
-[[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
-[[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
-[[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_zcashd_datadir "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
-[[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
+# Create and own cache and config directories based on ZEBRA_* environment
+# variables. Only root can do this; a non-root start relies on pre-provisioned
+# permissions and lets zebrad create and check the directories itself.
+if [[ $(id -u) == '0' ]]; then
+  [[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
+  [[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
+  [[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_zcashd_datadir "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
+  [[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
+fi
 
 # --- Optional config file support ---
 # If provided, pass a config file path through to zebrad via CONFIG_FILE_PATH.

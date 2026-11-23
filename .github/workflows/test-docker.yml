@@ -146,6 +146,14 @@ jobs:
             env_vars: -e ZEBRA_STATE__CACHE_DIR=/tmp/zebra-cache
             grep_patterns: -e "Opened Zebra state cache at /tmp/zebra-cache"
 
+          # Non-root run: the entrypoint must not chown (and fail) when it is not
+          # root, so a read-only root and a group-writable root-owned cache tmpfs
+          # must still start.
+          - id: nonroot-readonly-cache
+            name: Non-root with read-only root and group-writable cache
+            env_vars: --user 10001:10001 --cap-drop=ALL --read-only --tmpfs /home/zebra/.cache:rw,size=64m,uid=0,gid=10001,mode=0770 -e ZEBRA_NETWORK__NETWORK=Regtest -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra
+            grep_patterns: -e "Opened Zebra state cache at /home/zebra/.cache/zebra"
+
           # Feature-based configurations
           - id: prometheus-feature
             name: Prometheus metrics
