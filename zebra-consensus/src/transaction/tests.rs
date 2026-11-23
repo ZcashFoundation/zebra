@@ -3133,15 +3133,19 @@ fn v4_with_small_order_rk_sapling_spend() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
+        // The change gives the transaction another sighash, so its other signatures fail too, and
+        // the verifier returns the check that fails first. A V4 transaction with only Sapling
+        // data has no other check that can fail.
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
             .find(|(_, transaction)| transaction.sapling_spends_count() > 0)
-            .expect("No transaction found with Sapling spends");
+            .expect("No V4 transaction found with Sapling spends");
 
         // Parsing must accept the small-order rk; only verification may reject it.
         set_first_sapling_spend_rk(
@@ -3176,15 +3180,17 @@ fn v4_with_small_order_epk_sapling_output() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
+        // As for the small-order rk, the Sapling check has to be the only one that can fail.
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
             .find(|(_, transaction)| transaction.sapling_outputs().next().is_some())
-            .expect("No transaction found with Sapling outputs");
+            .expect("No V4 transaction found with Sapling outputs");
 
         // Parsing must accept the small-order epk; only verification may reject it.
         set_first_sapling_output_epk(
@@ -3298,9 +3304,14 @@ async fn v5_with_duplicate_sapling_spends() {
 async fn v5_with_small_order_rk_sapling_spend() {
     let _init_guard = zebra_test::init();
 
-    for net in Network::iter() {
+    // Only Mainnet: the Testnet vectors have no V5 tx with Sapling spends, no transparent inputs,
+    // and no Orchard actions. The change gives the tx another sighash, so its Orchard signatures
+    // would fail too, and the verifier returns the check that fails first.
+    for net in [Network::Mainnet] {
         let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
             .find(|tx| tx.sapling_spends_count() > 0)
             .expect("V5 tx with Sapling spends");
 
@@ -3337,9 +3348,12 @@ async fn v5_with_small_order_epk_sapling_output() {
     let _init_guard = zebra_test::init();
 
     // Only Mainnet: the Testnet vectors have no V5 tx with Sapling outputs and no transparent inputs.
+    // As for the small-order rk, the tx has no Orchard actions.
     for net in [Network::Mainnet] {
         let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
             .find(|tx| tx.sapling_outputs().next().is_some())
             .expect("V5 tx with Sapling outputs");
 
