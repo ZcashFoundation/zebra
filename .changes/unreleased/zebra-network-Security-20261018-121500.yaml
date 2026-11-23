@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Security
+body: "Bound the upfront body-capacity reservation in the P2P codec, so a peer can no longer force a reservation near the 2 MiB protocol maximum by sending only a header and withholding the body. The buffer now grows as body bytes arrive, never beyond the declared length. (#10564)"
+time: 2026-10-18T12:15:00.000000000+02:00
