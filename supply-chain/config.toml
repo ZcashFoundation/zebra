@@ -316,14 +316,6 @@ criteria = "safe-to-deploy"
 version = "0.9.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.const-random]]
-version = "0.1.18"
-criteria = "safe-to-deploy"
-
-[[exemptions.const-random-macro]]
-version = "0.1.16"
-criteria = "safe-to-deploy"
-
 [[exemptions.const_format]]
 version = "0.2.36"
 criteria = "safe-to-deploy"
@@ -334,10 +326,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.constant_time_eq]]
 version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.convert_case]]
-version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.convert_case]]
@@ -459,10 +447,6 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.dlv-list]]
-version = "0.5.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.documented]]
 version = "0.3.0"
 criteria = "safe-to-deploy"
@@ -489,10 +473,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.equihash]]
 version = "0.3.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.erased-serde]]
-version = "0.4.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.eyre]]
@@ -631,10 +611,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.halo2_proofs]]
 version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
-version = "0.14.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]
@@ -819,10 +795,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
 version = "0.3.97"
-criteria = "safe-to-deploy"
-
-[[exemptions.json5]]
-version = "0.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonrpsee]]
@@ -1057,10 +1029,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.orchard]]
 version = "0.15.0-pre.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.ordered-multimap]]
-version = "0.7.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.os_info]]
@@ -1343,10 +1311,6 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.rust-ini]]
-version = "0.21.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.rustc-demangle]]
 version = "0.1.27"
 criteria = "safe-to-deploy"
@@ -1503,10 +1467,6 @@ notes = "Sentry 0.47 upgrade"
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde-untagged]]
-version = "0.1.9"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_derive_internals]]
 version = "0.29.1"
 criteria = "safe-to-deploy"
@@ -1633,10 +1593,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.time]]
 version = "0.3.36"
-criteria = "safe-to-deploy"
-
-[[exemptions.tiny-keccak]]
-version = "2.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinyvec]]
@@ -2041,10 +1997,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xdg]]
 version = "3.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.yaml-rust2]]
-version = "0.10.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_address]]

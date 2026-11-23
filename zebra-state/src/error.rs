@@ -43,6 +43,27 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// A known finalized block cannot be read as a complete block.
+///
+/// Unknown blocks and incomplete secondary views return `Ok(None)` instead. Missing primary bodies
+/// indicate corruption until historical body pruning is supported.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum BlockReadError {
+    /// Some or all transaction rows are missing from a known block.
+    #[error("block body unavailable at height {height:?}: stored transactions are incomplete")]
+    BlockBodyUnavailable {
+        /// The height of the known block.
+        height: block::Height,
+    },
+
+    /// The retained header or transaction-location index is inconsistent.
+    #[error("corrupt block metadata at height {height:?}")]
+    CorruptBlock {
+        /// The height of the known block.
+        height: block::Height,
+    },
+}
+
 /// An error describing why opening the finalized state database failed.
 ///
 /// These errors are recoverable open-time failures that the caller can report,
@@ -117,6 +138,11 @@ pub enum CommitBlockError {
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
     WriteTaskExited,
+
+    /// The queue of blocks waiting for their parent blocks was full, so the state dropped this
+    /// block. It might be valid.
+    #[error("block was dropped from the full queue of blocks waiting for their parent blocks")]
+    OrphanQueueFull,
 }
 
 impl CommitBlockError {
@@ -136,7 +162,9 @@ impl CommitBlockError {
     pub fn is_auth_commitment_mismatch(&self) -> bool {
         match self {
             CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => false,
         }
     }
 
@@ -149,18 +177,22 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => {
                 err.is_descendant_of_auth_commitment_mismatch()
             }
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => false,
         }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, and rejected-ancestor descendants score 0.
+    /// Duplicate requests, shutdowns, full queues, and rejected-ancestor descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => 0,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => 0,
         }
     }
 }
@@ -327,6 +359,13 @@ pub enum ValidateContextError {
     #[error("block height {candidate_height:?} is not one greater than its parent block's height {parent_height:?}")]
     #[non_exhaustive]
     NonSequentialBlock {
+        candidate_height: block::Height,
+        parent_height: block::Height,
+    },
+
+    #[error("block height {candidate_height:?} is not one greater than its finalized parent block's height {parent_height:?}")]
+    #[non_exhaustive]
+    NonSequentialFinalizedChild {
         candidate_height: block::Height,
         parent_height: block::Height,
     },
@@ -629,6 +668,8 @@ impl ValidateContextError {
             // A wrong block subsidy, funding stream, or miner fee payment is invalid given only
             // the block and its parent, so the peer that sent it is misbehaving.
             ValidateContextError::InvalidSubsidy { .. } => 100,
+            // The parent's height is known, so the block is invalid on its own.
+            ValidateContextError::NonSequentialFinalizedChild { .. } => 100,
             _other => 0,
         }
     }

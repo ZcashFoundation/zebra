@@ -760,10 +760,10 @@ impl MetaAddr {
 
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
-    /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
+    /// Returns `None` if services are unknown or this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
-        if !self.last_known_info_is_valid_for_outbound(network) {
+        if self.services.is_none() || !self.last_known_info_is_valid_for_outbound(network) {
             return None;
         }
 
@@ -783,10 +783,7 @@ impl MetaAddr {
 
         Some(MetaAddr {
             addr: canonical_peer_addr(self.addr),
-            // initial peers are sanitized assuming they are `NODE_NETWORK`
-            // TODO: split untrusted and direct services
-            //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
-            services: self.services.or(Some(PeerServices::NODE_NETWORK)),
+            services: self.services,
             // only put the last seen time in the untrusted field,
             // this matches deserialization, and avoids leaking internal state
             untrusted_last_seen: Some(last_seen),

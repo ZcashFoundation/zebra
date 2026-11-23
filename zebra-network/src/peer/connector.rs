@@ -9,7 +9,7 @@ use std::{
 use futures::prelude::*;
 use tokio::net::TcpStream;
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 

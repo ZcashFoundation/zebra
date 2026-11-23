@@ -53,6 +53,12 @@
             "monitored": true
         }
     ],
+    "nsmValueBalance": {
+        "id": "nsm",
+        "chainValue": 368.5844552,
+        "chainValueZat": 36858445520,
+        "monitored": true
+    },
     "upgrades": {
         "5ba81b19": {
             "name": "Overwinter",

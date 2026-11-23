@@ -70,8 +70,10 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
     // Sanitize to the default state, even though it's not serialized
     assert_eq!(sanitized.last_connection_state, Default::default());
     // Sanitize to known flags
-    let sanitized_peer_services =
-        original.services.unwrap_or(PeerServices::NODE_NETWORK) & PeerServices::all();
+    let sanitized_peer_services = original
+        .services
+        .expect("sanitized addresses must have known services")
+        & PeerServices::all();
     assert_eq!(sanitized.services, Some(sanitized_peer_services));
 
     // Remove IPv6 scope ID and flow information

@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NonNegative, MAX_MONEY},
     block::{self, Block, Height},
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
@@ -439,6 +439,8 @@ proptest! {
     fn get_blockchain_info_response_with_an_arbitrary_chain_tip(
         network in any::<Network>(),
         block in any::<Block>(),
+        orchard_zat in 0..=MAX_MONEY,
+        nsm_zat in 0..=MAX_MONEY,
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
@@ -452,6 +454,10 @@ proptest! {
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let expected_size_on_disk = 1_000;
+        let orchard = Amount::<NonNegative>::try_from(orchard_zat).expect("the strategy keeps it in range");
+        let nsm = Amount::<NonNegative>::try_from(nsm_zat).expect("the strategy keeps it in range");
+        let mut value_balance = ValueBalance::from_orchard_amount(orchard);
+        value_balance.set_nsm_amount(nsm);
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -472,7 +478,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::TipPoolValues {
                             tip_height: block_height,
                             tip_hash: block_hash,
-                            value_balance: ValueBalance::default(),
+                            value_balance,
                         });
 
                     state
@@ -502,6 +508,14 @@ proptest! {
                     prop_assert_eq!(info.best_block_hash, block_hash);
                     prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
+
+                    // The NSM value balance is reported on its own, and is not part of the supply.
+                    prop_assert_eq!(
+                        info.nsm_value_balance,
+                        Some(GetBlockchainInfoBalance::nsm(&network, block_height, nsm, None))
+                    );
+                    prop_assert_eq!(info.chain_supply.chain_value_zat(), orchard);
+                    prop_assert!(info.value_pools.iter().all(|pool| pool.id() != "nsm"));
 
                     prop_assert_eq!(
                         info.consensus.chain_tip.0,
@@ -598,6 +612,8 @@ proptest! {
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
             prop_assert_eq!(response.value_pools, GetBlockchainInfoBalance::value_pools(ValueBalance::zero(), None));
+            // The fallback tip has no balances, so the NSM value balance is not known.
+            prop_assert_eq!(response.nsm_value_balance, None);
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");

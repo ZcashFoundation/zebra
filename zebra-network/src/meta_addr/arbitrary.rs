@@ -45,6 +45,20 @@ impl MetaAddr {
             })
             .boxed()
     }
+
+    /// Create a strategy that generates arbitrary [`MetaAddr`]s with known services.
+    ///
+    /// Addresses with unknown services are never sanitized for gossip, so this fills them in with
+    /// arbitrary services that include `NODE_NETWORK`, which gossip requires.
+    pub fn known_services_strategy() -> BoxedStrategy<Self> {
+        (any::<MetaAddr>(), any::<PeerServices>())
+            .prop_map(|(mut addr, services)| {
+                addr.services
+                    .get_or_insert(services | PeerServices::NODE_NETWORK);
+                addr
+            })
+            .boxed()
+    }
 }
 
 impl MetaAddrChange {

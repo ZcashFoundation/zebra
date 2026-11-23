@@ -17,6 +17,7 @@
 use std::{
     io::{stderr, stdout, Write},
     sync::Arc,
+    time::Instant,
 };
 
 use zebra_chain::{
@@ -39,9 +40,27 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, QueuedCheckpointVerified},
-    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
+    service::{check, ChainTipBlock, QueuedCheckpointVerified},
+    Config, StateInitError, ValidateContextError,
 };
+
+/// Records the time since the `Option<Instant>` in `$timer` as the block write task phase
+/// `$phase`, then resets `$timer` to now, so consecutive phases can share one timer.
+///
+/// Does nothing if `$timer` is `None`. `$phase` must be a literal, so the metric key is static.
+macro_rules! record_phase {
+    ($timer:expr, $phase:literal) => {
+        if let Some(start) = $timer.as_mut() {
+            let now = std::time::Instant::now();
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => $phase
+            )
+            .record(now.duration_since(*start).as_secs_f64());
+            *start = now;
+        }
+    };
+}
 
 pub mod column_family;
 
@@ -229,16 +248,26 @@ impl FinalizedState {
 
     /// Commit a checkpoint-verified block to the state.
     ///
+    /// Returns the committed chain-tip data and updated note commitment trees.
+    ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+    ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
+        let tip_block = ChainTipBlock {
+            hash: checkpoint_verified.hash,
+            height: checkpoint_verified.height,
+            time: checkpoint_verified.block.header.time,
+            transactions: checkpoint_verified.block.transactions.clone(),
+            transaction_hashes: checkpoint_verified.transaction_hashes.clone(),
+            previous_block_hash: checkpoint_verified.block.header.previous_block_hash,
+        };
         let result = self.commit_finalized_direct(
-            checkpoint_verified.clone().into(),
+            checkpoint_verified.into(),
             prev_note_commitment_trees,
             "commit checkpoint-verified request",
         );
@@ -246,23 +275,21 @@ impl FinalizedState {
         if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
             metrics::gauge!("state.checkpoint.finalized.block.height")
-                .set(checkpoint_verified.height.0 as f64);
+                .set(tip_block.height.0 as f64);
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height")
-                .set(checkpoint_verified.height.0 as f64);
+            metrics::gauge!("zcash.chain.verified.block.height").set(tip_block.height.0 as f64);
             metrics::counter!("zcash.chain.verified.block.total").increment(1);
         } else {
             metrics::counter!("state.checkpoint.error.block.count").increment(1);
-            metrics::gauge!("state.checkpoint.error.block.height")
-                .set(checkpoint_verified.height.0 as f64);
+            metrics::gauge!("state.checkpoint.error.block.height").set(tip_block.height.0 as f64);
         };
 
         let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
 
-        result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
+        result.map(|(_hash, note_commitment_trees)| (tip_block, note_commitment_trees))
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -285,6 +312,11 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        // Only checkpoint commits are timed, so the `checkpoint_*` phases don't mix in blocks
+        // finalized from the non-finalized state.
+        let mut phase_timer =
+            matches!(finalizable_block, FinalizableBlock::Checkpoint { .. }).then(Instant::now);
+
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
@@ -299,6 +331,7 @@ impl FinalizedState {
                 let mut history_tree = self.db.history_tree();
                 let prev_note_commitment_trees = prev_note_commitment_trees
                     .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+                record_phase!(phase_timer, "checkpoint_history_tree_load");
 
                 // Update the note commitment trees.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();
@@ -328,6 +361,7 @@ impl FinalizedState {
                     &self.network(),
                     &history_tree,
                 )?;
+                record_phase!(phase_timer, "checkpoint_trees_and_commitment");
 
                 // Update the history tree.
                 //
@@ -349,6 +383,7 @@ impl FinalizedState {
                     )
                     .map_err(Arc::new)
                     .map_err(ValidateContextError::from)?;
+                record_phase!(phase_timer, "checkpoint_history_tree_push");
 
                 let treestate = Treestate {
                     note_commitment_trees,
@@ -366,6 +401,7 @@ impl FinalizedState {
                     height,
                     block_hash: checkpoint_verified.hash,
                 })?;
+                record_phase!(phase_timer, "checkpoint_value_pool");
 
                 (
                     height,
@@ -435,12 +471,14 @@ impl FinalizedState {
         }
 
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+        record_phase!(phase_timer, "checkpoint_tip_checks");
 
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
             &self.network(),
             source,
+            &mut phase_timer,
         );
 
         if result.is_ok() {

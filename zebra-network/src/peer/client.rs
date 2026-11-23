@@ -1,9 +1,7 @@
 //! Handles outbound requests from our node to the network.
 
 use std::{
-    collections::HashSet,
     future::Future,
-    iter,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -15,7 +13,7 @@ use futures::{
     stream::{Stream, StreamExt},
     FutureExt,
 };
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tower::Service;
 
 use zebra_chain::diagnostic::task::CheckForPanics;
@@ -25,12 +23,8 @@ use crate::{
         error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
         ConnectionInfo,
     },
-    peer_set::InventoryChange,
-    protocol::{
-        external::InventoryHash,
-        internal::{Request, Response},
-    },
-    BoxError, PeerSocketAddr,
+    protocol::internal::{Request, Response},
+    BoxError,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -50,10 +44,6 @@ pub struct Client {
 
     /// Sends block adverts without waiting for an outstanding request's response.
     pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
-
-    /// Used to register missing inventory in client [`Response`]s,
-    /// so that the peer set can route retries to other clients.
-    pub(crate) inv_collector: broadcast::Sender<InventoryChange>,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
     ///
@@ -83,15 +73,6 @@ pub(crate) struct ClientRequest {
     /// The response `Message` channel, included because `peer::Client::call`
     /// returns a future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
-
-    /// Used to register missing inventory in responses on `tx`,
-    /// so that the peer set can route retries to other clients.
-    pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
-
-    /// The peer address for registering missing inventory.
-    ///
-    /// TODO: replace this with `ConnectedAddr`?
-    pub transient_addr: Option<PeerSocketAddr>,
 
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
@@ -124,9 +105,6 @@ pub(super) struct InProgressClientRequest {
     /// `Ok(())`, it will assume that it is safe to unconditionally poll the
     /// `Receiver` tied to the `Sender` used to create the `ClientRequest`.
     ///
-    /// We also take advantage of this invariant to route inventory requests
-    /// away from peers that did not respond with that inventory.
-    ///
     /// We enforce this invariant via the type system, by converting
     /// `ClientRequest`s to `InProgressClientRequest`s when they are received by
     /// the background task. These conversions are implemented by
@@ -139,7 +117,6 @@ pub(super) struct InProgressClientRequest {
 }
 
 /// A `oneshot::Sender` for client responses, that must be used by calling `send()`.
-/// Also handles forwarding missing inventory to the inventory registry.
 ///
 /// Panics on drop if `tx` has not been used or canceled.
 /// Panics if `tx.send()` is used more than once.
@@ -150,27 +127,6 @@ pub(super) struct MustUseClientResponseSender {
     ///
     /// `None` if `tx.send()` has been used.
     pub tx: Option<oneshot::Sender<Result<Response, SharedPeerError>>>,
-
-    /// Forwards missing inventory in the response to the inventory collector.
-    ///
-    /// Boxed to reduce the size of containing structures.
-    pub missing_inv: Option<Box<MissingInventoryCollector>>,
-}
-
-/// Forwards missing inventory in the response to the inventory registry.
-#[derive(Debug)]
-pub(super) struct MissingInventoryCollector {
-    /// A clone of the original request, if it is an inventory request.
-    ///
-    /// This struct is only ever created with inventory requests.
-    request: Request,
-
-    /// Used to register missing inventory from responses,
-    /// so that the peer set can route retries to other clients.
-    collector: broadcast::Sender<InventoryChange>,
-
-    /// The peer address for registering missing inventory.
-    transient_addr: PeerSocketAddr,
 }
 
 impl std::fmt::Debug for Client {
@@ -187,15 +143,9 @@ impl std::fmt::Debug for Client {
 
 impl From<ClientRequest> for InProgressClientRequest {
     fn from(client_request: ClientRequest) -> Self {
-        let ClientRequest {
-            request,
-            tx,
-            inv_collector,
-            transient_addr,
-            span,
-        } = client_request;
+        let ClientRequest { request, tx, span } = client_request;
 
-        let tx = MustUseClientResponseSender::new(tx, &request, inv_collector, transient_addr);
+        let tx = MustUseClientResponseSender::new(tx);
 
         InProgressClientRequest { request, tx, span }
     }
@@ -260,34 +210,17 @@ impl From<mpsc::Receiver<ClientRequest>> for ClientRequestReceiver {
 
 impl MustUseClientResponseSender {
     /// Returns a newly created client response sender for `tx`.
-    ///
-    /// If `request` or the response contains missing inventory,
-    /// it is forwarded to the `inv_collector`, for the peer at `transient_addr`.
-    pub fn new(
-        tx: oneshot::Sender<Result<Response, SharedPeerError>>,
-        request: &Request,
-        inv_collector: Option<broadcast::Sender<InventoryChange>>,
-        transient_addr: Option<PeerSocketAddr>,
-    ) -> Self {
-        Self {
-            tx: Some(tx),
-            missing_inv: MissingInventoryCollector::new(request, inv_collector, transient_addr),
-        }
+    pub fn new(tx: oneshot::Sender<Result<Response, SharedPeerError>>) -> Self {
+        Self { tx: Some(tx) }
     }
 
-    /// Forwards `response` to `tx.send()`, and missing inventory to `inv_collector`,
-    /// and marks this sender as used.
+    /// Forwards `response` to `tx.send()` and marks this sender as used.
     ///
     /// Panics if `tx.send()` is used more than once.
     pub fn send(
         mut self,
         response: Result<Response, SharedPeerError>,
     ) -> Result<(), Result<Response, SharedPeerError>> {
-        // Forward any missing inventory to the registry.
-        if let Some(missing_inv) = self.missing_inv.take() {
-            missing_inv.send(&response);
-        }
-
         // Forward the response to the internal requester.
         self.tx
             .take()
@@ -333,89 +266,6 @@ impl Drop for MustUseClientResponseSender {
                 self.tx.is_none() || self.is_canceled(),
                 "unused client response sender: oneshot must be used or canceled: {self:?}"
             );
-        }
-    }
-}
-
-impl MissingInventoryCollector {
-    /// Returns a newly created missing inventory collector, if needed.
-    ///
-    /// If `request` or the response contains missing inventory,
-    /// it is forwarded to the `inv_collector`, for the peer at `transient_addr`.
-    pub fn new(
-        request: &Request,
-        inv_collector: Option<broadcast::Sender<InventoryChange>>,
-        transient_addr: Option<PeerSocketAddr>,
-    ) -> Option<Box<MissingInventoryCollector>> {
-        if !request.is_inventory_download() {
-            return None;
-        }
-
-        if let (Some(inv_collector), Some(transient_addr)) = (inv_collector, transient_addr) {
-            Some(Box::new(MissingInventoryCollector {
-                request: request.clone(),
-                collector: inv_collector,
-                transient_addr,
-            }))
-        } else {
-            None
-        }
-    }
-
-    /// Forwards explicitly observed missing inventory to the registry.
-    ///
-    /// Only explicit `notfound` responses update the registry. Transport
-    /// failures and timeouts do not prove the peer lacks the inventory,
-    /// so they are not forwarded (prevents registry poisoning under
-    /// high sync concurrency).
-    pub fn send(self, response: &Result<Response, SharedPeerError>) {
-        let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
-            // Missing block hashes from partial responses.
-            (_, Ok(Response::Blocks(block_statuses))) => block_statuses
-                .iter()
-                .filter_map(|b| b.missing())
-                .map(InventoryHash::Block)
-                .collect(),
-
-            // Missing transaction IDs from partial responses.
-            (_, Ok(Response::Transactions(tx_statuses))) => tx_statuses
-                .iter()
-                .filter_map(|tx| tx.missing())
-                .map(|tx| tx.into())
-                .collect(),
-
-            // Other response types never contain missing inventory.
-            (_, Ok(_)) => iter::empty().collect(),
-
-            // Registry-generated errors are already tracked — don't re-forward.
-            (_, Err(e)) if e.inner_debug().contains("NotFoundRegistry") => iter::empty().collect(),
-
-            // Only mark inventory as missing for explicit notfound responses.
-            // Transport failures (timeouts, dropped connections) do not prove
-            // the peer lacks the inventory — they only prove the request failed.
-            // Treating them as missing poisons the routing registry under high
-            // sync concurrency.
-            (ref request, Err(e)) if e.inner_debug().contains("NotFoundResponse") => request
-                .block_hash_inventory()
-                .into_iter()
-                .map(InventoryHash::Block)
-                .chain(
-                    request
-                        .transaction_id_inventory()
-                        .into_iter()
-                        .map(InventoryHash::from),
-                )
-                .collect(),
-
-            // All other errors (timeouts, drops, overload): don't poison.
-            (_, Err(_)) => iter::empty().collect(),
-        };
-
-        if let Some(missing_inv) =
-            InventoryChange::new_missing_multi(missing_inv.iter(), self.transient_addr)
-        {
-            // if all the receivers are closed, assume we're in tests or an isolated connection
-            let _ = self.collector.send(missing_inv);
         }
     }
 }
@@ -643,13 +493,7 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest {
-            request,
-            tx,
-            inv_collector: Some(self.inv_collector.clone()),
-            transient_addr: self.connection_info.connected_addr.get_transient_addr(),
-            span,
-        }) {
+        match self.server_tx.try_send(ClientRequest { request, tx, span }) {
             Err(e) => {
                 if e.is_disconnected() {
                     let peer_error = self

@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Updated the `libz-sys` build dependency to 1.1.31, clearing RUSTSEC-2026-0418. Zebra isn''t affected: the leak needs `cc` 1.6.0 or later, and Zebra''s lockfile uses `cc` 1.2.61.'
-time: 2026-10-30T14:07:58.283216675-05:00

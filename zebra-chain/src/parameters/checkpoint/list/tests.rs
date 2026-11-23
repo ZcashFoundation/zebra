@@ -4,8 +4,6 @@
 
 use std::sync::Arc;
 
-use num_integer::div_ceil;
-
 use crate::{
     block::{Block, HeightDiff, MAX_BLOCK_BYTES},
     parameters::{
@@ -294,7 +292,7 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
     let max_checkpoint_height_gap =
         HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
     let min_checkpoint_height_gap =
-        HeightDiff::try_from(div_ceil(MAX_CHECKPOINT_BYTE_COUNT, MAX_BLOCK_BYTES))
+        HeightDiff::try_from(MAX_CHECKPOINT_BYTE_COUNT.div_ceil(MAX_BLOCK_BYTES))
             .expect("constant fits in HeightDiff");
 
     let list = network.checkpoint_list();

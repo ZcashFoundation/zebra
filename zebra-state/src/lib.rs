@@ -22,6 +22,7 @@ extern crate tracing;
 pub mod config;
 // Most constants are exported by default
 pub mod constants;
+pub mod metrics;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -41,11 +42,13 @@ pub use config::{
 };
 pub use constants::{
     state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS,
-    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES,
+    MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS,
 };
 pub use error::{
-    AwaitUtxoError, BoxError, CloneError, CommitBlockError, CommitCheckpointVerifiedError,
-    CommitSemanticallyVerifiedError, DuplicateNullifierError, StateInitError, ValidateContextError,
+    AwaitUtxoError, BlockReadError, BoxError, CloneError, CommitBlockError,
+    CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
+    StateInitError, ValidateContextError,
 };
 pub use request::{
     AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
@@ -74,6 +77,10 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
+// Allow external tests to write prepared blocks directly to a database
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use request::{FinalizedBlock, Treestate};
+
 pub use service::{
     finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
     ReadStateService,
@@ -82,7 +89,7 @@ pub use service::{
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
-    arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
+    arbitrary::{populated_state, populated_state_with_debug, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };
