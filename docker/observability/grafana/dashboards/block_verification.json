@@ -146,18 +146,6 @@
             "uid": "zebra-prometheus"
           },
           "editorMode": "code",
-          "expr": "state_checkpoint_queued_min_height{job=\"$job\"}",
-          "hide": false,
-          "legendFormat": "checkpoint queued min",
-          "range": true,
-          "refId": "J"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "zebra-prometheus"
-          },
-          "editorMode": "code",
           "expr": "state_memory_sent_block_height{job=\"$job\"}",
           "hide": false,
           "legendFormat": "full sent",

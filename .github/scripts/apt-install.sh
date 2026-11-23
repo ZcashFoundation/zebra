@@ -16,7 +16,7 @@
 #
 # Exit codes:
 #   0 - packages installed
-#   1 - no packages given, or the install failed twice
+#   1 - no packages given, the download failed twice, or the install failed
 
 set -euo pipefail
 
@@ -60,20 +60,38 @@ apt_get() {
 apt_get 90s -q update ||
   echo "::warning::apt-get update timed out or failed; continuing with the package index from the runner image"
 
-# These packages are required, so retry once -- a second attempt redoes the
-# mirror failover -- then fail loudly, instead of leaving a later step to break
-# on a missing header or binary.
+# Download first and install separately, so a timeout only ever interrupts a
+# download. apt-get runs dpkg in a session of its own, so the process-group kill
+# above does not reach it: an install killed during dpkg leaves dpkg holding the
+# lock, and then dying with the package database half-configured, which fails
+# any retry. A killed download leaves only partial files, which a retry resumes.
 #
-# `-q` here too: under `-qq` a stalled install prints nothing before the timeout
-# kills it, so the log cannot show whether a download or dpkg hung. `-q` keeps
-# the `Get:` and `Unpacking`/`Setting up` lines that pin it down.
+# These packages are required, so retry the download once -- a second attempt
+# redoes the mirror failover -- then fail loudly, instead of leaving a later
+# step to break on a missing header or binary.
+#
+# `-q` here too: under `-qq` a stalled download prints nothing before the
+# timeout kills it. `-q` keeps the `Get:` lines that show which mirror stalled,
+# and the `Unpacking`/`Setting up` lines that show a dpkg hang.
+downloaded=false
 for attempt in 1 2; do
-  if apt_get 240s -q install -y --no-install-recommends "$@"; then
-    exit 0
+  if apt_get 240s -q install -y --no-install-recommends --download-only "$@"; then
+    downloaded=true
+    break
   fi
 
-  echo "::warning::apt-get install attempt $attempt of 2 failed or timed out"
+  echo "::warning::apt-get download attempt $attempt of 2 failed or timed out"
 done
 
-echo "::error::apt-get install failed for: $*"
-exit 1
+if [ "$downloaded" != "true" ]; then
+  echo "::error::apt-get download failed for: $*"
+  exit 1
+fi
+
+# The install reads the package cache, so a stalling mirror cannot hold it up.
+# It is not retried: a timeout here means dpkg hung, and the dpkg it leaves
+# behind would fail the retry anyway.
+if ! apt_get 120s -q install -y --no-install-recommends "$@"; then
+  echo "::error::apt-get install failed for: $*"
+  exit 1
+fi

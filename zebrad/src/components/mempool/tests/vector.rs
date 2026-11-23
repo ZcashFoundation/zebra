@@ -156,6 +156,32 @@ fn lock_time_rejections_have_no_mempool_score() {
     assert_eq!(score(TransactionError::NoInputs), 100);
 }
 
+/// A V4 transaction signed for an adjacent upgrade fails its scripts, so script failures of
+/// transactions without a branch ID field have no peer score near an activation, and keep it
+/// elsewhere and for transactions that carry a branch ID.
+#[test]
+fn v4_script_failure_near_activation_has_no_mempool_score() {
+    let network = Network::Mainnet;
+    let activation_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height");
+    let score = |transaction_upgrade, height| {
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::Script(zebra_script::Error::ScriptInvalid),
+            transaction_upgrade,
+            height,
+            &network,
+        )
+    };
+
+    for (offset, expected) in [(-41, 100), (-40, 0), (-1, 0), (0, 0), (39, 0), (40, 100)] {
+        let height =
+            (activation_height + offset).expect("NU6.3 activates far from the height limits");
+        assert_eq!(score(None, height), expected, "height offset {offset}");
+        assert_eq!(score(Some(NetworkUpgrade::Nu6_3), height), 100);
+    }
+}
+
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized
@@ -2564,4 +2590,178 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         matches!(result, Err(MempoolError::FullQueue)),
         "a transaction from the same IP on a different port must share the per-peer bucket, got {result:?}"
     );
+}
+
+/// Returns an enabled mempool with a mock transaction verifier, and the misbehavior receiver.
+async fn enabled_mempool_with_mock_verifier(
+    network: &Network,
+    config: mempool::Config,
+) -> (
+    Mempool,
+    MockTxVerifier,
+    tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
+) {
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let (state, _read_only_state, latest_chain_tip, mut chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), network, Height::MAX, 0).await;
+    let mut state_service = ServiceBuilder::new().buffer(10).service(state);
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(10);
+    let (mut mempool, mempool_changes) = Mempool::new(
+        network,
+        &config,
+        Buffer::new(BoxService::new(peer_set), 1),
+        state_service.clone(),
+        Buffer::new(BoxService::new(tx_verifier.clone()), 1),
+        sync_status,
+        latest_chain_tip,
+        chain_tip_change.clone(),
+        misbehavior_tx,
+    );
+    let mut changes = mempool_changes.subscribe();
+    tokio::spawn(async move { while changes.recv().await.is_ok() {} });
+
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.into(),
+        ))
+        .await
+        .unwrap();
+    chain_tip_change.wait_for_tip_change().await.unwrap();
+    mempool.enable(&mut recent_syncs).await;
+
+    (mempool, tx_verifier, misbehavior_rx)
+}
+
+/// Returns a Mainnet transaction with its outputs replaced by `outputs`.
+fn transaction_with_outputs(
+    network: &Network,
+    outputs: Vec<transparent::Output>,
+) -> zebra_chain::transaction::UnminedTx {
+    let mut transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction")
+        .transaction
+        .transaction;
+    Arc::make_mut(&mut transaction).set_outputs(outputs);
+    transaction.into()
+}
+
+/// A peer's transaction with a dust output is rejected before verification, without scoring the
+/// peer, like zcashd's `IsStandardTx()` check.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_rejects_non_standard_outputs_before_verification() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    };
+    let (mut mempool, mut tx_verifier, mut misbehavior_rx) =
+        enabled_mempool_with_mock_verifier(&network, config).await;
+
+    let dust_tx = transaction_with_outputs(
+        &network,
+        vec![transparent::Output {
+            value: Amount::new(10),
+            lock_script: p2pkh_script([0u8; 20]),
+        }],
+    );
+    let dust_id = dust_tx.id;
+
+    let source: std::net::SocketAddr = "203.0.113.7:8233".parse().unwrap();
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![Gossip::Tx(dust_tx)],
+            source,
+        })
+        .await
+        .expect("transaction is queued");
+
+    let rejected = futures::future::poll_fn(|cx| {
+        let _ = mempool.poll_ready(cx);
+        match mempool.storage().rejection_error(&dust_id) {
+            Some(error) => std::task::Poll::Ready(error),
+            None => std::task::Poll::Pending,
+        }
+    });
+    let error = timeout(Duration::from_secs(10), rejected)
+        .await
+        .expect("dust transaction is rejected");
+
+    assert_eq!(
+        error,
+        MempoolError::StorageExactTip(ExactTipRejectionError::FailedStandard(
+            storage::NonStandardTransactionError::IsDust
+        )),
+    );
+    tx_verifier.expect_no_requests().await;
+    assert!(
+        misbehavior_rx.try_recv().is_err(),
+        "a non-standard transaction doesn't score the peer"
+    );
+
+    Ok(())
+}
+
+/// The early output check uses the configured `max_datacarrier_bytes`, not the default.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_early_output_check_uses_configured_datacarrier_limit() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        max_datacarrier_bytes: Some(200),
+        ..Default::default()
+    };
+    let (mut mempool, mut tx_verifier, _misbehavior_rx) =
+        enabled_mempool_with_mock_verifier(&network, config).await;
+
+    // A 103-byte OP_RETURN script: above the 83-byte default, below the configured 200.
+    let mut op_return = vec![0x6a, 0x4c, 100];
+    op_return.extend([0u8; 100]);
+    let tx = transaction_with_outputs(
+        &network,
+        vec![transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Script::new(&op_return),
+        }],
+    );
+
+    let source: std::net::SocketAddr = "203.0.113.7:8233".parse().unwrap();
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![Gossip::Tx(tx)],
+            source,
+        })
+        .await
+        .expect("transaction is queued");
+
+    let verifier_request = tx_verifier.expect_request_that(|_| true);
+    let drive = async {
+        loop {
+            let _ = futures::poll!(futures::future::poll_fn(|cx| mempool.poll_ready(cx)));
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::select! {
+        request = verifier_request => request.respond(Err(TransactionError::NoInputs)),
+        _ = drive => unreachable!("the drive loop never ends"),
+    }
+
+    Ok(())
 }

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added the `state.block_writer.phase.duration_seconds` histogram, which times each phase of committing a checkpoint-verified block, with a `phase` label. `LatestChainTip` now implements `ChainTip::best_tip_changed_at`.
+time: 2026-11-17T12:26:26.869967Z

@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Reduce build dependencies without changing node behavior.
-time: 2026-11-07T01:26:16.557392892+01:00

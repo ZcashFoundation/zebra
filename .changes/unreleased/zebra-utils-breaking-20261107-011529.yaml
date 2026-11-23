@@ -1,5 +1,0 @@
-project: zebra-utils
-kind: breaking
-body: Remove the unused `zcash_primitives` Cargo feature and optional dependency; remove this feature from dependency declarations.
-time: 2026-11-07T01:15:29.790561584+01:00
-

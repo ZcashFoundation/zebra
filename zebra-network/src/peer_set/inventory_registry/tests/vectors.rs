@@ -6,7 +6,7 @@ use zebra_chain::{block, serialization::AtLeastOne, transaction};
 
 use crate::{
     peer_set::inventory_registry::{
-        tests::new_inv_registry, InventoryMarker, InventoryStatus, MAX_INV_PER_MAP,
+        tests::new_inv_registry, InventoryMarker, InventoryStatus, RepeatRequests, MAX_INV_PER_MAP,
         MAX_PEERS_PER_INV,
     },
     protocol::external::InventoryHash,
@@ -299,6 +299,96 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
             );
         }
     }
+}
+
+/// Check that peers that returned an advertised block are recorded separately from failed peers,
+/// aren't cleared when the peer reconnects, and expire after two rotations.
+#[tokio::test]
+async fn inv_registry_served_peers_ok() {
+    let test_hash = InventoryHash::Block(block::Hash([0; 32]));
+    let test_peer = "1.1.1.1:1"
+        .parse()
+        .expect("unexpected invalid peer address");
+
+    let (mut inv_registry, _inv_stream_tx) = new_inv_registry();
+
+    inv_registry.register_served(test_hash, test_peer);
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+    assert_eq!(inv_registry.failed_peers(test_hash).count(), 0);
+
+    // The record is about the block, so a new connection from the same address keeps it.
+    inv_registry.clear_peer_failures(test_peer);
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    inv_registry.rotate();
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    inv_registry.rotate();
+    assert_eq!(inv_registry.served_peers(test_hash).count(), 0);
+}
+
+/// Check that repeat requests are counted for each group of peers, across both intervals, and
+/// expire after two rotations.
+#[tokio::test]
+async fn inv_registry_repeat_requests_ok() {
+    let test_hash = InventoryHash::Block(block::Hash([0; 32]));
+    let other_hash = InventoryHash::Block(block::Hash([1; 32]));
+
+    let (mut inv_registry, _inv_stream_tx) = new_inv_registry();
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests::default()
+    );
+
+    inv_registry.register_repeat_request(test_hash, false);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 0,
+            other_peers: 1,
+        }
+    );
+    assert_eq!(
+        inv_registry.repeat_requests(other_hash),
+        RepeatRequests::default()
+    );
+    assert_eq!(inv_registry.served_peers(test_hash).count(), 0);
+
+    // Requests in both intervals are added up.
+    inv_registry.rotate();
+    inv_registry.register_repeat_request(test_hash, true);
+    inv_registry.register_repeat_request(test_hash, false);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 1,
+            other_peers: 2,
+        }
+    );
+
+    inv_registry.rotate();
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 1,
+            other_peers: 1,
+        }
+    );
+
+    inv_registry.rotate();
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests::default()
+    );
 }
 
 /// Check that failed peers are recorded, aren't cleared by advertisements, and expire after two

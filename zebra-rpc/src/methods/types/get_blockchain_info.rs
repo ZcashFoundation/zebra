@@ -92,6 +92,33 @@ impl GetBlockchainInfoBalance {
         Self::new_internal("ironwood", amount, delta)
     }
 
+    /// Creates a [`GetBlockchainInfoBalance`] for the Network Sustainability Mechanism (NSM)
+    /// value balance (NU7) after the block at `height` on `network`. `amount` and `delta` are
+    /// [ZIP 237]'s values. It is `monitored` from NU7 - 1, also when the balance is zero.
+    ///
+    /// The NSM value balance is not part of the issued supply, so it is not a value pool and
+    /// is not counted in [`Self::chain_supply`].
+    ///
+    /// [ZIP 237]: https://zips.z.cash/zip-0237
+    pub fn nsm(
+        network: &zebra_chain::parameters::Network,
+        height: zebra_chain::block::Height,
+        amount: Amount<NonNegative>,
+        delta: Option<Amount<NegativeAllowed>>,
+    ) -> Self {
+        Self {
+            // The next block is at or after NU7 activation; `Height::MAX` has no next block.
+            monitored: zebra_chain::parameters::NetworkUpgrade::Nu7
+                .activation_height(network)
+                .is_some_and(|activation_height| {
+                    height
+                        .next()
+                        .map_or(true, |next_height| next_height >= activation_height)
+                }),
+            ..Self::new_internal("nsm", amount, delta)
+        }
+    }
+
     /// Converts a [`ValueBalance`] to a list of [`GetBlockchainInfoBalance`]s.
     pub fn value_pools(
         value_balance: ValueBalance<NonNegative>,
@@ -126,8 +153,8 @@ impl GetBlockchainInfoBalance {
         ]
     }
 
-    // The NU7 NSM reserve is deliberately not a pool here: it is not part of the Issued Supply,
-    // so `chain_supply()` correctly falls as fees are burned.
+    // The NU7 NSM value balance is deliberately not a pool here: it is not part of the Issued
+    // Supply, so `chain_supply()` correctly falls as fees are burned. `nsm()` reports it.
 
     /// Converts a [`ValueBalance`] to a [`GetBlockchainInfoBalance`] representing the total chain supply.
     pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {

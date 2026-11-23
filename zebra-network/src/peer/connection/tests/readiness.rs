@@ -142,8 +142,6 @@ async fn backpressured_request_gets_response_budget_after_dispatch() {
         .try_send(crate::peer::ClientRequest {
             request: Request::Peers,
             tx,
-            inv_collector: None,
-            transient_addr: None,
             span: tracing::Span::current(),
         })
         .unwrap();

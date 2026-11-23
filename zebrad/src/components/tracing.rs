@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 mod component;
 mod endpoint;
+mod format;
 
 #[cfg(feature = "flamegraph")]
 mod flame;
@@ -20,6 +21,7 @@ mod otel;
 
 pub use component::Tracing;
 pub use endpoint::TracingEndpoint;
+pub(crate) use format::json_panic_line;
 
 #[cfg(feature = "flamegraph")]
 pub use flame::{layer, Grapher};
@@ -187,6 +189,13 @@ pub struct InnerConfig {
     /// its parent directories.
     pub log_file: Option<PathBuf>,
 
+    /// The format of the logs written to standard output or the log file.
+    ///
+    /// Defaults to `"text"`. Set to `"json"` to write one JSON object per line, for log
+    /// collectors such as Google Cloud Logging, Azure Monitor, Grafana Loki, and Datadog.
+    /// JSON logs never use color.
+    pub log_format: LogFormat,
+
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
     /// distributions that use systemd.
     ///
@@ -221,10 +230,29 @@ pub struct InnerConfig {
     ///
     /// Lower values reduce network/collector overhead for busy nodes.
     ///
-    /// Note: This differs from the standard `OTEL_TRACES_SAMPLER_ARG` which uses
-    /// a ratio (0.0-1.0). Zebra uses percentage (0-100) for consistency with
-    /// other integer-based configuration options.
+    /// When `None` (default), the standard `OTEL_TRACES_SAMPLER` and
+    /// `OTEL_TRACES_SAMPLER_ARG` environment variables choose the sampler, and every
+    /// trace is sampled if they are unset. Unlike this setting, `OTEL_TRACES_SAMPLER_ARG`
+    /// is a ratio between 0.0 and 1.0, and only applies when `OTEL_TRACES_SAMPLER` is set.
     pub opentelemetry_sample_percent: Option<u8>,
+}
+
+/// The format of Zebra's logs.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    /// Human-readable text, one event per line.
+    #[default]
+    Text,
+
+    /// One JSON object per line.
+    ///
+    /// Each line has the keys `timestamp`, `level`, `severity`, `message`, and `target`,
+    /// followed by the event's fields, the `spans` it happened in, its `code.file.path` and
+    /// `code.line.number`, and its OpenTelemetry `trace_id` and `span_id` if it is in a
+    /// sampled trace. Only these keys are stable: event and span fields can change between
+    /// releases.
+    Json,
 }
 
 /// The progress bars that Zebra will show while running.
@@ -244,9 +272,10 @@ pub enum ProgressConfig {
 
 impl Config {
     /// Returns `true` if standard output should use color escapes.
-    /// Automatically checks if Zebra is running in a terminal.
+    /// Automatically checks if Zebra is running in a terminal, and never uses color for JSON logs.
     pub fn use_color_stdout(&self) -> bool {
-        self.force_use_color || (self.use_color && std::io::stdout().is_terminal())
+        self.log_format == LogFormat::Text
+            && (self.force_use_color || (self.use_color && std::io::stdout().is_terminal()))
     }
 
     /// Returns `true` if standard error should use color escapes.
@@ -279,6 +308,7 @@ impl Default for InnerConfig {
             flamegraph: None,
             progress_bar,
             log_file: runtime_default_log_file(None, progress_bar),
+            log_format: LogFormat::Text,
             use_journald: false,
             opentelemetry_endpoint: None,
             opentelemetry_service_name: None,

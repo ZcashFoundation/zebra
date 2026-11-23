@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: Return `ChainTipBlock` instead of `CheckpointVerifiedBlock` from `FinalizedState::commit_finalized`, moving created outputs into the database commit instead of copying them. Callers should use the returned chain-tip summary rather than the consumed checkpoint block.
-time: 2026-11-04T22:14:01.66483384+01:00

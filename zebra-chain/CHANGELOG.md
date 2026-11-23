@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.0.0] - 2026-11-16
+
+### Breaking Changes
+
+- Removed unused Orchard construction APIs: `orchard::NoteCommitment`, `error::NoteError`, `orchard::ValueCommitment::{new, randomized}`, `orchard::ShieldedData::binding_verification_key`, and conversions from `orchard::Diversifier` to Pallas points ([#11488](https://github.com/ZcashFoundation/zebra/pull/11488)).
+- `Transaction::value_balance`, `Block::chain_value_pool_change`, `Block::chain_value_pool_change_and_fees`, `Block::transaction_fees` and `transparent::Input::value` take any `HashMap<OutPoint, U>` with `U: AsRef<transparent::Utxo>`, so ordered UTXO maps no longer need to be copied; `transparent::Input::value_from_ordered_utxos` is removed in favour of `Input::value`. Callers passing an empty map may need a type annotation.
+- Added `parameters::network::error::ParametersBuilderError::MissingBranchId`. `ParametersBuilder::with_activation_heights` now returns it when a configured network upgrade from Overwinter on has no consensus branch ID in this build, so `zebrad` stops at config load instead of panicking in the history tree at that upgrade's activation block ([#11482](https://github.com/ZcashFoundation/zebra/issues/11482)).
+- Remove the `elasticsearch` feature. The `serde::Serialize` impls it enabled on `Block`, `Transaction` and transparent types are still available with `proptest-impl`.
+
+### Added
+
+- `impl AsRef<transparent::Utxo> for transparent::Utxo`.
+
+### Changed
+
+- Reduce large block transaction-ID and authorizing-data Merkle tree levels in parallel without changing their roots or public APIs.
+- Generate matching NU5 coinbase expiry heights in partial test chains.
+- Reduce direct build dependencies by using standard-library assertions and ceiling division.
+
+### Fixed
+
+- Display TEX addresses as Bech32m with the `tex`, `textest` or `texregtest` HRP (ZIP 320). `transparent::Address` previously printed and serialized them as the P2PKH address with the same key hash.
+
+### Security
+
+- `Block` deserialization rejects some malformed blocks earlier, before reading all of their transactions.
+
 ## [15.0.0] - 2026-10-22
 
 ### Breaking Changes

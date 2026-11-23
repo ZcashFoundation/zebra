@@ -49,15 +49,16 @@ groups:
           summary: "No peers connected"
           description: "Zebra has 0 peers for 2 minutes. Check network connectivity and firewall rules."
 
-      # High error rate
+      # Blocks failing verification. Download errors, such as peers not having a block, are
+      # expected during sync and aren't counted.
       - alert: ZebraHighErrorRate
-        expr: rate(zebra_errors_total[5m]) > 0.1
+        expr: sum without (kind) (rate(sync_block_error_count{kind=~"invalid|auth_commitment_mismatch|validation_request|verifier_service|verify_timeout|utxo_lookup_timeout|final_checkpoint_verify_timeout"}[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High error rate"
-          description: "Zebra is experiencing elevated error rates (> 0.1/s for 5 minutes)."
+          summary: "High block verification error rate"
+          description: "Zebra's syncer is failing to verify blocks (> 0.1/s for 5 minutes)."
 
   # Value Pool Alerts (Monitoring)
   - name: zebra-value-pools
@@ -85,19 +86,20 @@ groups:
   # RPC Alerts
   - name: zebra-rpc
     rules:
-      # High RPC latency
+      # High RPC latency. getblocktemplate long polls wait for a new template on purpose, so
+      # they're left out.
       - alert: RPCHighLatency
-        expr: histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method)) > 2
+        expr: histogram_quantile(0.99, rate(rpc_request_duration_seconds_bucket{method!="getblocktemplate"}[5m])) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "High RPC latency detected"
-          description: "RPC method {{ $labels.method }} has p99 latency > 2 seconds for 5 minutes."
+          description: "RPC method {{ $labels.method }} has p99 latency > 2 seconds for 5 minutes. getblocktemplate isn't checked, because its long polls wait for a new template."
 
       # High RPC error rate
       - alert: RPCHighErrorRate
-        expr: sum(rate(rpc_errors_total[5m])) by (method) / sum(rate(rpc_requests_total[5m])) by (method) > 0.1
+        expr: sum without (error_code) (rate(rpc_errors_total[5m])) / sum without (status) (rate(rpc_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
@@ -120,7 +122,7 @@ groups:
     rules:
       # High handshake failure rate
       - alert: HandshakeFailureRateHigh
-        expr: sum(rate(zcash_net_peer_handshake_failures_total[5m])) / (sum(rate(zcash_net_peer_handshake_duration_seconds_count[5m])) + 0.001) > 0.5
+        expr: sum without (reason) (rate(zcash_net_peer_handshake_failures_total[5m])) / (sum without (result) (rate(zcash_net_peer_handshake_duration_seconds_count[5m])) + 0.001) > 0.5
         for: 5m
         labels:
           severity: warning
@@ -138,12 +140,13 @@ groups:
           summary: "Many obsolete version handshakes"
           description: "Elevated rate of peer handshake failures due to obsolete protocol versions. May indicate network upgrade in progress."
 
-      # Slow handshakes
+      # Slow handshakes. Zebra abandons handshakes after 3 seconds (HANDSHAKE_TIMEOUT), so the
+      # threshold must be lower than that.
       - alert: SlowHandshakes
-        expr: histogram_quantile(0.95, sum(rate(zcash_net_peer_handshake_duration_seconds_bucket{result="success"}[5m])) by (le)) > 10
+        expr: histogram_quantile(0.95, sum without (result) (rate(zcash_net_peer_handshake_duration_seconds_bucket{result="success"}[5m]))) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Slow peer handshakes"
-          description: "p95 handshake duration exceeds 10 seconds. Network latency may be high."
+          description: "p95 successful handshake duration exceeds 2 seconds for 5 minutes, close to the 3 second handshake timeout. Network latency may be high."

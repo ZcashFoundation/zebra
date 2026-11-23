@@ -43,7 +43,10 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError},
+    error::{
+        CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError,
+        ValidateContextError,
+    },
     request::TimedSpan,
     response::NonFinalizedBlocksListener,
     service::{
@@ -114,6 +117,11 @@ pub(crate) struct StateService {
     /// The configured Zcash network.
     network: Network,
 
+    /// The height of the final checkpoint, or [`block::Height::MAX`] if there isn't one.
+    ///
+    /// Checkpoint verified blocks are written to the finalized state up to this height.
+    max_checkpoint_height: block::Height,
+
     /// The height that we start storing UTXOs from finalized blocks.
     ///
     /// This height should be lower than the last few checkpoints,
@@ -171,7 +179,8 @@ pub(crate) struct StateService {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
-    non_finalized_rejected_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+    non_finalized_rejected_receiver:
+        tokio::sync::mpsc::UnboundedReceiver<write::NonFinalizedWriteOutcome>,
 
     // Pending UTXO Request Tracking
     //
@@ -458,6 +467,7 @@ impl StateService {
 
         let state = Self {
             network: network.clone(),
+            max_checkpoint_height,
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
@@ -644,6 +654,12 @@ impl StateService {
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
 
+            // A queued child that isn't at the next height is invalid and would never be dequeued.
+            self.reject_queued_non_finalized_children(
+                queued_block.0.hash,
+                last_sent_finalized_block_height,
+            );
+
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
             // Blocks waiting in the queue are not recorded, so they can be downloaded again.
@@ -710,12 +726,13 @@ impl StateService {
         }
     }
 
-    /// Drains every hash queued on `non_finalized_rejected_receiver` and
-    /// removes it from `non_finalized_block_write_sent_hashes`.
+    /// Drains every write outcome queued on `non_finalized_rejected_receiver`.
     ///
-    /// This closes the lockout window where a rejected block keeps its hash
-    /// recorded as "sent", so a subsequent honest re-delivery of a block at
-    /// the same hash is not short-circuited as a false "duplicate".
+    /// Rejected and evicted blocks are removed from
+    /// `non_finalized_block_write_sent_hashes`. This closes the lockout window where a rejected
+    /// block keeps its hash recorded as "sent", so a subsequent honest re-delivery of a block at
+    /// the same hash is not short-circuited as a false "duplicate". Committed blocks stay sent,
+    /// but their UTXOs are forgotten, because readers then find them in the non-finalized state.
     ///
     /// # Correctness & Performance
     ///
@@ -725,10 +742,14 @@ impl StateService {
     fn drain_non_finalized_rejected_hashes(&mut self) {
         use tokio::sync::mpsc::error::TryRecvError;
 
+        let mut rejected_hashes = Vec::new();
+
         loop {
             match self.non_finalized_rejected_receiver.try_recv() {
-                Ok(hash) => {
-                    self.non_finalized_block_write_sent_hashes.remove(&hash);
+                Ok(write::NonFinalizedWriteOutcome::Rejected(hash)) => rejected_hashes.push(hash),
+                Ok(write::NonFinalizedWriteOutcome::Committed(hash)) => {
+                    self.non_finalized_block_write_sent_hashes
+                        .forget_utxos(&hash);
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
@@ -740,6 +761,9 @@ impl StateService {
                 }
             }
         }
+
+        self.non_finalized_block_write_sent_hashes
+            .remove_all(rejected_hashes);
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
@@ -798,7 +822,7 @@ impl StateService {
     #[instrument(level = "debug", skip(self, semantically_verified))]
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
-        semantically_verified: SemanticallyVerifiedBlock,
+        mut semantically_verified: SemanticallyVerifiedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
@@ -836,44 +860,56 @@ impl StateService {
             return rsp_rx;
         }
 
+        if let Some(parent_height) = self.read_service.db.height(parent_hash) {
+            if Some(semantically_verified.height) != parent_height + 1 {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let _ = rsp_tx.send(Err(CommitBlockError::ValidateContextError(Box::new(
+                    ValidateContextError::NonSequentialFinalizedChild {
+                        candidate_height: semantically_verified.height,
+                        parent_height,
+                    },
+                ))
+                .into()));
+                return rsp_rx;
+            }
+        }
+
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
-        // it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx)) = self
+        // it with the newer request. A block hash does not identify its authorizing data, so
+        // replace the body together with its response channel.
+        if let Some(old_request) = self
             .non_finalized_state_queued_blocks
-            .get_mut(&semantically_verified.hash)
+            .remove_queued(&semantically_verified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
-            let (mut rsp_tx, rsp_rx) = oneshot::channel();
-            std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
-                Some(semantically_verified.hash.into()),
-                KnownBlock::Queue,
-            )
-            .into()));
-            rsp_rx
-        } else {
-            let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.non_finalized_state_queued_blocks
-                .queue((semantically_verified, rsp_tx));
-            rsp_rx
-        };
+            // Another copy of the same body was received when its first copy was, so it keeps
+            // its place in `Chain::cmp`'s first-received order. A different body doesn't.
+            // Blocks with the same hash compare equal, so compare their authorizing data.
+            if old_request.0.block.auth_data_root() == semantically_verified.block.auth_data_root()
+            {
+                semantically_verified.received_time = old_request
+                    .0
+                    .received_time
+                    .min(semantically_verified.received_time);
+            }
+            Self::send_semantically_verified_block_error(
+                old_request,
+                CommitBlockError::new_duplicate(
+                    Some(semantically_verified.hash.into()),
+                    KnownBlock::Queue,
+                ),
+            );
+        }
+
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        self.non_finalized_state_queued_blocks
+            .queue((semantically_verified, rsp_tx));
 
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
-        //
-        // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
-        if self.block_write_sender.finalized.is_some()
-            && self
-                .non_finalized_state_queued_blocks
-                .has_queued_children(self.finalized_block_write_last_sent_hash)
-            && self.read_service.db.finalized_tip_hash()
-                == self.finalized_block_write_last_sent_hash
-        {
+        if self.block_write_sender.finalized.is_some() && self.checkpoint_handoff_is_ready() {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.block_write_sender.finalized.take());
@@ -882,6 +918,12 @@ impl StateService {
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
             self.non_finalized_block_write_sent_hashes
                 .can_fork_chain_at_hashes = true;
+            // Children queued while their finalized parent was in the write channel weren't checked.
+            for parent_hash in self.non_finalized_state_queued_blocks.parent_hashes() {
+                if let Some(parent_height) = self.read_service.db.height(parent_hash) {
+                    self.reject_queued_non_finalized_children(parent_hash, parent_height);
+                }
+            }
             // Send blocks from non-finalized queue
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
@@ -906,7 +948,63 @@ impl StateService {
                 .prune_by_height(finalized_tip_height);
         }
 
+        // Limit the queue after sending the blocks that are ready, so it can't fail them.
+        self.non_finalized_state_queued_blocks.prune_overflow();
+
         rsp_rx
+    }
+
+    /// Returns `true` if checkpoint verified blocks are written up to the final checkpoint,
+    /// so the block write task can switch to non-finalized blocks.
+    ///
+    /// With no final checkpoint (`Height::MAX`), it waits for a queued child of the last sent block.
+    fn checkpoint_handoff_is_ready(&self) -> bool {
+        self.read_service.db.finalized_tip_hash() == self.finalized_block_write_last_sent_hash
+            && (self
+                .read_service
+                .db
+                .finalized_tip_height()
+                .is_some_and(|tip_height| tip_height >= self.max_checkpoint_height)
+                || (self.max_checkpoint_height == block::Height::MAX
+                    && self
+                        .non_finalized_state_queued_blocks
+                        .has_queued_children(self.finalized_block_write_last_sent_hash)))
+    }
+
+    /// Rejects the queued non-finalized children of the finalized block `parent_hash` whose
+    /// height isn't `parent_height + 1`.
+    fn reject_queued_non_finalized_children(
+        &mut self,
+        parent_hash: block::Hash,
+        parent_height: block::Height,
+    ) {
+        if !self
+            .non_finalized_state_queued_blocks
+            .has_queued_children(parent_hash)
+        {
+            return;
+        }
+
+        for queued in self
+            .non_finalized_state_queued_blocks
+            .dequeue_children(parent_hash)
+        {
+            let candidate_height = queued.0.height;
+            if Some(candidate_height) == parent_height + 1 {
+                self.non_finalized_state_queued_blocks.queue(queued);
+                continue;
+            }
+
+            Self::send_semantically_verified_block_error(
+                queued,
+                CommitBlockError::ValidateContextError(Box::new(
+                    ValidateContextError::NonSequentialFinalizedChild {
+                        candidate_height,
+                        parent_height,
+                    },
+                )),
+            );
+        }
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
