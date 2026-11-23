@@ -420,9 +420,10 @@ impl Config {
                 // Count the initial peers from this seed. If an IP is returned by multiple seeds,
                 // each duplicate adds 1 to the initial peer count. (But we only make one initial
                 // connection attempt to each IP.)
-                metrics::counter!("zcash.net.peers.initial", "seed" => host.to_string()).increment(
-                    u64::try_from(ip_addrs.len()).expect("a peer address count fits in u64"),
-                );
+                metrics::counter!("zcash.net.peers.initial", "seed" => seed_metric_label(host))
+                    .increment(
+                        u64::try_from(ip_addrs.len()).expect("a peer address count fits in u64"),
+                    );
 
                 Ok(ip_addrs.into_iter().collect())
             }
@@ -500,11 +501,8 @@ impl Config {
         // Count the initial peers from the cache. If an IP is returned by DNS seeders and the
         // cache, each duplicate adds 1 to the initial peer count. (But we only make one initial
         // connection attempt to each IP.)
-        metrics::counter!(
-            "zcash.net.peers.initial",
-            "cache" => peer_cache_file.display().to_string(),
-        )
-        .increment(u64::try_from(peer_list.len()).expect("a peer address count fits in u64"));
+        metrics::counter!("zcash.net.peers.initial")
+            .increment(u64::try_from(peer_list.len()).expect("a peer address count fits in u64"));
 
         Ok(peer_list)
     }
@@ -560,11 +558,7 @@ impl Config {
                     "updated cached peer IP addresses"
                 );
 
-                metrics::counter!(
-                    "zcash.net.peers.cache",
-                    "cache" => peer_cache_file.display().to_string(),
-                )
-                .increment(
+                metrics::counter!("zcash.net.peers.cache").increment(
                     u64::try_from(peer_list.len()).expect("a peer address count fits in u64"),
                 );
 
@@ -915,6 +909,18 @@ fn is_default_initial_peer(peer: &str) -> bool {
         .chain(&DEFAULT_TESTNET_PEERS)
         .chain(&RETIRED_PUBLIC_PEERS)
         .any(|default| peer_host.eq_ignore_ascii_case(hostname(default)))
+}
+
+/// Returns `host` if it is exactly one of the default DNS seeders, and `custom` otherwise.
+///
+/// Operators can configure private peer addresses, which must not reach metrics backends.
+fn seed_metric_label(host: &str) -> &'static str {
+    DEFAULT_MAINNET_PEERS
+        .iter()
+        .chain(&DEFAULT_TESTNET_PEERS)
+        .find(|default| **default == host)
+        .copied()
+        .unwrap_or("custom")
 }
 
 fn build_configured_testnet<'de, D>(

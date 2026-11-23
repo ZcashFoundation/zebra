@@ -30,6 +30,9 @@ which are shared by all tests. Tests prefer the latest image generated from the 
 But if a state from the same commit is not available, tests will use the latest image from
 any branch and commit, as long as the state version is the same.
 
+If no image exists for the current state version, tests use the newest image from the previous
+state version, when zebrad can upgrade it in place.
+
 Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml) on tier 2 platforms using GitHub actions runners.
 
 ## Automated Merges

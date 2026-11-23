@@ -2,9 +2,7 @@
 //!
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
-use std::future::Future;
-
-use std::pin::Pin;
+use std::{fmt, future::Future, pin::Pin};
 
 use futures::{future, FutureExt};
 use http_body_util::{BodyExt, Limited};
@@ -15,6 +13,8 @@ use jsonrpsee::{
 };
 use jsonrpsee_types::ErrorObject;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tower::Service;
 
 use super::cookie::Cookie;
@@ -42,10 +42,12 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 ///
 /// ### Authenticate incoming requests
 ///
-/// If the cookie-based RPC authentication is enabled, check that the incoming request contains the
-/// authentication cookie.
+/// If RPC authentication is enabled, check that the incoming request carries the
+/// configured credentials: either the per-start authentication cookie, or the
+/// static user and password from the config. Requests that fail the check get an
+/// HTTP 401 response.
 ///
-/// This enables compatibility with `zcash-cli`.
+/// Cookie authentication enables compatibility with `zcash-cli`.
 ///
 /// ## Security
 ///
@@ -55,35 +57,86 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 #[derive(Clone, Debug)]
 pub struct HttpRequestMiddleware<S> {
     service: S,
-    cookie: Option<Cookie>,
+    auth: Option<RpcAuth>,
     max_request_body_size: usize,
+}
+
+#[derive(Clone)]
+pub(super) enum RpcAuth {
+    Cookie(Cookie),
+    Static([u8; 32]),
+}
+
+impl fmt::Debug for RpcAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Cookie(_) => "Cookie(..)",
+            Self::Static(_) => "Static(..)",
+        })
+    }
+}
+
+impl RpcAuth {
+    pub(super) fn static_credentials(user: &str, password: &str) -> Self {
+        // Compare fixed-size digests so even a length mismatch checks every byte.
+        Self::Static(
+            Sha256::new()
+                .chain_update(user)
+                .chain_update(b":")
+                .chain_update(password)
+                .finalize()
+                .into(),
+        )
+    }
+
+    fn authenticate(&self, authorization: &str) -> bool {
+        let encoded = match self {
+            // Preserve the header formats accepted by existing cookie clients.
+            Self::Cookie(_) => authorization.split_whitespace().nth(1),
+            Self::Static(_) => authorization
+                .split_once(' ')
+                .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Basic"))
+                .map(|(_, value)| value.trim_start_matches(' ')),
+        };
+        let Some(credentials) = encoded.and_then(|value| STANDARD.decode(value).ok()) else {
+            return false;
+        };
+        match self {
+            Self::Cookie(cookie) => std::str::from_utf8(&credentials)
+                .ok()
+                .and_then(|pair| pair.split_once(':'))
+                .is_some_and(|(_, password)| cookie.authenticate(password.to_owned())),
+            Self::Static(expected) => expected.ct_eq(&Sha256::digest(credentials)).into(),
+        }
+    }
 }
 
 impl<S> HttpRequestMiddleware<S> {
     /// Create a new `HttpRequestMiddleware` with the given service, cookie, and request body size limit.
     pub fn new(service: S, cookie: Option<Cookie>, max_request_body_size: usize) -> Self {
+        Self::with_auth(service, cookie.map(RpcAuth::Cookie), max_request_body_size)
+    }
+
+    /// Create a new `HttpRequestMiddleware` that requires the given credentials, if any.
+    fn with_auth(service: S, auth: Option<RpcAuth>, max_request_body_size: usize) -> Self {
         Self {
             service,
-            cookie,
+            auth,
             max_request_body_size,
         }
     }
 
     /// Check if the request is authenticated.
     pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
-        self.cookie.as_ref().is_none_or(|internal_cookie| {
+        self.auth.as_ref().is_none_or(|auth| {
             headers
                 .get(header::AUTHORIZATION)
                 .and_then(|auth_header| auth_header.to_str().ok())
-                .and_then(|auth_header| auth_header.split_whitespace().nth(1))
-                .and_then(|encoded| STANDARD.decode(encoded).ok())
-                .and_then(|decoded| String::from_utf8(decoded).ok())
-                .and_then(|request_cookie| request_cookie.split(':').nth(1).map(String::from))
-                .is_some_and(|passwd| internal_cookie.authenticate(passwd))
+                .is_some_and(|authorization| auth.authenticate(authorization))
         })
     }
 
-    /// Returns the HTTP 401 response sent when the request has no valid cookie credentials.
+    /// Returns the HTTP 401 response sent when authentication fails.
     ///
     /// The body is a JSON-RPC error object, so clients see why the request was refused
     /// instead of an empty reply.
@@ -201,18 +254,23 @@ impl<S> HttpRequestMiddleware<S> {
     }
 }
 
-/// Implement the Layer for HttpRequestMiddleware to allow injecting the cookie
+/// Implement the Layer for HttpRequestMiddleware to allow injecting the credentials
 #[derive(Clone)]
 pub struct HttpRequestMiddlewareLayer {
-    cookie: Option<Cookie>,
+    auth: Option<RpcAuth>,
     max_request_body_size: usize,
 }
 
 impl HttpRequestMiddlewareLayer {
     /// Create a new `HttpRequestMiddlewareLayer` with the given cookie and request body size limit.
     pub fn new(cookie: Option<Cookie>, max_request_body_size: usize) -> Self {
+        Self::with_auth(cookie.map(RpcAuth::Cookie), max_request_body_size)
+    }
+
+    /// Create a new `HttpRequestMiddlewareLayer` that requires the given credentials, if any.
+    pub(super) fn with_auth(auth: Option<RpcAuth>, max_request_body_size: usize) -> Self {
         Self {
-            cookie,
+            auth,
             max_request_body_size,
         }
     }
@@ -222,7 +280,7 @@ impl<S> tower::Layer<S> for HttpRequestMiddlewareLayer {
     type Service = HttpRequestMiddleware<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        HttpRequestMiddleware::new(service, self.cookie.clone(), self.max_request_body_size)
+        HttpRequestMiddleware::with_auth(service, self.auth.clone(), self.max_request_body_size)
     }
 }
 
@@ -432,6 +490,23 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["code"], 401);
         assert_eq!(body["error"]["message"], "unauthenticated method");
+    }
+
+    #[test]
+    fn static_auth_requires_the_whole_basic_credential() {
+        let auth = RpcAuth::static_credentials("node", "one:two");
+        let middleware = HttpRequestMiddleware::with_auth((), Some(auth), 1024);
+        for (scheme, pair, allowed) in [
+            ("bAsIc", "node:one:two", true),
+            ("Basic", "node:one", false),
+            ("Basic", "peer:one:two", false),
+            ("Bearer", "node:one:two", false),
+        ] {
+            let mut headers = header::HeaderMap::new();
+            let value = format!("{scheme} {}", STANDARD.encode(pair));
+            headers.insert(header::AUTHORIZATION, value.parse().unwrap());
+            assert_eq!(middleware.check_credentials(&headers), allowed);
+        }
     }
 
     #[tokio::test]

@@ -1,10 +1,73 @@
 //! RPC config
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{fmt, net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::common::default_cache_dir;
+
+/// A [`String`] whose `Debug` output is redacted, so secrets do not reach the logs.
+///
+/// Serialization is unaffected. Use [`RedactedString::as_str()`] to read the contents.
+#[derive(Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct RedactedString(String);
+
+impl fmt::Debug for RedactedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad("[REDACTED]")
+    }
+}
+
+impl RedactedString {
+    /// Returns the secret contents.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<S> From<S> for RedactedString
+where
+    S: Into<String>,
+{
+    fn from(value: S) -> Self {
+        Self(value.into())
+    }
+}
+
+/// The error returned when the static RPC credentials in [`Config`] are incomplete or unreadable.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum StaticCredentialsError {
+    /// A password is configured without a user.
+    #[error("rpc.rpc_password or rpc.rpc_password_file is set, but rpc.rpc_user is missing")]
+    MissingUser,
+
+    /// A user is configured without a password.
+    #[error("rpc.rpc_user is set, but neither rpc.rpc_password nor rpc.rpc_password_file is")]
+    MissingPassword,
+
+    /// The configured user is an empty string.
+    #[error("rpc.rpc_user must not be empty")]
+    EmptyUser,
+
+    /// The configured user contains a colon, so no HTTP Basic client could send it.
+    #[error("rpc.rpc_user must not contain ':', which separates the user from the password in HTTP Basic authentication")]
+    UserContainsColon,
+
+    /// The configured or loaded password is an empty string.
+    #[error("the RPC password must not be empty")]
+    EmptyPassword,
+
+    /// The password file could not be read.
+    #[error("reading rpc.rpc_password_file {path}: {source}")]
+    ReadPasswordFile {
+        /// The configured path.
+        path: PathBuf,
+        /// The I/O error.
+        source: std::io::Error,
+    },
+}
 
 /// RPC configuration section.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -93,10 +156,82 @@ pub struct Config {
     pub cookie_dir: PathBuf,
 
     /// Enable cookie-based authentication for RPCs.
+    ///
+    /// Ignored when static credentials are configured, see [`Self::rpc_user`].
     pub enable_cookie_auth: bool,
+
+    /// Username for static HTTP Basic RPC authentication.
+    ///
+    /// Must be set together with `rpc_password` or `rpc_password_file`, and must not
+    /// contain `:`. When set, every request to `listen_addr` needs these credentials, and
+    /// no cookie is written. The indexer and lightwalletd gRPC servers have no authentication.
+    ///
+    /// # Security
+    ///
+    /// HTTP Basic authentication sends the password unencrypted with every request.
+    pub rpc_user: Option<String>,
+
+    /// Password for static HTTP Basic RPC authentication.
+    ///
+    /// Prefer `rpc_password_file`, which keeps the secret out of the config file.
+    /// It can't be set through an environment variable.
+    pub rpc_password: Option<RedactedString>,
+
+    /// Path to a file containing the password for static HTTP Basic RPC authentication.
+    ///
+    /// Read once at startup with trailing newlines trimmed, so a new password needs a restart.
+    /// Takes precedence over `rpc_password`.
+    pub rpc_password_file: Option<PathBuf>,
 
     /// The maximum size of the response body in bytes.
     pub max_response_body_size: u32,
+}
+
+impl Config {
+    /// Returns `true` if any static credential field is set.
+    pub(crate) fn uses_static_auth(&self) -> bool {
+        self.rpc_user.is_some() || self.rpc_password.is_some() || self.rpc_password_file.is_some()
+    }
+
+    /// Returns the static user and password, `None` if they are not configured,
+    /// or an error if the configuration is partial or the password file is unreadable.
+    pub(crate) fn static_credentials(
+        &self,
+    ) -> Result<Option<(String, RedactedString)>, StaticCredentialsError> {
+        if !self.uses_static_auth() {
+            return Ok(None);
+        }
+
+        let user = self
+            .rpc_user
+            .clone()
+            .ok_or(StaticCredentialsError::MissingUser)?;
+        if user.is_empty() {
+            return Err(StaticCredentialsError::EmptyUser);
+        }
+        if user.contains(':') {
+            return Err(StaticCredentialsError::UserContainsColon);
+        }
+
+        let password = match (&self.rpc_password_file, &self.rpc_password) {
+            (Some(path), _) => {
+                let contents = std::fs::read_to_string(path).map_err(|source| {
+                    StaticCredentialsError::ReadPasswordFile {
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
+                RedactedString::from(contents.trim_end_matches(['\r', '\n']))
+            }
+            (None, Some(password)) => password.clone(),
+            (None, None) => return Err(StaticCredentialsError::MissingPassword),
+        };
+        if password.as_str().is_empty() {
+            return Err(StaticCredentialsError::EmptyPassword);
+        }
+
+        Ok(Some((user, password)))
+    }
 }
 
 // This impl isn't derivable because it depends on features.
@@ -125,8 +260,88 @@ impl Default for Config {
             // Enable cookie-based authentication by default.
             enable_cookie_auth: true,
 
+            rpc_user: None,
+            rpc_password: None,
+            rpc_password_file: None,
+
             // 50 MiB
             max_response_body_size: 52_428_800,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::{Config, RedactedString, StaticCredentialsError};
+
+    fn config_with(user: Option<&str>, password: Option<&str>) -> Config {
+        Config {
+            rpc_user: user.map(str::to_string),
+            rpc_password: password.map(RedactedString::from),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn static_credentials_from_config_password() {
+        let config = config_with(Some("user"), Some("hunter2"));
+        assert_eq!(
+            config.static_credentials().unwrap(),
+            Some(("user".to_string(), RedactedString::from("hunter2")))
+        );
+    }
+
+    /// Zebra logs the whole config at startup, so the password must never appear in it.
+    #[test]
+    fn config_debug_does_not_contain_rpc_password() {
+        let config = config_with(Some("user"), Some("hunter2"));
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("hunter2"), "{debug}");
+        assert!(debug.contains("[REDACTED]"), "{debug}");
+    }
+
+    #[test]
+    fn static_credentials_reject_partial_config() {
+        let cases = [
+            ("user without password", Some("user"), None),
+            ("password without user", None, Some("hunter2")),
+            ("empty user", Some(""), Some("hunter2")),
+            ("user with a colon", Some("us:er"), Some("hunter2")),
+            ("empty password", Some("user"), Some("")),
+        ];
+
+        for (case, user, password) in cases {
+            let result = config_with(user, password).static_credentials();
+            assert!(result.is_err(), "{case} should be rejected, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn static_credentials_from_password_file_take_precedence_and_trim_newline() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"from-file\n").unwrap();
+
+        let config = Config {
+            rpc_password_file: Some(file.path().to_path_buf()),
+            ..config_with(Some("user"), Some("from-config"))
+        };
+        assert_eq!(
+            config.static_credentials().unwrap(),
+            Some(("user".to_string(), RedactedString::from("from-file")))
+        );
+    }
+
+    #[test]
+    fn static_credentials_reject_missing_password_file() {
+        let config = Config {
+            rpc_password_file: Some("/nonexistent/rpc-password".into()),
+            ..config_with(Some("user"), None)
+        };
+        assert!(matches!(
+            config.static_credentials(),
+            Err(StaticCredentialsError::ReadPasswordFile { .. })
+        ));
     }
 }

@@ -658,6 +658,13 @@ pub fn tx_transparent_coinbase_spends_maturity(
 /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L20>
 pub const MAX_P2SH_SIGOPS: u32 = 15;
 
+/// The maximum number of signature operations in a standard transaction: legacy sigops plus P2SH
+/// redeem-script sigops.
+///
+/// This is zcashd's `MAX_STANDARD_TX_SIGOPS` standardness (policy) constant:
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L24>
+pub const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
+
 /// The maximum size in bytes of the scriptSig of a standard transaction input.
 ///
 /// This is zcashd's `MAX_STANDARD_SCRIPTSIG_SIZE` standardness (policy) constant:

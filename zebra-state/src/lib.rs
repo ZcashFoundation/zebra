@@ -22,6 +22,7 @@ extern crate tracing;
 pub mod config;
 // Most constants are exported by default
 pub mod constants;
+pub mod metrics;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -41,7 +42,8 @@ pub use config::{
 };
 pub use constants::{
     state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS,
-    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES,
+    MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS,
 };
 pub use error::{
     AwaitUtxoError, BlockReadError, BoxError, CloneError, CommitBlockError,

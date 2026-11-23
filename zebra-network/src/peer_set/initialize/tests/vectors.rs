@@ -3192,3 +3192,91 @@ async fn misbehavior_reports_are_received_during_flush() {
     drop(misbehavior_tx);
     batch_task.await.expect("batch task should not panic");
 }
+
+/// Check that a misbehaviour report that bans a peer is sent to the address book right away,
+/// once per peer and flush interval, and that other reports still wait for the next flush.
+///
+/// A peer that serves a forged body for a block that only it advertised would otherwise keep
+/// getting the requests for that block until the next flush (GHSA-g9rc-89v4-hhvf).
+#[tokio::test]
+async fn ban_reports_are_sent_before_the_next_flush() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    const FLUSH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+    const SHORT_WAIT: Duration = Duration::from_secs(1);
+
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(10);
+    let (address_book_updater, mut address_book_rx) = change_channel(10);
+
+    let batch_task = tokio::spawn(batch_misbehavior_updates(
+        misbehavior_rx,
+        address_book_updater,
+        FLUSH_INTERVAL,
+    ));
+
+    let report = |port, score| {
+        MisbehaviorReport::new(
+            PeerSocketAddr::from(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+            score,
+            "test",
+        )
+    };
+
+    /// Returns the number of updates received before `SHORT_WAIT` passes without one. The wait is
+    /// much shorter than the flush interval, so only an early update arrives in time.
+    async fn early_updates<T>(address_book_rx: &mut tokio::sync::mpsc::Receiver<T>) -> usize {
+        let mut updates = 0;
+        while tokio::time::timeout(SHORT_WAIT, address_book_rx.recv())
+            .await
+            .is_ok_and(|update| update.is_some())
+        {
+            updates += 1;
+        }
+        updates
+    }
+
+    // Let the interval's immediate first tick pass, so the next flush is a whole interval away.
+    tokio::time::sleep(SHORT_WAIT).await;
+
+    misbehavior_tx
+        .send(report(1, constants::MAX_PEER_MISBEHAVIOR_SCORE))
+        .await
+        .unwrap();
+    assert_eq!(
+        early_updates(&mut address_book_rx).await,
+        1,
+        "a ban should be sent right away"
+    );
+
+    misbehavior_tx.send(report(2, 1)).await.unwrap();
+    misbehavior_tx
+        .send(report(1, constants::MAX_PEER_MISBEHAVIOR_SCORE))
+        .await
+        .unwrap();
+    assert_eq!(
+        early_updates(&mut address_book_rx).await,
+        0,
+        "other reports, and a second ban for the same peer, should wait for the next flush"
+    );
+
+    misbehavior_tx
+        .send(report(3, constants::MAX_PEER_MISBEHAVIOR_SCORE))
+        .await
+        .unwrap();
+    assert_eq!(
+        early_updates(&mut address_book_rx).await,
+        1,
+        "a ban for another peer should be sent right away"
+    );
+
+    tokio::time::sleep(FLUSH_INTERVAL).await;
+    assert_eq!(
+        early_updates(&mut address_book_rx).await,
+        2,
+        "the flush should send the waiting reports for peers 1 and 2"
+    );
+
+    drop(misbehavior_tx);
+    batch_task.await.expect("batch task should not panic");
+}

@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Bound metric labels: `mempool.failed.verify.tasks.total` uses error kinds for `reason` (retaining `timeout`), `zebra.net.in.errors` uses error kinds for `error`, and handshake protocol-version labels use known versions or `other`. Update custom selectors that match full error messages or unknown protocol versions.'
-time: 2026-10-22T00:35:22.919721505+02:00

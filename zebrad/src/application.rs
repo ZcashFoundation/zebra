@@ -23,7 +23,10 @@ use zebra_state::{
 
 use crate::{
     commands::EntryPoint,
-    components::{sync::end_of_support::EOS_PANIC_MESSAGE_HEADER, tracing::Tracing},
+    components::{
+        sync::end_of_support::EOS_PANIC_MESSAGE_HEADER,
+        tracing::{json_panic_line, LogFormat, Tracing},
+    },
     config::ZebradConfig,
 };
 
@@ -392,12 +395,14 @@ impl Application for ZebradApp {
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // Type checks should be faster than string conversions.
                     //
-                    // Don't ask users to create bug reports for timeouts and peer errors.
+                    // Don't ask users to create bug reports for timeouts, peer errors, or
+                    // RPC credential configuration errors.
                     if error.is::<tower::timeout::error::Elapsed>()
                         || error.is::<tokio::time::error::Elapsed>()
                         || error.is::<zebra_network::PeerError>()
                         || error.is::<zebra_network::SharedPeerError>()
                         || error.is::<zebra_network::HandshakeError>()
+                        || error.is::<zebra_rpc::config::rpc::StaticCredentialsError>()
                     {
                         return false;
                     }
@@ -420,24 +425,17 @@ impl Application for ZebradApp {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        if env::var_os("SENTRY_DSN").is_some() {
-            #[cfg(feature = "sentry")]
+        let uses_sentry = env::var_os("SENTRY_DSN").is_some();
+        let json_logs = config.tracing.log_format == LogFormat::Json;
+
+        #[cfg(feature = "sentry")]
+        if uses_sentry {
             crate::sentry::init(&config.network.network);
+        }
 
-            std::panic::set_hook(Box::new(move |panic_info| {
-                let panic_report = panic_hook.panic_report(panic_info);
-                eprintln!("{panic_report}");
-
-                #[cfg(feature = "sentry")]
-                {
-                    let event = crate::sentry::panic_event_from(panic_info, panic_report);
-                    sentry::capture_event(event);
-
-                    if !crate::sentry::end(sentry::protocol::SessionStatus::Crashed) {
-                        warn!("unable to flush sentry events during panic");
-                    }
-                }
-            }));
+        // Otherwise, the default panic hook prints the panic.
+        if uses_sentry || json_logs {
+            install_panic_hook(panic_hook, uses_sentry, json_logs);
         }
 
         // Apply the configured number of threads to the thread pool.
@@ -603,6 +601,38 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
 
     ZebradApp::run(app_cell, args);
     process::exit(0);
+}
+
+/// Installs a panic hook that writes the panic to standard error, as one JSON line with JSON
+/// logs, and sends it to Sentry when Sentry is enabled.
+///
+/// Logs are written by another thread, which doesn't run again after a panic, so the panic is
+/// written to standard error directly.
+#[allow(clippy::print_stderr)]
+fn install_panic_hook(
+    panic_hook: color_eyre::config::PanicHook,
+    #[cfg_attr(not(feature = "sentry"), allow(unused_variables))] uses_sentry: bool,
+    json_logs: bool,
+) {
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let panic_report = panic_hook.panic_report(panic_info);
+
+        if json_logs {
+            eprintln!("{}", json_panic_line(panic_info));
+        } else {
+            eprintln!("{panic_report}");
+        }
+
+        #[cfg(feature = "sentry")]
+        if uses_sentry {
+            let event = crate::sentry::panic_event_from(panic_info, panic_report);
+            sentry::capture_event(event);
+
+            if !crate::sentry::end(sentry::protocol::SessionStatus::Crashed) {
+                warn!("unable to flush sentry events during panic");
+            }
+        }
+    }));
 }
 
 #[cfg(test)]

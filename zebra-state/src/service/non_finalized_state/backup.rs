@@ -4,7 +4,7 @@ use std::{
     io::{self, ErrorKind},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use hex::ToHex;
@@ -36,14 +36,28 @@ pub(super) fn restore_backup(
     backup_dir_path: &Path,
     finalized_state: &ZebraDb,
 ) -> NonFinalizedState {
+    let started = Instant::now();
+    let mut restored_blocks: usize = 0;
     let mut store: BTreeMap<Height, Vec<SemanticallyVerifiedBlock>> = BTreeMap::new();
 
     for block in read_non_finalized_blocks_from_backup(backup_dir_path, finalized_state) {
         store.entry(block.height).or_default().push(block);
     }
 
-    for (height, blocks) in store {
+    'restore: for (height, blocks) in store {
         for block in blocks {
+            // Restoring can't finalize blocks, so a backup that is over the limits, such as one
+            // written before the index entry limit, would be rebuilt in memory whole. The block
+            // write task finalizes the restored blocks, and the rest are downloaded again.
+            if non_finalized_state.should_finalize_root() {
+                tracing::warn!(
+                    ?height,
+                    "the non-finalized backup is over the non-finalized state limits: \
+                     not restoring its remaining blocks"
+                );
+                break 'restore;
+            }
+
             #[cfg(test)]
             let commit_result = if non_finalized_state
                 .any_chain_contains(&block.block.header.previous_block_hash)
@@ -64,9 +78,16 @@ pub(super) fn restore_backup(
                     ?height,
                     "failed to commit non-finalized block from backup directory"
                 );
+            } else {
+                restored_blocks += 1;
             }
         }
     }
+
+    // A restore holds far fewer blocks than f64 represents exactly.
+    metrics::gauge!("state.memory.backup.restored.block.count").set(restored_blocks as f64);
+    metrics::gauge!("state.memory.backup.restore.duration_seconds")
+        .set(started.elapsed().as_secs_f64());
 
     non_finalized_state
 }

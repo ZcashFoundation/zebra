@@ -19,7 +19,11 @@ use zebra_chain::{
 };
 use zebra_state::ValidateContextError;
 
-use crate::{block::MAX_BLOCK_SIGOPS, transaction::check::MAX_STANDARD_SCRIPTSIG_SIZE, BoxError};
+use crate::{
+    block::MAX_BLOCK_SIGOPS,
+    transaction::check::{MAX_STANDARD_SCRIPTSIG_SIZE, MAX_STANDARD_TX_SIGOPS},
+    BoxError,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -275,6 +279,16 @@ pub enum TransactionError {
 
     #[error("mempool transaction has non-standard transparent inputs")]
     NonStandardInputs,
+
+    /// A mempool transaction exceeds the total legacy and P2SH sigop standardness limit.
+    #[error(
+        "mempool transaction has {sigops} signature operations, \
+         above the {MAX_STANDARD_TX_SIGOPS} standardness limit"
+    )]
+    NonStandardSigops {
+        /// The transaction's total number of legacy and P2SH signature operations.
+        sigops: u32,
+    },
 
     #[error("transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,

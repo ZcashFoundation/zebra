@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: Added the `zcash.chain.tip.block_delay_seconds` histogram, which measures how long after its header time each new tip block is accepted, and sent it to Sentry as a distribution, with the block's height, when `SENTRY_DSN` is set. Metrics sent to Sentry also carry the network upgrade at the tip and the process uptime.
-time: 2026-10-22T19:49:59.091624841Z

@@ -16,6 +16,18 @@ use crate::common::config::default_test_config;
 #[tokio::test]
 #[cfg(feature = "prometheus")]
 async fn metrics_endpoint() -> Result<()> {
+    use std::time::Duration;
+
+    use color_eyre::eyre::eyre;
+
+    /// How long to wait for the first process metrics sample after the endpoint opens.
+    const PROCESS_METRICS_TIMEOUT: Duration = Duration::from_secs(10);
+    // Zebra doesn't record process metrics on Windows.
+    #[cfg(not(windows))]
+    const PROCESS_METRICS_TYPE_LINE: &str = "# TYPE process_resident_memory_bytes gauge";
+    #[cfg(windows)]
+    const PROCESS_METRICS_TYPE_LINE: &str = "# TYPE zebrad_build_info counter";
+
     let _init_guard = zebra_test::init();
 
     // TODO: exporter hides its bound address; this handoff can race until it accepts a listener.
@@ -39,14 +51,23 @@ async fn metrics_endpoint() -> Result<()> {
     // Create an http client
     let client = reqwest::Client::builder().timeout(LAUNCH_DELAY).build()?;
 
-    // Test metrics endpoint
-    let res = client.get(url).send().await;
+    // The endpoint opens before the first process sample is recorded, so poll until it appears.
+    let body = tokio::time::timeout(PROCESS_METRICS_TIMEOUT, async {
+        loop {
+            let res = client.get(&url).send().await?.error_for_status()?;
+            let body = res.bytes().await?;
+            if String::from_utf8_lossy(&body).contains(PROCESS_METRICS_TYPE_LINE) {
+                return Ok::<_, reqwest::Error>(body);
+            }
 
-    let (res, child) = child.kill_on_error(res)?;
-    assert!(res.status().is_success());
-
-    // Get the body of the response
-    let body = res.bytes().await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        eyre!("metrics endpoint did not report process metrics within {PROCESS_METRICS_TIMEOUT:?}")
+    })
+    .and_then(|body| body.map_err(Into::into));
     let (body, mut child) = child.kill_on_error(body)?;
     child.kill(false)?;
 
@@ -60,6 +81,37 @@ async fn metrics_endpoint() -> Result<()> {
         "the metrics response header",
     )?;
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
+
+    output.any_output_line_contains(
+        "# HELP zebrad_build_info ",
+        &body,
+        "metrics exporter response",
+        "the build info description",
+    )?;
+
+    output.any_output_line_contains(
+        "commit=\"",
+        &body,
+        "metrics exporter response",
+        "the build info commit label",
+    )?;
+
+    #[cfg(not(windows))]
+    {
+        output.any_output_line_contains(
+            PROCESS_METRICS_TYPE_LINE,
+            &body,
+            "metrics exporter response",
+            "the process metrics",
+        )?;
+
+        output.any_output_line_contains(
+            "# TYPE process_cpu_seconds_total counter",
+            &body,
+            "metrics exporter response",
+            "the standard CPU time counter",
+        )?;
+    }
 
     output.assert_was_killed()?;
 
@@ -210,6 +262,100 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     let output = output.assert_failure()?;
 
     output.assert_was_killed()?;
+
+    Ok(())
+}
+
+/// Test that the JSON-RPC endpoint requires the static user and password when they are
+/// configured, and that they replace the cookie even with cookie authentication enabled.
+#[tokio::test]
+async fn rpc_endpoint_static_credentials() -> Result<()> {
+    use reqwest::StatusCode;
+
+    const PASSWORD: &str = "s3cret:with:colons";
+
+    let _init_guard = zebra_test::init();
+    let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
+    config.network.cache_dir = false.into();
+
+    let dir = testdir()?;
+    let password_file = dir.path().join("rpc_password");
+    std::fs::write(&password_file, format!("{PASSWORD}\n"))?;
+    let cookie_path = dir.path().join(".cookie");
+    config.rpc.rpc_user = Some("zebra".to_string());
+    config.rpc.rpc_password_file = Some(password_file);
+    config.rpc.enable_cookie_auth = true;
+    config.rpc.cookie_dir = dir.path().to_path_buf();
+
+    let mut child = dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+
+    let client = reqwest::Client::builder().timeout(LAUNCH_DELAY).build()?;
+    let checks = async {
+        for (credentials, expected) in [
+            (None, StatusCode::UNAUTHORIZED),
+            (Some(("zebra", "wrong")), StatusCode::UNAUTHORIZED),
+            (Some(("other", PASSWORD)), StatusCode::UNAUTHORIZED),
+            (Some(("zebra", PASSWORD)), StatusCode::OK),
+        ] {
+            let mut request = client
+                .post(format!("http://{rpc_address}"))
+                .header("Content-Type", "application/json")
+                .body(r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#);
+            if let Some((user, password)) = credentials {
+                request = request.basic_auth(user, Some(password));
+            }
+            let response = request.send().await?;
+            assert_eq!(response.status(), expected);
+            if expected == StatusCode::OK {
+                let body: serde_json::Value = serde_json::from_slice(&response.bytes().await?)?;
+                assert!(body["result"].is_object());
+            } else {
+                assert_eq!(
+                    response.headers()[reqwest::header::WWW_AUTHENTICATE],
+                    r#"Basic realm="jsonrpc""#
+                );
+            }
+        }
+        Result::<()>::Ok(())
+    }
+    .await;
+    let ((), mut child) = child.kill_on_error(checks)?;
+    child.kill(false)?;
+    assert!(
+        !cookie_path.exists(),
+        "static credentials should replace the cookie"
+    );
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+    output.assert_was_killed()?;
+
+    Ok(())
+}
+
+/// Test that `zebrad` exits with an error naming the missing field, instead of panicking,
+/// when the RPC server has a static user but no password.
+#[test]
+fn rpc_endpoint_static_credentials_require_password() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
+    config.network.cache_dir = false.into();
+    config.rpc.rpc_user = Some("zebra".to_string());
+
+    let output = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?
+        .wait_with_output()?;
+
+    output.stdout_line_contains(
+        "rpc.rpc_user is set, but neither rpc.rpc_password nor rpc.rpc_password_file is",
+    )?;
+    output.assert_failure()?.assert_was_not_killed()?;
 
     Ok(())
 }

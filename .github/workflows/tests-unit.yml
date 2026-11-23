@@ -112,7 +112,6 @@ jobs:
         run: |
           profile_args=()
           if [[ "$GITHUB_EVENT_NAME" == pull_request &&
-                "${GITHUB_BASE_REF:-}" == main &&
                 "$GITHUB_REPOSITORY" == ZcashFoundation/zebra ]]; then
             metadata=$(cargo metadata --locked --no-deps --format-version=1)
             packages=$(jq -er '.packages[].name' <<< "$metadata")

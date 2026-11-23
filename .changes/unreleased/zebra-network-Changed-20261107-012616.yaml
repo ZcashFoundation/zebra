@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: Reduce direct build dependencies without changing peer behavior.
-time: 2026-11-07T01:26:16.543136939+01:00

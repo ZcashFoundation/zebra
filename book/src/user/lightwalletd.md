@@ -51,7 +51,7 @@ for Zebra is:
 - `8232` for Mainnet, and
 - `18232` for Testnet.
 
-Starting with Zebra v2.0.0, a cookie authentication method like the one used by the `zcashd` node is enabled by default for the RPC server. However, lightwalletd currently [does not support cookie authentication](https://github.com/zcash/lightwalletd/blob/master/docs/docker-compose-setup.md#edit-the-two-zcashconf-files), so we need to disable this authentication method to use Zebra as a backend for lightwalletd.
+Starting with Zebra v2.0.0, a cookie authentication method like the one used by the `zcashd` node is enabled by default for the RPC server. For lightwalletd, configure [static credentials](./docker.md#static-credentials) when supported by your Zebra build. Set matching `rpcuser` and `rpcpassword` values in lightwalletd's protected `zcash.conf`. The loopback-only example below is for Zebra 7.1.0 on a trusted host.
 
 For example, to use Zebra as a `lightwalletd` backend on Mainnet, give it this
 `~/.config/zebrad.toml`:
@@ -129,7 +129,7 @@ If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
 - `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `zcash/lightwalletd` fork.
-  - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
+  - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, which Zebra ignores when authentication is disabled
   - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
   - When using testnet, use `testnet=1`
 

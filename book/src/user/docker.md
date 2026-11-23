@@ -76,6 +76,27 @@ docker build -f ./docker/Dockerfile --target runtime \
 All available Cargo features are listed at
 <https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags>.
 
+## Startup and permissions
+
+The image starts as `root` so the entrypoint can prepare directories, then drops
+privileges and runs `zebrad` as the `zebra` user (UID and GID `10001`).
+
+To start the published Zebra 7.1.0 image directly as UID 10001, bypass its
+root-oriented entrypoint and mount a writable cache directory:
+
+```shell
+mkdir -p /srv/zebra-cache
+chgrp 10001 /srv/zebra-cache
+chmod 0770 /srv/zebra-cache
+docker run --user 10001:10001 --cap-drop=ALL --entrypoint zebrad \
+  -v /srv/zebra-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.1.0 start
+```
+
+Images with the non-root entrypoint fix can use the default command. The
+entrypoint skips ownership changes when started as a non-root user. Each
+configured data directory must already be writable by that user or its group.
+
 ## Configuring Zebra
 
 Zebra uses [config-rs](https://crates.io/crates/config) to layer configuration from defaults, an optional TOML file, and `ZEBRA_`-prefixed environment variables. When running with Docker, configure Zebra using any of the following (later items override earlier ones):
@@ -117,14 +138,44 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
 
   - If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
-Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default). Configuring static credentials also stops Zebra from creating the cookie.
 
-Environment variable examples for health endpoints:
+#### Static credentials
 
-- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
-- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
-- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
-- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
+Static credentials give clients a fixed username and password that survive
+restarts, so they don't need to read the validator's cookie. They are not
+available in Zebra 7.1.0, which supports only cookie authentication.
+
+On a private Docker network, use this configuration to accept RPC connections
+from outside the container.
+
+```toml
+[rpc]
+listen_addr = "0.0.0.0:8232"
+rpc_user = "zebra"
+rpc_password_file = "/run/secrets/rpc_password"
+```
+
+Clients on the same user-defined Docker network can reach a container named
+`zebra` at `zebra:8232` without publishing a port. For clients on the Docker
+host, publish RPC on host loopback with `-p 127.0.0.1:8232:8232`.
+
+Store a long, randomly generated password in the file and mount it read-only.
+Restrict read access to the user running Zebra (for example, mode
+`0400` with that user as owner). Apply the same permissions to any TOML file
+containing an inline `rpc_password`. The password file takes precedence. Zebra
+reads it at listener startup and trims trailing line endings. Set both a
+password and a username. The username cannot contain a colon.
+
+For a container, set `ZEBRA_RPC__RPC_USER` and `ZEBRA_RPC__RPC_PASSWORD_FILE`.
+Zebra rejects `ZEBRA_RPC__RPC_PASSWORD`. Configure clients such as `zcash-cli`
+with matching `rpcuser` and `rpcpassword`. Coordinate client updates with
+server restarts when rotating the password.
+
+Zebra's JSON-RPC listener serves plain HTTP. For cross-host clients, terminate
+TLS at a reverse proxy or use an encrypted tunnel. Keep the listener on
+loopback or a private network so remote clients can reach it only through the
+proxy or tunnel. These settings protect only JSON-RPC.
 
 ### Health Endpoints
 
@@ -142,6 +193,13 @@ min_connected_peers = 1
 ready_max_blocks_behind = 2
 enforce_on_test_networks = false
 ```
+
+To set the same values with environment variables:
+
+- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
 
 If you want to expose the endpoints to the host, add a port mapping to your compose file:
 

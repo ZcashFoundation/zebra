@@ -94,7 +94,9 @@ use tracing::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{
+    config::rpc::StaticCredentialsError, methods::RpcImpl, server::RpcServer, SubmitBlockChannel,
+};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -102,6 +104,7 @@ use crate::{
         health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
+        metrics::node_context,
         notify::{self, BlockNotifyError},
         sync::{
             self, record_tip_block_delay, show_block_chain_progress,
@@ -169,6 +172,14 @@ fn check_tcp_slow_start_after_idle() {
 
 #[cfg(not(target_os = "linux"))]
 fn check_tcp_slow_start_after_idle() {}
+
+/// Report credential configuration errors while preserving panic diagnostics for other RPC failures.
+fn rpc_startup_error(error: tower::BoxError) -> Report {
+    match error.downcast::<StaticCredentialsError>() {
+        Ok(credentials_error) => Report::new(*credentials_error),
+        Err(error) => panic!("server should start: {error:?}"),
+    }
+}
 
 impl StartCmd {
     /// Extra time Zebra waits for the zcashd-compat supervisor task beyond the
@@ -515,7 +526,7 @@ impl StartCmd {
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
             RpcServer::start(rpc_impl.clone(), config.rpc.clone())
                 .await
-                .expect("server should start")
+                .map_err(rpc_startup_error)?
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };
@@ -655,8 +666,14 @@ impl StartCmd {
 
         // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
         info!("spawning tip block delay metrics task");
+        node_context::set_network(&config.network.network);
         let tip_delay_task_handle =
             tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
+
+        // Like the tip block delay task, this task only reports metrics.
+        info!("spawning process memory metrics task");
+        let process_memory_task_handle =
+            tokio::spawn(crate::components::metrics::record_process_memory().in_current_span());
 
         // Start health server if configured
         info!("initializing health endpoints");
@@ -901,6 +918,7 @@ impl StartCmd {
         block_template_task_handle.abort();
         health_task_handle.abort();
         tip_delay_task_handle.abort();
+        process_memory_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();

@@ -5,6 +5,7 @@ use std::{
     fmt,
     io::{Cursor, Read, Write},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -46,6 +47,12 @@ const HEADER_LEN: usize = 24usize;
 /// Version messages are ~344 bytes max (including a 256-byte user agent);
 /// verack is 0 bytes. 1 KB provides headroom for future protocol changes.
 const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
+
+/// Initial cap on reserved body capacity, before any body bytes have arrived.
+///
+/// `body_len` is peer-declared and untrusted; this bounds the upfront cost of
+/// a header-only peer to one step instead of the full declared length.
+const INITIAL_BODY_RESERVATION_STEP: usize = 16 * 1024;
 
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
@@ -407,8 +414,10 @@ impl Decoder for Codec {
                 metrics::counter!("zcash.net.in.bytes.total")
                     .increment((body_len + HEADER_LEN) as u64);
 
-                // Reserve buffer space for the expected body and the following header.
-                src.reserve(body_len + HEADER_LEN);
+                // Cap the upfront reservation instead of trusting body_len; grows
+                // as more of the body arrives, never beyond the declared length
+                // (below).
+                src.reserve(HEADER_LEN + body_len.min(INITIAL_BODY_RESERVATION_STEP));
 
                 self.state = DecodeState::Body {
                     body_len,
@@ -425,7 +434,23 @@ impl Decoder for Codec {
                 checksum,
             } => {
                 if src.len() < body_len {
-                    // Need to wait for the full body
+                    // Grow as the body arrives, never reserving beyond the
+                    // declared length, instead of trusting the peer-declared
+                    // remaining length upfront.
+                    let remaining = body_len - src.len();
+
+                    if src.capacity() - src.len() < remaining.min(INITIAL_BODY_RESERVATION_STEP) {
+                        // `BytesMut::reserve` grows the underlying `Vec` by doubling its
+                        // capacity, which can overshoot `body_len` by up to ~2x (see #11793
+                        // review). Allocate exactly instead: proportional to the bytes
+                        // received so far, capped at the declared body length.
+                        let target = body_len
+                            .min(src.len() + src.len().max(2 * INITIAL_BODY_RESERVATION_STEP));
+                        let mut grown = BytesMut::with_capacity(target + HEADER_LEN);
+                        grown.extend_from_slice(src);
+                        *src = grown;
+                    }
+
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
                     return Ok(None);
                 }
@@ -659,8 +684,13 @@ impl Codec {
     }
 
     fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_block_spawning(reader);
-        Ok(Message::Block(result?.into()))
+        let decode_start = Instant::now();
+        let (result, wait) = Self::deserialize_block_spawning(reader);
+        metrics::histogram!("zebra.net.block.decode.wait_seconds").record(wait.as_secs_f64());
+        let message = Message::Block(result?.into());
+        metrics::histogram!("zebra.net.block.decode.duration_seconds")
+            .record(decode_start.elapsed().as_secs_f64());
+        Ok(message)
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -802,9 +832,14 @@ impl Codec {
     }
 
     /// Given the reader, deserialize the block in the rayon thread pool.
+    ///
+    /// Also returns how long the parse waited for a rayon thread to start it.
     #[allow(clippy::unwrap_in_result)]
-    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
+    fn deserialize_block_spawning<R: Read + std::marker::Send>(
+        reader: R,
+    ) -> (Result<Block, Error>, Duration) {
         let mut result = None;
+        let mut wait = Duration::ZERO;
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
@@ -814,12 +849,16 @@ impl Codec {
         // We can't use `spawn_blocking()` because:
         // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
         // - There is no way to check the blocking task's future for panics
+        let wait_start = Instant::now();
         tokio::task::block_in_place(|| {
             rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
+                s.spawn_fifo(|_s| {
+                    wait = wait_start.elapsed();
+                    result = Some(Block::zcash_deserialize(reader))
+                })
             })
         });
 
-        result.expect("scope has already finished")
+        (result.expect("scope has already finished"), wait)
     }
 }
