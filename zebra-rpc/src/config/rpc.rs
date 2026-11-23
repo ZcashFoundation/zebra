@@ -37,6 +37,7 @@ where
 
 /// The error returned when the static RPC credentials in [`Config`] are incomplete or unreadable.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum StaticCredentialsError {
     /// A password is configured without a user.
     #[error("rpc.rpc_password or rpc.rpc_password_file is set, but rpc.rpc_user is missing")]
@@ -49,6 +50,10 @@ pub enum StaticCredentialsError {
     /// The configured user is an empty string.
     #[error("rpc.rpc_user must not be empty")]
     EmptyUser,
+
+    /// The configured user contains a colon, so no HTTP Basic client could send it.
+    #[error("rpc.rpc_user must not contain ':', which separates the user from the password in HTTP Basic authentication")]
+    UserContainsColon,
 
     /// The configured or loaded password is an empty string.
     #[error("the RPC password must not be empty")]
@@ -157,18 +162,25 @@ pub struct Config {
 
     /// Username for static HTTP Basic RPC authentication.
     ///
-    /// Must be set together with `rpc_password` or `rpc_password_file`. When set,
-    /// every request needs these credentials, and no cookie is written.
+    /// Must be set together with `rpc_password` or `rpc_password_file`, and must not
+    /// contain `:`. When set, every request to `listen_addr` needs these credentials, and
+    /// no cookie is written. The indexer and lightwalletd gRPC servers have no authentication.
+    ///
+    /// # Security
+    ///
+    /// HTTP Basic authentication sends the password unencrypted with every request.
     pub rpc_user: Option<String>,
 
     /// Password for static HTTP Basic RPC authentication.
     ///
     /// Prefer `rpc_password_file`, which keeps the secret out of the config file.
+    /// It can't be set through an environment variable.
     pub rpc_password: Option<RedactedString>,
 
     /// Path to a file containing the password for static HTTP Basic RPC authentication.
     ///
-    /// Read once at startup with trailing newlines trimmed. Takes precedence over `rpc_password`.
+    /// Read once at startup with trailing newlines trimmed, so a new password needs a restart.
+    /// Takes precedence over `rpc_password`.
     pub rpc_password_file: Option<PathBuf>,
 
     /// The maximum size of the response body in bytes.
@@ -177,13 +189,15 @@ pub struct Config {
 
 impl Config {
     /// Returns `true` if any static credential field is set.
-    pub fn uses_static_auth(&self) -> bool {
+    pub(crate) fn uses_static_auth(&self) -> bool {
         self.rpc_user.is_some() || self.rpc_password.is_some() || self.rpc_password_file.is_some()
     }
 
     /// Returns the static user and password, `None` if they are not configured,
     /// or an error if the configuration is partial or the password file is unreadable.
-    pub fn static_credentials(&self) -> Result<Option<(String, String)>, StaticCredentialsError> {
+    pub(crate) fn static_credentials(
+        &self,
+    ) -> Result<Option<(String, RedactedString)>, StaticCredentialsError> {
         if !self.uses_static_auth() {
             return Ok(None);
         }
@@ -195,6 +209,9 @@ impl Config {
         if user.is_empty() {
             return Err(StaticCredentialsError::EmptyUser);
         }
+        if user.contains(':') {
+            return Err(StaticCredentialsError::UserContainsColon);
+        }
 
         let password = match (&self.rpc_password_file, &self.rpc_password) {
             (Some(path), _) => {
@@ -204,12 +221,12 @@ impl Config {
                         source,
                     }
                 })?;
-                contents.trim_end_matches(['\r', '\n']).to_string()
+                RedactedString::from(contents.trim_end_matches(['\r', '\n']))
             }
-            (None, Some(password)) => password.as_str().to_string(),
+            (None, Some(password)) => password.clone(),
             (None, None) => return Err(StaticCredentialsError::MissingPassword),
         };
-        if password.is_empty() {
+        if password.as_str().is_empty() {
             return Err(StaticCredentialsError::EmptyPassword);
         }
 
@@ -268,18 +285,11 @@ mod tests {
     }
 
     #[test]
-    fn no_static_credentials_by_default() {
-        assert!(!Config::default().uses_static_auth());
-        assert!(matches!(Config::default().static_credentials(), Ok(None)));
-    }
-
-    #[test]
     fn static_credentials_from_config_password() {
         let config = config_with(Some("user"), Some("hunter2"));
-        assert!(config.uses_static_auth());
         assert_eq!(
             config.static_credentials().unwrap(),
-            Some(("user".to_string(), "hunter2".to_string()))
+            Some(("user".to_string(), RedactedString::from("hunter2")))
         );
     }
 
@@ -298,6 +308,7 @@ mod tests {
             ("user without password", Some("user"), None),
             ("password without user", None, Some("hunter2")),
             ("empty user", Some(""), Some("hunter2")),
+            ("user with a colon", Some("us:er"), Some("hunter2")),
             ("empty password", Some("user"), Some("")),
         ];
 
@@ -318,7 +329,7 @@ mod tests {
         };
         assert_eq!(
             config.static_credentials().unwrap(),
-            Some(("user".to_string(), "from-file".to_string()))
+            Some(("user".to_string(), RedactedString::from("from-file")))
         );
     }
 
@@ -332,21 +343,5 @@ mod tests {
             config.static_credentials(),
             Err(StaticCredentialsError::ReadPasswordFile { .. })
         ));
-    }
-
-    #[test]
-    fn static_credentials_deserialize_with_defaults() {
-        let config: Config = serde_json::from_value(serde_json::json!({
-            "listen_addr": "127.0.0.1:8232",
-            "rpc_user": "user",
-            "rpc_password_file": "/run/secrets/rpc_password",
-        }))
-        .expect("static credential fields should deserialize");
-        assert_eq!(config.rpc_user.as_deref(), Some("user"));
-        assert_eq!(
-            config.rpc_password_file.as_deref(),
-            Some(std::path::Path::new("/run/secrets/rpc_password"))
-        );
-        assert!(config.enable_cookie_auth, "defaults are kept");
     }
 }

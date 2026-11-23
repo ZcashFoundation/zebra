@@ -94,7 +94,9 @@ use tracing::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{
+    config::rpc::StaticCredentialsError, methods::RpcImpl, server::RpcServer, SubmitBlockChannel,
+};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -514,9 +516,14 @@ impl StartCmd {
             .unwrap_or_else(|| tokio::spawn(std::future::pending().in_current_span()));
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
-            RpcServer::start(rpc_impl.clone(), config.rpc.clone())
-                .await
-                .expect("server should start")
+            match RpcServer::start(rpc_impl.clone(), config.rpc.clone()).await {
+                Ok(rpc_task_handle) => rpc_task_handle,
+                // Incomplete or unreadable credentials are an operator mistake, not a bug.
+                Err(error) => match error.downcast::<StaticCredentialsError>() {
+                    Ok(credentials_error) => return Err(Report::new(*credentials_error)),
+                    Err(error) => panic!("server should start: {error:?}"),
+                },
+            }
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };

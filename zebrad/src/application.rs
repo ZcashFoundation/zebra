@@ -395,12 +395,14 @@ impl Application for ZebradApp {
                 color_eyre::ErrorKind::Recoverable(error) => {
                     // Type checks should be faster than string conversions.
                     //
-                    // Don't ask users to create bug reports for timeouts and peer errors.
+                    // Don't ask users to create bug reports for timeouts, peer errors, or
+                    // RPC credential configuration errors.
                     if error.is::<tower::timeout::error::Elapsed>()
                         || error.is::<tokio::time::error::Elapsed>()
                         || error.is::<zebra_network::PeerError>()
                         || error.is::<zebra_network::SharedPeerError>()
                         || error.is::<zebra_network::HandshakeError>()
+                        || error.is::<zebra_rpc::config::rpc::StaticCredentialsError>()
                     {
                         return false;
                     }

@@ -135,10 +135,7 @@ impl RpcServer {
         // over no authentication at all.
         let auth = if let Some((user, password)) = conf.static_credentials()? {
             info!("RPC server requires static user/password authentication");
-            Some(RpcAuth::Static {
-                user,
-                password: Cookie::from_secret(password),
-            })
+            Some(RpcAuth::static_credentials(&user, password.as_str()))
         } else if conf.enable_cookie_auth {
             let cookie = Cookie::default();
             cookie::write_to_disk(&cookie, &conf.cookie_dir)
@@ -147,7 +144,8 @@ impl RpcServer {
         } else {
             None
         };
-        let http_middleware_layer = HttpRequestMiddlewareLayer::new(auth, max_request_body_size);
+        let http_middleware_layer =
+            HttpRequestMiddlewareLayer::with_auth(auth, max_request_body_size);
 
         let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
 
