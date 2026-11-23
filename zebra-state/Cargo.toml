@@ -34,12 +34,19 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
+# Development-only synthetic Regtest state.
+mock-state = ["proptest-impl"]
+
 # Experimental elasticsearch support
 elasticsearch = [
     "dep:elasticsearch",
     "dep:serde_json",
     "zebra-chain/elasticsearch",
 ]
+
+[[bin]]
+name = "mock-state"
+required-features = ["mock-state"]
 
 [dependencies]
 bincode = { workspace = true }

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added the opt-in `mock-state` development tool to generate a populated local Regtest database and a matching zebrad configuration without mining a chain.
+time: 2026-11-23T20:44:49Z
