@@ -173,6 +173,8 @@ queries can group nodes by the commit they run.
 | `state.block_writer.phase.duration_seconds` | seconds | `phase` | Time each phase of committing a checkpoint-verified block took, from loading the history tree to the RocksDB write. The phases start with `checkpoint_`. |
 | `zebra.net.block.decode.wait_seconds` | seconds | | Time a received block message waited for a rayon thread to start decoding it. |
 | `zebra.net.block.decode.duration_seconds` | seconds | | Time taken to decode a received block message, including that wait. |
+| `zebra.net.compact_block.admitted` | count | | Compact block announcements that this node kept, to rebuild the block when it is downloaded. Only with `network.experimental_early_block_relay`. |
+| `zebra.net.compact_block.rebuilt` | count | | Blocks that this node rebuilt from a compact announcement and its mempool, instead of downloading them in full. |
 | `gossip.block.download.duration_seconds` | seconds | | Time taken to download a gossiped block from a peer. |
 | `gossip.block.verify_commit.duration_seconds` | seconds | | Time from sending a downloaded gossiped block to the verifier until it was committed. |
 | `rpc.getblocktemplate.build.duration_seconds` | seconds | | Time taken to select transactions and build a block template. |

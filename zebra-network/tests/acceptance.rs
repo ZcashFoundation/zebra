@@ -41,5 +41,6 @@ fn connection_info_types_are_public() {
         connected_addr,
         remote,
         negotiated_version,
+        early_block_relay: false,
     });
 }

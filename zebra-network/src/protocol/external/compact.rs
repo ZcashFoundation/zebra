@@ -59,6 +59,34 @@ pub struct BlockTransactions {
     pub transactions: Vec<Arc<Transaction>>,
 }
 
+/// The `blocktxn` response that a connection is waiting for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ExpectedBlockTransactions {
+    /// The hash of the block the transactions are for.
+    pub(crate) block_hash: block::Hash,
+
+    /// The number of transactions the connection asked for.
+    pub(crate) count: usize,
+
+    /// When the connection stops waiting for them.
+    pub(crate) deadline: tokio::time::Instant,
+}
+
+impl ExpectedBlockTransactions {
+    /// Returns `true` if `body`, the body of a `blocktxn` message, starts with the expected
+    /// block hash and transaction count, and the connection is still waiting for it.
+    ///
+    /// This only reads the hash and the count, so an unexpected response isn't decoded.
+    pub(crate) fn matches(&self, mut body: &[u8]) -> bool {
+        tokio::time::Instant::now() < self.deadline
+            && block::Hash::zcash_deserialize(&mut body).ok() == Some(self.block_hash)
+            && CompactSizeMessage::zcash_deserialize(&mut body)
+                .ok()
+                .map(usize::from)
+                == Some(self.count)
+    }
+}
+
 /// Bounded partial reconstruction; not a consensus or authorizing-data validation verdict.
 pub struct Reconstruction {
     compact: Arc<CompactBlock>,

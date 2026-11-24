@@ -142,6 +142,12 @@ pub struct ConnectionInfo {
     /// Derived from `remote.version` and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
+
+    /// Whether both ends advertised the experimental early-block-relay service bit.
+    ///
+    /// Derived from this connection's version exchange, not gossiped services or user agents.
+    /// This permits compact block relay but does not authenticate or validate any received block.
+    pub early_block_relay: bool,
 }
 
 /// The peer address that we are handshaking with.
@@ -671,7 +677,7 @@ where
         .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
-    let (their_addr, our_services, our_listen_addr) = match connected_addr {
+    let (their_addr, mut our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
         Isolated => {
@@ -695,6 +701,10 @@ where
             (their_addr, our_services, advertise_addr)
         }
     };
+    our_services.set(
+        PeerServices::NODE_EARLY_BLOCK_RELAY,
+        config.experimental_early_block_relay && !matches!(connected_addr, Isolated),
+    );
 
     let start_height = minimum_peer_version
         .chain_tip()
@@ -840,12 +850,16 @@ where
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+    let early_block_relay = our_services
+        .intersection(remote.services)
+        .contains(PeerServices::NODE_EARLY_BLOCK_RELAY);
 
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
     let connection_info = Arc::new(ConnectionInfo {
         connected_addr: *connected_addr,
         remote,
         negotiated_version,
+        early_block_relay,
     });
 
     debug!(
@@ -1077,6 +1091,12 @@ where
             let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(connection_info.negotiated_version);
             bare_codec.reconfigure_full_body_len();
+            bare_codec.reconfigure_early_block_relay(connection_info.early_block_relay);
+            let compact_recovery = connection_info.early_block_relay.then(|| {
+                let (sender, receiver) = tokio::sync::watch::channel(None);
+                bare_codec.reconfigure_compact_recovery(receiver);
+                sender
+            });
 
             debug!("constructing client, spawning server");
 
@@ -1119,6 +1139,9 @@ where
             // So we can just track peer activity based on Ping and Pong.
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
+            let compact_inventory = connection_info
+                .early_block_relay
+                .then(|| inv_collector.clone());
             let inbound_inv_collector = inv_collector;
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
@@ -1198,7 +1221,7 @@ where
                     MetaAddr::new_gossiped_meta_addr(addr, remote_services, DateTime32::now())
                 });
 
-            let server = Connection::new(
+            let mut server = Connection::new(
                 inbound_service,
                 (
                     server_rx,
@@ -1212,6 +1235,8 @@ where
                 connection_info.clone(),
                 alternate_addrs.collect(),
             );
+            server.compact_recovery = compact_recovery;
+            server.compact_inventory = compact_inventory;
 
             let connection_task = tokio::spawn(
                 server
@@ -1288,6 +1313,8 @@ fn serialization_error_metric_label(error: &SerializationError) -> &'static str 
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
+///
+/// The connection registers compact block announcements itself, once it has screened them.
 pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,

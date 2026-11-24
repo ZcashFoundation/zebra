@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod compact;
 mod decode_metrics;
 
 mod vectors;

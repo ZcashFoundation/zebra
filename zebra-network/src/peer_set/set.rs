@@ -1507,6 +1507,9 @@ where
     /// If the group whose turn it is has no ready peer, the other group gets the request, and
     /// the next turn goes back to the group that missed out.
     ///
+    /// The first request for a block goes to the peer that announced it, if the request carries
+    /// that peer, it is ready, and its connection negotiated compact block relay.
+    ///
     /// Uses P2C to choose the least loaded peer in each list.
     fn select_inv_route(&self, request: &Request, hash: InventoryHash) -> InvRoute<D::Key> {
         // # Security
@@ -1566,6 +1569,37 @@ where
             }),
             _ => None,
         };
+
+        // # Correctness
+        //
+        // A peer that negotiated compact block relay announces blocks in compact form, and the
+        // carried advertiser is the connection whose announcement the downloader admitted. Only
+        // that connection holds the announcement, so only it can rebuild the block from the
+        // mempool, and any other peer is asked for the full block. So the first request for the
+        // block goes to the advertiser, if it is ready.
+        //
+        // # Security
+        //
+        // The advertiser gets no preference in a repeat request, or after it failed to return
+        // the block, like the other advertisers. An advertiser that didn't negotiate compact
+        // block relay gets no preference either: it can only send the full block, so the choice
+        // among the block's advertisers stays random, and one peer can't take every first
+        // request by announcing each block first.
+        if !is_repeat {
+            if let Some(peer) = advertiser.filter(|addr| {
+                !has_failed(addr)
+                    && self
+                        .ready_services
+                        .get(addr)
+                        .is_some_and(|peer| peer.connection_info().early_block_relay)
+            }) {
+                tracing::trace!(?hash, ?peer, "routing to the peer that announced the block");
+                return InvRoute::Peer {
+                    peer,
+                    advertised: true,
+                };
+            }
+        }
 
         let advertising_peers: Vec<PeerSocketAddr> = self
             .inventory_registry
