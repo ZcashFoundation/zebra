@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The block template updater validates each template it publishes as a block proposal, one at a time.'
+time: 2026-11-24T12:00:06.000000000Z

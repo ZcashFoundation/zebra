@@ -31,6 +31,7 @@ use zebra_chain::{
     serialization::{DateTime32, Duration32},
     work::difficulty::ParameterDifficulty,
 };
+use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_node_services::mempool::{MempoolChange, MempoolService};
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, ReadState};
 
@@ -40,9 +41,12 @@ use crate::{
 };
 
 use super::{
-    check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, nsm_value_balance_for_next_block,
-    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
+    check_synced_to_tip,
+    constants::MEMPOOL_LONG_POLL_INTERVAL,
+    fetch_chain_info, fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    proposal::{proposal_block_from_template, BlockTemplateTimeSource},
+    zip317::select_mempool_transactions,
+    BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -520,6 +524,58 @@ async fn verified_transaction_added(
     }
 
     sleep_until(not_before).await;
+}
+
+/// Validates each block template that [`run()`] publishes as a block proposal, one at a time.
+///
+/// The block verifier keeps the result of each successful validation. So when a miner submits a
+/// solved template, Zebra only checks its proof of work before committing it. A template that is
+/// published during a validation waits for it, and then only the latest template is validated.
+///
+/// Runs until the task is aborted.
+pub(crate) async fn validate_templates<BlockVerifierRouter>(
+    mut templates: TemplateChanges,
+    network: Network,
+    block_verifier_router: BlockVerifierRouter,
+) where
+    BlockVerifierRouter: BlockVerifierService,
+{
+    loop {
+        templates.changed().await;
+
+        let Some(template) = templates.0.borrow_and_update().clone() else {
+            continue;
+        };
+
+        // Miners that don't change a template submit it with its current time, so that is the
+        // block to validate. Building it re-serializes the template, so it runs off the executor.
+        let proposal = {
+            let network = network.clone();
+            tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            })
+            .await
+        };
+
+        let result = match proposal {
+            Ok(Ok(proposal)) => block_verifier_router
+                .clone()
+                .oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal)))
+                .await
+                .map(|_hash| ()),
+            Ok(Err(error)) => Err(error.into()),
+            Err(error) => Err(error.into()),
+        };
+
+        // This is expected when the chain tip changes during the validation, or for a template
+        // on a block that is still being verified.
+        if let Err(error) = result {
+            tracing::debug!(
+                ?error,
+                "could not validate a block template as a block proposal"
+            );
+        }
+    }
 }
 
 /// Returns the state information for mining on top of a block with a valid proof of work that

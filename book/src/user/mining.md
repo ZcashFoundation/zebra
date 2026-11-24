@@ -220,6 +220,26 @@ If you can see something similar to the following then you are good to go.
 
 </details>
 
+## How Zebra keeps mining work current
+
+[#how-zebra-keeps-mining-work-current]: #how-zebra-keeps-mining-work-current
+
+Zebra keeps a block template ready, so `getblocktemplate` answers without building one. It
+replaces that template when the chain tip changes, and when the mempool verifies a new transaction,
+at most once a second.
+
+When a block arrives from a peer, Zebra serves a coinbase-only template on top of it as soon as its
+proof of work, difficulty and header commitments are checked, while its transactions are still
+being verified. If the block turns out to be invalid, Zebra goes back to a template on the
+previous tip. Miners that long poll `getblocktemplate` see both changes.
+
+Zebra validates each template as a block proposal in the background. When a miner submits that
+template with only a nonce and an Equihash solution added, Zebra checks the proof of work and
+commits the block without validating it again. A template with a changed coinbase transaction or
+time is verified in full when it is submitted. Zebra still runs every transaction check, and only
+skips the proofs, signatures and transparent scripts that it has already verified for the same
+transaction, for example in the mempool.
+
 ## Run a mining pool
 
 [#run-a-mining-pool]: #run-a-mining-pool
