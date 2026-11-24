@@ -13,11 +13,13 @@ concurrency:
 
 # Bench list shared by both jobs. New benches need a `[[bench]]` stanza
 # with `harness = false` in the crate's `Cargo.toml`.
+# Storage-resource runs are explicit local workloads, not part of this timing matrix.
 env:
   BENCHES: |
     criterion -p zebra-consensus --bench groth16
     criterion -p zebra-consensus --bench halo2
     criterion -p zebra-consensus --bench sapling
+    criterion -p zebra-consensus --bench header
     criterion -p zebra-chain --bench transaction
     criterion -p zebra-chain --bench block --features bench
     criterion -p zebra-chain --bench redpallas

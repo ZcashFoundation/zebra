@@ -185,7 +185,7 @@ successful dispatch does not mean its tests passed.
 ## Benchmarks
 
 The [benchmark workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/benchmarks.yml)
-runs six targets listed in `BENCHES`. Register new targets there and in the
+runs the targets listed in `BENCHES`. Register new targets there and in the
 crate's `Cargo.toml` with `[[bench]]` and `harness = false`. Manual dispatch
 runs `cargo-criterion` and publishes results to `gh-pages/dev/bench`. The
 [book workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/book.yml)
