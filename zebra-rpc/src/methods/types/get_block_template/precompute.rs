@@ -552,6 +552,8 @@ impl TemplateCache {
         });
     }
 
+    // `fetch_update` is deprecated, but its replacement, `try_update`, needs Rust 1.95.
+    #[allow(deprecated)]
     fn cached_template(&self, response: BlockTemplateResponse) -> Arc<CachedTemplate> {
         let generation = self
             .generation

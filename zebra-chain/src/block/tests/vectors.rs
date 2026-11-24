@@ -31,7 +31,7 @@ fn serial_transaction_merkle_root(leaves: &[[u8; 32]]) -> Option<[u8; 32]> {
             level.push(*level.last().unwrap());
         }
         let mut parents = Vec::new();
-        for pair in level.chunks_exact(2) {
+        for pair in level.as_chunks::<2>().0 {
             let mut writer = sha256d::Writer::default();
             writer.write_all(&pair[0]).unwrap();
             writer.write_all(&pair[1]).unwrap();
@@ -48,7 +48,7 @@ fn serial_auth_data_root(leaves: &[[u8; 32]]) -> [u8; 32] {
     level.resize(level.len().next_power_of_two(), [0; 32]);
     while level.len() > 1 {
         let mut parents = Vec::new();
-        for pair in level.chunks_exact(2) {
+        for pair in level.as_chunks::<2>().0 {
             let digest = blake2b_simd::Params::new()
                 .hash_length(32)
                 .personal(b"ZcashAuthDatHash")
@@ -371,11 +371,11 @@ fn parallel_merkle_roots_match_serial_reference() {
     let leaves: Vec<[u8; 32]> = (0..20_000)
         .map(|_| {
             let mut leaf = [0; 32];
-            for bytes in leaf.chunks_exact_mut(8) {
+            for bytes in leaf.as_chunks_mut::<8>().0 {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                bytes.copy_from_slice(&state.to_le_bytes());
+                *bytes = state.to_le_bytes();
             }
             leaf
         })

@@ -72,7 +72,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.97.0
+          toolchain: 1.100.0
           components: clippy
           # This job only runs `cargo tree` to build the matrix, so a cache here
           # only consumes quota.
@@ -129,7 +129,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.97.0
+          toolchain: 1.100.0
           components: clippy
           # One cache per half of the matrix instead of one per job. These jobs
           # compile overlapping subsets of the same dependency graph, so 12

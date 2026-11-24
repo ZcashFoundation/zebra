@@ -12,7 +12,7 @@
 # repository's .dockerignore, so the whole checkout is copied to /src.
 
 # Keep in sync with rust-toolchain.toml and RUST_VERSION in docker/Dockerfile.
-FROM rust:1.91.0-trixie
+FROM rust:1.100.0-trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 

@@ -121,16 +121,16 @@ Install the native [build dependencies][installation], Rust toolchains,
 repository root, run the main formatting, lint, and unit-test checks:
 
 ```sh
-cargo +1.91.0 fmt --all -- --check
-cargo +1.97.0 clippy --workspace --all-targets \
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets \
   --features default-release-binaries -- -D warnings
-cargo +1.97.0 clippy --workspace --all-targets \
+cargo clippy --workspace --all-targets \
   --features 'default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints' \
   -- -D warnings
-CARGO_PROFILE_RELEASE_LTO=false cargo +1.97.0 nextest run \
+CARGO_PROFILE_RELEASE_LTO=false cargo nextest run \
   --profile ci --locked --release --features default-release-binaries \
   --run-ignored=all
-cargo +1.91.0 hack check --workspace
+cargo hack check --workspace
 ```
 
 The `ci` nextest profile excludes stateful, end-to-end, and no-Git-dependency

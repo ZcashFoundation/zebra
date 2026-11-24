@@ -175,7 +175,7 @@ current `main`, then checks these independently and reports each outcome:
 - **Manifests:** a package whose `Cargo.toml` changes is released.
 - **Fragments:** a released package has no fragments left in `.changes/unreleased`,
   so the next plan does not count them again.
-- **Cargo release:** Cargo 1.91's multi-package publication dry run. The controller
+- **Cargo release:** Cargo 1.100's multi-package publication dry run. The controller
   also observes crates.io, Git tags, and the GitHub Release without publishing.
 
 The workflow always applies the release version. To release a prerelease, save

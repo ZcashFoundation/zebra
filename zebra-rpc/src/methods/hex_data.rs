@@ -37,8 +37,8 @@ const DECODE: [u8; 256] = {
 /// Encode bytes as lowercase hex in a single preallocated buffer.
 pub(super) fn encode(bytes: &[u8]) -> String {
     let mut encoded = vec![0; bytes.len() * 2];
-    for (byte, pair) in bytes.iter().zip(encoded.chunks_exact_mut(2)) {
-        pair.copy_from_slice(&ENCODE[usize::from(*byte)]);
+    for (byte, pair) in bytes.iter().zip(encoded.as_chunks_mut::<2>().0) {
+        *pair = ENCODE[usize::from(*byte)];
     }
     String::from_utf8(encoded).expect("the encoding table contains only ASCII hex digits")
 }
@@ -50,7 +50,8 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Vec<u8>, FromHexError> {
     }
 
     let mut decoded = vec![0; bytes.len() / 2];
-    for (index, (pair, byte)) in bytes.chunks_exact(2).zip(&mut decoded).enumerate() {
+    let (pairs, _) = bytes.as_chunks::<2>();
+    for (index, (pair, byte)) in pairs.iter().zip(&mut decoded).enumerate() {
         let high = DECODE[usize::from(pair[0])];
         let low = DECODE[usize::from(pair[1])];
         if high | low == u8::MAX {

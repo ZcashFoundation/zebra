@@ -165,7 +165,7 @@ fn batch_merkle_crh_matches_scalar_at_every_level() {
         let mut out = vec![Node::default(); count];
         for level in 0..MERKLE_DEPTH {
             Node::combine_batch(level, &nodes, &mut out);
-            for (pair, actual) in nodes.chunks_exact(2).zip(&out) {
+            for (pair, actual) in nodes.as_chunks::<2>().0.iter().zip(&out) {
                 let prefix = BitArray::<_, Lsb0>::from([level, 0]);
                 let left = BitArray::<_, Lsb0>::from(pair[0].0.to_repr());
                 let right = BitArray::<_, Lsb0>::from(pair[1].0.to_repr());
@@ -200,7 +200,9 @@ fn batch_tree_matches_every_serial_intermediate_node() {
                 nodes.push(Node::empty_root(level.into()));
             }
             let expected: Vec<_> = nodes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| Node::combine(level.into(), &pair[0], &pair[1]))
                 .collect();
             let mut actual = vec![Node::default(); expected.len()];

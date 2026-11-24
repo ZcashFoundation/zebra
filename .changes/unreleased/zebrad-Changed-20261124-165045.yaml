@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Release binaries and Docker images are built with Rust 1.100.0, which `rust-toolchain.toml` also selects for source builds. Building from source still needs Rust 1.91 or newer ([#12596](https://github.com/ZcashFoundation/zebra/pull/12596)).'
+time: 2026-11-24T16:50:45.014910194+01:00

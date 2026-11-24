@@ -38,7 +38,7 @@ Ubuntu-specific release archive.
 
 | Target | Environment | Toolchain coverage |
 | --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | GitHub Actions `ubuntu-26.04` | Rust 1.97.0 builds and tests; Rust 1.91.0 daemon build; Rust 1.89 library-crate builds |
+| `x86_64-unknown-linux-gnu` | GitHub Actions `ubuntu-26.04` | Rust 1.100.0 builds and tests; Rust 1.91.0 daemon build; Rust 1.89 library-crate builds |
 
 The target triple is the same as the x86-64 Tier 1 release target; the tier
 here describes an additional OS/toolchain environment. See the

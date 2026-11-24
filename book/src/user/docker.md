@@ -290,7 +290,7 @@ The Dockerfile declares these build arguments:
 | Argument | Default | Purpose |
 | --- | --- | --- |
 | `FEATURES` | `default-release-binaries` | Features passed to Cargo. |
-| `RUST_VERSION` | `1.91.0` | Rust base-image tag; the `FROM` instruction also pins a digest, which must match any replacement toolchain image. |
+| `RUST_VERSION` | `1.100.0` | Rust base-image tag; the `FROM` instruction also pins a digest, which must match any replacement toolchain image. |
 | `UID` | `10001` | Created user's numeric ID. |
 | `GID` | The `UID` argument | Created group's numeric ID. |
 | `USER` | `zebra` | Account name. |
