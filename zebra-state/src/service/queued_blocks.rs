@@ -16,8 +16,8 @@ use crate::{
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
     request::new_outputs_retained_bytes,
-    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
-    SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
+    KnownBlock, NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -33,6 +33,9 @@ pub type QueuedCheckpointVerified = (
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
+    // The result of validating the block as a block proposal, if it solves one. A block only
+    // keeps it until the end of the call that queues it.
+    Option<Box<ContextuallyVerifiedBlock>>,
 );
 
 /// The maximum number of blocks in a [`QueuedBlocks`].
@@ -154,7 +157,7 @@ impl QueuedBlocks {
                 })
                 .or_else(|| self.by_height.values().next_back()?.iter().next())
                 .expect("a queue over its limits has blocks");
-            let (_block, rsp_tx) = self.remove(&hash);
+            let (_block, rsp_tx, _contextual) = self.remove(&hash);
 
             // The caller might have stopped waiting for the block.
             let _ = rsp_tx.send(Err(CommitBlockError::OrphanQueueFull.into()));
@@ -243,7 +246,7 @@ impl QueuedBlocks {
             }
 
             for hash in lowest.remove() {
-                let (expired_block, expired_sender) = self.remove(&hash);
+                let (expired_block, expired_sender, _contextual) = self.remove(&hash);
 
                 // we don't care if the receiver was dropped
                 let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
@@ -256,6 +259,16 @@ impl QueuedBlocks {
 
         tracing::trace!(num_blocks = %self.blocks.len(), "Finished pruning blocks at or beneath the finalized tip height");
         self.update_metrics();
+    }
+
+    /// Drops the proposal validation result of the block `hash`, if that block is still queued.
+    ///
+    /// A block that waits for its parent is validated as usual when the parent arrives. So a
+    /// validation result, which the queue's memory limit doesn't count, is never kept here.
+    pub fn drop_proposal_result(&mut self, hash: &block::Hash) {
+        if let Some(((_, _, contextual), _)) = self.blocks.get_mut(hash) {
+            *contextual = None;
+        }
     }
 
     /// Removes a queued block, its indexes, its outputs and its memory charge, if it is queued.

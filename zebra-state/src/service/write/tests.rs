@@ -11,7 +11,7 @@ use crate::{
     arbitrary::Prepare,
     service::precomputed_trees::REUSED_TREES,
     tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
-    Config,
+    Config, ContextuallyVerifiedBlock,
 };
 
 use super::*;
@@ -463,6 +463,7 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
     tx.send(NonFinalizedWriteMessage::Commit((
         block1.clone().prepare(),
         rsp_tx,
+        None,
     )))
     .unwrap();
     let committed = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
@@ -474,5 +475,205 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
     assert!(
         reused_trees() > reused_trees_before,
         "the commit reuses the trees that were computed for the candidate"
+    );
+}
+
+/// A block that was validated as a proposal is committed by rebinding the chain its validation
+/// built, and any other block is committed as usual.
+#[tokio::test]
+async fn write_worker_rebinds_a_solved_proposal() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let [block1, block2]: [Block; 2] = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ]
+    .map(|bytes| bytes.zcash_deserialize_into().expect("block is valid"));
+
+    let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, _worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    // Gives `block` a header that is contextually valid on the best tip, as a block template has.
+    let on_best_tip = |mut block: Block| {
+        let snapshot = state_receiver.borrow().clone();
+        let context = read::difficulty::get_block_template_chain_info(&snapshot, &db, &network)
+            .expect("the state has a context for the next block");
+        let header = Arc::make_mut(&mut block.header);
+        header.previous_block_hash = context.tip_hash;
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        Arc::new(block)
+    };
+    let commit = |block: SemanticallyVerifiedBlock,
+                  contextual: Option<Box<ContextuallyVerifiedBlock>>| async {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        tx.send(NonFinalizedWriteMessage::Commit((
+            block, rsp_tx, contextual,
+        )))
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+            .await
+            .expect("the write task answers")
+            .expect("the write task is running")
+    };
+
+    // The proposal's parent has to be in the non-finalized state for its chain to be rebound.
+    let block1 = on_best_tip(block1);
+    assert_eq!(
+        commit(block1.clone().prepare(), None).await.ok(),
+        Some(block1.hash())
+    );
+
+    // Validate a proposal on a snapshot of the state, like the read state service does.
+    let proposal = on_best_tip(block2);
+    let mut snapshot = state_receiver.borrow().clone();
+    let mut expected = snapshot.clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, proposal.clone().prepare())
+        .expect("the proposal is contextually valid");
+    let prepared_chain = snapshot
+        .remove_chain_with_tip(proposal.hash())
+        .expect("validation adds the proposal to a chain");
+    let contextual = prepared_chain
+        .tip_block()
+        .expect("the proposal is the chain's tip")
+        .clone();
+    snapshot.store_prepared_chain(prepared_chain);
+    assert!(snapshot.has_prepared_chain());
+
+    // A solved proposal only differs in its nonce and solution.
+    let mut solved = (*proposal).clone();
+    Arc::make_mut(&mut solved.header).nonce = [0xff; 32].into();
+    let solved = Arc::new(solved);
+    assert_ne!(solved.hash(), proposal.hash());
+
+    let received_time = std::time::Instant::now();
+    let mut rebound = contextual.clone();
+    rebound.rebind(solved.clone(), received_time);
+    let semantic = solved.clone().prepare();
+
+    let committed = commit(semantic, Some(Box::new(rebound))).await;
+    assert_eq!(committed.ok(), Some(solved.hash()));
+    assert_eq!(latest.best_tip_hash(), Some(solved.hash()));
+    assert!(
+        !snapshot.has_prepared_chain(),
+        "the commit rebinds the prepared chain instead of pushing the block",
+    );
+
+    // The rebound chain is the same as a chain that the solved block was pushed onto.
+    let mut pushed = solved.clone().prepare();
+    pushed.received_time = Some(received_time);
+    validate_and_commit_non_finalized(&db, &mut expected, pushed)
+        .expect("the solved block is contextually valid");
+    let best_chain = state_receiver
+        .borrow()
+        .best_chain()
+        .expect("the state has a best chain")
+        .clone();
+    assert!(
+        best_chain.eq_internal_state(expected.best_chain().expect("the state has a best chain")),
+        "rebinding gives the same chain as pushing the solved block",
+    );
+}
+
+/// The block write task drops a prepared chain once the best chain is longer than it, and keeps
+/// it while a block that solves its proposal could still extend the best chain.
+#[tokio::test]
+async fn write_worker_drops_a_prepared_chain_that_the_best_chain_passed() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let [block1, block2, block3]: [Block; 3] = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
+    ]
+    .map(|bytes| bytes.zcash_deserialize_into().expect("block is valid"));
+
+    let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, _worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    // Gives `block` a header that is contextually valid on the best tip, as a block template has.
+    let on_best_tip = |mut block: Block| {
+        let snapshot = state_receiver.borrow().clone();
+        let context = read::difficulty::get_block_template_chain_info(&snapshot, &db, &network)
+            .expect("the state has a context for the next block");
+        let header = Arc::make_mut(&mut block.header);
+        header.previous_block_hash = context.tip_hash;
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        Arc::new(block)
+    };
+    let commit = |block: Arc<Block>| async {
+        let hash = block.hash();
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        tx.send(NonFinalizedWriteMessage::Commit((
+            block.prepare(),
+            rsp_tx,
+            None,
+        )))
+        .unwrap();
+
+        let committed = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+            .await
+            .expect("the write task answers")
+            .expect("the write task is running");
+        assert_eq!(committed.ok(), Some(hash));
+    };
+    // The write task drops a passed prepared chain after it answers the commit. It handles one
+    // request at a time, so it has finished with that commit once it answers another request.
+    let after_last_commit = || async {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        tx.send(NonFinalizedWriteMessage::Invalidate {
+            hash: block::Hash([0xff; 32]),
+            rsp_tx,
+        })
+        .unwrap();
+
+        let invalidated = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+            .await
+            .expect("the write task answers")
+            .expect("the write task is running");
+        assert!(invalidated.is_err(), "no block has this hash");
+    };
+
+    commit(on_best_tip(block1)).await;
+
+    // Validate a proposal on a snapshot of the state, like the read state service does.
+    let proposal = on_best_tip(block2);
+    let mut snapshot = state_receiver.borrow().clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, proposal.clone().prepare())
+        .expect("the proposal is contextually valid");
+    let prepared_chain = snapshot
+        .remove_chain_with_tip(proposal.hash())
+        .expect("validation adds the proposal to a chain");
+    snapshot.store_prepared_chain(prepared_chain);
+
+    // Another block at the proposal's height leaves the prepared chain as long as the best chain.
+    let mut sibling = (*proposal).clone();
+    Arc::make_mut(&mut sibling.header).nonce = [0xff; 32].into();
+    let sibling = Arc::new(sibling);
+    commit(sibling.clone()).await;
+    after_last_commit().await;
+    assert_eq!(latest.best_tip_hash(), Some(sibling.hash()));
+    assert!(snapshot.has_prepared_chain());
+
+    // A block above the proposal's height makes the best chain longer.
+    commit(on_best_tip(block3)).await;
+    after_last_commit().await;
+    assert!(
+        !snapshot.has_prepared_chain(),
+        "a proposal below the best tip can't extend the best chain",
     );
 }

@@ -516,7 +516,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some((queued_child, rsp_tx, contextual)) = queued_child_and_rsp_tx else {
                 forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
                 update_latest_chain_channels(
                     non_finalized_state,
@@ -543,6 +543,10 @@ impl WriteBlockWorkerTask {
             // parent's misbehaviour score.
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
+            } else if let Some(contextual) = contextual {
+                // The block was validated as a proposal, so only apply it to its parent chain.
+                candidate_trees = None;
+                non_finalized_state.commit_prevalidated_contextual(*contextual, &finalized_state.db)
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 // A commit is the only use for a candidate's trees: they are for its own block,
@@ -618,6 +622,9 @@ impl WriteBlockWorkerTask {
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+
+            // A prepared chain that the best chain has passed can't be used any more.
+            non_finalized_state.drop_passed_prepared_chain();
 
             finalize_root_blocks_and_forget_evicted(
                 finalized_state,

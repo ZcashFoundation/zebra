@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `Request::CommitContextuallyVerifiedBlock` and `ContextuallyVerifiedBlock::rebind`, which commit a block that was validated as a block proposal and then solved, without validating it again. `Response::ValidBlockProposal` and `ReadResponse::ValidBlockProposal` now carry the proposal validation result.'
+time: 2026-11-12T15:00:00.000000000Z
