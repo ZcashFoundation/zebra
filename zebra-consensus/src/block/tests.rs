@@ -27,6 +27,22 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+tokio::task_local! {
+    static CHECK_POLLS: Arc<std::sync::atomic::AtomicUsize>;
+}
+
+/// Counts polls of the block verifier's own check futures, as `FuturesUnordered` makes them.
+pub(super) async fn count_check_polls<F: Future>(future: F) -> F::Output {
+    use std::sync::atomic::Ordering;
+
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        let _ = CHECK_POLLS.try_with(|polls| polls.fetch_add(1, Ordering::Relaxed));
+        future.as_mut().poll(cx)
+    })
+    .await
+}
+
 mod cooperative_drain;
 mod decoded_size;
 mod dispatch;

@@ -1261,7 +1261,7 @@ where
                     height,
                     time: block.header.time,
                 };
-                async_checks.push(budget_aware(async move {
+                let check = budget_aware(async move {
                     // Dispatch and poll each verification together without monopolizing the executor.
                     tokio::task::consume_budget().await;
                     transaction_verifier
@@ -1270,7 +1270,10 @@ where
                         .expect("transaction verifier is always ready")
                         .call(request)
                         .await
-                }));
+                });
+                #[cfg(test)]
+                let check = tests::count_check_polls(check);
+                async_checks.push(check);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 

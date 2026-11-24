@@ -131,6 +131,54 @@ async fn verify_without_blocking_admission(
     .ok()
 }
 
+/// Ready proposal checks must not be re-polled on every cooperative budget refill.
+#[tokio::test(flavor = "current_thread")]
+async fn ready_proposal_checks_are_polled_at_most_twice() {
+    use std::sync::atomic::AtomicUsize;
+    use tower::ServiceExt;
+
+    const CHECKS: u32 = 2_000;
+
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let mut block = (*candidate(
+        &network,
+        Height(2),
+        spend_from(0, LockTime::unlocked(), Height(3)),
+    ))
+    .clone();
+    block
+        .transactions
+        .extend((1..CHECKS).map(|index| spend_from(index, LockTime::unlocked(), Height(3))));
+    Arc::make_mut(&mut block.header).merkle_root =
+        block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    let polls = Arc::new(AtomicUsize::new(0));
+    let transactions = service_fn(|_: transaction::BlockRequest| {
+        ready(Err::<transaction::BlockResponse, BoxError>(
+            TransactionError::BadBalance.into(),
+        ))
+    });
+    let result = tokio::time::timeout(
+        Duration::from_secs(20),
+        super::CHECK_POLLS.scope(
+            polls.clone(),
+            SemanticBlockVerifier::new(&network, mock_state(), transactions)
+                .oneshot(Request::CheckProposal(Arc::new(block))),
+        ),
+    )
+    .await
+    .expect("ready proposal checks finish within the test deadline");
+    assert!(matches!(
+        result,
+        Err(VerifyBlockError::Transaction(TransactionError::BadBalance))
+    ));
+    assert!(
+        polls.load(Ordering::Relaxed) <= 2 * usize::try_from(CHECKS + 1).unwrap(),
+        "ready transaction checks were repeatedly polled after the cooperative budget expired"
+    );
+}
+
 #[tokio::test]
 async fn only_small_decoded_blocks_bypass_blocking_check_admission() {
     let _init_guard = zebra_test::init();
