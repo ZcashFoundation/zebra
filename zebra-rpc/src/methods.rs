@@ -1113,7 +1113,8 @@ where
     /// mempool, selecting transactions, and building a coinbase transaction.
     ///
     /// The task also rebuilds the template when `mempool_changes` reports a newly verified
-    /// transaction.
+    /// transaction, and validates each template as a block proposal, so a solved template is
+    /// not validated again when it is submitted.
     ///
     /// Returns `None` if mining isn't configured.
     pub fn spawn_block_template_updater(
@@ -1123,18 +1124,32 @@ where
         let miner_params = self.gbt.miner_params()?.clone();
         let template_cache = self.gbt.template_cache()?.clone();
 
+        // Subscribe before the updater starts, so its first template is validated too.
+        let validate_templates = precompute::validate_templates(
+            template_cache.subscribe(),
+            self.network.clone(),
+            self.gbt.block_verifier_router(),
+        );
+        let update_templates = precompute::run(
+            self.network.clone(),
+            miner_params,
+            self.gbt.coinbase_cache(),
+            template_cache,
+            self.mempool.clone(),
+            mempool_changes.subscribe(),
+            self.read_state.clone(),
+            self.latest_chain_tip.clone(),
+            self.gbt.sync_status(),
+        );
+
         Some(tokio::spawn(
-            precompute::run(
-                self.network.clone(),
-                miner_params,
-                self.gbt.coinbase_cache(),
-                template_cache,
-                self.mempool.clone(),
-                mempool_changes.subscribe(),
-                self.read_state.clone(),
-                self.latest_chain_tip.clone(),
-                self.gbt.sync_status(),
-            )
+            async move {
+                // The validation only ends with the task, so the task ends with the updater.
+                tokio::select! {
+                    () = update_templates => {}
+                    () = validate_templates => {}
+                }
+            }
             .in_current_span(),
         ))
     }
