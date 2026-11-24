@@ -403,3 +403,11 @@ unwrap_in_result = "warn"
 # TODOs: fix this lint eventually
 result_large_err = "allow"
 
+
+# Benchmark: upstream default branches, merged but not yet released.
+[patch.crates-io]
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "7465edf9110aace00b8c24b96270e1b820fd39fb" }
+halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "7465edf9110aace00b8c24b96270e1b820fd39fb" }
+halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "7465edf9110aace00b8c24b96270e1b820fd39fb" }
+pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "c4e5dc1208e6eebc134bf2780c35b8a25237ec3d" }
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "4ab3f7f8d7ae39a16ee516ca5be8b2d59d5501d2" }
