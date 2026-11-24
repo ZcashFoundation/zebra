@@ -21,6 +21,12 @@ mod prop;
 mod vector;
 
 impl Mempool {
+    /// Lets the mempool start on sync status alone, for tests whose best tip is an old
+    /// Mainnet block.
+    pub fn skip_tip_age_check(&mut self) {
+        self.skip_tip_age_check = true;
+    }
+
     /// Get the storage field of the mempool for testing purposes.
     pub fn storage(&mut self) -> &mut Storage {
         match &mut self.active_state {
