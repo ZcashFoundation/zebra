@@ -102,6 +102,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "block_parallel_decode"
+path = "fuzz_targets/block_parallel_decode.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "block_deep_fuzz"
 path = "fuzz_targets/block_deep_fuzz.rs"
 test = false

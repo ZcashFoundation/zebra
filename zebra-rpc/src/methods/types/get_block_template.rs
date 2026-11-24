@@ -34,7 +34,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, ZcashDeserializeInto},
+    serialization::DateTime32,
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
@@ -915,7 +915,13 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
+    // Large blocks decode their transactions on Rayon, so keep that off the async executor.
+    let block = tokio::task::spawn_blocking(move || {
+        Block::zcash_deserialize_parallel(&mut block_proposal_bytes.as_slice())
+    })
+    .await
+    .map_misc_error()?;
+    let block: Block = match block {
         Ok(block) => block,
         Err(parse_error) => {
             tracing::info!(
