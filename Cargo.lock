@@ -1944,7 +1944,8 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8862c7f2d99964760016516103fcc621352e77a505b22b0fc25140f09e4b8bb0"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1968,7 +1969,8 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
-source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "800f76fa421515e2729192e3863bb0a58f30fe17a9a165ea5e778a157adeb579"
 dependencies = [
  "bitvec",
  "ff",
@@ -1979,7 +1981,8 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.1"
-source = "git+https://github.com/upbqdn/halo2?rev=e13c0522684b0cb47648eae6c42b36b321197277#e13c0522684b0cb47648eae6c42b36b321197277"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d886268046f1ceedd464c95382a64c7e86520b029b18e02ee92bf94f5120817d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3568,7 +3571,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.16.0"
-source = "git+https://github.com/upbqdn/orchard?rev=de4537bfc59b8fc204b95000f52f4d38bd29b2db#de4537bfc59b8fc204b95000f52f4d38bd29b2db"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae7ceb7b5387bd76cf3c0712f57708795c925cecf097036cedb60b5c3706e8f"
 dependencies = [
  "aes",
  "bitvec",
@@ -3589,7 +3593,6 @@ dependencies = [
  "pasta_curves",
  "rand 0.10.2",
  "rand_core 0.10.1",
- "rayon",
  "reddsa",
  "serde",
  "sinsemilla",
@@ -3687,14 +3690,13 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.3"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=67d1040a18798101541c66f8a012b57e770e3d44#67d1040a18798101541c66f8a012b57e770e3d44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c6ffcfacaf7dc81ca2e318f019b6e09f84327ecfbddb4e58574bcebdd123975"
 dependencies = [
  "blake2b_simd",
- "cpufeatures 0.3.1",
  "ff",
  "group",
  "lazy_static",
- "maybe-rayon",
  "rand 0.10.2",
  "static_assertions",
  "subtle",
@@ -4373,7 +4375,8 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "git+https://github.com/ZcashFoundation/reddsa?rev=9d272a0f08def464067673cf92edbe1a0d01986e#9d272a0f08def464067673cf92edbe1a0d01986e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a70b6dbd7b3277cbd4d89ee750a30bebab3b9951ee4e166ce15c00975fe410f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -4796,7 +4799,8 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.9.0"
-source = "git+https://github.com/zcash/sapling-crypto?rev=752298d32f9c97f8487becf6ead88c198dfe4762#752298d32f9c97f8487becf6ead88c198dfe4762"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a2cbdcfeef20006adf72699cd466f21fe349674277cc05d3fc9b7302db7b182"
 dependencies = [
  "aes",
  "bellman",
@@ -4818,7 +4822,6 @@ dependencies = [
  "memuse",
  "rand 0.10.2",
  "rand_core 0.10.1",
- "rayon",
  "redjubjub",
  "subtle",
  "tracing",
@@ -5281,7 +5284,8 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 [[package]]
 name = "sinsemilla"
 version = "0.2.0"
-source = "git+https://github.com/upbqdn/sinsemilla?rev=3e175751a626e99a449b7ffe44631a44e6875dd4#3e175751a626e99a449b7ffe44631a44e6875dd4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72744738b764bb3bb7bb5dcf71b62d19c2de8a09f850a7388f6088f244037299"
 dependencies = [
  "group",
  "pasta_curves",
@@ -7302,7 +7306,8 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.6.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script?rev=08556638dfd1a517d887b27acbff46bb24273f1e#08556638dfd1a517d887b27acbff46bb24273f1e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10106859d08a2a4119af8a0fa8db72afe35647768b562f94b7a2124adad41275"
 dependencies = [
  "bip32",
  "bitflags",
