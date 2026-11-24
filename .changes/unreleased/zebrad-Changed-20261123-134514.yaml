@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Changed `cargo binstall zebrad` so it no longer falls back to third-party QuickInstall builds on platforms without a release archive. `cargo binstall` does not check the Cosign signature or the build-provenance attestation of the release archive, so the install guide now says so and lists the verified manual download first.
+time: 2026-11-23T13:45:14.815393379Z
