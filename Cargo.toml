@@ -404,11 +404,11 @@ unwrap_in_result = "warn"
 result_large_err = "allow"
 
 [patch.crates-io]
-halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "f422982350f0d57cb1cf5363ffaf73b7be20c27e" }
-halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "f422982350f0d57cb1cf5363ffaf73b7be20c27e" }
-halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "f422982350f0d57cb1cf5363ffaf73b7be20c27e" }
+halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "e13c0522684b0cb47648eae6c42b36b321197277" }
+halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "e13c0522684b0cb47648eae6c42b36b321197277" }
+halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "e13c0522684b0cb47648eae6c42b36b321197277" }
 orchard = { git = "https://github.com/upbqdn/orchard", rev = "de4537bfc59b8fc204b95000f52f4d38bd29b2db" }
-pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "67bc6d16009a3d24f638aea515db80249970caa5" }
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "67d1040a18798101541c66f8a012b57e770e3d44" }
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "9d272a0f08def464067673cf92edbe1a0d01986e" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
 sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "3e175751a626e99a449b7ffe44631a44e6875dd4" }
