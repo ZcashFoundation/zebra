@@ -216,13 +216,10 @@ fn batch_tree_matches_every_serial_intermediate_node() {
 fn batch_merkle_bottom_maps_to_zero_like_scalar() {
     use halo2::pasta::group::Group;
 
-    // An identity starting accumulator forces bottom without solving a discrete logarithm
-    // relation for the fixed production domain. from_Q deliberately disables table dispatch.
     let domain = sinsemilla::HashDomain::from_Q(pallas::Point::identity());
     let nodes = vec![Node::default(); 16];
-    let words = vec![[0u16; 52]; 8];
-    assert!(bool::from(domain.hash_many_vartime(&words)[0].is_none()));
     let scalar = domain.hash(std::iter::repeat_n(false, 520));
+    // stock-upstream benchmark: the released scalar API still exercises bottom-to-zero.
     assert!(bool::from(scalar.is_none()));
     let mut out = vec![Node(pallas::Base::one()); 8];
     merkle_crh_orchard_batch(&domain, 0, &nodes, &mut out);

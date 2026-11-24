@@ -189,8 +189,8 @@ chrono = { workspace = true }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true }
 lazy_static = { workspace = true }
-# Unify assembly with Halo 2 and Orchard; startup diagnostics require runtime dispatch.
-pasta_curves = { version = "0.6.1", optional = true, default-features = false }
+# Unify assembly with Halo 2 and Orchard.
+pasta_curves = { version = "0.6.3", optional = true, default-features = false }
 semver = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 toml = { workspace = true }

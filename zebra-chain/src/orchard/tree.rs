@@ -59,12 +59,21 @@ pub(super) const MERKLE_DEPTH: u8 = 32;
 /// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
 /// <https://zips.z.cash/protocol/protocol.pdf#constants>
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
+    merkle_crh_orchard_with_domain(&MERKLE_CRH_DOMAIN, layer, left, right)
+}
+
+fn merkle_crh_orchard_with_domain(
+    domain: &sinsemilla::HashDomain,
+    layer: u8,
+    left: pallas::Base,
+    right: pallas::Base,
+) -> pallas::Base {
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
     let prefix = BitArray::<_, Lsb0>::from([MERKLE_DEPTH - 1 - layer, 0]);
     let left = BitArray::<_, Lsb0>::from(left.to_repr());
     let right = BitArray::<_, Lsb0>::from(right.to_repr());
 
-    MERKLE_CRH_DOMAIN
+    domain
         .hash(
             prefix[..10]
                 .iter()
@@ -75,22 +84,6 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
         .unwrap_or(pallas::Base::zero())
 }
 
-/// Packs the public MerkleCRH message into its 52 little-endian 10-bit words.
-fn merkle_crh_words(level: u8, left: pallas::Base, right: pallas::Base) -> [u16; 52] {
-    let left = BitArray::<_, Lsb0>::from(left.to_repr());
-    let right = BitArray::<_, Lsb0>::from(right.to_repr());
-    let mut words = [0; 52];
-    words[0] = u16::from(level);
-    for i in 0..25 {
-        words[i + 1] = left[i * 10..i * 10 + 10].load_le();
-    }
-    words[26] = left[250..255].load_le::<u16>() | (right[..5].load_le::<u16>() << 5);
-    for i in 0..25 {
-        words[i + 27] = right[i * 10 + 5..i * 10 + 15].load_le();
-    }
-    words
-}
-
 /// Hashes a level of public node pairs, preserving the specification's bottom-to-zero mapping.
 fn merkle_crh_orchard_batch(
     domain: &sinsemilla::HashDomain,
@@ -99,12 +92,14 @@ fn merkle_crh_orchard_batch(
     out: &mut [Node],
 ) {
     assert_eq!(nodes.len(), out.len() * 2, "one output per node pair");
-    let words: Vec<_> = nodes
-        .chunks_exact(2)
-        .map(|pair| merkle_crh_words(level, pair[0].0, pair[1].0))
-        .collect();
-    for (out, hash) in out.iter_mut().zip(domain.hash_many_vartime(&words)) {
-        *out = Node(hash.unwrap_or(pallas::Base::zero()));
+    // stock-upstream benchmark: hash each pair with the released scalar Sinsemilla API.
+    for (pair, out) in nodes.chunks_exact(2).zip(out) {
+        *out = Node(merkle_crh_orchard_with_domain(
+            domain,
+            MERKLE_DEPTH - 1 - level,
+            pair[0].0,
+            pair[1].0,
+        ));
     }
 }
 

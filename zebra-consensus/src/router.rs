@@ -390,10 +390,7 @@ where
     // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
 
-    // Build shared scalar and batch tables off the async workers without delaying initialization.
-    let orchard_tree_preload = tokio::task::spawn_blocking(sinsemilla::precompute);
-
-    // Make sure the state contains the known best chain checkpoints, in a separate thread.
+    // stock-upstream benchmark: no Sinsemilla table to precompute; start checkpoint checks directly.
 
     let checkpoint_state_service = state_service.clone();
     let checkpoint_sync = config.checkpoint_sync;
@@ -469,9 +466,6 @@ where
             }
 
             tracing::info!("finished state checkpoint validation");
-            orchard_tree_preload
-                .await
-                .expect("Orchard tree table precomputation must succeed");
         }
         .instrument(Span::current()),
     );
