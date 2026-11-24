@@ -18,7 +18,7 @@ target; see [Running locally](#running-locally).
 zebra-fuzz/
 └── fuzz/                    # cargo-fuzz crate, a member of Zebra's workspace
     ├── Cargo.toml
-    ├── fuzz_targets/        # 15 targets, one file each
+    ├── fuzz_targets/        # 16 targets, one file each
     ├── dicts/               # libFuzzer dictionaries, named <target>.dict
     ├── seed_gen.rs          # helper binary, not a fuzz target
     └── corpus/              # runtime corpus, git-ignored
@@ -59,7 +59,7 @@ dependencies. Building the fuzz package enables it, including in a whole
 workspace build. Default root builds exclude the fuzz package. Build the
 production node with `cargo build -p zebrad` (and `--release` for release mode)
 to explicitly select only the node and its dependencies.
-The remaining nine targets use public APIs only.
+The remaining ten targets use public APIs only.
 
 `fuzzing` is a test-only feature in the same category as `proptest-impl`: it is
 not part of the crates' stability surface, and the items it exposes carry no
@@ -73,6 +73,7 @@ semver guarantee.
 | `p2p_deep_fuzz` | P2P codec multi-message extraction, then per-variant body invariants; re-encode is compared against the attacker-supplied byte range |
 | `addr_message_fuzz` | `addr` / `addrv2` application-layer invariants, complementing the framing-only target above |
 | `block_deserialize` | `Block` deserialization plus six structural invariants |
+| `block_parallel_decode` | The parallel block decoder against the serial one: the same block or error, and the same consumed bytes |
 | `block_deep_fuzz` | Block consensus checks swept across mainnet network-upgrade activation heights |
 | `equihash_fuzz` | `Solution::check()` and the `equihash_solution_is_valid` consensus wrapper — the PoW verifier every inbound header passes through |
 | `script_verify_fuzz` | `CachedFfiTransaction::is_valid`, where transparent scripts cross the Rust → C++ FFI boundary |

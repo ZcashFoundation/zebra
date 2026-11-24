@@ -10,7 +10,7 @@ use zebra_test::prelude::*;
 
 use crate::{
     parameters::GENESIS_PREVIOUS_BLOCK_HASH,
-    serialization::{SerializationError, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
 use super::super::{
@@ -265,4 +265,117 @@ fn arbitrary_height_partial_chain_strategy() -> Result<()> {
     });
 
     Ok(())
+}
+
+/// The default number of proptest cases for the parallel block decoder tests.
+const DEFAULT_PARALLEL_DECODE_PROPTEST_CASES: u32 = 64;
+
+/// Returns blocks that the parallel decoder decodes in parallel: the test vectors with at least
+/// 64 transactions, and blocks of 64 copies of each ZIP 244 test vector transaction.
+fn parallel_decode_blocks() -> Vec<Vec<u8>> {
+    let mut blocks: Vec<Vec<u8>> = zebra_test::vectors::BLOCKS
+        .iter()
+        .filter(|bytes| {
+            Block::zcash_deserialize(**bytes).is_ok_and(|block| block.transactions.len() >= 64)
+        })
+        .map(|bytes| bytes.to_vec())
+        .collect();
+
+    for vector in zebra_test::zip0244::TEST_VECTORS.iter() {
+        let transaction = Arc::new(
+            crate::transaction::Transaction::zcash_deserialize(vector.tx.as_slice())
+                .expect("the test vector is a valid transaction"),
+        );
+        let block = Block {
+            header: Arc::new(super::generate::block_header().0),
+            transactions: vec![transaction; 64],
+        };
+        blocks.push(
+            block
+                .zcash_serialize_to_vec()
+                .expect("vec writes can't fail"),
+        );
+    }
+
+    for bytes in &blocks {
+        assert!(
+            super::super::serialize::parallel_block(bytes).is_some(),
+            "the block is decoded in parallel"
+        );
+    }
+
+    blocks
+}
+
+/// The parallel decoder gives the serial decoder's block or error, and consumes the same bytes,
+/// for large blocks with changed bytes, and truncated or extended.
+#[test]
+fn parallel_decode_matches_serial_for_changed_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let blocks = parallel_decode_blocks();
+
+    proptest!(
+        Config::with_cases(
+            env::var("PROPTEST_CASES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_PARALLEL_DECODE_PROPTEST_CASES)
+        ),
+        |(block in any::<prop::sample::Index>(),
+          changes in prop::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 0..4),
+          end in any::<prop::sample::Index>(),
+          end_change in 0..3u8,
+          extra in prop::collection::vec(any::<u8>(), 0..8))| {
+            let mut bytes = block.get(&blocks).clone();
+            for (position, byte) in changes {
+                *position.get_mut(&mut bytes) = byte;
+            }
+            match end_change {
+                0 => {}
+                1 => bytes.truncate(end.index(bytes.len())),
+                _ => bytes.extend_from_slice(&extra),
+            }
+
+            super::vectors::assert_parallel_decode_matches_serial(&bytes);
+        }
+    );
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(Config::with_cases(
+        env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES)
+    ))]
+
+    /// The layout scan ends every transaction where the decoder does, and a large block of
+    /// copies of a transaction decodes the same in parallel as serially.
+    #[test]
+    fn layout_scan_finds_where_each_transaction_ends(
+        transaction in any::<crate::transaction::Transaction>()
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let encoded = transaction.zcash_serialize_to_vec()?;
+        let mut decoded = encoded.as_slice();
+        if crate::transaction::Transaction::zcash_deserialize(&mut decoded).is_ok() {
+            prop_assert!(decoded.is_empty());
+
+            let mut scanned = encoded.as_slice();
+            prop_assert_eq!(super::super::serialize::scan_transaction(&mut scanned), Some(()));
+            prop_assert!(scanned.is_empty(), "the scan ends where the decoder ends");
+        }
+
+        // Copies of one transaction are enough for the decoder, which doesn't check duplicates.
+        let transaction = Arc::new(transaction);
+        let block = Block {
+            header: Arc::new(super::generate::block_header().0),
+            transactions: vec![transaction; 64],
+        };
+        super::vectors::assert_parallel_decode_matches_serial(&block.zcash_serialize_to_vec()?);
+    }
 }

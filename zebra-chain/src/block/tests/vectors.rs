@@ -63,6 +63,457 @@ fn serial_auth_data_root(leaves: &[[u8; 32]]) -> [u8; 32] {
     level[0]
 }
 
+/// Compare values, transaction IDs, exact errors, and reader position (also on failures).
+pub(super) fn assert_parallel_decode_matches_serial(bytes: &[u8]) {
+    let mut serial_bytes = bytes;
+    let mut parallel_bytes = bytes;
+    let serial = Block::zcash_deserialize(&mut serial_bytes);
+    let parallel = Block::zcash_deserialize_parallel(&mut parallel_bytes);
+    assert_eq!(serial_bytes, parallel_bytes, "consumed bytes differ");
+    match (serial, parallel) {
+        (Ok(serial), Ok(parallel)) => {
+            assert_eq!(serial, parallel);
+            assert_eq!(
+                serial.zcash_serialize_to_vec().unwrap(),
+                parallel.zcash_serialize_to_vec().unwrap()
+            );
+            for (serial, parallel) in serial.transactions.iter().zip(&parallel.transactions) {
+                assert_eq!(serial.hash(), parallel.hash());
+                assert_eq!(serial.auth_digest(), parallel.auth_digest());
+            }
+        }
+        (Err(serial), Err(parallel)) => {
+            assert_eq!(format!("{serial:?}"), format!("{parallel:?}"));
+        }
+        (serial, parallel) => panic!("decode results differ: {serial:?} / {parallel:?}"),
+    }
+}
+
+/// The parallel decoder rejects transactions that are too small on average at the same
+/// transaction as the serial decoder, in its serial prefix and in its speculative batches.
+#[test]
+fn parallel_decode_applies_the_transaction_size_check() {
+    let _init_guard = zebra_test::init();
+
+    let large = v1_transaction_with_output_script(200);
+    let below_minimum = v1_transaction_with_output_script(34);
+    let header_len = block_with_repeated_transaction(&large, 0).len() - 1;
+
+    // Each large transaction leaves room for 165 undersized ones before the average drops
+    // below the minimum, so these blocks are rejected at transactions 1, 167 and 1,661.
+    for large_count in [0, 1, 10] {
+        let rejected = 165 * large_count + 1;
+        let small_count = rejected + 100;
+
+        let mut block = block_with_repeated_transaction(&large, 0);
+        block.truncate(header_len);
+        crate::serialization::CompactSizeMessage::try_from(large_count + small_count)
+            .expect("count fits")
+            .zcash_serialize(&mut block)
+            .expect("count serializes");
+        let transactions_start = block.len();
+        for _ in 0..large_count {
+            block.extend_from_slice(&large);
+        }
+        for _ in 0..small_count {
+            block.extend_from_slice(&below_minimum);
+        }
+
+        assert_too_small(&block);
+        assert_parallel_decode_matches_serial(&block);
+
+        // Both decoders stop reading at the end of the transaction that is rejected.
+        let mut unread = &block[..];
+        assert!(Block::zcash_deserialize_parallel(&mut unread).is_err());
+        assert_eq!(
+            block.len() - unread.len(),
+            transactions_start + large_count * large.len() + rejected * below_minimum.len(),
+            "{large_count} large transactions",
+        );
+    }
+}
+
+/// Only one block at a time is marked as being decoded in parallel.
+#[test]
+fn parallel_decode_mark_is_exclusive() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::block::serialize::ParallelDecode;
+
+    let decoding = AtomicBool::new(false);
+
+    let mark = ParallelDecode::try_start(&decoding).expect("no block is being decoded");
+    assert!(decoding.load(Ordering::Acquire));
+    assert!(ParallelDecode::try_start(&decoding).is_none());
+
+    drop(mark);
+    assert!(!decoding.load(Ordering::Acquire));
+    assert!(ParallelDecode::try_start(&decoding).is_some());
+}
+
+/// A large block is still decoded, with the same result, while another block is being decoded in
+/// parallel.
+#[test]
+fn large_blocks_decode_during_a_parallel_decode() {
+    use crate::block::serialize::{parallel_block, ParallelDecode, PARALLEL_DECODE};
+
+    let _init_guard = zebra_test::init();
+
+    let large = generate::many_transaction_v4_block(100);
+    assert!(parallel_block(&large).is_some(), "a large block uses Rayon");
+
+    // Other tests decode blocks at the same time, so wait for their decodes.
+    let _decoding = loop {
+        if let Some(mark) = ParallelDecode::try_start(&PARALLEL_DECODE) {
+            break mark;
+        }
+        std::thread::yield_now();
+    };
+
+    assert_parallel_decode_matches_serial(&large);
+}
+
+#[test]
+fn parallel_decode_vectors() {
+    use crate::block::serialize::{parallel_block, scan_transaction};
+
+    let _init_guard = zebra_test::init();
+    for bytes in zebra_test::vectors::BLOCKS.iter() {
+        assert_parallel_decode_matches_serial(bytes);
+        let block = Block::zcash_deserialize(*bytes).unwrap();
+        if block.transactions.len() >= 64 {
+            assert!(parallel_block(bytes).is_some(), "large vector uses Rayon");
+        }
+        for transaction in &block.transactions {
+            let mut encoded = transaction.zcash_serialize_to_vec().unwrap();
+            let end = encoded.len();
+            encoded.extend_from_slice(&[0xaa, 0xbb]);
+            let mut remaining = encoded.as_slice();
+            assert_eq!(scan_transaction(&mut remaining), Some(()));
+            assert_eq!(remaining, &encoded[end..], "scanner transaction boundary");
+        }
+
+        let mut trailing = bytes.to_vec();
+        trailing.extend_from_slice(&[0xaa, 0xbb]);
+        assert_parallel_decode_matches_serial(&trailing);
+        for end in [0, 1, 3, 4, 100, bytes.len() / 2, bytes.len() - 1] {
+            assert_parallel_decode_matches_serial(&bytes[..end.min(bytes.len())]);
+        }
+    }
+}
+
+#[test]
+fn parallel_decode_zip244_and_v6_pools() {
+    use crate::{
+        block::serialize::parallel_block, transaction::arbitrary::shielded::fake_bundle_for_branch,
+    };
+    use ::orchard::ValuePool;
+    use zcash_protocol::consensus::BranchId;
+
+    let _init_guard = zebra_test::init();
+    let mut transactions: Vec<_> = zebra_test::zip0244::TEST_VECTORS
+        .iter()
+        .map(|vector| Transaction::zcash_deserialize(vector.tx.as_slice()).unwrap())
+        .collect();
+    let sapling = transactions
+        .iter()
+        .find_map(|tx| tx.sapling_bundle().cloned())
+        .unwrap();
+    for pools in 0..8 {
+        let transaction = zcash_primitives::transaction::TransactionData::from_parts_v6(
+            BranchId::Nu6_3,
+            0,
+            0.into(),
+            None,
+            (pools & 1 != 0).then(|| sapling.clone()),
+            (pools & 2 != 0).then(|| {
+                fake_bundle_for_branch(BranchId::Nu6_3, ValuePool::Orchard, 2, 1).unwrap()
+            }),
+            (pools & 4 != 0).then(|| {
+                fake_bundle_for_branch(BranchId::Nu6_3, ValuePool::Ironwood, 2, 2).unwrap()
+            }),
+        )
+        .freeze()
+        .unwrap();
+        let mut encoded = Vec::new();
+        transaction.write(&mut encoded).unwrap();
+        transactions.push(Transaction::zcash_deserialize(encoded.as_slice()).unwrap());
+    }
+    for transaction in transactions {
+        let transaction = Arc::new(transaction);
+        let block = Block {
+            header: Arc::new(generate::block_header().0),
+            transactions: vec![transaction; 64],
+        };
+        let bytes = block.zcash_serialize_to_vec().unwrap();
+        assert!(
+            parallel_block(&bytes).is_some(),
+            "shielded block uses Rayon"
+        );
+        assert_parallel_decode_matches_serial(&bytes);
+        for end in [bytes.len() / 2, bytes.len() - 1] {
+            assert_parallel_decode_matches_serial(&bytes[..end]);
+        }
+    }
+}
+
+#[test]
+fn parallel_decode_large_transactions_keep_byte_prefix_bounds() {
+    use crate::{
+        block::serialize::{
+            scan_transaction, serial_decode_prefix_is_complete, PARALLEL_DECODE_BATCH_BYTES,
+        },
+        transaction::arbitrary::shielded::fake_bundle_for_branch,
+    };
+    use ::orchard::ValuePool;
+    use zcash_protocol::consensus::BranchId;
+
+    let _init_guard = zebra_test::init();
+    let limit = PARALLEL_DECODE_BATCH_BYTES;
+    assert!(!serial_decode_prefix_is_complete(63, limit - 1));
+    assert!(serial_decode_prefix_is_complete(64, 0));
+    assert!(serial_decode_prefix_is_complete(1, limit));
+    let bundle = fake_bundle_for_branch(BranchId::Nu6_3, ValuePool::Orchard, 2, 1).unwrap();
+    let cv_bytes = bundle.actions().iter().next().unwrap().cv_net().to_bytes();
+    let transaction = zcash_primitives::transaction::TransactionData::from_parts_v6(
+        BranchId::Nu6_3,
+        0,
+        0.into(),
+        None,
+        None,
+        Some(bundle),
+        None,
+    )
+    .freeze()
+    .unwrap();
+    let mut transaction_bytes = Vec::new();
+    transaction.write(&mut transaction_bytes).unwrap();
+    let cv_offset = transaction_bytes
+        .windows(cv_bytes.len())
+        .position(|bytes| bytes == cv_bytes.as_slice())
+        .expect("the serialized action contains its value commitment");
+    let transaction =
+        Arc::new(Transaction::zcash_deserialize(transaction_bytes.as_slice()).unwrap());
+    let block = Block {
+        header: Arc::new(generate::block_header().0),
+        transactions: vec![transaction; 208],
+    };
+    let bytes = block.zcash_serialize_to_vec().unwrap();
+    assert!(u64::try_from(bytes.len()).unwrap() <= MAX_BLOCK_BYTES);
+    let transaction_start = block.header.zcash_serialize_to_vec().unwrap().len() + 1;
+    let prefix = limit.div_ceil(transaction_bytes.len());
+    assert!(prefix < 64, "large transactions reach the byte bound first");
+    assert!(!serial_decode_prefix_is_complete(
+        prefix - 1,
+        (prefix - 1) * transaction_bytes.len()
+    ));
+    assert!(serial_decode_prefix_is_complete(
+        prefix,
+        prefix * transaction_bytes.len()
+    ));
+    assert_parallel_decode_matches_serial(&bytes);
+    for index in [prefix - 1, prefix, prefix + 1, 63, 207] {
+        let start = transaction_start + index * transaction_bytes.len();
+        let mut malformed = bytes.clone();
+        malformed[start] ^= 0xff;
+        assert_parallel_decode_matches_serial(&malformed);
+        // The scanner accepts this layout, but the canonical point decoder rejects it.
+        let mut malformed = bytes.clone();
+        malformed[start + cv_offset..start + cv_offset + cv_bytes.len()].fill(0xff);
+        let mut scanned = &malformed[start..];
+        assert_eq!(scan_transaction(&mut scanned), Some(()));
+        assert!(Block::zcash_deserialize(malformed.as_slice()).is_err());
+        assert_parallel_decode_matches_serial(&malformed);
+        for offset in [4, transaction_bytes.len() / 2, transaction_bytes.len() - 1] {
+            assert_parallel_decode_matches_serial(&bytes[..start + offset]);
+        }
+    }
+}
+
+#[test]
+fn parallel_decode_threshold_and_malformed() {
+    use crate::block::serialize::parallel_block;
+
+    let _init_guard = zebra_test::init();
+    for count in [0, 1, 63, 64, 65, 9_000, 9_500] {
+        let bytes = generate::many_transaction_v4_block(count);
+        assert_parallel_decode_matches_serial(&bytes);
+        assert_eq!(
+            parallel_block(&bytes).is_some(),
+            count >= 64,
+            "parallel entry threshold for {count} transactions"
+        );
+    }
+
+    let bytes = generate::many_transaction_v4_block(65);
+    let mut regtest = Block::zcash_deserialize(bytes.as_slice()).unwrap();
+    Arc::make_mut(&mut regtest.header).solution = crate::work::equihash::Solution::from_bytes(
+        &[0; crate::work::equihash::REGTEST_SOLUTION_SIZE],
+    )
+    .unwrap();
+    let regtest = regtest.zcash_serialize_to_vec().unwrap();
+    assert!(
+        parallel_block(&regtest).is_some(),
+        "Regtest header boundary"
+    );
+    assert_parallel_decode_matches_serial(&regtest);
+    let (_, header) = generate::block_header();
+    let header_end = header.len();
+    let transaction_start = header_end + 1;
+    // Transaction count: non-canonical, over TrustedPreallocate, over message limit.
+    for count in [
+        vec![0xfd, 1, 0],
+        vec![0xfe, 0, 0, 1, 0],
+        vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+    ] {
+        let mut malformed = header.clone();
+        malformed.extend_from_slice(&count);
+        malformed.extend_from_slice(&bytes[transaction_start..]);
+        assert_parallel_decode_matches_serial(&malformed);
+    }
+
+    for end in (0..bytes.len()).step_by(53).chain([bytes.len() - 1]) {
+        assert_parallel_decode_matches_serial(&bytes[..end]);
+    }
+    // Exercise invalid fields at both ends, not just scan failures. This includes
+    // version/group IDs, coinbase outpoints, counts, values and the Sapling balance.
+    for transaction in [0, 64] {
+        for offset in 0..211 {
+            let mut malformed = bytes.clone();
+            malformed[transaction_start + transaction * 211 + offset] ^= 0xff;
+            assert_parallel_decode_matches_serial(&malformed);
+        }
+    }
+    // Oversized input, output and script counts, preserving the remaining suffix.
+    for offset in [8, 45, 157, 166] {
+        let mut malformed = bytes[..transaction_start + offset].to_vec();
+        malformed.extend_from_slice(&[0xff; 9]);
+        malformed.extend_from_slice(&bytes[transaction_start + offset + 1..]);
+        assert_parallel_decode_matches_serial(&malformed);
+    }
+}
+
+#[test]
+fn parallel_decode_bounds_speculation_and_keeps_first_error() {
+    use crate::block::serialize::{parallel_block, scan_batch, PARALLEL_DECODE_TASK_BYTES};
+
+    let _init_guard = zebra_test::init();
+    let bytes = generate::many_transaction_v4_block(9_000);
+    let start = generate::block_header().1.len() + 3;
+    let body = &bytes[start..];
+    let mut ranges = Vec::new();
+    // Batches stop at the transaction limit, and at the end of the budgeted slice.
+    for (budget, count, expected) in [
+        (body.len(), 64, 64),
+        (body.len(), 9_000, 9_000),
+        (64 * 211, 9_000, 64),
+        (64 * 211 - 1, 9_000, 63),
+        (210, 9_000, 0),
+    ] {
+        scan_batch(&body[..budget], count, &mut ranges);
+        assert_eq!(ranges.len(), expected, "budget {budget}, count {count}");
+        assert!(ranges.last().is_none_or(|range| range.end <= budget));
+    }
+    // A truncated second transaction must not discard the first range.
+    scan_batch(&body[..422 - 1], 2, &mut ranges);
+    assert_eq!(ranges, vec![0..211]);
+    // Bad valueBalanceSapling before, at, and after batch and task boundaries, and at the end.
+    // Batches double from 64 transactions, and tasks hold about 156 of these transactions.
+    let task_len = PARALLEL_DECODE_TASK_BYTES.div_ceil(211);
+    for index in [
+        0,
+        63,
+        64,
+        65,
+        127,
+        128,
+        255,
+        256,
+        64 + task_len - 1,
+        64 + task_len,
+        2 * task_len,
+        5_000,
+        8_191,
+        8_192,
+        8_999,
+    ] {
+        let mut malformed = bytes.clone();
+        malformed[start + index * 211 + 200] = 1;
+        let (result, _) = parallel_block(&malformed).unwrap();
+        assert!(matches!(
+            result,
+            Err(SerializationError::BadTransactionBalance)
+        ));
+        assert_parallel_decode_matches_serial(&malformed);
+
+        // Two errors in the same batch: the earlier one wins.
+        if index + 40 < 9_000 {
+            malformed[start + (index + 40) * 211 + 200] = 1;
+            assert_parallel_decode_matches_serial(&malformed);
+        }
+
+        // A block that ends inside a later transaction of the same batch.
+        let mut truncated = bytes.clone();
+        truncated.truncate(start + index * 211 + 100);
+        assert_parallel_decode_matches_serial(&truncated);
+    }
+    // A later scan failure must not replace an earlier canonical field error.
+    let mut malformed = bytes;
+    malformed[start + 64 * 211 + 200] = 1;
+    malformed.truncate(start + 66 * 211 - 1);
+    assert_parallel_decode_matches_serial(&malformed);
+}
+
+/// A transaction larger than the accepted prefix is scanned only up to the budget, then
+/// decoded serially, and parallel decoding resumes after it.
+#[test]
+fn parallel_decode_huge_transaction_after_prefix() {
+    use crate::block::serialize::{parallel_block, scan_batch};
+
+    let _init_guard = zebra_test::init();
+    let small = generate::many_transaction_v4_block(9_000);
+    let header_len = generate::block_header().1.len();
+    let txs = &small[header_len + 3..];
+
+    // A V4 transaction with one input whose script is 600,000 bytes.
+    let mut huge = Vec::new();
+    huge.extend_from_slice(&0x8000_0004_u32.to_le_bytes());
+    huge.extend_from_slice(&0x892f_2085_u32.to_le_bytes());
+    huge.push(1);
+    huge.extend_from_slice(&[2; 36]);
+    huge.push(0xfe);
+    huge.extend_from_slice(&600_000_u32.to_le_bytes());
+    huge.extend(std::iter::repeat_n(0, 600_000));
+    huge.extend_from_slice(&u32::MAX.to_le_bytes());
+    huge.push(0); // no outputs
+    huge.extend_from_slice(&[0; 4 + 4 + 8 + 3]);
+
+    // The budget after the serial prefix is far smaller than the transaction.
+    let mut ranges = Vec::new();
+    scan_batch(&huge[..64 * 211], 64, &mut ranges);
+    assert!(ranges.is_empty());
+
+    for (before, after) in [(64, 2_000), (500, 2_000), (64, 0)] {
+        let mut bytes = generate::block_header().1;
+        crate::serialization::CompactSizeMessage::try_from(before + 1 + after)
+            .unwrap()
+            .zcash_serialize(&mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&txs[..before * 211]);
+        bytes.extend_from_slice(&huge);
+        bytes.extend_from_slice(&txs[before * 211..(before + after) * 211]);
+        assert!(parallel_block(&bytes).is_some());
+        assert_parallel_decode_matches_serial(&bytes);
+
+        // The huge transaction has a bad value balance, or the block ends inside it.
+        let mut malformed = bytes.clone();
+        malformed[bytes.len() - after * 211 - 3 - 8] = 1;
+        assert_parallel_decode_matches_serial(&malformed);
+        malformed.truncate(bytes.len() - after * 211 - 1_000);
+        assert_parallel_decode_matches_serial(&malformed);
+    }
+}
+
 /// Both reducers must preserve serial semantics across padding, chunk, and scheduling boundaries.
 #[test]
 fn parallel_merkle_roots_match_serial_reference() {

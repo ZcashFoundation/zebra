@@ -9,6 +9,7 @@ use zebra_chain::{
     block::{
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
+            many_transaction_v4_block,
         },
         Block,
     },
@@ -46,6 +47,46 @@ fn block_serialization(c: &mut Criterion) {
             &block_bytes,
             |b, bytes| b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap()),
         );
+    }
+
+    let bytes = many_transaction_v4_block(9_000);
+    let mut group = c.benchmark_group("decode_1900kb_v4");
+    group.throughput(criterion::Throughput::Bytes(
+        u64::try_from(bytes.len()).unwrap(),
+    ));
+    group.bench_function("serial", |b| {
+        b.iter(|| Block::zcash_deserialize(std::hint::black_box(bytes.as_slice())).unwrap())
+    });
+    group.bench_function("parallel", |b| {
+        b.iter(|| {
+            Block::zcash_deserialize_parallel(&mut std::hint::black_box(bytes.as_slice())).unwrap()
+        })
+    });
+    group.finish();
+
+    let start = zebra_chain::block::tests::generate::block_header().1.len() + 3;
+    for bad_tx in [0, 500, 5000] {
+        let mut malformed = many_transaction_v4_block(9_000);
+        // invalid valueBalanceSapling in transaction `bad_tx` (each is 211 bytes)
+        malformed[start + 211 * bad_tx + 200] = 1;
+        let name = if bad_tx == 0 {
+            "decode_malformed_1900kb_v4".to_string()
+        } else {
+            format!("decode_malformed_tx{bad_tx}_1900kb_v4")
+        };
+        let mut group = c.benchmark_group(name);
+        group.bench_function("serial", |b| {
+            b.iter(|| {
+                Block::zcash_deserialize(std::hint::black_box(malformed.as_slice())).unwrap_err()
+            })
+        });
+        group.bench_function("parallel", |b| {
+            b.iter(|| {
+                Block::zcash_deserialize_parallel(&mut std::hint::black_box(malformed.as_slice()))
+                    .unwrap_err()
+            })
+        });
+        group.finish();
     }
 }
 
