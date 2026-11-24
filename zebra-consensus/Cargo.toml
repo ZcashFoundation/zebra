@@ -108,6 +108,7 @@ zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
 
 criterion = { workspace = true, features = ["html_reports"] }
+gungraun = { workspace = true }
 
 [[bench]]
 name = "groth16"
@@ -119,6 +120,10 @@ harness = false
 
 [[bench]]
 name = "sapling"
+harness = false
+
+[[bench]]
+name = "instruction_consensus"
 harness = false
 
 [lints]

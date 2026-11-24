@@ -136,6 +136,7 @@ bounded-vec = { workspace = true, features = ["serde"] }
 sinsemilla = { workspace = true, features = ["test-dependencies"] }
 # Benchmarks
 criterion = { workspace = true, features = ["html_reports"] }
+gungraun = { workspace = true }
 
 # Error Handling & Formatting
 color-eyre = { workspace = true }
@@ -170,6 +171,10 @@ harness = false
 
 [[bench]]
 name = "note_commitment_tree"
+harness = false
+
+[[bench]]
+name = "instruction_chain"
 harness = false
 
 [lints]

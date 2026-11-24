@@ -1,0 +1,103 @@
+name: Instruction-count performance guard
+
+on:
+  pull_request:
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/perf-guard.yml'
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  BENCHES: |-
+    zebra-consensus instruction_consensus
+    zebra-chain instruction_chain
+    zebra-script instruction_script
+
+jobs:
+  instructions:
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    steps:
+      # The default ref is GitHub's merge of the PR into its base: its first parent is the base
+      # the PR would merge into, so base commits the PR lacks are not charged to it.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+        with:
+          toolchain: 1.97.0
+          cache: false
+
+      - uses: ./.github/actions/setup-zebra-build
+
+      - name: Install Valgrind and Gungraun runner
+        run: |
+          .github/scripts/apt-install.sh valgrind
+          cargo install gungraun-runner --version 0.20.0 --locked
+
+      - name: Save base instruction counts
+        run: |
+          base=$(git rev-parse HEAD^1)
+          git checkout --detach "$base"
+          : > "$RUNNER_TEMP/perf-guard-baselines"
+          while read -r package bench; do
+            # New benchmarks cannot be run against a base that does not define them.
+            if [ -e "$package/benches/$bench.rs" ] &&
+               grep -Fq "name = \"$bench\"" "$package/Cargo.toml"; then
+              echo "::group::base: $package/$bench"
+              cargo bench --locked -p "$package" --bench "$bench" -- --save-baseline=pr_base
+              printf '%s %s\n' "$package" "$bench" >> "$RUNNER_TEMP/perf-guard-baselines"
+              echo '::endgroup::'
+            fi
+          done <<< "$BENCHES"
+
+      - name: Compare PR instruction counts
+        run: |
+          git checkout --detach "$GITHUB_SHA"
+          failed=0
+          {
+            echo '## Instruction-count guard (Callgrind Ir; limit +5%)'
+            echo
+            echo '| Benchmark | Base Ir | PR Ir | Change |'
+            echo '| --- | ---: | ---: | ---: |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          while read -r package bench; do
+            echo "::group::PR: $package/$bench"
+            output="$RUNNER_TEMP/perf-guard-$bench.jsonl"
+            if grep -Fxq "$package $bench" "$RUNNER_TEMP/perf-guard-baselines"; then
+              set +e
+              cargo bench --locked -p "$package" --bench "$bench" -- --baseline=pr_base --callgrind-limits='Ir=5%' --output-format=json > "$output"
+              status=$?
+              set -e
+              if [ "$status" -ne 0 ]; then
+                # Cargo wraps a benchmark's exit status; use the structured
+                # regression report to distinguish a regression from a broken run.
+                if jq -s -e 'any(.[]; any(.profiles[]; .data.total.regressions | length > 0))' \
+                  "$output" > /dev/null; then
+                  failed=1
+                else
+                  exit "$status"
+                fi
+              fi
+            else
+              cargo bench --locked -p "$package" --bench "$bench" -- --output-format=json > "$output"
+            fi
+            jq -er '
+              . as $benchmark | .profiles[] | select(.tool == "Callgrind") |
+              .data.total.metrics.Ir.values as $ir |
+              "| `\($benchmark.module_path)` | \($ir.old // "—") | \($ir.new) | \(if $ir.old == null then "no baseline (new benchmark)" elif $ir.old == 0 then "n/a" else ((($ir.new - $ir.old) / $ir.old * 10000 | round) / 100 | tostring) + "%" end) |"
+            ' "$output" >> "$GITHUB_STEP_SUMMARY"
+            echo '::endgroup::'
+          done <<< "$BENCHES"
+          exit "$failed"

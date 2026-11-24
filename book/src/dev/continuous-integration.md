@@ -202,6 +202,16 @@ to the run summary and a PR comment. Failed or missing base targets appear
 in the summary without a comparison. See
 [benchmark invocation and results](profiling-and-benchmarking.md).
 
+The [instruction-count guard](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/perf-guard.yml)
+runs automatically on PRs changing Rust or Cargo files. Valgrind Callgrind counts
+instructions for Orchard and Sapling proof/signature checks, Orchard tree updates,
+transparent scripts, and large-block decoding, on one thread. It compares the PR
+merged into its base with that base, and fails if any benchmark's `Ir` count rises
+more than 5%. Read the base and PR counts and percentage in the run summary; a newly
+introduced benchmark says `no baseline` until it exists on the base branch.
+An intentional increase needs maintainer review of the changed code and its
+comparison before merging. Do not raise the shared 5% limit to hide a regression.
+
 ## Coverage
 
 The [coverage workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/coverage.yml)

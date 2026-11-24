@@ -39,9 +39,14 @@ ripemd = { workspace = true }
 secp256k1 = { workspace = true }
 sha2 = { workspace = true }
 zebra-test = { path = "../zebra-test" }
+gungraun = { workspace = true }
 
 # The tests build transactions with `Transaction::test_v*`, which are gated behind this feature.
 zebra-chain = { path = "../zebra-chain", version = "16.0.0", features = ["proptest-impl"] }
+
+[[bench]]
+name = "instruction_script"
+harness = false
 
 [lints]
 workspace = true
