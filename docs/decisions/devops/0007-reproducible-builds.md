@@ -16,7 +16,7 @@ Zebra already builds with `--locked` and `CARGO_INCREMENTAL=0`, pins apt version
 
 ## Decision Drivers
 
-- Reuse the existing multi-stage Dockerfile, GitHub Actions, and Docker Build Cloud. Avoid a second build system.
+- Reuse the existing multi-stage Dockerfile, GitHub Actions, and Buildx. Avoid a second build system.
 - The artifact is a native binary and its OCI image, so verification rests on the image digest and its attestations, not a consensus blob.
 - Reproducibility hardening must be cheap enough to apply to every build; reserve signing for release images.
 
@@ -33,13 +33,14 @@ Chosen: option 1. Guix gives the strongest guarantee but is a large departure fr
 Reproducibility applies to every image build, releases included, because the changes are cheap. The build becomes a function of its inputs and nothing else:
 
 - Pin the Rust toolchain to an exact version and digest-pin the rust and debian base images; bump both deliberately.
+- Pin the tooling that runs during the build: the buildx release, and by digest the BuildKit image, the Dockerfile frontend, and the SBOM scanner. Dependabot does not track these pins, so they also move only on deliberate bumps.
 - Set `SOURCE_DATE_EPOCH` from the commit and rewrite layer timestamps.
 - Remap absolute build paths out of the binary.
 - Drop the apt/dpkg logs and ldconfig cache, which record wall-clock times in their file contents.
 
 The build stays hermetic by keeping `.git` out of the context and passing the commit as the `SHORT_SHA` build arg. Reading `.git` would let the clone shape, a detached-HEAD tag checkout or a shallow clone, change the output bytes.
 
-Signing and attestation apply on the release path only; the reproducibility measures above apply to every build. Development and dispatch builds are reproducible but unsigned. The `merge` job signs the final multi-arch digest with Cosign and attaches a signed SLSA provenance attestation and a signed SBOM. A verify step then fails the release if any of them do not verify, pinning the signer with `gh attestation verify --signer-workflow`. Release builds also run with `no_cache: true`.
+Signing and attestation apply on the release path only; the reproducibility measures above apply to every build. Development and dispatch builds are reproducible but unsigned. The `merge` job signs the final multi-arch digest with Cosign and attaches a signed SLSA provenance attestation and a signed SBOM. A verify step then fails the release if any of them do not verify, pinning the signer workflow and the release tag. Release builds also run with `no_cache: true`. Every image builds on a fresh local Buildx builder, because `no_cache` does not empty the BuildKit cache mounts a shared builder keeps between builds.
 
 `codegen-units` stays at the cargo default: the binary already reproduces bit-for-bit with thin LTO, so forcing it to `1` would only cost build time.
 
@@ -53,17 +54,23 @@ Signing and attestation apply on the release path only; the reproducibility meas
 
 ## More Information
 
-Verify a release image (`<version>` is the release tag):
+Verify a release image by digest, because a tag can be moved to another image. `<version>` is the release version, such as `7.1.0`, and `<digest>` is the value the first command prints. Every caller of the reusable build workflow signs with the same workflow identity, so the commands pin the release tag. The [Docker user guide](../../../book/src/user/docker.md#verify-the-image) walks through the same steps.
 
 ```sh
-gh attestation verify oci://docker.io/zfnd/zebra:<version> \
-  --owner ZcashFoundation \
-  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
-cosign verify docker.io/zfnd/zebra:<version> \
-  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
+docker buildx imagetools inspect zfnd/zebra:<version> --format '{{.Manifest.Digest}}'
+gh attestation verify oci://docker.io/zfnd/zebra@<digest> \
+  --repo ZcashFoundation/zebra \
+  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml \
+  --source-ref 'refs/tags/v<version>'
+cosign verify docker.io/zfnd/zebra@<digest> \
+  --certificate-identity='https://github.com/ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml@refs/tags/v<version>' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
 - Reproducible Builds: <https://reproducible-builds.org/docs/>
 - SLSA v1.0: <https://slsa.dev/spec/v1.0/levels>
 - BuildKit reproducibility: <https://docs.docker.com/build/ci/github-actions/reproducible-builds/>
+
+## Revision History
+
+- 2026-11-23: Every image now builds on a fresh local Buildx builder, the build tooling is pinned, and release verification pins the release tag.

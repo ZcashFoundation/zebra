@@ -36,6 +36,63 @@ docker compose -f docker/docker-compose.yml up
 
 The default compose file already exposes the Mainnet P2P port.
 
+These commands run the `latest` tag, which moves to each new release. To run a
+release you have checked, [verify the image](#verify-the-image) and run it by
+digest.
+
+## Verify the image
+
+Each Zebra release image on Docker Hub is signed by the release build, which
+also attaches a signed record of the commit and workflow that built it. A tag
+such as `7.1.0` can be moved to another image, but a digest always names the
+same image contents. Verify a release by its digest, then run that digest.
+
+You need the [GitHub CLI](https://cli.github.com/), signed in with
+`gh auth login`, or [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
+In the commands below, replace `<version>` with a release version, such as
+`7.1.0`.
+
+1. Look up the digest of the release:
+
+   ```shell
+   docker buildx imagetools inspect zfnd/zebra:<version> --format '{{.Manifest.Digest}}'
+   ```
+
+   The command prints a digest such as `sha256:4f9536c8...`. Use the full value
+   as `<digest>` in the next steps.
+
+2. Verify the digest with the GitHub CLI:
+
+   ```shell
+   gh attestation verify oci://docker.io/zfnd/zebra@<digest> \
+     --repo ZcashFoundation/zebra \
+     --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml \
+     --source-ref 'refs/tags/v<version>'
+   ```
+
+   Or verify it with cosign:
+
+   ```shell
+   cosign verify docker.io/zfnd/zebra@<digest> \
+     --certificate-identity='https://github.com/ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml@refs/tags/v<version>' \
+     --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+   ```
+
+   Either command exits with an error unless Zebra's release build signed this
+   image for the `v<version>` tag.
+
+3. Run the verified digest:
+
+   ```shell
+   docker run -d \
+     --name zebra \
+     -p 8233:8233 \
+     -v zebrad-cache:/home/zebra/.cache/zebra \
+     zfnd/zebra@<digest>
+   ```
+
+   In a compose file, set `image: zfnd/zebra@<digest>`.
+
 ## Custom Images
 
 If you want to use your own images with, for example, some opt-in compilation

@@ -40,7 +40,10 @@ docker run -d \
 
 The `-p 8233:8233` flag exposes the P2P port so other Zcash nodes can connect to
 yours, and `-v` persists the chain state across restarts (use port `18233` for
-Testnet). For more information, read our [Docker
+Testnet). To check that an image comes from Zebra's release build before you
+run it, follow [Verify the
+image](https://zebra.zfnd.org/user/docker.html#verify-the-image). For more
+information, read our [Docker
 documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Manual Install
