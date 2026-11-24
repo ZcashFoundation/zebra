@@ -99,6 +99,7 @@ jobs:
     needs: prepare-binaries
     permissions:
       contents: write # attach assets to the existing release
+      attestations: read # verify archive provenance before the upload
     uses: ./.github/workflows/zfnd-attach-release-binaries.yml
     with:
       release_tag: ${{ github.event.release.tag_name }}
