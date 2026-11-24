@@ -11,7 +11,7 @@ use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Ins
 
 use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
-use tokio::time::{sleep, Sleep};
+use tokio::time::Sleep;
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -24,7 +24,7 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
+        GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
         MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
         PEER_ADDR_RESPONSE_LIMIT,
     },
@@ -44,6 +44,7 @@ use crate::{
 
 use InventoryResponse::*;
 
+mod compact_relay;
 mod peer_tx;
 
 #[cfg(test)]
@@ -65,6 +66,12 @@ pub(super) enum Handler {
         pending_hashes: HashSet<block::Hash>,
         blocks: Vec<Arc<Block>>,
     },
+    CompactBlock {
+        reconstruction: crate::compact::Reconstruction,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        /// The deadline of the whole block download, including a fallback to the full block.
+        deadline: tokio::time::Instant,
+    },
     TransactionsById {
         pending_ids: HashSet<UnminedTxId>,
         transactions: Vec<UnminedTx>,
@@ -83,6 +90,7 @@ impl fmt::Display for Handler {
 
             Handler::FindBlocks => "FindBlocks".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
+            Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
                 pending_hashes,
                 blocks,
@@ -120,6 +128,7 @@ impl Handler {
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
+            Handler::CompactBlock { .. } => "CompactBlock".into(),
             Handler::TransactionsById { .. } => "TransactionsById".into(),
 
             Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
@@ -391,6 +400,15 @@ impl Handler {
                         .collect(),
                 )))
             }
+            // A compact block announces the peer's new tip, like a single block inventory. So
+            // it completes the tip poll, and it is also handled as an announcement. Otherwise
+            // the poll would hold this connection until it times out, and the announced block's
+            // download with it.
+            (Handler::FindBlocks, Message::CompactBlock(block)) => {
+                let hash = block.header.hash();
+                ignored_msg = Some(Message::CompactBlock(block));
+                Handler::Finished(Ok(Response::BlockHashes(vec![hash])))
+            }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
             }
@@ -578,6 +596,15 @@ where
     /// Receives block adverts independently of the current request's response.
     pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<BlockAdvert>,
 
+    /// Permit decoding recovery responses only for the live request and its deadline.
+    pub(super) compact_recovery:
+        Option<tokio::sync::watch::Sender<Option<crate::compact::ExpectedBlockTransactions>>>,
+
+    /// Registers the blocks that this peer announces in compact form, once their announcements
+    /// are handled.
+    pub(super) compact_inventory:
+        Option<tokio::sync::broadcast::Sender<crate::peer_set::InventoryChange>>,
+
     /// Live authorization, rechecked immediately before request and advert writes.
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
@@ -617,6 +644,9 @@ where
     /// service to a request from this connection,
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
+
+    /// Negotiated compact transport and globally bounded, expiring body retention.
+    compact: compact_relay::CompactRelay,
 }
 
 impl<S, Tx, C> fmt::Debug for Connection<S, Tx, C>
@@ -668,6 +698,8 @@ where
             svc: inbound_service,
             client_rx: client_rx.into(),
             block_advert_rx,
+            compact_recovery: None,
+            compact_inventory: None,
             minimum_peer_version,
             bans_receiver,
             error_slot,
@@ -676,6 +708,7 @@ where
             metrics_label,
             last_metrics_state: None,
             last_overload_time: None,
+            compact: compact_relay::CompactRelay::default(),
         }
     }
 }
@@ -695,6 +728,16 @@ where
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
+        // Ask negotiated peers to announce new blocks in compact form.
+        if self.connection_info.early_block_relay {
+            let request = Message::SendCompact {
+                high_bandwidth: true,
+                version: 1,
+            };
+            if let Err(error) = self.peer_tx.send(request).await {
+                self.fail_with(error).await;
+            }
+        }
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
         // as a response to a pending client request, and if not, interpret them as a
@@ -717,6 +760,8 @@ where
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
         loop {
+            self.compact.expire();
+            let compact_expiry = self.compact.expiry();
             self.update_state_metrics(None);
 
             match self.state {
@@ -763,6 +808,7 @@ where
                     // the request completes (or times out).
                     let incoming = tokio::select! {
                         biased;
+                        _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
                         msg = peer_rx.next() => Either::Left(msg),
                         // A closed advert channel disables only this branch.
                         Some(hash) = self.block_advert_rx.recv() => {
@@ -883,10 +929,16 @@ where
                         _ = tx.cancellation() => {
                             // The canceled response receiver no longer needs a result.
                             trace!(parent: &span, "client request was cancelled");
+                            self.clear_compact_recovery();
                             self.state = State::AwaitingRequest;
                             continue;
                         }
                         _ = timer_ref => {
+                            if let State::AwaitingResponse { handler: Handler::CompactBlock { reconstruction, deadline, .. }, .. } = &self.state {
+                                let (hash, deadline) = (reconstruction.block_hash(), *deadline);
+                                self.fallback_compact(hash, deadline).await;
+                                continue;
+                            }
                             trace!(parent: &span, "client request timed out");
                             let e = PeerError::ConnectionReceiveTimeout;
 
@@ -913,6 +965,7 @@ where
                             };
                             continue;
                         }
+                        _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
                         msg = peer_rx.next() => msg,
                         Some(hash) = self.block_advert_rx.recv() => {
                             self.send_block_advert(hash).await;
@@ -1017,6 +1070,12 @@ where
             "command" => "AdvertiseBlock",
         )
         .increment(1);
+        // Peers that asked for compact announcements get the block's header and short IDs.
+        let message = self
+            .compact_advert(advert.hash)
+            .await
+            .unwrap_or_else(|| Message::Inv(vec![InventoryHash::Block(advert.hash)]));
+        let is_compact = matches!(message, Message::CompactBlock(_));
 
         let address = self.connection_info.connected_addr.get_transient_addr();
         let version = self.connection_info.remote.version;
@@ -1024,24 +1083,27 @@ where
         let bans = &self.bans_receiver;
         let delivery = self
             .peer_tx
-            .send_authorized(
-                Message::Inv(vec![InventoryHash::Block(advert.hash)]),
-                || {
-                    if version >= minimum.current()
-                        && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
-                    {
-                        Ok(())
-                    } else {
-                        Err(PeerError::AdvertAuthorizationRevoked)
-                    }
-                },
-            )
+            .send_authorized(message, || {
+                if version >= minimum.current()
+                    && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+                {
+                    Ok(())
+                } else {
+                    Err(PeerError::AdvertAuthorizationRevoked)
+                }
+            })
             .await;
         match delivery {
             Ok(()) => {
+                if is_compact {
+                    self.compact.mark_sent();
+                }
                 let _ = advert.result.send(Ok(()));
             }
             Err(error) => {
+                if is_compact {
+                    self.compact.clear_sent();
+                }
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
                 self.fail_with(error).await;
@@ -1096,7 +1158,7 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let authorized = || {
+        let mut authorized = || {
             if version < minimum.current()
                 || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
             {
@@ -1151,6 +1213,23 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
+            // A compact announcement from this peer can answer the download without a full body.
+            (AwaitingRequest, BlockDownload { hash, .. }) if self.compact.is_cached(hash) => {
+                match authorized() {
+                    Ok(()) => self.download_block(hash).await,
+                    Err(error) => Err(error),
+                }
+            }
+            (AwaitingRequest, BlocksByHash(hashes))
+                if hashes.len() == 1
+                    && hashes.iter().all(|hash| self.compact.is_cached(*hash)) =>
+            {
+                let hash = *hashes.iter().next().expect("the set contains exactly one hash");
+                match authorized() {
+                    Ok(()) => self.download_block(hash).await,
+                    Err(error) => Err(error),
+                }
+            }
             (AwaitingRequest, BlockDownload { hash, .. }) => self
                 .peer_tx
                 .send_authorized(Message::GetData(vec![hash.into()]), authorized)
@@ -1259,6 +1338,9 @@ where
             (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
+            (AwaitingRequest, AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(_)) => {
+                Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
+            }
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
@@ -1268,11 +1350,23 @@ where
              shutdown(), which the request arms never call",
         );
 
+        let download_deadline = self.compact.take_download_deadline();
+
         // Update the connection state with a new handler, or fail with an error.
         match new_handler {
             Ok(handler) => {
+                let timer = compact_relay::response_timer(&handler, download_deadline);
+                if let (Handler::CompactBlock { reconstruction, .. }, Some(recovery)) =
+                    (&handler, &self.compact_recovery)
+                {
+                    recovery.send_replace(Some(crate::compact::ExpectedBlockTransactions {
+                        block_hash: reconstruction.block_hash(),
+                        count: reconstruction.missing_count(),
+                        deadline: timer.deadline(),
+                    }));
+                }
                 self.state = AwaitingResponse { handler, span, tx };
-                self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+                self.request_timer = Some(Box::pin(timer));
             }
             Err(error) => {
                 let error = SharedPeerError::from(error);
@@ -1297,6 +1391,26 @@ where
         use InboundMessage::*;
 
         let req = match msg {
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                self.compact.send =
+                    self.connection_info.early_block_relay && high_bandwidth && version == 1;
+                Consumed
+            }
+            Message::CompactBlock(block) => {
+                self.receive_compact(block).await;
+                return None;
+            }
+            Message::GetBlockTransactions(request) => {
+                self.serve_compact_transactions(request).await;
+                return None;
+            }
+            Message::BlockTransactions(response) => {
+                self.receive_compact_transactions(response).await;
+                return None;
+            }
             Message::Ping(nonce) => {
                 trace!(?nonce, "responding to heartbeat");
                 if let Err(e) = self.peer_tx.send(Message::Pong(nonce)).await {
@@ -1589,6 +1703,10 @@ where
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
+            Response::CompactBlockTransactions(_) => {
+                error!("inbound service returned a local-only compact relay response");
+                return;
+            }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
@@ -1842,6 +1960,29 @@ where
         }
     }
 
+    /// Stop admitting compact recovery responses before dropping or replacing their handler.
+    fn clear_compact_recovery(&self) {
+        if let Some(recovery) = &self.compact_recovery {
+            recovery.send_replace(None);
+        }
+    }
+
+    /// Drops the compact relay bodies of a connection that is shutting down, which releases their
+    /// global slots.
+    ///
+    /// A peer that stops reading can hold the connection task in its final flush until the
+    /// connection is dropped, so this runs before that flush.
+    fn release_compact(&mut self) {
+        self.clear_compact_recovery();
+        self.compact.release();
+        if let State::AwaitingResponse { handler, .. } = &mut self.state {
+            if matches!(handler, Handler::CompactBlock { .. }) {
+                // `shutdown()` still answers the request with the connection's error.
+                *handler = Handler::Finished(Ok(Response::Nil));
+            }
+        }
+    }
+
     /// Marks the peer as having failed with `error`, and performs connection cleanup,
     /// including async channel closes.
     ///
@@ -1855,6 +1996,7 @@ where
         // - using channels instead of streams/sinks?
         // - exposing the underlying implementation rather than using generics and closures?
         // - adding peer_rx to the connection struct (optional)
+        self.release_compact();
         let _ = self.peer_tx.close().await;
 
         self.shutdown(error);
@@ -1865,6 +2007,7 @@ where
     ///
     /// Call [`Self::shutdown_async()`] in async code, because it can shut down more channels.
     fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
+        self.release_compact();
         let mut error = error.into();
 
         // Close channels first, so other tasks can start shutting down.

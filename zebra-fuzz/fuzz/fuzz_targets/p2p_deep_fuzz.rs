@@ -193,6 +193,12 @@ fuzz_target!(|data: &[u8]| {
                 Message::Verack | Message::GetAddr | Message::Mempool | Message::FilterClear => {
                     // No fields to extract
                 }
+                Message::SendCompact { .. }
+                | Message::CompactBlock(_)
+                | Message::GetBlockTransactions(_)
+                | Message::BlockTransactions(_) => {
+                    // Only decoded on connections that negotiated compact block relay.
+                }
                 Message::Ping(nonce) | Message::Pong(nonce) => {
                     let _n = *nonce;
                 }
@@ -386,6 +392,10 @@ fuzz_target!(|data: &[u8]| {
                 Message::Version(_)
                 | Message::Verack
                 | Message::Ping(_)
+                | Message::SendCompact { .. }
+                | Message::CompactBlock(_)
+                | Message::GetBlockTransactions(_)
+                | Message::BlockTransactions(_)
                 | Message::Pong(_)
                 | Message::Reject { .. }
                 | Message::GetAddr

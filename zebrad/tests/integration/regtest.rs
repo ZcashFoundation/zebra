@@ -25,6 +25,7 @@ use crate::common::{
     regtest::MiningRpcMethods,
 };
 
+mod compact_relay;
 mod nu7;
 
 /// Checks that the Regtest genesis block can be validated.

@@ -393,10 +393,13 @@ impl StartCmd {
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
-            ));
+            .service(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
+                    .with_compact_relay(
+                        config.network.network.clone(),
+                        read_only_state_service.clone(),
+                    ),
+            );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(

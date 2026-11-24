@@ -99,6 +99,132 @@ async fn carried_advertiser_respects_missing_and_failed_candidates() {
     }
 }
 
+/// Returns which of three serving peers gets the first download of a block that all of them
+/// advertised, when the request carries the last peer as its advertiser.
+///
+/// `advertiser_services` are the services the last peer advertises as well as serving blocks.
+async fn first_download_peer(advertiser_services: PeerServices) -> usize {
+    let services = [
+        PeerServices::NODE_NETWORK,
+        PeerServices::NODE_NETWORK,
+        PeerServices::NODE_NETWORK | advertiser_services,
+    ];
+    let (discovered_peers, addrs, mut handles) = mock_peers_with_services(&services);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, mut guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(services.len(), DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    let (_, inventory, _response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: Some(addrs[2]),
+    };
+
+    // The test inventory channel holds one change, so the peer set reads each one before the next.
+    for addr in &addrs[..2] {
+        send_inventory(&mut guard, InventoryStatus::new_available(inventory, *addr));
+        peer_set
+            .ready()
+            .await
+            .expect("the peer set has ready peers");
+    }
+
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peer set has ready peers")
+        .call(request.clone());
+
+    let peer = (0..handles.len())
+        .find(|&index| received_request(&mut handles[index]).is_some())
+        .expect("a peer gets the download");
+    drop(download);
+    peer
+}
+
+/// The first download of a block goes to the peer that announced it, if that peer negotiated
+/// compact block relay, because only its connection can rebuild the block from its announcement.
+/// For any other advertiser, the choice among the block's advertisers stays random, so a peer
+/// can't take every first download by announcing each block first.
+#[tokio::test(start_paused = true)]
+async fn compact_relay_sends_the_first_download_to_the_advertiser() {
+    let _init_guard = zebra_test::init();
+
+    for _ in 0..20 {
+        assert_eq!(
+            first_download_peer(PeerServices::NODE_EARLY_BLOCK_RELAY).await,
+            2,
+        );
+    }
+
+    let mut other_peer = false;
+    for _ in 0..60 {
+        other_peer |= first_download_peer(PeerServices::empty()).await != 2;
+    }
+    assert!(
+        other_peer,
+        "the carried advertiser is one of three advertisers, so it rarely gets every download",
+    );
+}
+
+/// An advertiser that negotiated compact block relay, and failed to return the block, gets no
+/// preference.
+#[tokio::test(start_paused = true)]
+async fn compact_relay_does_not_prefer_a_failed_advertiser() {
+    let _init_guard = zebra_test::init();
+
+    let services = [
+        PeerServices::NODE_NETWORK,
+        PeerServices::NODE_EARLY_BLOCK_RELAY,
+    ];
+    let (discovered_peers, addrs, mut handles) = mock_peers_with_services(&services);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(services.len(), DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: Some(addrs[1]),
+    };
+
+    // The advertiser gets the first request, and fails it.
+    assert!(respond_to_request(
+        &mut peer_set,
+        &mut handles[1],
+        request.clone(),
+        Err(PeerError::ConnectionReceiveTimeout.into()),
+    )
+    .await
+    .is_err());
+
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the healthy serving connection remains ready")
+        .call(request.clone());
+    assert_eq!(
+        received_request(&mut handles[1]),
+        None,
+        "a failed advertiser is only asked again as a last resort",
+    );
+    finish_download(&mut handles[0], request, response, download).await;
+}
+
 /// N7: a failed connected advertisement must not redirect historic work to unrelated peers.
 #[tokio::test(start_paused = true)]
 async fn failed_advertiser_does_not_enable_nonserving_fallback() {

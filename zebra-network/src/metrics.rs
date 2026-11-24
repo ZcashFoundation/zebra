@@ -227,6 +227,16 @@ pub fn describe() {
         Unit::Seconds,
         "Time taken to decode a received block message, including the wait for a rayon thread."
     );
+    describe_counter!(
+        "zebra.net.compact_block.admitted",
+        Unit::Count,
+        "Compact block announcements that this node kept, to rebuild the block when it is downloaded."
+    );
+    describe_counter!(
+        "zebra.net.compact_block.rebuilt",
+        Unit::Count,
+        "Blocks that this node rebuilt from a compact announcement and its mempool."
+    );
 
     // Inbound overload
     describe_counter!(
