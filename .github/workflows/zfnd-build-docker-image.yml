@@ -395,7 +395,7 @@ jobs:
 
       - name: Install Cosign
         if: inputs.publish_to_dockerhub
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Sign images with Cosign
         if: inputs.publish_to_dockerhub
@@ -426,19 +426,35 @@ jobs:
           push-to-registry: true
 
       # Fail the release if the signature or attestations don't verify.
+      # Every caller of this reusable workflow signs with the same identity,
+      # so pin the release tag, repository, and commit.
       - name: Verify release signatures
         if: inputs.publish_to_dockerhub
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ZcashFoundation/zebra
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [[ -z "${RELEASE_TAG}" ]]; then
+            echo "::error::Docker Hub images are only published from release events"
+            exit 1
+          fi
+          signer_workflow="${REPOSITORY}/.github/workflows/zfnd-build-docker-image.yml"
           cosign verify "${HUB_IMAGE}@${DIGEST}" \
-            --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
-            --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
-          gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
-            --owner ZcashFoundation \
-            --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
+            --certificate-identity="https://github.com/${signer_workflow}@refs/tags/${RELEASE_TAG}" \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            --certificate-github-workflow-repository="${REPOSITORY}" \
+            --certificate-github-workflow-sha="${GITHUB_SHA}"
+          for predicate_type in https://slsa.dev/provenance/v1 https://spdx.dev/Document/v2.3; do
+            gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
+              --repo "${REPOSITORY}" \
+              --signer-workflow "${signer_workflow}" \
+              --source-ref "refs/tags/${RELEASE_TAG}" \
+              --source-digest "${GITHUB_SHA}" \
+              --predicate-type "${predicate_type}"
+          done
 
       # For the merged multi-arch manifest, display:
       # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)
