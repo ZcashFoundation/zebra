@@ -40,6 +40,17 @@ mod tests;
 #[derive(Clone, Debug)]
 pub struct MiningCandidateGuard(pub(crate) tokio::sync::watch::Sender<()>);
 
+impl MiningCandidateGuard {
+    /// Returns a guard for tests, and a receiver that closes when the guard and its clones are
+    /// dropped.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_for_tests() -> (Self, tokio::sync::watch::Receiver<()>) {
+        let (guard, verification) = tokio::sync::watch::channel(());
+
+        (Self(guard), verification)
+    }
+}
+
 impl PartialEq for MiningCandidateGuard {
     fn eq(&self, other: &Self) -> bool {
         self.0.same_channel(&other.0)

@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -19,6 +20,7 @@ use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
+use tokio::sync::watch;
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -48,6 +50,74 @@ pub struct SemanticBlockVerifier<S, V> {
     network: Network,
     state_service: S,
     transaction_verifier: V,
+    /// The block proposals that this verifier has validated, shared by all its requests.
+    validated_proposals: Arc<watch::Sender<ValidatedProposals>>,
+}
+
+/// Block proposals that passed validation, with the state's validation results, newest first.
+///
+/// A miner that solves a validated proposal submits the same block with a nonce and an Equihash
+/// solution. That block only needs its proof of work checked: the rest of its validation is the
+/// proposal's.
+type ValidatedProposals = VecDeque<(Arc<block::Block>, Box<zs::ContextuallyVerifiedBlock>)>;
+
+/// The number of validated proposals the verifier keeps.
+///
+/// Mining nodes validate each new block template as a proposal, so this covers the templates
+/// that miners can still be working on. Each proposal keeps its decoded block and the outputs it
+/// creates and spends, so the limit also bounds that memory.
+const MAX_VALIDATED_PROPOSALS: usize = 8;
+
+/// Removes and returns the validation result of the proposal that `block` solves, if there is one.
+fn take_solved_proposal(
+    validated_proposals: &watch::Sender<ValidatedProposals>,
+    block: &block::Block,
+) -> Option<Box<zs::ContextuallyVerifiedBlock>> {
+    let mut solved = None;
+
+    validated_proposals.send_if_modified(|proposals| {
+        if let Some(index) = proposals
+            .iter()
+            .position(|(proposal, _)| is_solved_proposal(proposal, block))
+        {
+            solved = proposals.remove(index).map(|(_, contextual)| contextual);
+        }
+
+        // Nothing waits for changes to the proposals.
+        false
+    });
+
+    solved
+}
+
+/// Returns `true` if `block` is `proposal` with a different nonce and Equihash solution.
+///
+/// `block`'s transactions haven't been checked against its header, so an equal header doesn't
+/// mean equal transactions. They are compared by [`UnminedTxId`], because [`Transaction`]
+/// equality only compares transaction IDs, which don't cover the input scripts, signatures and
+/// proofs of a v5 or later transaction.
+///
+/// [`UnminedTxId`]: zebra_chain::transaction::UnminedTxId
+/// [`Transaction`]: zebra_chain::transaction::Transaction
+fn is_solved_proposal(proposal: &block::Block, block: &block::Block) -> bool {
+    let unsolved_header = block::Header {
+        nonce: proposal.header.nonce,
+        solution: proposal.header.solution,
+        ..*block.header
+    };
+
+    unsolved_header == *proposal.header
+        && block.transactions.len() == proposal.transactions.len()
+        && block
+            .transactions
+            .iter()
+            .zip(&proposal.transactions)
+            .all(|(transaction, validated)| {
+                // `submitblock` builds a solved proposal from the proposal's own transactions,
+                // which skips hashing their authorizing data here.
+                Arc::ptr_eq(transaction, validated)
+                    || transaction.unmined_id() == validated.unmined_id()
+            })
 }
 
 /// Block verification errors.
@@ -327,6 +397,7 @@ where
             network: network.clone(),
             state_service,
             transaction_verifier,
+            validated_proposals: Arc::new(watch::Sender::new(VecDeque::new())),
         }
     }
 }
@@ -357,6 +428,7 @@ where
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
+        let validated_proposals = self.validated_proposals.clone();
 
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
@@ -426,6 +498,42 @@ where
             // The height is only authenticated once the Merkle root check also passes, but either
             // failure shows that the body was forged.
             check::coinbase_height_is_committed(&block, height)?;
+
+            // A block that was validated as a proposal, and then solved, only needs the proof of
+            // work check above and the time check here. The state commits the proposal's
+            // validation result for it.
+            let solved_proposal = if request.is_proposal() {
+                None
+            } else {
+                take_solved_proposal(&validated_proposals, &block)
+            };
+            if let Some(mut contextual) = solved_proposal {
+                check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
+                    .map_err(VerifyBlockError::Time)?;
+
+                contextual.rebind(block, received_time);
+
+                // A solved proposal has no transaction verification phase.
+                record_phase("block_checks", &mut phase_start);
+
+                return match state_service
+                    .ready()
+                    .await
+                    .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                    .call(zs::Request::CommitContextuallyVerifiedBlock(contextual))
+                    .await
+                {
+                    Ok(zs::Response::Committed(committed_hash)) => {
+                        assert_eq!(committed_hash, hash, "state must commit correct hash");
+                        record_phase("state_commit", &mut phase_start);
+                        Ok(hash)
+                    }
+
+                    Err(source) => Err(map_commit_error(source, hash)),
+
+                    _ => unreachable!("wrong response for CommitContextuallyVerifiedBlock"),
+                };
+            }
 
             // Next, check the Merkle root validity, to ensure that
             // the header binds to the transactions in the blocks.
@@ -597,6 +705,8 @@ where
 
             // Return early for proposal requests.
             if request.is_proposal() {
+                let proposal = prepared_block.block.clone();
+
                 return match state_service
                     .ready()
                     .await
@@ -605,7 +715,16 @@ where
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
-                    zs::Response::ValidBlockProposal(_) => Ok(hash),
+                    zs::Response::ValidBlockProposal(contextual) => {
+                        // Keep the result, so the solved proposal isn't validated again.
+                        validated_proposals.send_modify(|proposals| {
+                            proposals.retain(|(validated, _)| *validated != proposal);
+                            proposals.push_front((proposal, contextual));
+                            proposals.truncate(MAX_VALIDATED_PROPOSALS);
+                        });
+
+                        Ok(hash)
+                    }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
                 };
             }
