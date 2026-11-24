@@ -253,7 +253,8 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
-      no_cache: ${{ inputs.no_cache || false }}
+      # Release images deploy to production nodes, so build them without cached layers.
+      no_cache: ${{ inputs.no_cache || github.event_name == 'release' }}
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: ${{ needs.set-matrix.outputs.environment }}
