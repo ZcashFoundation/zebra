@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed a node that is syncing below a network upgrade banning honest peers that relay transactions for that upgrade. Without peers, the node could stop syncing just before the upgrade's activation height.
+time: 2026-11-17T15:31:27.368860267Z
