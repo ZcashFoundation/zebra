@@ -660,7 +660,7 @@ async fn mempool_stays_disabled_with_short_sync_batches_and_old_tip() -> Result<
     ) = setup(&network, u64::MAX, true).await;
 
     // The best tip is the 2016 genesis block.
-    service.checks_tip_age = true;
+    service.skip_tip_age_check = false;
 
     service.enable(&mut recent_syncs).await;
     assert!(

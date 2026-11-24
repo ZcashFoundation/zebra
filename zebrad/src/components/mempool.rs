@@ -308,8 +308,9 @@ pub struct Mempool {
     /// Allows checking if we are near the tip to enable/disable the mempool.
     sync_status: SyncStatus,
 
-    /// Whether initial activation also requires a recent best tip.
-    checks_tip_age: bool,
+    /// Lets tests whose best tip is an old Mainnet block start the mempool on sync status alone.
+    #[cfg(test)]
+    skip_tip_age_check: bool,
 
     /// If the state's best chain tip has reached this height, always enable the mempool.
     debug_enable_at_height: Option<Height>,
@@ -389,7 +390,8 @@ impl Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
             sync_status,
-            checks_tip_age: true,
+            #[cfg(test)]
+            skip_tip_age_check: false,
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
@@ -446,8 +448,13 @@ impl Mempool {
 
     /// Returns `true` if Zebra is caught up enough to start the mempool.
     fn is_caught_up_to_start(&self) -> bool {
+        #[cfg(test)]
+        let skip_tip_age_check = self.skip_tip_age_check;
+        #[cfg(not(test))]
+        let skip_tip_age_check = false;
+
         let is_near_tip = self.sync_status.is_close_to_tip()
-            && (!self.checks_tip_age
+            && (skip_tip_age_check
                 || is_near_network_tip(&self.network, &self.latest_chain_tip, Utc::now()));
 
         is_near_tip || self.is_enabled_by_debug()

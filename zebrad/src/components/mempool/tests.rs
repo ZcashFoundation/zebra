@@ -24,7 +24,7 @@ impl Mempool {
     /// Lets the mempool start on sync status alone, for tests whose best tip is an old
     /// Mainnet block.
     pub fn skip_tip_age_check(&mut self) {
-        self.checks_tip_age = false;
+        self.skip_tip_age_check = true;
     }
 
     /// Get the storage field of the mempool for testing purposes.
