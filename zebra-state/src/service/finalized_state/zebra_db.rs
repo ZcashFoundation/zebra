@@ -43,6 +43,9 @@ use crate::{
     BoxError, Config, StateInitError,
 };
 
+#[cfg(feature = "snapshot-trial")]
+use crate::state_snapshot::SnapshotBase;
+
 use super::disk_format::upgrade::{can_read_without_migration, restorable_db_versions};
 
 /// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
@@ -238,13 +241,7 @@ impl ZebraDb {
             read_only,
         )?;
 
-        let mut db = ZebraDb {
-            config: Arc::new(config.clone()),
-            debug_skip_format_upgrades,
-            format_change_handle: None,
-            ready_for_pruning: Arc::new(AtomicBool::new(false)),
-            db: disk_db,
-        };
+        let mut db = Self::from_disk_db(config, disk_db, debug_skip_format_upgrades);
 
         // One entry is enough to detect the corruption, and the height range has to start at
         // zero, because the corrupt entries are exactly the ones at the zero address location.
@@ -287,13 +284,41 @@ impl ZebraDb {
             false,
         )?;
 
-        Ok(ZebraDb {
+        Ok(Self::from_disk_db(config, db, true))
+    }
+
+    /// Opens an existing snapshot trial state without starting format changes or checks.
+    #[cfg(feature = "snapshot-trial")]
+    pub(crate) fn open_for_snapshot_comparison(
+        config: &Config,
+        network: &Network,
+        path: &Path,
+        format_version_in_code: &Version,
+        secondary_path: Option<&Path>,
+    ) -> Result<Self, BoxError> {
+        let db = DiskDb::open_for_snapshot_comparison(
+            path,
+            network,
+            format_version_in_code,
+            secondary_path,
+        )?;
+        Ok(Self::from_disk_db(config, db, true))
+    }
+
+    /// Reads and validates a trial database's snapshot base marker without panicking on bad data.
+    #[cfg(feature = "snapshot-trial")]
+    pub(crate) fn checked_snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
+        self.db.snapshot_base()
+    }
+
+    fn from_disk_db(config: &Config, db: DiskDb, debug_skip_format_upgrades: bool) -> Self {
+        Self {
             config: Arc::new(config.clone()),
-            debug_skip_format_upgrades: true,
+            debug_skip_format_upgrades,
             format_change_handle: None,
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db,
-        })
+        }
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.

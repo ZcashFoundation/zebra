@@ -4,12 +4,46 @@ Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
 - [known-hashes](#known-hashes)
+- [synthetic-snapshot](#synthetic-snapshot)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
 - [scanning-results-reader](#scanning-results-reader)
 
 Binaries are easier to use if they are located in your system execution path.
+
+## synthetic-snapshot
+
+From the repository root:
+
+```sh
+./zebra-utils/snapshot-benchmark
+```
+
+The script builds the tools and runs one trial per side with the current
+`zebrad`. To compare two compatible builds with matching profiles and
+features, pass their executable paths (five trials per build):
+
+```sh
+./zebra-utils/snapshot-benchmark /path/to/baseline/zebrad /path/to/candidate/zebrad
+```
+
+The baseline serves both runs. The script prints median interval timings and
+deltas and leaves the JSON reports and logs in the printed workspace. Node
+intervals measure elapsed time between log markers, not individual operations:
+manifest verification to last piece verification includes header verification,
+successor handling, and SST backpressure; state rename to initialization includes
+cleanup. Runs are sequential, not controlled cold-cache measurements.
+
+To customize or reuse a fixture, run `prepare` and `benchmark` directly with
+`target/debug/synthetic-snapshot`. Both accept `--config trial.json`:
+
+```json
+{"state": "prepared-a", "height": 120, "tail": 2, "trials": 5}
+```
+
+`state` is a new directory relative to the config; `tail` is the number of
+headers to serve after the snapshot height.
 
 ## zebra-checkpoints
 

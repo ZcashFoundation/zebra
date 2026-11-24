@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+    printf 'Usage: %s [BASELINE_ZEBRAD CANDIDATE_ZEBRAD]\n' "$0"
+    printf 'Without arguments, build the current zebrad and run one trial per side.\n'
+}
+
+case $# in
+    0) ;;
+    1)
+        case $1 in
+            -h|--help) usage; exit 0 ;;
+            *) usage >&2; exit 2 ;;
+        esac
+        ;;
+    2) ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+target_dir=${CARGO_TARGET_DIR:-"$repo/target"}
+[[ $target_dir = /* ]] || target_dir="$PWD/$target_dir"
+
+build() (
+    cd -- "$repo"
+    cargo build --locked --target-dir "$target_dir" "$@"
+)
+
+if [[ $# == 0 ]]; then
+    build -p zebrad --bin zebrad
+    baseline="$target_dir/debug/zebrad"
+    candidate=$baseline
+    trials=1
+else
+    baseline=$1
+    candidate=$2
+    trials=5
+fi
+build -p zebra-utils --features synthetic-snapshot --bin synthetic-snapshot
+harness="$target_dir/debug/synthetic-snapshot"
+
+workspace=$(mktemp -d "${TMPDIR:-/tmp}/zebra-snapshot-benchmark.XXXXXX")
+printf 'Benchmark workspace: %s\n' "$workspace"
+printf '{"state":"prepared","height":120,"tail":2,"trials":%s}\n' "$trials" > "$workspace/trial.json"
+"$harness" prepare --config "$workspace/trial.json"
+exec "$harness" benchmark --config "$workspace/trial.json" \
+    --baseline "$baseline" --candidate "$candidate" --output "$workspace/results"

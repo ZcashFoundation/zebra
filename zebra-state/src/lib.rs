@@ -28,6 +28,8 @@ pub mod constants;
 pub mod arbitrary;
 
 mod error;
+#[cfg(feature = "mock-state")]
+pub mod mock;
 mod request;
 mod response;
 mod service;

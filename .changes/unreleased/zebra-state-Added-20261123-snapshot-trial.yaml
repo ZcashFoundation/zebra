@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added opt-in state helpers to prepare an isolated Regtest snapshot source and independently compare the snapshot-selected rows of a stopped bootstrap node.
+time: 2026-11-23T21:43:20Z

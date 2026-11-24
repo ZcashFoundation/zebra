@@ -18,6 +18,9 @@ use zebra_chain::{block, state_snapshot::ObjectHash};
 
 use crate::{BoxError, StateInitError};
 
+#[cfg(feature = "snapshot-trial")]
+pub mod compare;
+
 pub mod export;
 pub mod format;
 pub mod import;
