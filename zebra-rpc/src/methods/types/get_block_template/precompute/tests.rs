@@ -474,3 +474,104 @@ async fn refreshed_template_proposals_share_their_transactions() {
         "a refreshed proposal reuses the transactions of the proposal it refreshes",
     );
 }
+
+/// Returns a block verifier that reports the proposals it gets, and never answers them.
+fn stuck_verifier() -> (
+    impl BlockVerifierService,
+    tokio::sync::mpsc::UnboundedReceiver<Arc<block::Block>>,
+) {
+    let (verified_tx, verified_rx) = tokio::sync::mpsc::unbounded_channel();
+    let verifier = tower::service_fn(move |request: zebra_consensus::Request| {
+        verified_tx
+            .send(request.block())
+            .expect("the test holds the receiver");
+        std::future::pending::<Result<block::Hash, zebra_consensus::BoxError>>()
+    });
+
+    (verifier, verified_rx)
+}
+
+/// A template on another block replaces a validation that is still running, so a validation that
+/// is stuck on the old chain tip doesn't hold up the templates on the new one.
+#[tokio::test]
+async fn template_on_another_block_replaces_a_running_validation() {
+    let _init_guard = zebra_test::init();
+
+    let (verifier, mut verified_rx) = stuck_verifier();
+    let cache = TemplateCache::default();
+    let validator = tokio::spawn(validate_templates(
+        cache.subscribe(),
+        Network::Mainnet,
+        verifier,
+        ProposalTransactions::default(),
+    ));
+
+    let first_template = template();
+    let mut next_tip_template = first_template.clone();
+    next_tip_template.previous_block_hash = block::Hash([0xcd; 32]);
+
+    let mut proposals = Vec::new();
+    for template in [first_template, next_tip_template] {
+        cache.publish(template);
+
+        // The verifier never answers, so the second proposal only reaches it if the first
+        // validation was dropped, well before the validation timeout.
+        let proposal = tokio::time::timeout(TEMPLATE_VALIDATION_TIMEOUT / 3, verified_rx.recv())
+            .await
+            .expect("a template on another block is validated without waiting")
+            .expect("the validator holds the sender");
+        proposals.push(proposal);
+    }
+    validator.abort();
+
+    assert_ne!(
+        proposals[0].header.previous_block_hash,
+        proposals[1].header.previous_block_hash
+    );
+}
+
+/// A refreshed template on the same block waits for the running validation, which is dropped
+/// after the validation timeout.
+#[tokio::test(start_paused = true)]
+async fn stuck_validation_is_dropped_after_its_timeout() {
+    let _init_guard = zebra_test::init();
+
+    let (verifier, mut verified_rx) = stuck_verifier();
+    let cache = TemplateCache::default();
+    let validator = tokio::spawn(validate_templates(
+        cache.subscribe(),
+        Network::Mainnet,
+        verifier,
+        ProposalTransactions::default(),
+    ));
+
+    let first_template = template();
+    let mut refreshed_template = first_template.clone();
+    refreshed_template.cur_time = DateTime32::from(first_template.cur_time.timestamp() + 1);
+
+    cache.publish(first_template);
+    let first = verified_rx
+        .recv()
+        .await
+        .expect("the validator holds the sender");
+    let first_validation_started = tokio::time::Instant::now();
+
+    // The clock is paused, and only moves when every task is waiting. So the refreshed proposal
+    // reaches the verifier at the time the first validation is dropped.
+    cache.publish(refreshed_template);
+    let refreshed = tokio::time::timeout(TEMPLATE_VALIDATION_TIMEOUT * 2, verified_rx.recv())
+        .await
+        .expect("a stuck validation is dropped after its timeout")
+        .expect("the validator holds the sender");
+    validator.abort();
+
+    assert_ne!(first.header.time, refreshed.header.time);
+    assert_eq!(
+        first.header.previous_block_hash,
+        refreshed.header.previous_block_hash
+    );
+    assert!(
+        first_validation_started.elapsed() >= TEMPLATE_VALIDATION_TIMEOUT - Duration::from_secs(1),
+        "a refreshed template on the same block waits for the running validation",
+    );
+}

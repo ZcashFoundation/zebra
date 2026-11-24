@@ -87,6 +87,14 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 /// up its fee without waiting for the periodic refresh.
 pub(crate) const MEMPOOL_REBUILD_PAUSE: Duration = Duration::from_secs(1);
 
+/// How long [`validate_templates()`] waits for the validation of one block template.
+///
+/// A validation normally takes milliseconds. But the block verifier waits for a transparent input
+/// that isn't in the chain yet, for much longer than a template is useful, and no other template
+/// is validated in the meantime. A template whose validation takes longer than this has been
+/// replaced many times over, so the validation is dropped and the latest template gets its turn.
+pub(crate) const TEMPLATE_VALIDATION_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -116,6 +124,30 @@ impl TemplateChanges {
             // No sender, so no template will ever be published. Waiting forever lets the caller's
             // other wait conditions drive it, where returning would spin it.
             std::future::pending::<()>().await
+        }
+    }
+
+    /// Waits for a published template that doesn't extend `previous_block_hash`.
+    ///
+    /// Doesn't mark any template as seen, so the next [`Self::changed()`] still returns for the
+    /// templates published during this wait.
+    async fn extends_another_block(&self, previous_block_hash: block::Hash) {
+        let mut templates = self.0.clone();
+
+        loop {
+            if templates.changed().await.is_err() {
+                // No sender, so no other template will ever be published.
+                std::future::pending::<()>().await
+            }
+
+            let extends_another_block = templates
+                .borrow_and_update()
+                .as_ref()
+                .is_some_and(|template| template.previous_block_hash != previous_block_hash);
+
+            if extends_another_block {
+                return;
+            }
         }
     }
 }
@@ -533,6 +565,11 @@ async fn verified_transaction_added(
 /// its proof of work before committing it, without decoding its transactions. A template that is
 /// published during a validation waits for it, and then only the latest template is validated.
 ///
+/// A validation is dropped when a template is published on another block, because miners no
+/// longer work on the template it validates, and after [`TEMPLATE_VALIDATION_TIMEOUT`]. Dropping
+/// it also drops the block verifier's request, so the verifier stops waiting for it. A template
+/// that isn't validated is verified in full when a miner submits it.
+///
 /// Runs until the task is aborted.
 pub(crate) async fn validate_templates<BlockVerifierRouter>(
     mut templates: TemplateChanges,
@@ -548,45 +585,28 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
         let Some(template) = templates.0.borrow_and_update().clone() else {
             continue;
         };
+        let previous_block_hash = template.previous_block_hash;
 
-        // Miners that don't change a template submit it with its current time, so that is the
-        // block to validate. Building it re-serializes the template, so it runs off the executor.
-        // A miner's block has the same transaction bytes as this block, so serialize them here,
-        // rather than when the solved block is submitted.
-        let proposal = {
-            let network = network.clone();
-            let proposal_transactions = proposal_transactions.clone();
-            tokio::task::spawn_blocking(move || {
-                let proposal = proposal_block_from_template(
-                    &template,
-                    BlockTemplateTimeSource::CurTime,
-                    &network,
-                )?;
-                let proposal_bytes = proposal.zcash_serialize_to_vec()?;
+        let validation = tokio::time::timeout(
+            TEMPLATE_VALIDATION_TIMEOUT,
+            validate_template(
+                template,
+                &network,
+                block_verifier_router.clone(),
+                &proposal_transactions,
+            ),
+        );
 
-                // A refreshed template often only has a new time. Its proposal takes the
-                // transactions of the validated proposal with the same transaction bytes, so a
-                // block that solves either proposal has the transaction objects of both.
-                let proposal = proposal_transactions
-                    .block_with_validated_transactions(&proposal_bytes)
-                    .unwrap_or(proposal);
+        let result = tokio::select! {
+            biased;
 
-                Ok::<_, zebra_chain::serialization::SerializationError>((
-                    Arc::new(proposal),
-                    proposal_bytes,
-                ))
-            })
-            .await
-        };
-
-        let result = match proposal {
-            Ok(Ok((proposal, proposal_bytes))) => block_verifier_router
-                .clone()
-                .oneshot(zebra_consensus::Request::CheckProposal(proposal.clone()))
-                .await
-                .map(|_hash| proposal_transactions.insert(proposal, &proposal_bytes)),
-            Ok(Err(error)) => Err(error.into()),
-            Err(error) => Err(error.into()),
+            () = templates.extends_another_block(previous_block_hash) => {
+                Err("a template was published on another block".into())
+            }
+            result = validation => match result {
+                Ok(result) => result,
+                Err(elapsed) => Err(elapsed.into()),
+            },
         };
 
         // This is expected when the chain tip changes during the validation, or for a template
@@ -598,6 +618,55 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
             );
         }
     }
+}
+
+/// Validates `template` as a block proposal, and keeps its transactions in
+/// `proposal_transactions` if it is valid.
+async fn validate_template<BlockVerifierRouter>(
+    template: Arc<BlockTemplateResponse>,
+    network: &Network,
+    block_verifier_router: BlockVerifierRouter,
+    proposal_transactions: &ProposalTransactions,
+) -> Result<(), zebra_consensus::BoxError>
+where
+    BlockVerifierRouter: BlockVerifierService,
+{
+    // Miners that don't change a template submit it with its current time, so that is the
+    // block to validate. Building it re-serializes the template, so it runs off the executor.
+    // A miner's block has the same transaction bytes as this block, so serialize them here,
+    // rather than when the solved block is submitted.
+    let (proposal, proposal_bytes) = {
+        let network = network.clone();
+        let proposal_transactions = proposal_transactions.clone();
+        tokio::task::spawn_blocking(move || {
+            let proposal = proposal_block_from_template(
+                &template,
+                BlockTemplateTimeSource::CurTime,
+                &network,
+            )?;
+            let proposal_bytes = proposal.zcash_serialize_to_vec()?;
+
+            // A refreshed template often only has a new time. Its proposal takes the
+            // transactions of the validated proposal with the same transaction bytes, so a
+            // block that solves either proposal has the transaction objects of both.
+            let proposal = proposal_transactions
+                .block_with_validated_transactions(&proposal_bytes)
+                .unwrap_or(proposal);
+
+            Ok::<_, zebra_chain::serialization::SerializationError>((
+                Arc::new(proposal),
+                proposal_bytes,
+            ))
+        })
+        .await??
+    };
+
+    block_verifier_router
+        .oneshot(zebra_consensus::Request::CheckProposal(proposal.clone()))
+        .await?;
+    proposal_transactions.insert(proposal, &proposal_bytes);
+
+    Ok(())
 }
 
 /// Returns the state information for mining on top of a block with a valid proof of work that
