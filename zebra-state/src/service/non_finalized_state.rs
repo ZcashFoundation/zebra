@@ -71,6 +71,14 @@ pub struct NonFinalizedState {
     /// The block write task sets this for one commit. Clones never carry it.
     pub(crate) precomputed_trees: Option<crate::service::precomputed_trees::PrecomputedTrees>,
 
+    /// A private copy of the best chain with the latest validated block proposal on top.
+    ///
+    /// Proposal validation runs on a clone of this state, and leaves the chain it built here. A
+    /// commit of the solved proposal rebinds that chain's tip to the solved block, instead of
+    /// applying the block to its parent chain again. Clones share this channel, and only nodes
+    /// that validate proposals keep a chain in it.
+    prepared_chain: watch::Sender<Option<Arc<Chain>>>,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -128,6 +136,7 @@ impl Clone for NonFinalizedState {
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             precomputed_trees: None,
+            prepared_chain: self.prepared_chain.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -152,6 +161,7 @@ impl NonFinalizedState {
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
             precomputed_trees: None,
+            prepared_chain: watch::Sender::new(None),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -699,6 +709,147 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Commits `contextual`, a block that was validated as a block proposal on its parent, and
+    /// then solved, without repeating its contextual validation.
+    ///
+    /// If the chain that the proposal's validation built is still available, this rebinds its
+    /// tip to the solved block. Otherwise, it applies the block to its parent chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn commit_prevalidated_contextual(
+        &mut self,
+        contextual: ContextuallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<(), ValidateContextError> {
+        // Blocks are invalidated by their solved hashes, which proposals don't have.
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == contextual.hash))
+        {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: contextual.hash,
+            });
+        }
+
+        let parent_hash = contextual.block.header.previous_block_hash;
+        let (height, hash) = (contextual.height, contextual.hash);
+
+        let chain = if parent_hash == finalized_state.finalized_tip_hash() {
+            Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .expect("a validated proposal has a finalized parent"),
+                finalized_state.note_commitment_trees_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            )
+            .push(contextual)?
+        } else {
+            let parent_chain = self.parent_chain(parent_hash)?;
+
+            match self.take_prepared_chain_for(&contextual, &parent_chain) {
+                Some(mut prepared_chain) => {
+                    prepared_chain.rebind_tip(contextual)?;
+                    prepared_chain
+                }
+                None => Arc::unwrap_or_clone(parent_chain).push(contextual)?,
+            }
+        };
+
+        self.insert_with(Arc::new(chain), |chain_set| {
+            chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(())
+    }
+
+    /// Stores `chain`, which has a validated block proposal at its tip, for the commit of the
+    /// solved proposal. Replaces the chain of any earlier proposal.
+    pub(crate) fn store_prepared_chain(&self, chain: Arc<Chain>) {
+        self.prepared_chain.send_replace(Some(chain));
+    }
+
+    /// Drops the prepared chain once the best chain is longer than it.
+    ///
+    /// A block that solved its proposal now wouldn't extend the best chain, and nothing else
+    /// replaces a prepared chain on a node that has stopped validating proposals. The block
+    /// write task calls this after its commits. Proposal validation runs on a copy of the
+    /// non-finalized state, and doesn't.
+    pub(crate) fn drop_passed_prepared_chain(&self) {
+        let Some(best_tip_height) = self
+            .best_chain()
+            .map(|chain| chain.non_finalized_tip_height())
+        else {
+            return;
+        };
+
+        self.prepared_chain.send_if_modified(|prepared| {
+            if prepared
+                .as_ref()
+                .is_some_and(|prepared| prepared.non_finalized_tip_height() < best_tip_height)
+            {
+                *prepared = None;
+            }
+
+            // Nothing waits for changes to the prepared chain.
+            false
+        });
+    }
+
+    /// Returns `true` if there is a prepared chain.
+    #[cfg(test)]
+    pub(crate) fn has_prepared_chain(&self) -> bool {
+        self.prepared_chain.borrow().is_some()
+    }
+
+    /// Takes the prepared chain, if it is `parent_chain` with a proposal for `block` on top.
+    ///
+    /// The returned chain has the same blocks as `parent_chain` below its tip. Another prepared
+    /// chain is left for the commit of its own proposal.
+    fn take_prepared_chain_for(
+        &self,
+        block: &ContextuallyVerifiedBlock,
+        parent_chain: &Chain,
+    ) -> Option<Chain> {
+        let mut prepared_chain = None;
+        self.prepared_chain.send_if_modified(|prepared| {
+            if prepared
+                .as_ref()
+                .is_some_and(|prepared| is_prepared_chain_for(prepared, block, parent_chain))
+            {
+                prepared_chain = prepared.take();
+            }
+
+            // Nothing waits for changes to the prepared chain.
+            false
+        });
+        let mut prepared_chain = Arc::unwrap_or_clone(prepared_chain?);
+
+        // The proposal was validated on a snapshot of the best chain, which can still have root
+        // blocks that the block write task has finalized since then.
+        while prepared_chain.non_finalized_root_height() < parent_chain.non_finalized_root_height()
+        {
+            // Popping the root separately from the chains in the chain set stops sharing its
+            // map paths with them, as it does for a side chain when a block is finalized.
+            prepared_chain.detach_index_entries_at(prepared_chain.non_finalized_root_height());
+            prepared_chain.pop_root();
+        }
+        // Fork diagnostics aren't part of the chain's blocks.
+        prepared_chain.last_fork_height = parent_chain.last_fork_height;
+
+        prepared_chain.can_rebind_tip().then_some(prepared_chain)
+    }
+
+    /// Removes and returns the chain whose tip block is `tip`, if there is one.
+    pub(crate) fn remove_chain_with_tip(&mut self, tip: block::Hash) -> Option<Arc<Chain>> {
+        let chain = self.find_chain(|chain| chain.non_finalized_tip_hash() == tip)?;
+        self.chain_set.remove(&chain);
+
+        Some(chain)
     }
 
     /// Contextually validate `prepared` using `finalized_state`.
@@ -1275,6 +1426,56 @@ impl NonFinalizedState {
             count_bar.chain(fork_bars).for_each(howudoin::Tx::close);
         }
     }
+}
+
+/// Returns `true` if `prepared` is `parent_chain` with a validated proposal for `block` on top.
+///
+/// A block's hash commits to its ancestors, so two chains with the same block at a height have
+/// the same blocks below it. `prepared` can also have root blocks that `parent_chain` has
+/// finalized, but not the other way around, because it was built from an earlier best chain.
+fn is_prepared_chain_for(
+    prepared: &Chain,
+    block: &ContextuallyVerifiedBlock,
+    parent_chain: &Chain,
+) -> bool {
+    if parent_chain.is_empty() {
+        return false;
+    }
+
+    let Some(proposal) = prepared.tip_block() else {
+        return false;
+    };
+    let parent_height = parent_chain.non_finalized_tip_height();
+
+    same_block_except_proof_of_work(proposal, block)
+        && parent_height.next().ok() == Some(prepared.non_finalized_tip_height())
+        && prepared.hash_by_height(parent_height) == Some(parent_chain.non_finalized_tip_hash())
+        && prepared.non_finalized_root_height() <= parent_chain.non_finalized_root_height()
+}
+
+/// Returns `true` if `proposal` and `block` have the same transactions, height, and header apart
+/// from the nonce and Equihash solution.
+///
+/// Both blocks' transactions were validated against their headers: `proposal`'s by the state,
+/// and `block`'s by the sender of [`Request::CommitContextuallyVerifiedBlock`]. A validated
+/// header's Merkle root and block commitments cover the transactions and their authorizing data,
+/// so this means the same block contents.
+///
+/// [`Request::CommitContextuallyVerifiedBlock`]: crate::Request::CommitContextuallyVerifiedBlock
+fn same_block_except_proof_of_work(
+    proposal: &ContextuallyVerifiedBlock,
+    block: &ContextuallyVerifiedBlock,
+) -> bool {
+    let (proposal_header, header) = (&proposal.block.header, &block.block.header);
+
+    proposal.height == block.height
+        && proposal.transaction_hashes == block.transaction_hashes
+        && proposal_header.version == header.version
+        && proposal_header.previous_block_hash == header.previous_block_hash
+        && proposal_header.merkle_root == header.merkle_root
+        && proposal_header.commitment_bytes == header.commitment_bytes
+        && proposal_header.time == header.time
+        && proposal_header.difficulty_threshold == header.difficulty_threshold
 }
 
 impl Drop for NonFinalizedState {

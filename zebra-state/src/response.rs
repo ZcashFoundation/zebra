@@ -202,8 +202,9 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    /// Response to [`Request::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    /// Response to [`Request::CheckBlockProposalValidity`], with the result of validating the
+    /// proposal, which [`Request::CommitContextuallyVerifiedBlock`] can commit once it is solved.
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -638,8 +639,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    /// Response to [`ReadRequest::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`], with the result of validating
+    /// the proposal.
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
@@ -771,7 +773,7 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
+            ReadResponse::ValidBlockProposal(block) => Ok(Response::ValidBlockProposal(block)),
 
             ReadResponse::SolutionRate(_)
             | ReadResponse::TipBlockSize(_)

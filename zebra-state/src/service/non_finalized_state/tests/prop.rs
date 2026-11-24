@@ -18,6 +18,7 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     transparent,
     value_balance::ValueBalance,
+    work::equihash::Solution,
     LedgerState,
 };
 
@@ -708,6 +709,90 @@ fn different_blocks_different_chains() -> Result<()> {
                 );
             }
         }
+    });
+
+    Ok(())
+}
+
+/// Rebinding a chain's tip to a solved block gives the same chain as pushing the solved block,
+/// for a chain with a history tree. The solved block is the tip block with another nonce, which
+/// changes its hash, and optionally a solution of another length, which changes its size.
+///
+/// The prepared chain of a block proposal can still have root blocks that the state finalized
+/// since the proposal was validated, so this also checks that popping root blocks before or
+/// after rebinding gives the same chain.
+#[test]
+fn rebound_tip_equals_pushed_history_tree() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+                                         .ok()
+                                         .and_then(|v| v.parse().ok())
+                                         .unwrap_or(DEFAULT_SHORT_CHAIN_PROPTEST_CASES)),
+    |((chain, count, network, finalized_tree) in PreparedChain::new_heartwood(),
+      nonce in any::<[u8; 32]>(),
+      resize_solution in any::<bool>(),
+      pops_before in 0usize..3,
+      pops_after in 0usize..3)| {
+        prop_assert!(finalized_tree.is_some());
+
+        // Skip the first block, which was used for the history tree.
+        let count = std::cmp::min(count, chain.len() - 1);
+        let blocks: Vec<_> = chain[1..]
+            .iter()
+            .take(count)
+            .map(ContextuallyVerifiedBlock::test_with_zero_spent_utxos)
+            .collect();
+        prop_assume!(blocks.len() > pops_before + 1);
+        let (tip, below) = blocks.split_last().expect("there are at least two blocks");
+
+        let mut solved_block = (*tip.block).clone();
+        let header = Arc::make_mut(&mut solved_block.header);
+        header.nonce = nonce.into();
+        // A proposal skips proof of work, so its solution can have another length.
+        if resize_solution {
+            header.solution = match header.solution {
+                Solution::Common(_) => Solution::Regtest([0; 36]),
+                Solution::Regtest(_) => Solution::default(),
+            };
+        }
+        prop_assume!(solved_block.hash() != tip.hash);
+        let mut solved = tip.clone();
+        solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+
+        let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+        let mut pushed = Chain::new(
+            &network,
+            Height(0),
+            NoteCommitmentTrees::default(),
+            finalized_tree,
+            fake_value_pool,
+        );
+        for block in below {
+            pushed = pushed.push(block.clone())?;
+        }
+        let mut rebound = pushed.clone().push(tip.clone())?;
+
+        for _ in 0..pops_before {
+            pushed.pop_root();
+            rebound.pop_root();
+        }
+        prop_assume!(rebound.can_rebind_tip());
+
+        pushed = pushed.push(solved.clone())?;
+        rebound.rebind_tip(solved)?;
+
+        for _ in 0..pops_after {
+            pushed.pop_root();
+            rebound.pop_root();
+        }
+
+        prop_assert!(
+            rebound.eq_internal_state(&pushed),
+            "\n\
+             rebound chain:\n{rebound:#?}\n\n\
+             pushed chain:\n{pushed:#?}\n",
+        );
     });
 
     Ok(())

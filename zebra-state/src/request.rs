@@ -513,6 +513,24 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Rebinds the result of validating a block proposal to `block`, the solved proposal.
+    ///
+    /// The caller must check `block`'s proof of work, and that `block` is the same as the
+    /// proposal apart from its nonce and Equihash solution. That includes the authorizing data
+    /// of its transactions, which transaction and block equality don't compare. The receipt
+    /// time is the solved block's, not the proposal's.
+    ///
+    /// # Correctness
+    ///
+    /// Nothing checks the result after this, so a mismatched block would be committed with a
+    /// validation result that isn't its own. This is only for the block verifier's solved
+    /// proposal path; see [`Request::CommitContextuallyVerifiedBlock`].
+    pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        self.hash = block.hash();
+        self.block = block;
+        self.received_time = Some(received_time);
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -1180,6 +1198,30 @@ pub enum Request {
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 
+    /// Commits a block that was validated as a block proposal, and then solved, without
+    /// repeating its contextual validation.
+    ///
+    /// The block is the result of a successful [`Request::CheckBlockProposalValidity`], rebound
+    /// to the solved block with [`ContextuallyVerifiedBlock::rebind`]. The caller must check the
+    /// solved block's proof of work, and that it is the same as the proposal apart from its
+    /// nonce and Equihash solution, including the authorizing data of its transactions.
+    ///
+    /// # Correctness
+    ///
+    /// The state trusts the caller: it doesn't validate the block's transactions, and it doesn't
+    /// check that the result belongs to the block. It only compares the block with the last
+    /// proposal to decide whether it can reuse the chain that validating that proposal built.
+    /// Only send this request with a result that the block verifier has matched to the solved
+    /// block.
+    ///
+    /// The proposal was validated on a snapshot of the state, and the block is committed later.
+    /// That is still valid, because a block's parent hash fixes every block below it, and the
+    /// result's contextual checks only depend on those blocks.
+    ///
+    /// Returns [`Response::Committed`], and is queued like
+    /// [`Request::CommitSemanticallyVerifiedBlock`].
+    CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
+
     /// Starts computing early mining work on a block that is still being verified, so miners
     /// can build on it before its transactions are verified.
     ///
@@ -1198,6 +1240,7 @@ impl Request {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -1854,6 +1897,7 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitContextuallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_)
