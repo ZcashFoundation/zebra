@@ -103,16 +103,22 @@ export CXXFLAGS="$CXXFLAGS -include cstdint"
 </details>
 
 On `x86_64` or `aarch64` Linux (glibc 2.34+), you can skip the build dependencies
-and download a signed, pre-built binary with
-[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+and use a pre-built binary. Most
+[GitHub releases](https://github.com/ZcashFoundation/zebra/releases) from v6.0.0
+on attach `zebrad` archives, a checksum file signed with Cosign, and a Sigstore
+build-provenance attestation for each archive. To check the signature and the
+attestation before you run `zebrad`, download and verify the archive as
+described in [Pre-built
+binaries](https://zebra.zfnd.org/user/install.html#pre-built-binaries).
+
+You can also install a release binary with
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall). It downloads the
+binary from the GitHub release, but it does not check the signature or the
+attestation:
 
 ```sh
 cargo binstall zebrad
 ```
-
-The same binaries are attached to each
-[GitHub release](https://github.com/ZcashFoundation/zebra/releases), with a
-SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature.
 
 Otherwise, once you have the dependencies in place, you can build and install
 Zebra from source with:

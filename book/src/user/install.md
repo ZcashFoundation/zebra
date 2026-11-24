@@ -5,33 +5,77 @@ Started](https://zebra.zfnd.org/index.html#getting-started) section.
 
 ## Pre-built binaries
 
-Every [GitHub release](https://github.com/ZcashFoundation/zebra/releases) ships
-pre-built `zebrad` binaries for Linux on `x86_64` and `aarch64`, as
-`zebrad-<version>-<target>.tar.gz` archives. They are built on Ubuntu 22.04 and
+[GitHub releases](https://github.com/ZcashFoundation/zebra/releases) from
+v6.0.0 on ship pre-built `zebrad` binaries for Linux on `x86_64` and `aarch64`,
+as `zebrad-<version>-<target>.tar.gz` archives. They are built on Ubuntu 22.04 and
 need glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023);
 on older or other platforms use the [Docker image](https://hub.docker.com/r/zfnd/zebra)
 or build from source.
 
-Install the latest release with
-[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+Some releases have no archives, for example v6.4.0 and v6.4.1. Check that the
+release you want lists them under its assets before you follow these steps.
 
-```bash
-cargo binstall zebrad
-```
+### Verify and extract an archive
 
-Or download an archive, verify it, and extract `zebrad`:
+Each release with archives also has a `SHA256SUMS` file, signed with Cosign in
+`SHA256SUMS.sigstore.json`, and a Sigstore build-provenance attestation for each
+archive. Download those two files and the archive for your platform, then
+verify them and extract `zebrad`.
+
+The commands need:
+
+- the [GitHub CLI](https://cli.github.com/), signed in with `gh auth login` or
+  given a token in `GH_TOKEN`, because `gh attestation verify` fails without one
+- [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.1.3
+  or later, because earlier versions can skip the certificate identity and
+  issuer checks for a forged bundle
+  ([GHSA-fx35-mq7g-6g98](https://github.com/sigstore/cosign/security/advisories/GHSA-fx35-mq7g-6g98))
+
+The commands are joined with `&&`, so `tar` extracts the archive only if every
+check passes:
 
 ```bash
 gh attestation verify zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz \
   --repo ZcashFoundation/zebra \
   --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml \
-  --source-ref 'refs/tags/v<version>'
+  --source-ref 'refs/tags/v<version>' &&
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
   --certificate-identity='https://github.com/ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml@refs/tags/v<version>' \
-  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
-sha256sum --ignore-missing -c SHA256SUMS
+  --certificate-oidc-issuer='https://token.actions.githubusercontent.com' &&
+sha256sum --ignore-missing -c SHA256SUMS &&
 tar xzf zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz
+```
+
+### Install with `cargo binstall`
+
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall) downloads the
+same archive from the GitHub release and installs `zebrad`. It does not check
+the Cosign signature or the build-provenance attestation. If you need those
+checks, use the steps in the previous section.
+
+```bash
+cargo binstall zebrad
+```
+
+Releases published with Zebra's updated crate metadata turn off the
+`cargo binstall` fallback to third-party
+[QuickInstall](https://github.com/cargo-bins/cargo-quickinstall) builds by
+default. For those releases, if there is no archive for your platform,
+`cargo binstall zebrad` builds Zebra from source instead, which needs the build
+dependencies from
+[Manual Install](https://zebra.zfnd.org/index.html#manual-install). That crate
+setting is only a default: passing `--strategies` or setting
+`BINSTALL_STRATEGIES` replaces it, so a list that includes `quick-install` can
+still install a QuickInstall build.
+
+Already-published releases without this metadata (such as v7.1.0 and earlier)
+can still fall back to QuickInstall when no release archive is available. To
+prevent that fallback when installing one of those versions, pass
+`--disable-strategies quick-install`:
+
+```bash
+cargo binstall --disable-strategies quick-install zebrad
 ```
 
 ## Building Zebra
