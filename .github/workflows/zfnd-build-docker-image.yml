@@ -1,6 +1,6 @@
 # This workflow automates the building and pushing of Docker images based on user-defined inputs. It includes:
 # - Accepting various inputs like image name, Dockerfile path, target, and additional Rust-related parameters.
-# - Authenticates with Google Cloud and logs into Google Artifact Registry and DockerHub.
+# - Authenticates with Google Cloud and logs into Google Artifact Registry and, when needed, Docker Hub.
 # - Builds the Docker image and pushes it to both Google Artifact Registry and potentially DockerHub, depending on release type.
 # - Uses Docker Scout to display vulnerabilities and recommendations for the latest built image.
 name: Build docker image
@@ -59,6 +59,11 @@ on:
       DOCKERHUB_USERNAME:
         required: false
       DOCKERHUB_TOKEN:
+        required: false
+      # Read-only Docker Hub credentials for Docker Scout on release PRs. Without them, Scout is skipped.
+      DOCKER_SCOUT_USERNAME:
+        required: false
+      DOCKER_SCOUT_TOKEN:
         required: false
 
     outputs:
@@ -192,13 +197,6 @@ jobs:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
-
-      - name: Login to DockerHub
-        if: github.repository == 'ZcashFoundation/zebra'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         id: buildx
@@ -356,11 +354,8 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      # Login to DockerHub in ZcashFoundation/zebra, when:
-      # 1. Publishing images for a release or pre-release, OR
-      # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
-        if: github.repository == 'ZcashFoundation/zebra' && (inputs.publish_to_dockerhub || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v')))
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -454,14 +449,35 @@ jobs:
       # - `prod` for a release event
       # - `stage` for a push event to the main branch
       # - `dev` for a pull request event
+      #
+      # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
+      # and are commonly used for testing, and thus are ephemeral.
+      # Release PRs are release-plz branches with the `release` label, as in release.yml and pr-gate.yml.
+      # TODO: Run on more PRs once we have a better way to determine if just new vulnerabilities are present.
+      # See: https://github.com/docker/scout-action/issues/56
+      - name: Check Docker Scout credentials
+        id: scout-credentials
+        if: ${{ github.repository == 'ZcashFoundation/zebra' && inputs.dockerfile_target == 'runtime' && github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-plz-') && contains(github.event.pull_request.labels.*.name, 'release') }}
+        env:
+          HAS_CREDENTIALS: ${{ secrets.DOCKER_SCOUT_USERNAME != '' && secrets.DOCKER_SCOUT_TOKEN != '' }}
+        run: |
+          if [[ "${HAS_CREDENTIALS}" == "true" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Docker Scout skipped::DOCKER_SCOUT_USERNAME and DOCKER_SCOUT_TOKEN were not passed to this build."
+          fi
+
+      - name: Login to Docker Scout
+        if: steps.scout-credentials.outputs.available == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_SCOUT_USERNAME }}
+          password: ${{ secrets.DOCKER_SCOUT_TOKEN }}
+
       - name: Docker Scout
         id: docker-scout
         uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a #v1.21.0
-        # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
-        # and are commonly used for testing, and thus are ephemeral.
-        # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
-        # See: https://github.com/docker/scout-action/issues/56
-        if: ${{ github.repository == 'ZcashFoundation/zebra' && inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        if: steps.scout-credentials.outputs.available == 'true'
         with:
           command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}

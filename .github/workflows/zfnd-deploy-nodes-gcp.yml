@@ -258,10 +258,10 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: ${{ needs.set-matrix.outputs.environment }}
-    # This step needs access to Docker Hub secrets to run successfully
+    # Never pass the Docker Hub publishing token here; Scout gets read-only credentials.
     secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKER_SCOUT_USERNAME: ${{ github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-plz-') && contains(github.event.pull_request.labels.*.name, 'release') && secrets.DOCKER_SCOUT_USERNAME || '' }}
+      DOCKER_SCOUT_TOKEN: ${{ github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-plz-') && contains(github.event.pull_request.labels.*.name, 'release') && secrets.DOCKER_SCOUT_TOKEN || '' }}
 
   deploy:
     name: Deploy immutable image
