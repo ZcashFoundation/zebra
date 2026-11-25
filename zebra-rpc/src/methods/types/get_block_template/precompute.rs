@@ -87,7 +87,8 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 /// up its fee without waiting for the periodic refresh.
 pub(crate) const MEMPOOL_REBUILD_PAUSE: Duration = Duration::from_secs(1);
 
-/// How long [`validate_templates()`] waits for the validation of one block template.
+/// How long [`validate_templates()`] waits for the validation of one block template, including
+/// the wait for the block the template is on to become the chain tip.
 ///
 /// A validation normally takes milliseconds. But the block verifier waits for a transparent input
 /// that isn't in the chain yet, for much longer than a template is useful, and no other template
@@ -565,19 +566,27 @@ async fn verified_transaction_added(
 /// its proof of work before committing it, without decoding its transactions. A template that is
 /// published during a validation waits for it, and then only the latest template is validated.
 ///
-/// A validation is dropped when a template is published on another block, because miners no
-/// longer work on the template it validates, and after [`TEMPLATE_VALIDATION_TIMEOUT`]. Dropping
-/// it also drops the block verifier's request, so the verifier stops waiting for it. A template
-/// that isn't validated is verified like any other block when a miner submits it.
+/// The state only accepts a proposal on the chain tip, so a template on a block that is still
+/// being verified is validated once `latest_chain_tip` reports that block. Miners can keep working
+/// on that template after the block is committed: on an empty mempool, the first template on the
+/// committed block can have the same long poll ID, so a long polling miner isn't sent it.
+///
+/// A validation, and its wait for the chain tip, is dropped when a template is published on
+/// another block, because miners no longer work on the template it validates, and after
+/// [`TEMPLATE_VALIDATION_TIMEOUT`]. Dropping it also drops the block verifier's request, so the
+/// verifier stops waiting for it. A template that isn't validated is verified like any other block
+/// when a miner submits it.
 ///
 /// Runs until the task is aborted.
-pub(crate) async fn validate_templates<BlockVerifierRouter>(
+pub(crate) async fn validate_templates<BlockVerifierRouter, Tip>(
     mut templates: TemplateChanges,
     network: Network,
     block_verifier_router: BlockVerifierRouter,
     proposal_transactions: ProposalTransactions,
+    mut latest_chain_tip: Tip,
 ) where
     BlockVerifierRouter: BlockVerifierService,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     loop {
         templates.changed().await;
@@ -587,15 +596,21 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
         };
         let previous_block_hash = template.previous_block_hash;
 
-        let validation = tokio::time::timeout(
-            TEMPLATE_VALIDATION_TIMEOUT,
+        let validation = tokio::time::timeout(TEMPLATE_VALIDATION_TIMEOUT, async {
+            // The state rejects a proposal that isn't on its tip, and it commits a block before
+            // it updates the chain tip.
+            while latest_chain_tip.best_tip_hash() != Some(previous_block_hash) {
+                latest_chain_tip.best_tip_changed().await?;
+            }
+
             validate_template(
                 template,
                 &network,
                 block_verifier_router.clone(),
                 &proposal_transactions,
-            ),
-        );
+            )
+            .await
+        });
 
         let result = tokio::select! {
             biased;
@@ -609,8 +624,8 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
             },
         };
 
-        // This is expected when the chain tip changes during the validation, or for a template
-        // on a block that is still being verified.
+        // This is expected when the chain tip changes during the validation, or when the state
+        // withdraws the work on a block that is still being verified.
         if let Err(error) = result {
             tracing::debug!(
                 ?error,

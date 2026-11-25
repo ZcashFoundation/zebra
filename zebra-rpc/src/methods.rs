@@ -1130,6 +1130,7 @@ where
             self.network.clone(),
             self.gbt.block_verifier_router(),
             self.gbt.proposal_transactions().clone(),
+            self.latest_chain_tip.clone(),
         );
         let update_templates = precompute::run(
             self.network.clone(),
