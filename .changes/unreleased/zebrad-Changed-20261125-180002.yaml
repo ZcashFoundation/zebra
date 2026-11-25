@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed the mempool to accept and relay transactions that pay at least 400 zatoshis per ZIP 317 logical action, with a minimum of 800 zatoshis per transaction, down from 1,000 per logical action and 2,000 per transaction. `getstandardfee` still recommends 1,000 zatoshis per logical action to wallets.'
+time: 2026-11-25T18:00:02.000000000Z

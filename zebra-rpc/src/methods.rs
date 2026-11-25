@@ -716,7 +716,7 @@ pub trait Rpc {
 
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
-    /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
+    /// Currently returns a fixed fee for the next block, with `version` 0:
     /// 5000 zatoshis before Mainnet height 3,590,000, and 1000 zatoshis from that height
     /// and on test networks. This will be replaced by a dynamic estimate without changing
     /// the parameters or result shape.
