@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Reduced request parsing work for canonical JSON-RPC 2.0 `submitblock` calls with unescaped hex block data.'
+time: 2026-11-25T00:00:01Z

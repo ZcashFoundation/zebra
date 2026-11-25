@@ -32,8 +32,9 @@ use tokio::{
 use tower::{service_fn, Service, ServiceExt};
 
 use crate::server::http_request_compatibility::{
-    is_canonical_json_rpc_2_request, reencode_response, response_to_version, splice_response,
-    HttpRequestMiddleware, HttpRequestMiddlewareLayer, JsonRpcRequest, JsonRpcVersion,
+    is_canonical_json_rpc_2_request, is_canonical_submitblock_request, reencode_response,
+    response_to_version, splice_response, HttpRequestMiddleware, HttpRequestMiddlewareLayer,
+    JsonRpcRequest, JsonRpcVersion,
 };
 
 /// A body that always returns an error, simulating a TCP RST during body collection.
@@ -192,6 +193,153 @@ async fn canonical_json_rpc_2_passes_through_unchanged() {
         assert_eq!(
             round_trip(request, response).await,
             (request.to_string(), response.to_string())
+        );
+    }
+}
+
+/// Common JSON-RPC 2.0 client layouts go straight to the dispatcher without re-encoding.
+#[tokio::test]
+async fn submitblock_fast_path_accepts_common_layouts() {
+    let response = r#"{"jsonrpc":"2.0","result":null,"id":1}"#;
+    for request in [
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["aB"],"id":1}"#,
+        // Python json.dumps with its default separators.
+        r#"{"jsonrpc": "2.0", "id": 1, "method": "submitblock", "params": ["aB"]}"#,
+        // Node JSON.stringify with the version key in the last position.
+        r#"{"method":"submitblock","params":["aB"],"id":1,"jsonrpc":"2.0"}"#,
+        r#"{"id":1,"params":["aB"],"method":"submitblock","jsonrpc":"2.0"}"#,
+        "{\r\n\"id\"\t:\t\"pool\",\n\"params\": [ \"aB\" ], \"jsonrpc\":\"2.0\", \"method\":\"submitblock\" }",
+        r#"{"params":[""],"method":"submitblock","id":null,"jsonrpc":"2.0"}"#,
+        r#"{"params":["f"],"method":"submitblock","id":18446744073709551615,"jsonrpc":"2.0"}"#,
+    ] {
+        assert!(is_canonical_submitblock_request(request.as_bytes()), "{request}");
+        assert_eq!(
+            round_trip(request, response).await,
+            (request.to_string(), response.to_string()),
+            "{request}"
+        );
+    }
+
+    let large = "aB".repeat(1_900_000);
+    let body = format!(r#"{{"id":1,"params":["{large}"],"method":"submitblock","jsonrpc":"2.0"}}"#);
+    assert!(is_canonical_submitblock_request(body.as_bytes()));
+}
+
+/// Inputs outside the exact shortcut still use the existing JSON-RPC compatibility path.
+#[tokio::test]
+async fn submitblock_fast_path_rejects_noncanonical_layouts() {
+    for body in [
+        r#"{"id":1,"method":"submitblock","params":["00"]}"#,
+        // Versionless Node JSON.stringify requests retain bitcoind compatibility.
+        r#"{"method":"submitblock","params":["00"],"id":1}"#,
+        r#"{"jsonrpc":"1.0","method":"submitblock","params":["00"],"id":1}"#,
+        r#"{"jsonrpc":"2.0","jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","method":"submitblock","params":["00"],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1,"x":0}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00\u0030"],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00","11"],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":[0],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00",],"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1,}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1}garbage"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":"a\n"}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":[1]}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":01}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":18446744073709551616}"#,
+        r#"{"jsonrpc":"2.0","method":"submitblock","params":["gg"],"id":1}"#,
+    ] {
+        assert!(!is_canonical_submitblock_request(body.as_bytes()), "{body}");
+    }
+    let response = r#"{"jsonrpc":"2.0","result":null,"id":1}"#;
+    let legacy = r#"{"id":1,"method":"submitblock","params":["00"]}"#;
+    let (forwarded, reply) = round_trip(legacy, response).await;
+    assert_eq!(
+        json(&forwarded),
+        json(r#"{"jsonrpc":"2.0","id":1,"method":"submitblock","params":["00"]}"#)
+    );
+    assert_eq!(json(&reply), json(r#"{"result":null,"error":null,"id":1}"#));
+}
+
+/// Parses what the submitblock handler reads, including the second optional argument.
+fn submitblock_handler_reads(body: &[u8]) -> (Id<'static>, String, Option<String>) {
+    let request: jsonrpsee_types::Request<'_> =
+        serde_json::from_slice(body).expect("valid JSON-RPC request");
+    assert_eq!(request.method, "submitblock");
+    let params = request.params.as_ref().expect("submitblock has params");
+    let params = jsonrpsee_types::Params::new(Some(params.get()));
+    let mut sequence = params.sequence();
+    let hex = sequence
+        .next::<String>()
+        .expect("first parameter is a string");
+    let second = sequence
+        .optional_next::<String>()
+        .expect("there is no second parameter");
+    (request.id.into_owned(), hex, second)
+}
+
+/// Every accepted wire shape has the same meaning when the generic path re-encodes it.
+#[tokio::test]
+async fn submitblock_fast_path_matches_generic_forwarding() {
+    let response = r#"{"jsonrpc":"2.0","result":null,"id":1}"#;
+    for request in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"submitblock","params":["aB"]}"#,
+        r#"{"params": [ "f" ], "id": "miner", "method": "submitblock", "jsonrpc": "2.0"}"#,
+        r#"{"id":null,"jsonrpc":"2.0","params":[""],"method":"submitblock"}"#,
+        r#"{"params":[ "aB" ],"method":"submitblock","id":null,"jsonrpc":"2.0"}"#,
+        r#"{"id":"é","method":"submitblock","params":["00"],"jsonrpc":"2.0"}"#,
+        r#"{"params":["00"],"jsonrpc":"2.0","method":"submitblock","id":18446744073709551615}"#,
+    ] {
+        assert!(
+            is_canonical_submitblock_request(request.as_bytes()),
+            "{request}"
+        );
+        let (forwarded, _) = round_trip(request, response).await;
+        let decoded: Value = serde_json::from_str(request).expect("valid request");
+        let generic = serde_json::to_vec(&decoded).expect("generic path decodes params");
+        assert_eq!(
+            submitblock_handler_reads(forwarded.as_bytes()),
+            submitblock_handler_reads(&generic),
+            "{request}"
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn submitblock_random_layouts_read_like_generic(
+        hex in "[0-9a-fA-F]{0,48}",
+        id in prop_oneof![
+            Just("null".to_string()),
+            any::<u64>().prop_map(|id| id.to_string()),
+            "[a-zA-Z0-9]{0,16}".prop_map(|id| format!("\"{id}\"")),
+        ],
+        order in any::<u8>(),
+        between in prop::sample::select(vec!["", " ", "\t", "\r\n"]),
+        inside in prop::sample::select(vec!["", " ", "\t", "\n"]),
+    ) {
+        let mut fields = [
+            format!(r#""jsonrpc"{between}:"2.0""#),
+            format!(r#""method"{between}:"submitblock""#),
+            format!(r#""params"{between}:[{inside}"{hex}"{inside}]"#),
+            format!(r#""id"{between}:{id}"#),
+        ];
+        fields.rotate_left(usize::from(order % 4));
+        if order & 4 != 0 {
+            fields.swap(0, 2);
+        }
+        if order & 8 != 0 {
+            fields.swap(1, 3);
+        }
+        let body = format!("{{{}}}", fields.join(&format!("{between},{between}")));
+        prop_assert!(is_canonical_submitblock_request(body.as_bytes()), "{body}");
+
+        let decoded: Value = serde_json::from_str(&body).expect("generated JSON is valid");
+        let generic = serde_json::to_vec(&decoded).expect("generic path decodes params");
+        prop_assert_eq!(
+            submitblock_handler_reads(body.as_bytes()),
+            submitblock_handler_reads(&generic)
         );
     }
 }

@@ -1,6 +1,7 @@
 //! Differential compatibility tests and an opt-in large-payload microbenchmark.
 
-use super::{decode, encode, HexData};
+use super::{decode, decode_scalar, encode, HexData};
+use proptest::prelude::*;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct ReferenceHex(#[serde(with = "hex")] Vec<u8>);
@@ -38,6 +39,43 @@ fn hex_conversion_matches_reference() {
         "", "0", "fF0", "g", "0x00", "0X00", " f", "f\n", "é", "0é0", "💻",
     ] {
         assert_eq!(decode(input.as_bytes()), hex::decode(input));
+    }
+}
+
+proptest! {
+    #[test]
+    fn simd_decode_matches_scalar(bytes in proptest::collection::vec(any::<u8>(), 0..512)) {
+        let mut lower = hex::encode(bytes).into_bytes();
+        let mut upper = lower.clone();
+        upper.make_ascii_uppercase();
+        prop_assert_eq!(decode(&lower), decode_scalar(&lower));
+        prop_assert_eq!(decode(&upper), decode_scalar(&upper));
+
+        for index in 0..lower.len() {
+            let original = lower[index];
+            for invalid in [b'g', 0xff] {
+                lower[index] = invalid;
+                prop_assert_eq!(decode(&lower), decode_scalar(&lower));
+            }
+            lower[index] = original;
+        }
+        lower.push(b'g');
+        prop_assert_eq!(decode(&lower), decode_scalar(&lower));
+
+        for input in [
+            &b""[..],
+            b"0x",
+            b"0X00",
+            b"0x0",
+            b"0X0f",
+            b"g",
+            b"g0",
+            b"0g",
+            b"00g0",
+            b"0xg0",
+        ] {
+            prop_assert_eq!(decode(input), decode_scalar(input));
+        }
     }
 }
 
