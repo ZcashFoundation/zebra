@@ -69,6 +69,8 @@ pub struct SemanticBlockVerifier<S, V> {
     block_size_serializations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     transaction_hash_computations: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    cached_body_checks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn run_blocking<T: Send + 'static>(
@@ -795,6 +797,8 @@ where
             block_size_serializations: Default::default(),
             #[cfg(test)]
             transaction_hash_computations: Default::default(),
+            #[cfg(test)]
+            cached_body_checks: Default::default(),
         }
     }
 
@@ -842,6 +846,8 @@ where
         let block_size_serializations = self.block_size_serializations.clone();
         #[cfg(test)]
         let transaction_hash_computations = self.transaction_hash_computations.clone();
+        #[cfg(test)]
+        let cached_body_checks = self.cached_body_checks.clone();
 
         let block = request.block();
 
@@ -1049,11 +1055,17 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
 
-            // Quick structure checks reject an invalid body before it is announced as early work
-            // or its transactions are verified. The state relies on some of them when it prepares
-            // a local submission's commit: see `quick_checks`.
-            let coinbase_tx = check::coinbase_is_first(&block)?;
-            check::no_duplicate_transparent_spends(&block)?;
+            // A cached proposal has already passed these body-only checks, which scan every
+            // transaction and build an outpoint set for its transparent inputs.
+            let coinbase_tx = if cached.is_none() {
+                #[cfg(test)]
+                cached_body_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let coinbase_tx = check::coinbase_is_first(&block)?;
+                check::no_duplicate_transparent_spends(&block)?;
+                Some(coinbase_tx)
+            } else {
+                None
+            };
             rejection_candidate = (!request.is_proposal()).then(|| block.clone());
 
             // From the NSM reissuance height, the block subsidy depends on the
@@ -1191,6 +1203,7 @@ where
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
+            let coinbase_tx = coinbase_tx.expect("cache hits return before coinbase decryption");
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
 
             if !request.is_proposal() {
