@@ -6357,8 +6357,8 @@ tokio::task_local! {
     pub(crate) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
     /// Number of shielded sighashes computed by this task's transaction verifier.
     static SHIELDED_SIGHASH_REQUESTS: Arc<AtomicUsize>;
-    /// The thread that ran each transaction preparation by this task's verifier.
-    static PREPARATION_THREADS: Arc<Mutex<Vec<std::thread::ThreadId>>>;
+    /// The thread and pool membership for each transaction preparation by this task's verifier.
+    static PREPARATION_THREADS: Arc<Mutex<Vec<(std::thread::ThreadId, bool)>>>;
 }
 
 /// Counts a shielded sighash computed by the transaction verifier.
@@ -6377,15 +6377,18 @@ pub(super) fn record_preparation_thread() {
         rayon::current_thread_index().is_none(),
         "preparation can wait for verifying keys built on Rayon, so it must not occupy Rayon"
     );
+    let on_preparation_pool = std::thread::current()
+        .name()
+        .is_some_and(|name| name.starts_with(super::PREPARATION_THREAD_PREFIX));
     let _ = PREPARATION_THREADS.try_with(|threads| {
         threads
             .lock()
             .expect("only test code holds the lock")
-            .push(std::thread::current().id())
+            .push((std::thread::current().id(), on_preparation_pool))
     });
 }
 
-/// Carries the verifier's test task locals into a preparation that runs on a blocking thread.
+/// Carries the verifier's test task locals into preparation on a dedicated worker.
 pub(super) fn with_verifier_task_locals<T>(
     prepare: impl FnOnce() -> T + Send,
 ) -> impl FnOnce() -> T + Send {
@@ -6421,9 +6424,30 @@ fn scoped<V: 'static, T>(
     }
 }
 
-/// Runs `future`, returning whether each transaction preparation in it ran off the thread
-/// polling it.
-async fn preparation_offloads(future: impl Future<Output = ()>) -> Vec<bool> {
+/// A panic in one preparation job must not strand later transactions on that worker.
+#[tokio::test]
+async fn preparation_worker_survives_panic() {
+    let worker = &super::PREPARATION_POOL.workers[0];
+    let (failed_tx, failed_rx) = tokio::sync::oneshot::channel::<()>();
+    assert!(worker
+        .send(Box::new(move || {
+            let _sender = failed_tx;
+            panic!("deliberate preparation panic");
+        }))
+        .is_ok());
+    assert!(timeout(test_timeout(), failed_rx).await.unwrap().is_err());
+
+    let (ok_tx, ok_rx) = tokio::sync::oneshot::channel();
+    assert!(worker
+        .send(Box::new(move || {
+            let _ = ok_tx.send(());
+        }))
+        .is_ok());
+    timeout(test_timeout(), ok_rx).await.unwrap().unwrap();
+}
+
+/// Runs `future`, returning whether each preparation ran off the polling task and on the pool.
+async fn preparation_offloads(future: impl Future<Output = ()>) -> Vec<(bool, bool)> {
     let threads = Arc::new(Mutex::new(Vec::new()));
     let mut pollers = Vec::new();
     let mut future = std::pin::pin!(PREPARATION_THREADS.scope(threads.clone(), future));
@@ -6433,13 +6457,16 @@ async fn preparation_offloads(future: impl Future<Output = ()>) -> Vec<bool> {
     })
     .await;
     let threads = threads.lock().expect("the scope has finished");
-    threads.iter().map(|id| !pollers.contains(id)).collect()
+    threads
+        .iter()
+        .map(|(id, on_pool)| (!pollers.contains(id), *on_pool))
+        .collect()
 }
 
-/// Both entry points must prepare shielded transactions off the async task, and keep counting
-/// their shielded sighashes.
+/// Both entry points prepare shielded transactions on the dedicated pool, preserving verification
+/// results and shielded sighash counts.
 #[test]
-fn shielded_preparation_runs_on_blocking_thread() {
+fn shielded_preparation_runs_on_dedicated_pool() {
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let (upgrade, tx) = cacheable_mainnet_sapling_transaction();
@@ -6481,7 +6508,7 @@ fn shielded_preparation_runs_on_blocking_thread() {
                 .unwrap();
             }))
             .await;
-        assert_eq!(offloads, [true, true]);
+        assert_eq!(offloads, [(true, true), (true, true)]);
         assert_eq!(requests.load(Ordering::SeqCst), 2);
     });
 }
@@ -6532,7 +6559,7 @@ async fn transparent_preparation_inline_work_is_bounded() {
             .unwrap();
         })
         .await;
-        assert_eq!(offloads, [offloaded]);
+        assert_eq!(offloads, [(offloaded, offloaded)]);
     }
 }
 
