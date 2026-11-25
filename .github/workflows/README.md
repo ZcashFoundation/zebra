@@ -171,6 +171,12 @@ Three rules keep the quota usable:
    in `test-crates.yml` set `cache: false`.
    The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
 
+Release jobs never cache. The `zebrad` binary build in `zfnd-release-binaries.yml` and the crate
+publishing job in `release.yml` set `cache: false`, and the release Docker build sets
+`no_cache: true`. A restored cache can replace `~/.cargo/bin` tools, registry sources, and build
+outputs, and these jobs produce signed artifacts or hold publishing credentials. The release
+readiness check keeps its cache: it publishes nothing.
+
 The dependency-check Docker action provides its own Rust toolchain. The `deny` matrix therefore
 does not install Rust or restore a Rust cache on the host.
 
