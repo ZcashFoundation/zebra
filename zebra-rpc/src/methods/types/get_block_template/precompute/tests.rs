@@ -673,6 +673,7 @@ async fn mempool_changes_compare_the_verified_set() {
         &template_ids,
         Instant::now(),
         Instant::now(),
+        burst_additions_for_pause(MEMPOOL_SHORT_PAUSE),
     );
     tokio::pin!(changed);
 
@@ -700,6 +701,50 @@ async fn mempool_changes_compare_the_verified_set() {
         .expect("a collateral eviction must wake the updater even when its ID was not announced");
 }
 
+/// The 10 ms pause still recognizes 1,000 tx/s arrivals as a continuous burst.
+#[tokio::test(start_paused = true)]
+async fn shorter_pause_keeps_burst_rate_and_slow_build_threshold() {
+    assert_eq!(burst_additions_for_pause(MEMPOOL_SHORT_PAUSE), 10);
+    assert_eq!(burst_additions_for_pause(Duration::from_millis(100)), 50);
+
+    let template_ids = HashSet::new();
+    let changed_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let mempool = tower::service_fn(move |request| {
+        assert_eq!(request, mempool::Request::TransactionIds);
+        std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+            mempool::Response::TransactionIds([changed_id].into_iter().collect()),
+        ))
+    });
+    let (events, mut receiver) = broadcast::channel(1);
+    let start = Instant::now();
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        start + MEMPOOL_SHORT_PAUSE,
+        start + MEMPOOL_THROTTLE,
+        burst_additions_for_pause(MEMPOOL_SHORT_PAUSE),
+    );
+    tokio::pin!(changed);
+    for batch in 0..200u32 {
+        let ids = (batch * 5..(batch + 1) * 5)
+            .map(|index| {
+                let mut bytes = [0; 32];
+                bytes[..4].copy_from_slice(&index.to_le_bytes());
+                UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash(bytes))
+            })
+            .collect();
+        events.send(MempoolChange::added(ids)).unwrap();
+        assert!(futures::poll!(&mut changed).is_pending());
+        tokio::time::advance(Duration::from_millis(5)).await;
+        if batch == 1 {
+            assert!(futures::poll!(&mut changed).is_pending());
+        }
+    }
+    assert!(futures::poll!(&mut changed).is_ready());
+    assert_eq!(start.elapsed(), MEMPOOL_THROTTLE);
+}
+
 /// Steady 20–100 tx/s flows use the short pause; a burst rebuilds after it goes quiet.
 #[tokio::test(start_paused = true)]
 async fn mempool_arrivals_adapt_the_rebuild_pause() {
@@ -720,6 +765,7 @@ async fn mempool_arrivals_adapt_the_rebuild_pause() {
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            burst_additions_for_pause(MEMPOOL_SHORT_PAUSE),
         );
         tokio::pin!(changed);
 
@@ -777,6 +823,7 @@ async fn mempool_buffered_bursts_extend_the_short_deadline() {
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            burst_additions_for_pause(MEMPOOL_SHORT_PAUSE),
         );
         tokio::pin!(changed);
 
@@ -837,6 +884,7 @@ async fn quiet_burst_respects_previous_build_duration() {
         &template_ids,
         next_build,
         start + MEMPOOL_THROTTLE,
+        burst_additions_for_pause(MEMPOOL_SHORT_PAUSE * 4),
     );
     tokio::pin!(changed);
 
@@ -877,6 +925,7 @@ async fn continuous_mempool_burst_keeps_its_refresh_deadline() {
         &template_ids,
         start + MEMPOOL_SHORT_PAUSE,
         start + MEMPOOL_THROTTLE,
+        burst_additions_for_pause(MEMPOOL_SHORT_PAUSE),
     );
     tokio::pin!(changed);
 
@@ -892,14 +941,14 @@ async fn continuous_mempool_burst_keeps_its_refresh_deadline() {
         ))
         .unwrap();
     assert!(futures::poll!(&mut changed).is_pending());
-    for _ in 1..25 {
-        tokio::time::advance(Duration::from_millis(40)).await;
+    for _ in 1..200 {
+        tokio::time::advance(Duration::from_millis(5)).await;
         events
             .send(MempoolChange::added([changed_id].into_iter().collect()))
             .unwrap();
         assert!(futures::poll!(&mut changed).is_pending());
     }
-    tokio::time::advance(Duration::from_millis(40)).await;
+    tokio::time::advance(Duration::from_millis(5)).await;
     assert!(futures::poll!(&mut changed).is_ready());
     assert_eq!(start.elapsed(), MEMPOOL_THROTTLE);
 }

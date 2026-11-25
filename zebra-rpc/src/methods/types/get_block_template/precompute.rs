@@ -99,10 +99,20 @@ pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_secs(1);
 
 /// Steady-arrival pause, and the quiet period that ends a burst.
-const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(50);
+const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(10);
 
-/// Additions in the pending window that switch to quiet-period burst coalescing.
+/// Keep the original burst trigger of 50 additions per 50 ms, even with a shorter pause.
 const MEMPOOL_BURST_ADDITIONS: usize = 50;
+const MEMPOOL_BURST_WINDOW: Duration = Duration::from_millis(50);
+
+/// Slow builds retain the old threshold rather than requiring more than 50 additions.
+fn burst_additions_for_pause(pause: Duration) -> usize {
+    let additions = u128::try_from(MEMPOOL_BURST_ADDITIONS)
+        .expect("50 additions fit in an unsigned 128-bit integer");
+    usize::try_from((pause.as_millis() * additions).div_ceil(MEMPOOL_BURST_WINDOW.as_millis()))
+        .unwrap_or(usize::MAX)
+        .clamp(1, MEMPOOL_BURST_ADDITIONS)
+}
 
 /// Reading inputs owns no proof or mutex permit.
 const BUILD_FETCHING: u8 = 0;
@@ -998,6 +1008,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         // run back-to-back. Tip changes still bypass this pause.
         let build_finished = Instant::now();
         let next_mempool_build = build_finished + MEMPOOL_THROTTLE.max(build_duration);
+        let coalescing_pause = MEMPOOL_SHORT_PAUSE.max(build_duration);
 
         // Build the coinbase transaction for the block after next while we're idle, so the next tip
         // change doesn't have to wait for a shielded coinbase proof.
@@ -1033,7 +1044,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             ) => {}
             _ = wait_for_mempool_change(
                 &mut mempool_changes, mempool.clone(), &mempool_tx_ids,
-                build_finished + MEMPOOL_SHORT_PAUSE.max(build_duration), next_mempool_build,
+                build_finished + coalescing_pause, next_mempool_build,
+                burst_additions_for_pause(coalescing_pause),
             ) => {}
         }
     }
@@ -1046,6 +1058,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
     template_ids: &HashSet<UnminedTxId>,
     next_build: Instant,
     burst_build: Instant,
+    burst_additions: usize,
 ) {
     let mut next_check = next_build;
     let mut additions = 0usize;
@@ -1058,7 +1071,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
         additions = additions.saturating_add(match &change {
             Ok(change) if change.is_added() => change.tx_ids().len(),
             // Lost messages can contain entire batches or no additions. Coalesce conservatively.
-            Err(broadcast::error::RecvError::Lagged(_)) => MEMPOOL_BURST_ADDITIONS,
+            Err(broadcast::error::RecvError::Lagged(_)) => burst_additions,
             _ => 0,
         });
 
@@ -1075,7 +1088,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                                 break;
                             }
                             Err(broadcast::error::RecvError::Lagged(_)) => {
-                                additions = MEMPOOL_BURST_ADDITIONS;
+                                additions = burst_additions;
                             }
                             Err(broadcast::error::RecvError::Closed) =>
                                 std::future::pending::<()>().await,
@@ -1091,7 +1104,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
         // wait until arrivals stop for the short pause, but never beyond the throttle deadline.
         // Neither deadline slides for steady arrivals.
         loop {
-            let deadline = if additions >= MEMPOOL_BURST_ADDITIONS {
+            let deadline = if additions >= burst_additions {
                 burst_build.min(burst_quiet_at.max(next_build))
             } else {
                 next_build
@@ -1112,7 +1125,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                                 burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                             }
                             Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                                additions = MEMPOOL_BURST_ADDITIONS;
+                                additions = burst_additions;
                                 burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                             }
                             Err(
@@ -1122,7 +1135,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                             _ => {}
                         }
                     }
-                    if additions < MEMPOOL_BURST_ADDITIONS
+                    if additions < burst_additions
                         || Instant::now() >= burst_quiet_at
                     {
                         break;
@@ -1134,7 +1147,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                         burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        additions = MEMPOOL_BURST_ADDITIONS;
+                        additions = burst_additions;
                         burst_quiet_at = Instant::now() + MEMPOOL_SHORT_PAUSE;
                     }
                     Err(broadcast::error::RecvError::Closed) => sleep_until(deadline).await,

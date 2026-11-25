@@ -3,10 +3,11 @@ kind: Changed
 body: >-
   Mining templates refresh after verified mempool additions and evictions, including removed
   dependent transactions, and wake long polls on publication.
-  Steady arrivals use a 50 ms coalescing pause; bursts of at least 50 additions or lost
-  notifications wait until arrivals pause for 50 ms, for at most one second. Slow builds extend
-  the pause, while chain-tip changes rebuild
-  immediately. Cached failures from an old tip do not interrupt mining
+  Steady arrivals use a 10 ms coalescing pause; bursts near 1,000 additions per second or lost
+  notifications wait until arrivals pause for 10 ms, for at most one second. Slow builds extend
+  the pause without raising the burst threshold above 50 additions, while chain-tip changes
+  rebuild immediately. Cached failures from an old tip do not interrupt mining
   ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374),
-  [#12570](https://github.com/ZcashFoundation/zebra/pull/12570)).
+  [#12570](https://github.com/ZcashFoundation/zebra/pull/12570),
+  [#12583](https://github.com/ZcashFoundation/zebra/pull/12583)).
 time: 2026-10-11T00:00:00Z
