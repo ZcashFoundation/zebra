@@ -7,6 +7,7 @@
   - [Supported Platforms](user/supported-platforms.md)
     - [Platform Tier Policy](user/target-tier-policies.md)
   - [Building and Installing Zebra](user/install.md)
+    - [Rebuilding a Release Binary](user/rebuild-release.md)
   - [Running Zebra](user/run.md)
     - [Syncing from a State Snapshot](user/snapshots.md)
   - [Zebra with Docker](user/docker.md)

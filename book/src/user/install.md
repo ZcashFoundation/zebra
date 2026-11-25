@@ -34,6 +34,10 @@ sha256sum --ignore-missing -c SHA256SUMS
 tar xzf zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz
 ```
 
+To check a release without trusting GitHub's build platform, rebuild it from
+source and compare it with `SHA256SUMS`, as described in
+[Rebuilding a Release Binary](rebuild-release.md).
+
 ## Building Zebra
 
 If you want to build Zebra, install the build dependencies as described in the

@@ -31,7 +31,7 @@ Per release, for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`:
 - `SHA256SUMS.sigstore.json`: a Cosign keyless (Sigstore) signature over the manifest, with the Fulcio certificate identity pinned to the release workflow.
 - SLSA v1 build provenance per archive via `actions/attest-build-provenance`, stored in GitHub's attestation API and verified against the expected signer workflow and release source ref.
 
-Six assets. Integrity and provenance for the whole release rest on one signed manifest plus one attestation per archive, not on per-file signatures. `cargo binstall zebrad` consumes these archives, giving a package-manager-style one-liner with no hosted repository to operate.
+Six assets. Integrity and provenance for the whole release rest on one signed manifest plus one attestation per archive, not on per-file signatures. `cargo binstall zebrad` consumes these archives, giving a package-manager-style one-liner with no hosted repository to operate, but it checks neither the signed manifest nor the attestations.
 
 ## Considered Options
 
@@ -55,17 +55,20 @@ Keep the six-asset posture above. The seven options are rejected for the binary 
 
 **3. Per-artifact PGP signatures: rejected.** The release already signs a single `SHA256SUMS` manifest with Cosign keyless, recorded in Rekor with the signer identity pinned to the workflow. PGP reintroduces a long-lived organization-held key to custody, rotate, revoke, and expose on the runner, which for a consensus-critical node is a net security regression: keyless has no secret to leak. The one niche PGP fills is a distro packager pinning a maintainer key. _Revisit if_ a concrete downstream packager requires OpenPGP, and then add an `.asc` alongside Cosign rather than switching.
 
-**4. Attached provenance files: rejected.** The release already mints the SLSA predicate with `actions/attest-build-provenance` and stores it in the attestation API; `gh attestation download` materializes the identical signed bundle on demand, and reproducible builds give a stronger source-to-binary check than any predicate. Attaching the `.intoto.jsonl` only saves one download command. The hand-rolled `.provenance.json` summary is unsigned, so it is unsafe to trust on its own and attaching it adds a misleading file. _Revisit if_ an explicit air-gapped or zero-GitHub-contact verification requirement appears, and then attach only the signed `.intoto.jsonl`, never an unsigned summary.
+**4. Attached provenance files: rejected.** The release already mints the SLSA predicate with `actions/attest-build-provenance` and stores it in the attestation API; `gh attestation download` materializes the identical signed bundle on demand. An independent rebuild gives a stronger source-to-binary check than any predicate, because it does not depend on GitHub's build platform. Attaching the `.intoto.jsonl` only saves one download command. The hand-rolled `.provenance.json` summary is unsigned, so it is unsafe to trust on its own and attaching it adds a misleading file. _Revisit if_ an explicit air-gapped or zero-GitHub-contact verification requirement appears, and then attach only the signed `.intoto.jsonl`, never an unsigned summary.
 
 **5. Per-artifact SBOM files: rejected as commonly shipped.** A post-hoc SBOM of the stripped, static binary carries no dependency graph (Syft yields an empty catalogue) and merely restates a checksum, so it delivers no scanner or compliance value while adding a security signal that must be kept accurate. A crate-graph SBOM from `Cargo.lock` is cheaper to produce, but on its own it misrepresents the binary: it gives the statically linked native C/C++ libraries no scanner-matchable version and lists crates the binary never links. A useful SBOM is a different, native-corrected artifact (see Gated future work). _Revisit_ per that entry.
 
 **6. Raw, un-archived binaries: rejected.** Shipping the bare executable saves one extraction step at the cost of the dual-license attribution that travels in the archive, the guaranteed executable bit, and a clean standalone-checksum story. The archive-with-licenses layout is the idiomatic Rust release convention.
 
-**7. A second per-architecture build system: rejected.** Both targets build on native Ubuntu runners with one toolchain, reproducibly ([0007](0007-reproducible-builds.md)). A second build system is the dominant complexity driver in pipelines that adopt it and produces no artifact an end user can distinguish. It also invites build-system asymmetries (for example an unstripped binary on one arch), which are a regression, not richer content.
+**7. A second per-architecture build system: rejected.** Both targets build on native Ubuntu runners with one toolchain and the reproducibility measures of [0007](0007-reproducible-builds.md). A second build system is the dominant complexity driver in pipelines that adopt it and produces no artifact an end user can distinguish. It also invites build-system asymmetries (for example an unstripped binary on one arch), which are a regression, not richer content.
 
 ### Expected Consequences
 
-- The binary release stays at six assets. Its integrity and provenance posture is a superset of a per-file-signed layout: one signed manifest plus reproducibility plus a stored attestation, rather than many individually signed files with no manifest.
+- The binary release stays at six assets. Its integrity and provenance posture is a superset of a per-file-signed layout: one signed manifest plus a stored attestation, rather than many individually signed files with no manifest.
+- The signature and the attestation are both issued through GitHub's OIDC identity. They prove which workflow and commit produced an archive, not that the build platform was honest. An independent rebuild that matches `SHA256SUMS` checks the build platform's output without trusting the platform. It still relies on GitHub for the source at the release tag and for the reference manifest. [Rebuilding a Release Binary](../../../book/src/user/rebuild-release.md) documents it, including how to compare the tag's commit with another clone.
+- Reproducibility of the archives is verified only for `x86_64-unknown-linux-gnu` at `v7.1.0`. The `aarch64-unknown-linux-gnu` archive has not been rebuilt independently, and no recurring rebuild check is in place yet.
+- The archives are not built from pinned inputs. The `ubuntu-22.04` runner image changes over time, and the apt packages are installed without version pins. The verified rebuild used the Ubuntu 22.04 compilers and glibc, which the runner image also ships. A runner image update can change those inputs, and with them the published bytes.
 - One keyless signing model across binaries and images. No long-lived key to custody.
 - Each rejection has a recorded revisit trigger, so the artifact set changes only when a trigger is met.
 
@@ -80,15 +83,7 @@ The plumbing is not the cost. A `Cargo.lock` SBOM both over- and under-reports t
 - It lists `bzip2-sys`, `libz-sys`, and `aws-lc-sys` as if linked, when none are. `bzip2` is never compiled (`zebra-state` pins `rocksdb` with `default-features = false, features = ["lz4"]`), `libz-sys` is build-time-only through `vergen-git2`, and `ring` is the TLS backend.
 - It gives the five linked native C/C++ libraries no scanner-matchable component. Each needs a `pkg:generic` entry with a pinned version and CPE: RocksDB 8.10.0 (`librocksdb-sys`), lz4 1.10.0 (`lz4-sys`), libsecp256k1 (`secp256k1-sys`, plus a second copy vendored in `libzcash_script`), the zcashd consensus C++ in `libzcash_script` 0.1.0, and the BoringSSL fork in `ring`.
 
-That augmentation has to be re-validated on every bump of those crates, and the recurring work is the real cost. Gate it on a concrete enterprise, federal, or Cyber Resilience Act consumer. Until then `Cargo.lock` is public and builds are reproducible, so any consumer can regenerate the crate graph. Consumers verify with:
-
-```sh
-gh attestation verify <archive> \
-  --repo ZcashFoundation/zebra \
-  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml \
-  --source-ref 'refs/tags/v<version>' \
-  --predicate-type https://spdx.dev/Document/v2.3
-```
+That augmentation has to be re-validated on every bump of those crates, and the recurring work is the real cost. Gate it on a concrete enterprise, federal, or Cyber Resilience Act consumer. Until then `Cargo.lock` is public, so any consumer can regenerate the crate graph. No SBOM attestation exists for the binary archives today. Once one does, consumers would verify it by adding `--predicate-type https://spdx.dev/Document/v2.3` to the archive's existing `gh attestation verify` command.
 
 A cheaper step fixes only the over-reporting, with no gate: build with `cargo-auditable` so the embedded, feature-accurate dependency list is readable by `syft`, `cargo-audit`, and `trivy`.
 
@@ -103,3 +98,7 @@ A cheaper step fixes only the over-reporting, with no gate: build with `cargo-au
 - `actions/attest-sbom`: <https://github.com/actions/attest-sbom>
 - `cargo-auditable`: <https://github.com/rust-secure-code/cargo-auditable>
 - `cargo binstall`: <https://github.com/cargo-bins/cargo-binstall>
+
+## Revision History
+
+- 2026-11-23: Stopped relying on unverified reproducibility as a control, recorded which archives have been rebuilt independently, and replaced the SBOM verification command, which failed because no SBOM attestation is published, with the step it would need.
