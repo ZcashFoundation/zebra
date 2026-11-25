@@ -32,7 +32,8 @@ use tokio::{
 use tower::{service_fn, Service, ServiceExt};
 
 use crate::server::http_request_compatibility::{
-    is_canonical_json_rpc_2_request, reencode_response, response_to_version, splice_response,
+    is_canonical_json_rpc_2_request, is_canonical_json_rpc_2_request_slow,
+    is_canonical_submitblock_request, reencode_response, response_to_version, splice_response,
     HttpRequestMiddleware, HttpRequestMiddlewareLayer, JsonRpcRequest, JsonRpcVersion,
 };
 
@@ -192,6 +193,71 @@ async fn canonical_json_rpc_2_passes_through_unchanged() {
         assert_eq!(
             round_trip(request, response).await,
             (request.to_string(), response.to_string())
+        );
+    }
+}
+
+/// The strict SIMD shortcut must agree with the original parser about forwarding every body.
+#[test]
+fn submitblock_fast_path_matches_original_canonical_decision() {
+    for hex in [
+        "aB",
+        "",
+        "00",
+        "f",
+        "0x00",
+        "0X00",
+        "00gg",
+        r"00\u0030",
+        "00\"00",
+        "é",
+    ] {
+        for id in [
+            "0",
+            "1",
+            "18446744073709551615",
+            "+1",
+            "",
+            "18446744073709551616",
+            "01",
+            "-1",
+            "1e0",
+            "null",
+            "\"miner\"",
+        ] {
+            let body = format!(
+                r#"{{"jsonrpc":"2.0","method":"submitblock","params":["{hex}"],"id":{id}}}"#
+            );
+            let body = body.as_bytes();
+            let fast = is_canonical_submitblock_request(body);
+            let expected_fast = matches!(hex, "aB" | "" | "00" | "f")
+                && matches!(id, "0" | "1" | "18446744073709551615");
+            assert_eq!(fast, expected_fast, "hex: {hex:?}, id: {id:?}");
+            let original = is_canonical_json_rpc_2_request_slow(body);
+            assert!(!fast || original, "shortcut must be a subset: {id}");
+            assert_eq!(is_canonical_json_rpc_2_request(body), original, "id: {id}");
+        }
+    }
+    let large = "aB".repeat(1_900_000);
+    let body = format!(r#"{{"jsonrpc":"2.0","method":"submitblock","params":["{large}"],"id":1}}"#);
+    assert!(is_canonical_submitblock_request(body.as_bytes()));
+    assert_eq!(
+        is_canonical_json_rpc_2_request(body.as_bytes()),
+        is_canonical_json_rpc_2_request_slow(body.as_bytes())
+    );
+    for body in [
+        br#"{"jsonrpc":"1.0","method":"submitblock","params":["00"],"id":1}"#.as_slice(),
+        br#"{"jsonrpc":"2.0","method":"submitblock","params":["00",{}],"id":1}"#,
+        br#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1,"x":0}"#,
+        br#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1} "#,
+        br#"{"jsonrpc":"2.0","method":"submitblock","params":["00"],"id":1}"#,
+        b"{\"jsonrpc\":\"2.0\",\"method\":\"submitblock\",\"params\":[\"\xff\"],\"id\":1}",
+    ] {
+        assert_eq!(
+            is_canonical_json_rpc_2_request(body),
+            is_canonical_json_rpc_2_request_slow(body),
+            "body: {:?}",
+            String::from_utf8_lossy(&body[..body.len().min(128)])
         );
     }
 }

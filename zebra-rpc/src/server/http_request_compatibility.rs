@@ -480,6 +480,10 @@ fn bytes_body(bytes: Bytes) -> HttpBody {
 /// Returns true if `body` is a single JSON-RPC 2.0 call that `jsonrpsee` reads the same way
 /// before and after re-encoding: only known fields, no escapes, canonical positional params.
 pub(super) fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
+    is_canonical_submitblock_request(body) || is_canonical_json_rpc_2_request_slow(body)
+}
+
+pub(super) fn is_canonical_json_rpc_2_request_slow(body: &[u8]) -> bool {
     // `jsonrpsee` only skips 128 bytes of leading whitespace, and re-encoding removes it.
     if body.first() != Some(&b'{') {
         return false;
@@ -494,6 +498,33 @@ pub(super) fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
             .id
             .is_none_or(|id| is_unescaped_string(id) || id.get().parse::<u64>().is_ok())
         && request.params.is_none_or(is_canonical_params)
+}
+
+/// A strict subset of canonical requests that needs only one SIMD scan before jsonrpsee parses it.
+pub(super) fn is_canonical_submitblock_request(body: &[u8]) -> bool {
+    // Adapted from Zakura (MIT OR Apache-2.0): avoid parsing a large unescaped hex string twice.
+    const PREFIX: &[u8] = br#"{"jsonrpc":"2.0","method":"submitblock","params":[""#;
+    let Some(rest) = body.strip_prefix(PREFIX) else {
+        return false;
+    };
+    let Some(end) = memchr::memmem::rfind(rest, br#""],"id":"#) else {
+        return false;
+    };
+    let (hex, tail) = rest.split_at(end);
+    let Some(id) = tail
+        .strip_prefix(br#""],"id":"#)
+        .and_then(|tail| tail.strip_suffix(b"}"))
+    else {
+        return false;
+    };
+    let Ok(id) = std::str::from_utf8(id) else {
+        return false;
+    };
+    id.len() <= 20
+        && (id == "0" || !id.starts_with('0'))
+        && id.bytes().all(|byte| byte.is_ascii_digit())
+        && id.parse::<u64>().is_ok()
+        && const_hex::check_raw(hex)
 }
 
 /// Returns true if `params` is an unspaced array of unescaped strings, integers, booleans or nulls.
