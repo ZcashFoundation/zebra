@@ -1,14 +1,30 @@
-//! The [ZIP-317 block production algorithm](https://zips.z.cash/zip-0317#block-production).
+//! Mempool transaction selection for block templates.
 //!
-//! This is recommended algorithm, so these calculations are not consensus-critical,
-//! or standardised across node implementations:
-//! > it is sufficient to use floating point arithmetic to calculate the argument to `floor`
-//! > when computing `size_target`, since there is no consensus requirement for this to be
-//! > exactly the same between implementations.
+//! [`select_mempool_transactions()`] reserves the space that the block header, the transaction
+//! count and the coinbase transaction need, and [`select_by_fee_rate()`] fills the rest of the
+//! block with mempool transactions.
+//!
+//! A mempool transaction can spend outputs of other mempool transactions, which then have to go in
+//! the block before it. So each transaction is rated together with the mempool transactions it
+//! depends on, directly or indirectly, that are not in the template yet: by their total miner fee
+//! per unit of their total [ZIP 401] cost. The best-rated transaction goes in along with those
+//! dependencies, which changes the rates of the transactions that depend on them. That way a
+//! transaction that pays a high fee can bring in dependencies that pay low fees.
+//!
+//! Rates are compared exactly. Equal rates go in the order the transactions entered the mempool,
+//! then in transaction ID order, so the same mempool always gives the same template.
+//!
+//! These rules are not consensus-critical, so other node implementations can fill templates
+//! differently.
+//!
+//! [ZIP 401]: https://zips.z.cash/zip-0401
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    cmp::{Ordering, Reverse},
+    collections::{BTreeSet, HashMap, HashSet},
+};
 
-use rand::distr::{weighted::WeightedIndex, Distribution};
+use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -42,16 +58,15 @@ type SelectedMempoolTx = (InBlockTxDependenciesDepth, VerifiedUnminedTx);
 #[cfg(not(test))]
 type SelectedMempoolTx = VerifiedUnminedTx;
 
-/// Selects mempool transactions for block production according to [ZIP-317],
-/// using a fake coinbase transaction and the mempool.
+/// Selects mempool transactions for block production, using a fake coinbase transaction to
+/// reserve the coinbase's share of the block limits, and [`select_by_fee_rate()`] to fill the rest
+/// of the block.
 ///
 /// The sizing coinbase must have at least the bytes, sigops, and shielded components of the
 /// fee-bearing coinbase. Both use the same subsidy and miner parameters; changing only the
 /// reward amount does not change these costs.
 ///
-/// Returns selected transactions from `mempool_txs`.
-///
-/// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+/// Returns selected transactions from `mempool_txs`, in the order they were selected.
 #[allow(clippy::too_many_arguments)]
 pub fn select_mempool_transactions(
     net: &Network,
@@ -90,24 +105,10 @@ pub fn select_mempool_transactions(
             cb
         });
 
-    let tx_dependencies = mempool_tx_deps.dependencies();
-    let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
-        mempool_txs
-            .into_iter()
-            .map(|tx| (tx.transaction.id.mined_id(), tx))
-            .partition(|(tx_id, _tx)| !tx_dependencies.contains_key(tx_id));
-
-    // Setup the transaction lists.
-    let (mut conventional_fee_txs, mut low_fee_txs): (Vec<_>, Vec<_>) = independent_mempool_txs
-        .into_values()
-        .partition(VerifiedUnminedTx::pays_conventional_fee);
-
-    let mut selected_txs = Vec::new();
-
     // Set up limit tracking
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
-    let mut remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
+    let remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
     let mut remaining_shielded = ShieldedBudget::new(net, height);
 
     // `MAX_BLOCK_BYTES` limits the whole serialized block, so reserve space for the block header
@@ -120,10 +121,10 @@ pub fn select_mempool_transactions(
     // a coinbase that exhausts the byte or sigop budget without wrapping.
     let Some(block_bytes) = remaining_block_bytes.checked_sub(fake_coinbase_tx.data.as_ref().len())
     else {
-        return selected_txs;
+        return Vec::new();
     };
     let Some(block_sigops) = remaining_block_sigops.checked_sub(fake_coinbase_tx.sigops) else {
-        return selected_txs;
+        return Vec::new();
     };
     let coinbase: Transaction = fake_coinbase_tx
         .data
@@ -131,49 +132,21 @@ pub fn select_mempool_transactions(
         .zcash_deserialize_into()
         .expect("locally constructed coinbase must deserialize");
     if !remaining_shielded.try_add(&coinbase) {
-        return selected_txs;
+        return Vec::new();
     }
     remaining_block_bytes = block_bytes;
     remaining_block_sigops = block_sigops;
 
-    // > Repeat while there is any candidate transaction
-    // > that pays at least the conventional fee:
-    let mut conventional_fee_tx_weights = setup_fee_weighted_index(&conventional_fee_txs);
-
-    while let Some(tx_weights) = conventional_fee_tx_weights {
-        conventional_fee_tx_weights = checked_add_transaction_weighted_random(
-            &mut conventional_fee_txs,
-            &mut dependent_mempool_txs,
-            tx_weights,
-            &mut selected_txs,
-            &mempool_tx_deps,
-            &mut remaining_block_bytes,
-            &mut remaining_block_sigops,
-            // The number of unpaid actions is always zero for transactions that pay the
-            // conventional fee, so this check and limit is effectively ignored.
-            &mut remaining_block_unpaid_actions,
-            &mut remaining_shielded,
-        );
-    }
-
-    // > Repeat while there is any candidate transaction:
-    let mut low_fee_tx_weights = setup_fee_weighted_index(&low_fee_txs);
-
-    while let Some(tx_weights) = low_fee_tx_weights {
-        low_fee_tx_weights = checked_add_transaction_weighted_random(
-            &mut low_fee_txs,
-            &mut dependent_mempool_txs,
-            tx_weights,
-            &mut selected_txs,
-            &mempool_tx_deps,
-            &mut remaining_block_bytes,
-            &mut remaining_block_sigops,
-            &mut remaining_block_unpaid_actions,
-            &mut remaining_shielded,
-        );
-    }
-
-    selected_txs
+    select_by_fee_rate(
+        mempool_txs,
+        &mempool_tx_deps,
+        BlockSpace {
+            bytes: remaining_block_bytes,
+            sigops: remaining_block_sigops,
+            unpaid_actions: remaining_block_unpaid_actions,
+            shielded: remaining_shielded,
+        },
+    )
 }
 
 /// Returns the maximum possible serialized size of a block's transaction count, in bytes.
@@ -195,173 +168,484 @@ fn max_transaction_count_size() -> usize {
         .len()
 }
 
-/// Returns a fee-weighted index and the total weight of `transactions`.
+/// A block template with this many unused bytes or fewer is full enough: no more transactions are
+/// tried, even if a small one would still fit.
+const UNUSED_BYTES_WHEN_FULL: usize = 3_000;
+
+/// A block template is also full enough after this many tries in a row fail.
 ///
-/// Returns `None` if there are no transactions, or if the weights are invalid.
-fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<WeightedIndex<f32>> {
-    if transactions.is_empty() {
-        return None;
-    }
-
-    let tx_weights: Vec<f32> = transactions.iter().map(|tx| tx.fee_weight_ratio).collect();
-
-    // Setup the transaction weights.
-    WeightedIndex::new(tx_weights).ok()
-}
-
-/// Checks if every item in `candidate_tx_deps` is present in `selected_txs`.
+/// Signature operations or [ZIP 218] shielded actions can run out while a block still has many
+/// unused bytes. Then most of the remaining candidates fail, and this limit ends the search for the
+/// few that could still fit.
 ///
-/// Requires items in `selected_txs` to be unique to work correctly.
-fn has_direct_dependencies(
-    candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
-    selected_txs: &Vec<SelectedMempoolTx>,
-) -> bool {
-    let Some(deps) = candidate_tx_deps else {
-        return true;
-    };
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+const FAILED_TRIES_BEFORE_FULL: usize = 1_000;
 
-    if selected_txs.len() < deps.len() {
-        return false;
-    }
+/// Fills `space` with transactions from `mempool_txs`, best fee rate first.
+///
+/// Each try takes the first candidate in [`QueueKey`] order, and adds it together with the
+/// unselected mempool transactions it depends on, or none of them if they don't all fit. Either way
+/// the candidate leaves the queue, and it only goes back in when one of the transactions it depends
+/// on is added.
+///
+/// `mempool_tx_deps` lists the mempool transactions that each transaction spends outputs from. A
+/// transaction that depends on one that is not in `mempool_txs` is never selected.
+///
+/// Rating a candidate visits every unselected transaction it depends on, and adding transactions
+/// rates every unselected transaction that depends on them again. So the work grows quickly with
+/// the number of mempool transactions that depend on each other, and this relies on the mempool
+/// keeping that number small.
+///
+/// Returns the selected transactions in the order they were added, which puts each one after the
+/// transactions it depends on.
+fn select_by_fee_rate(
+    mempool_txs: Vec<VerifiedUnminedTx>,
+    mempool_tx_deps: &TransactionDependencies,
+    space: BlockSpace,
+) -> Vec<SelectedMempoolTx> {
+    let mut selection = FeeRateSelection::new(mempool_txs, mempool_tx_deps, space);
+    let mut failed_tries = 0;
 
-    let mut num_available_deps = 0;
-    for tx in selected_txs {
-        #[cfg(test)]
-        let (_, tx) = tx;
-        if deps.contains(&tx.transaction.id.mined_id()) {
-            num_available_deps += 1;
+    while selection.space.bytes > UNUSED_BYTES_WHEN_FULL && failed_tries < FAILED_TRIES_BEFORE_FULL
+    {
+        let Some(best) = selection.queue.pop_first() else {
+            break;
+        };
+
+        if selection.try_add(best.id) {
+            failed_tries = 0;
         } else {
-            continue;
-        }
-
-        if num_available_deps == deps.len() {
-            return true;
+            failed_tries += 1;
         }
     }
 
-    false
+    selection.into_selected()
 }
 
-/// Returns the depth of a transaction's dependencies in the block for a candidate
-/// transaction with the provided dependencies.
-#[cfg(test)]
-fn dependencies_depth(
-    dependent_tx_id: &transaction::Hash,
-    mempool_tx_deps: &TransactionDependencies,
-) -> InBlockTxDependenciesDepth {
-    let mut current_level = 0;
-    let mut current_level_deps = mempool_tx_deps.direct_dependencies(dependent_tx_id);
-    while !current_level_deps.is_empty() {
-        current_level += 1;
-        current_level_deps = current_level_deps
-            .iter()
-            .flat_map(|dep_id| mempool_tx_deps.direct_dependencies(dep_id))
-            .collect();
-    }
+/// The space left in a block template under each block limit.
+#[derive(Clone)]
+struct BlockSpace {
+    /// The bytes left under `MAX_BLOCK_BYTES`.
+    bytes: usize,
 
-    current_level
+    /// The signature operations left under `MAX_BLOCK_SIGOPS`.
+    sigops: u32,
+
+    /// The unpaid actions left under the [ZIP 317] `BLOCK_UNPAID_ACTION_LIMIT`.
+    ///
+    /// [ZIP 317]: https://zips.z.cash/zip-0317#block-production
+    unpaid_actions: u32,
+
+    /// The [ZIP 218] shielded actions that are already in the block template.
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    shielded: ShieldedBudget,
 }
 
-/// Chooses a random transaction from `txs` using the weighted index `tx_weights`,
-/// and tries to add it to `selected_txs`.
-///
-/// If it fits in the supplied limits, adds it to `selected_txs`, and updates the limits.
-///
-/// Updates the weights of chosen transactions to zero, even if they weren't added,
-/// so they can't be chosen again.
-///
-/// Returns the updated transaction weights.
-/// If all transactions have been chosen, returns `None`.
-// TODO: Refactor these arguments into a struct and this function into a method.
-#[allow(clippy::too_many_arguments)]
-fn checked_add_transaction_weighted_random(
-    candidate_txs: &mut Vec<VerifiedUnminedTx>,
-    dependent_txs: &mut HashMap<transaction::Hash, VerifiedUnminedTx>,
-    tx_weights: WeightedIndex<f32>,
-    selected_txs: &mut Vec<SelectedMempoolTx>,
-    mempool_tx_deps: &TransactionDependencies,
-    remaining_block_bytes: &mut usize,
-    remaining_block_sigops: &mut u32,
-    remaining_block_unpaid_actions: &mut u32,
-    remaining_shielded: &mut ShieldedBudget,
-) -> Option<WeightedIndex<f32>> {
-    // > Pick one of those transactions at random with probability in direct proportion
-    // > to its weight_ratio, and remove it from the set of candidate transactions
-    let (new_tx_weights, candidate_tx) =
-        choose_transaction_weighted_random(candidate_txs, tx_weights);
+impl BlockSpace {
+    /// Returns the space left after adding `txs` in order, or `None` if one of them would go over a
+    /// block limit that [`TryUpdateBlockLimits`] checks.
+    fn after_adding<'tx>(
+        &self,
+        txs: impl IntoIterator<Item = &'tx VerifiedUnminedTx>,
+    ) -> Option<Self> {
+        let mut space = self.clone();
 
-    if !candidate_tx.try_update_block_template_limits(
-        remaining_block_bytes,
-        remaining_block_sigops,
-        remaining_block_unpaid_actions,
-        remaining_shielded,
-    ) {
-        return new_tx_weights;
-    }
-
-    let tx_dependencies = mempool_tx_deps.dependencies();
-    let selected_tx_id = &candidate_tx.transaction.id.mined_id();
-    debug_assert!(
-        !tx_dependencies.contains_key(selected_tx_id),
-        "all candidate transactions should be independent"
-    );
-
-    #[cfg(not(test))]
-    selected_txs.push(candidate_tx);
-
-    #[cfg(test)]
-    selected_txs.push((0, candidate_tx));
-
-    // Try adding any dependent transactions if all of their dependencies have been selected.
-
-    let mut current_level_dependents = mempool_tx_deps.direct_dependents(selected_tx_id);
-    while !current_level_dependents.is_empty() {
-        let mut next_level_dependents = HashSet::new();
-
-        for dependent_tx_id in &current_level_dependents {
-            // ## Note
-            //
-            // A necessary condition for adding the dependent tx is that it spends unmined outputs coming only from
-            // the selected txs, which come from the mempool. If the tx also spends in-chain outputs, it won't
-            // be added. This behavior is not specified by consensus rules and can be changed at any time,
-            // meaning that such txs could be added.
-            if has_direct_dependencies(tx_dependencies.get(dependent_tx_id), selected_txs) {
-                let Some(candidate_tx) = dependent_txs.remove(dependent_tx_id) else {
-                    continue;
-                };
-
-                // Transactions that don't pay the conventional fee should not have
-                // the same probability of being included as their dependencies.
-                if !candidate_tx.pays_conventional_fee() {
-                    continue;
-                }
-
-                if !candidate_tx.try_update_block_template_limits(
-                    remaining_block_bytes,
-                    remaining_block_sigops,
-                    remaining_block_unpaid_actions,
-                    remaining_shielded,
-                ) {
-                    continue;
-                }
-
-                #[cfg(not(test))]
-                selected_txs.push(candidate_tx);
-
-                #[cfg(test)]
-                selected_txs.push((
-                    dependencies_depth(dependent_tx_id, mempool_tx_deps),
-                    candidate_tx,
-                ));
-
-                next_level_dependents.extend(mempool_tx_deps.direct_dependents(dependent_tx_id));
+        for tx in txs {
+            if !tx.try_update_block_template_limits(
+                &mut space.bytes,
+                &mut space.sigops,
+                &mut space.unpaid_actions,
+                &mut space.shielded,
+            ) {
+                return None;
             }
         }
 
-        current_level_dependents = next_level_dependents;
+        Some(space)
+    }
+}
+
+/// A fee rate: miner fees in zatoshis per unit of [ZIP 401] cost.
+///
+/// Fee rates are ordered by their exact value, so equal fractions like 1/2 and 2/4 are equal.
+///
+/// [ZIP 401]: https://zips.z.cash/zip-0401
+#[derive(Clone, Copy, Debug)]
+struct FeeRate {
+    /// The total miner fee, in zatoshis.
+    fees: u64,
+
+    /// The total cost, which is not zero, because every transaction costs at least 10,000.
+    costs: u64,
+}
+
+impl Ord for FeeRate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // `a / b` and `c / d` compare like `a * d` and `c * b` when `b` and `d` are positive. A
+        // product of two `u64`s always fits in a `u128`, so nothing is rounded.
+        let scaled_self = u128::from(self.fees) * u128::from(other.costs);
+        let scaled_other = u128::from(other.fees) * u128::from(self.costs);
+
+        scaled_self.cmp(&scaled_other)
+    }
+}
+
+impl PartialOrd for FeeRate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for FeeRate {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for FeeRate {}
+
+/// The place of a candidate in the queue, where the lowest key is tried first.
+///
+/// Keys are compared field by field: a higher fee rate goes first, then an earlier mempool entry
+/// time, with an unknown time before any known time, then a lower mined ID, comparing its bytes in
+/// internal order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct QueueKey {
+    /// The fee rate of the candidate and the unselected transactions it depends on.
+    rate: Reverse<FeeRate>,
+
+    /// The time the candidate entered the mempool, if it is known.
+    time: Option<DateTime<Utc>>,
+
+    /// The mined ID of the candidate.
+    id: transaction::Hash,
+}
+
+/// A candidate transaction in the queue.
+struct Candidate {
+    /// The candidate's place in the queue.
+    key: QueueKey,
+
+    /// The unselected transactions that the candidate depends on, and then the candidate itself,
+    /// in [`Links::block_order()`].
+    block_order: Vec<transaction::Hash>,
+}
+
+/// The links between mempool transactions that spend outputs of other mempool transactions, by
+/// mined ID.
+#[derive(Default)]
+struct Links {
+    /// The mempool transactions that each transaction spends outputs from, including any that are
+    /// not candidates.
+    dependencies: HashMap<transaction::Hash, Vec<transaction::Hash>>,
+
+    /// The mempool transactions that spend outputs of each transaction.
+    dependents: HashMap<transaction::Hash, Vec<transaction::Hash>>,
+}
+
+impl Links {
+    /// Returns the links in `deps`.
+    ///
+    /// The dependents are worked out from the dependencies, so the two always agree, and every
+    /// transaction that depends on an added one is rated again.
+    fn new(deps: &TransactionDependencies) -> Self {
+        let mut links = Self::default();
+
+        for (dependent, dependencies) in deps.dependencies() {
+            for dependency in dependencies {
+                links
+                    .dependents
+                    .entry(*dependency)
+                    .or_default()
+                    .push(*dependent);
+            }
+
+            links
+                .dependencies
+                .insert(*dependent, dependencies.iter().copied().collect());
+        }
+
+        links
     }
 
-    new_tx_weights
+    /// Returns the mempool transactions that `id` spends outputs from.
+    fn dependencies_of(&self, id: &transaction::Hash) -> &[transaction::Hash] {
+        self.dependencies
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Returns the mempool transactions that spend outputs of `id`.
+    fn dependents_of(&self, id: &transaction::Hash) -> &[transaction::Hash] {
+        self.dependents
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Returns `txs` in an order that a block can have them in: each one after the transactions in
+    /// `txs` that it spends outputs from, and the lowest mined ID first among the ones that can go
+    /// next.
+    ///
+    /// Returns `None` if some of `txs` spend outputs from each other in a cycle, so they have no
+    /// such order.
+    fn block_order(&self, txs: &HashSet<transaction::Hash>) -> Option<Vec<transaction::Hash>> {
+        // For each transaction in `txs`, how many of the others it still waits for, and which of
+        // the others wait for it.
+        let mut waits_for: HashMap<transaction::Hash, usize> = HashMap::with_capacity(txs.len());
+        let mut waited_on_by: HashMap<transaction::Hash, Vec<transaction::Hash>> = HashMap::new();
+
+        for &tx in txs {
+            let mut count = 0;
+
+            for &dependency in self.dependencies_of(&tx) {
+                if txs.contains(&dependency) {
+                    count += 1;
+                    waited_on_by.entry(dependency).or_default().push(tx);
+                }
+            }
+
+            waits_for.insert(tx, count);
+        }
+
+        let mut ready: BTreeSet<transaction::Hash> = waits_for
+            .iter()
+            .filter(|(_, count)| **count == 0)
+            .map(|(tx, _)| *tx)
+            .collect();
+        let mut order = Vec::with_capacity(txs.len());
+
+        while let Some(next) = ready.pop_first() {
+            order.push(next);
+
+            for waiting in waited_on_by
+                .get(&next)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                // Every transaction in `waited_on_by` is in `txs`, so it has a count.
+                if let Some(count) = waits_for.get_mut(waiting) {
+                    // Each link is counted once, and `next` leaves `ready` only once, so the count
+                    // can't go below zero.
+                    *count -= 1;
+
+                    if *count == 0 {
+                        ready.insert(*waiting);
+                    }
+                }
+            }
+        }
+
+        (order.len() == txs.len()).then_some(order)
+    }
+}
+
+/// A block template while [`select_by_fee_rate()`] fills it.
+struct FeeRateSelection {
+    /// The links between the mempool transactions.
+    links: Links,
+
+    /// The mempool transactions that are not in the template yet, by mined ID.
+    pending: HashMap<transaction::Hash, VerifiedUnminedTx>,
+
+    /// The mined IDs of the transactions in the template.
+    in_template: HashSet<transaction::Hash>,
+
+    /// The transactions in the template, in the order they were added.
+    added: Vec<VerifiedUnminedTx>,
+
+    /// The space left in the template.
+    space: BlockSpace,
+
+    /// The candidates that can be tried, in the order they are tried.
+    queue: BTreeSet<QueueKey>,
+
+    /// The candidates in `queue`, by mined ID.
+    candidates: HashMap<transaction::Hash, Candidate>,
+}
+
+impl FeeRateSelection {
+    /// Returns an empty template with `space` left, and every transaction in `mempool_txs` that can
+    /// be added to it in the queue.
+    fn new(
+        mempool_txs: Vec<VerifiedUnminedTx>,
+        deps: &TransactionDependencies,
+        space: BlockSpace,
+    ) -> Self {
+        let pending: HashMap<_, _> = mempool_txs
+            .into_iter()
+            .map(|tx| (tx.transaction.id.mined_id(), tx))
+            .collect();
+        let ids: Vec<_> = pending.keys().copied().collect();
+
+        let mut selection = Self {
+            links: Links::new(deps),
+            pending,
+            in_template: HashSet::new(),
+            added: Vec::new(),
+            space,
+            queue: BTreeSet::new(),
+            candidates: HashMap::new(),
+        };
+
+        for id in ids {
+            selection.rate(id);
+        }
+
+        selection
+    }
+
+    /// Rates `id` against the transactions in the template now, and puts it in the queue in place
+    /// of its old rate, if it has one.
+    ///
+    /// Leaves it out of the queue if it can't be added to the template, see [`Self::candidate()`].
+    fn rate(&mut self, id: transaction::Hash) {
+        if let Some(old) = self.candidates.remove(&id) {
+            self.queue.remove(&old.key);
+        }
+
+        if let Some(candidate) = self.candidate(id) {
+            self.queue.insert(candidate.key);
+            self.candidates.insert(id, candidate);
+        }
+    }
+
+    /// Returns `id` as a candidate, with the unselected transactions it depends on.
+    ///
+    /// Returns `None` if `id` is not pending, if it depends on a transaction that is neither in the
+    /// template nor pending, if it depends on transactions that spend outputs from each other in a
+    /// cycle, or if the fees or costs add up to more than a `u64` can hold.
+    fn candidate(&self, id: transaction::Hash) -> Option<Candidate> {
+        let tx = self.pending.get(&id)?;
+
+        // `id` and the pending transactions it depends on, with their total fees and costs.
+        let mut needed = HashSet::from([id]);
+        let mut fees = u64::from(tx.miner_fee);
+        let mut costs = tx.cost();
+
+        let mut unexplored = vec![id];
+        while let Some(next) = unexplored.pop() {
+            for dependency in self.links.dependencies_of(&next) {
+                // A transaction in the template has all its dependencies in the template, so
+                // there is nothing more to explore there.
+                if self.in_template.contains(dependency) || needed.contains(dependency) {
+                    continue;
+                }
+
+                let dependency_tx = self.pending.get(dependency)?;
+                fees = fees.checked_add(u64::from(dependency_tx.miner_fee))?;
+                costs = costs.checked_add(dependency_tx.cost())?;
+
+                needed.insert(*dependency);
+                unexplored.push(*dependency);
+            }
+        }
+
+        Some(Candidate {
+            key: QueueKey {
+                rate: Reverse(FeeRate { fees, costs }),
+                time: tx.time,
+                id,
+            },
+            block_order: self.links.block_order(&needed)?,
+        })
+    }
+
+    /// Tries to add the candidate `id` together with the unselected transactions it depends on.
+    ///
+    /// Returns `false`, and leaves the template unchanged, if any of them would go over a block
+    /// limit.
+    fn try_add(&mut self, id: transaction::Hash) -> bool {
+        let candidate = self
+            .candidates
+            .remove(&id)
+            .expect("every key in the queue belongs to a candidate");
+
+        let txs = candidate.block_order.iter().map(|tx_id| {
+            self.pending
+                .get(tx_id)
+                .expect("candidates only list pending transactions")
+        });
+        let Some(space) = self.space.after_adding(txs) else {
+            return false;
+        };
+        self.space = space;
+
+        for tx_id in &candidate.block_order {
+            // A dependency can be a candidate too.
+            if let Some(dependency) = self.candidates.remove(tx_id) {
+                self.queue.remove(&dependency.key);
+            }
+
+            let tx = self
+                .pending
+                .remove(tx_id)
+                .expect("candidates only list pending transactions");
+            self.in_template.insert(*tx_id);
+            self.added.push(tx);
+        }
+
+        self.rate_dependents_again(&candidate.block_order);
+
+        true
+    }
+
+    /// Rates again every transaction that depends on `added`, directly or indirectly, because some
+    /// of the transactions it depends on are now in the template.
+    fn rate_dependents_again(&mut self, added: &[transaction::Hash]) {
+        let mut reached = HashSet::new();
+        let mut generation = added.to_vec();
+
+        while !generation.is_empty() {
+            generation = generation
+                .iter()
+                .flat_map(|id| self.links.dependents_of(id))
+                .filter(|dependent| reached.insert(**dependent))
+                .copied()
+                .collect();
+        }
+
+        for id in reached {
+            self.rate(id);
+        }
+    }
+
+    /// Returns the transactions in the template, in the order they were added.
+    #[cfg(not(test))]
+    fn into_selected(self) -> Vec<SelectedMempoolTx> {
+        self.added
+    }
+
+    /// Returns the transactions in the template, in the order they were added, each with its
+    /// depth: 0 if it spends no outputs of other transactions in the template, and otherwise one
+    /// more than the deepest transaction in the template that it spends outputs from.
+    #[cfg(test)]
+    fn into_selected(self) -> Vec<SelectedMempoolTx> {
+        let mut depths: HashMap<transaction::Hash, InBlockTxDependenciesDepth> = HashMap::new();
+
+        self.added
+            .into_iter()
+            .map(|tx| {
+                let id = tx.transaction.id.mined_id();
+                let depth = self
+                    .links
+                    .dependencies_of(&id)
+                    .iter()
+                    .map(|dependency| {
+                        *depths.get(dependency).expect(
+                            "a transaction is added after all the transactions it depends on",
+                        )
+                    })
+                    .max()
+                    .map_or(0, |deepest| deepest + 1);
+
+                depths.insert(id, depth);
+                (depth, tx)
+            })
+            .collect()
+    }
 }
 
 /// Tracks a block template's [ZIP 218] shielded action budget.
@@ -374,6 +658,7 @@ fn checked_add_transaction_weighted_random(
 /// blocks and a `getblocktemplate` proposal round-trip would fail.
 ///
 /// [ZIP 218]: https://zips.z.cash/zip-0218
+#[derive(Clone)]
 struct ShieldedBudget {
     /// Whether the ZIP 218 limits apply at this block's height.
     applies: bool,
@@ -462,21 +747,4 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
             false
         }
     }
-}
-
-/// Choose a transaction from `transactions`, using the previously set up `weighted_index`.
-///
-/// If some transactions have not yet been chosen, returns the weighted index and the transaction.
-/// Otherwise, just returns the transaction.
-fn choose_transaction_weighted_random(
-    candidate_txs: &mut Vec<VerifiedUnminedTx>,
-    weighted_index: WeightedIndex<f32>,
-) -> (Option<WeightedIndex<f32>>, VerifiedUnminedTx) {
-    let candidate_position = weighted_index.sample(&mut rand::rng());
-    let candidate_tx = candidate_txs.swap_remove(candidate_position);
-
-    // We have to regenerate this index each time we choose a transaction, due to floating-point sum inaccuracies.
-    // If we don't, some chosen transactions can end up with a tiny non-zero weight, leading to duplicates.
-    // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
-    (setup_fee_weighted_index(candidate_txs), candidate_tx)
 }

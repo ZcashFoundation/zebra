@@ -228,6 +228,14 @@ Zebra keeps a block template ready, so `getblocktemplate` answers without buildi
 replaces that template when the chain tip changes, and when the mempool verifies a new transaction,
 at most once a second.
 
+Zebra fills each template with mempool transactions in order of fee rate: miner fees per unit of
+[ZIP 401](https://zips.z.cash/zip-0401) cost. A transaction that spends outputs of other unconfirmed
+transactions is rated and added together with them, so a transaction with a high fee can bring in
+parents with low fees, and the same mempool always gives the same template transactions. Zebra
+treats a template as full when 3,000 bytes or fewer are unused. It also stops looking for more
+transactions after 1,000 tries in a row fail, where each try is a transaction together with the
+unconfirmed transactions it needs.
+
 When a block arrives from a peer, Zebra serves a coinbase-only template on top of it as soon as its
 proof of work, difficulty and header commitments are checked, while its transactions are still
 being verified. If the block turns out to be invalid, Zebra goes back to a template on the

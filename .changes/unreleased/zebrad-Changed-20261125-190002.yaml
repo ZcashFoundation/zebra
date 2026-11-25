@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed `getblocktemplate` to fill block templates in order of fee rate, in miner fees per unit of ZIP 401 cost, instead of at random. A transaction that spends outputs of other unconfirmed transactions is rated and added together with them, so the same mempool always gives the same template transactions.'
+time: 2026-11-25T19:00:02.000000000Z

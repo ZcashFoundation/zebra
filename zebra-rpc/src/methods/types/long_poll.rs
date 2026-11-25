@@ -61,7 +61,8 @@ pub struct LongPollInput {
     /// when the template containing this long poll ID was generated.
     /// We ignore changes to authorizing data.
     ///
-    /// This might be different from the transactions in the template, due to ZIP-317.
+    /// This might be different from the transactions in the template, due to transaction
+    /// selection.
     ///
     /// If the mempool transactions change, a new template might be provided.
     /// Old work is still valid.
@@ -163,7 +164,7 @@ pub struct LongPollId {
     //
     /// The number of transactions in the mempool when the template containing this long poll ID
     /// was generated. This might be different from the number of transactions in the template,
-    /// due to ZIP-317.
+    /// due to transaction selection.
     ///
     /// If the number of mempool transactions changes, a new template might be provided.
     /// Old work is still valid.
@@ -178,7 +179,8 @@ pub struct LongPollId {
     /// when the template containing this long poll ID was generated.
     /// We ignore changes to authorizing data.
     ///
-    /// This might be different from the transactions in the template, due to ZIP-317.
+    /// This might be different from the transactions in the template, due to transaction
+    /// selection.
     ///
     /// If the content of the mempool changes, a new template might be provided.
     /// Old work is still valid.

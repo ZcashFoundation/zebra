@@ -1,7 +1,14 @@
 //! ZIP-317 tests.
 
-use super::{mempool_checks, Amount, Error, GRACE_ACTIONS, MARGINAL_FEE};
-use crate::block::MAX_BLOCK_BYTES;
+use std::sync::Arc;
+
+use super::{
+    conventional_fee_weight_ratio, mempool_checks, Amount, Error, GRACE_ACTIONS, MARGINAL_FEE,
+};
+use crate::{
+    block::MAX_BLOCK_BYTES,
+    transaction::{LockTime, Transaction, UnminedTx},
+};
 
 #[test]
 fn zip317_unpaid_actions_err() {
@@ -39,4 +46,21 @@ fn minimum_conventional_fee_passes_the_size_floor_at_any_size() {
              must pass the size-based minimum fee",
         );
     }
+}
+
+#[test]
+fn fee_weight_ratio_is_not_capped() {
+    let transaction = UnminedTx::from(Arc::new(Transaction::test_v1(
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+    )));
+    let miner_fee = Amount::try_from(100 * u64::from(transaction.conventional_fee))
+        .expect("100 times the minimum conventional fee is far below the maximum amount");
+
+    assert_eq!(
+        conventional_fee_weight_ratio(&transaction, miner_fee),
+        100.0,
+        "a transaction that pays 100 times its conventional fee has a fee weight ratio of 100",
+    );
 }

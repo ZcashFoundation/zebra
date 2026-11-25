@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: 'Changed `transaction::zip317::conventional_fee_weight_ratio()` and `transaction::VerifiedUnminedTx::fee_weight_ratio` to no longer cap the ratio at 10, because block template selection does not use it any more.'
+time: 2026-11-25T19:00:01.000000000Z

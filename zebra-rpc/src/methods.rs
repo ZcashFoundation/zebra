@@ -3045,8 +3045,7 @@ where
 
         // - Processing fetched data to create a transaction template
         //
-        // Apart from random weighted transaction selection,
-        // the template only depends on the previously fetched data.
+        // The template only depends on the previously fetched data.
         // This processing never fails.
 
         tracing::debug!(
@@ -3060,7 +3059,7 @@ where
         let height = chain_info.tip_height.next().map_misc_error()?;
         let build_started = std::time::Instant::now();
 
-        // Randomly select some mempool transactions.
+        // Select mempool transactions in fee rate order.
         let coinbase_cache = self.gbt.coinbase_cache();
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(&self.network, &chain_info);
 

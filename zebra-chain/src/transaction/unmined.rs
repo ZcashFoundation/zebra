@@ -314,12 +314,14 @@ pub struct VerifiedUnminedTx {
     /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
     pub unpaid_actions: u32,
 
-    /// The fee weight ratio for `transaction`, as defined by [ZIP-317] for block production.
+    /// The fee weight ratio for `transaction`: its miner fee divided by its [ZIP-317] conventional
+    /// fee, for mempool metrics. The ratio is not capped, and block template selection does not
+    /// use it.
     ///
     /// This is not consensus-critical, so we use `f32` for efficient calculations
     /// when the mempool holds a large number of transactions.
     ///
-    /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
     pub fee_weight_ratio: f32,
 
     /// The time the transaction was added to the mempool, or None if it has not
