@@ -191,7 +191,7 @@ uint = "0.10"
 vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "3.0.0"
 zcash_note_encryption = "0.5.1"
-zcash_script = "0.6"
+zcash_script = "0.6.1"
 zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime", "tcp-transport"] }
 config = { version = "0.15.14", default-features = false, features = ["toml"] }
 which = "8.0.0"
@@ -412,5 +412,3 @@ pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "67d1040a
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "9d272a0f08def464067673cf92edbe1a0d01986e" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
 sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "3e175751a626e99a449b7ffe44631a44e6875dd4" }
-# Await the asm hex rendering in https://github.com/ZcashFoundation/zcash_script/pull/311.
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", rev = "08556638dfd1a517d887b27acbff46bb24273f1e" }
