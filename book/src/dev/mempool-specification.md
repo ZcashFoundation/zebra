@@ -143,6 +143,8 @@ The mempool exposes a service interface with the following request types:
    - `FullTransactions`: Get all verified transactions with fee information
    - `RejectedTransactionIds`: Query rejected transaction IDs
    - `TransactionWithDepsByMinedId`: Get a transaction and its dependencies
+   - `VerifiedTransactionsForBlock`: Get the verified transactions with a block's mined hashes, if
+     the block's parent is the mempool's tip
 
 2. **Action Requests**:
    - `Queue`: Queue transactions or transaction IDs for download and verification
@@ -163,12 +165,19 @@ The mempool interacts with several other Zebra components:
 
 5. **RPC Services**: To provide transaction data for RPC methods.
 
+6. **Block Verifier**: To reuse the verification of a block's transactions that are in the
+   mempool, when the block's parent is the mempool's tip.
+
 ## Implementation Constraints
 
 1. **Correctness**:
    - All transactions in the mempool must be verified
    - Transactions must be re-verified when the chain tip changes
    - Rejected transactions must be properly tracked to prevent DoS attacks
+   - The block verifier skips the transaction verifier for transactions in the mempool, so the
+     mempool must only store transactions that the transaction verifier would accept in a block in
+     the network upgrade that the mempool verified them in, except for the rules that the block
+     verifier checks again for each block
 
 2. **Performance**:
    - Transaction processing should be asynchronous

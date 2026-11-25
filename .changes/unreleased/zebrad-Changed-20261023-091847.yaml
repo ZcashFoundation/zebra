@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reuse verified mempool transactions when validating blocks on the same chain tip, while rechecking block-context consensus rules.
+time: 2026-10-23T09:18:47.744046156+02:00

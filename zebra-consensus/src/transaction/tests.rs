@@ -1106,13 +1106,15 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
-/// Confirms block verification always queries the state service fresh, even
-/// when the same transaction was already verified and cached by the mempool
-/// verifier. `BlockTxVerifier` has no dependency on any mempool service, so
-/// this is now also enforced structurally; this test additionally checks the
-/// runtime behavior when both verifiers share a state backend.
+/// Confirms the block transaction verifier always queries the state service
+/// fresh, even when the same transaction was already verified and cached by the
+/// mempool verifier. `BlockTxVerifier` has no dependency on any mempool service,
+/// so this is now also enforced structurally; this test additionally checks the
+/// runtime behavior when both verifiers share a state backend. The block
+/// verifier's reuse of the mempool's verification, which skips this verifier,
+/// is tested in `block::tests::mempool_reuse`.
 #[tokio::test(flavor = "multi_thread")]
-async fn block_verification_does_not_use_mempool_verified_state() {
+async fn block_tx_verifier_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
@@ -1230,10 +1232,11 @@ async fn block_verification_does_not_use_mempool_verified_state() {
     };
 
     // The mempool has already verified this transaction, and it is now submitted twice as a block
-    // request. Each request runs full block verification independently, which for this transaction
-    // means fetching the spent UTXO from the state service, so two AwaitUtxo responses are queued
-    // below. Reuse of the mempool's result — or of the first block request's result — is prevented
-    // structurally: BlockTxVerifier holds no mempool handle and caches nothing across requests.
+    // request. Each request runs the block transaction verifier independently, which for this
+    // transaction means fetching the spent UTXO from the state service, so two AwaitUtxo responses
+    // are queued below. This verifier can't reuse the mempool's result — or the first block
+    // request's result — because BlockTxVerifier holds no mempool handle and caches nothing across
+    // requests.
     let utxo_clone = utxo.clone();
     tokio::spawn(async move {
         state
@@ -5315,9 +5318,11 @@ async fn mempool_zip317_ok() {
 /// same transaction share a mined id. The original bug let a mempool-cached result for that id
 /// stand in for verification of the block transaction.
 ///
-/// [`BlockTxVerifier`] has no mempool handle, so it cannot consult mempool state at all. That
-/// makes the bypass structurally impossible rather than merely untaken, which is why this test
-/// only needs to check that the garbage proofs are rejected on their own merits.
+/// [`BlockTxVerifier`] has no mempool handle, so this test only needs to check that the garbage
+/// proofs are rejected on their own merits. The block verifier reuses the mempool's verification
+/// of a block transaction only if the mempool's entry has the same unmined ID, which includes the
+/// authorizing data digest, so it sends the garbage version to this verifier. That is tested by
+/// `block::tests::mempool_reuse::same_txid_with_different_authorizing_data_is_a_miss`.
 #[tokio::test(flavor = "multi_thread")]
 async fn block_with_garbage_orchard_proofs_is_rejected() {
     let _init_guard = zebra_test::init();
@@ -5392,10 +5397,12 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
 /// to the tip (not only exactly at it), and the download pipeline verifies blocks up to
 /// `tip + full_verify_concurrency_limit` ahead of it.
 ///
-/// That fast path no longer exists, and [`BlockTxVerifier`] holds no mempool handle, so the
-/// bypass can no longer be reconstructed from a block request. What remains testable, and what
-/// this test pins, is the rule the bypass evaded: block verification rejects a transaction whose
-/// `nExpiryHeight` is below the block height.
+/// That fast path no longer exists, and [`BlockTxVerifier`] holds no mempool handle. This test
+/// pins the rule the bypass evaded: block transaction verification rejects a transaction whose
+/// `nExpiryHeight` is below the block height. The block verifier reuses the mempool's verification
+/// of a transaction only in a block whose parent is the mempool's tip, so never in a block ahead
+/// of that tip, and it checks each reused transaction's expiry height at the block's height. That
+/// is tested by `block::tests::mempool_reuse::eligible_hits_recheck_expiry_height_and_lock_time`.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() {
     let _init_guard = zebra_test::init();

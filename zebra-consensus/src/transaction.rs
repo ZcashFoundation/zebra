@@ -304,7 +304,10 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            // Do quick checks first
+            // Do quick checks first. The block verifier runs only these checks on a transaction
+            // that it takes from the mempool, and skips the rest of this verifier for it, so a
+            // rule that depends on the block's height or time must be checked in
+            // `check_block_context_rules`.
             check_block_context_rules(tx.as_ref(), height, time, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
@@ -577,11 +580,9 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
-            // spends both chain and mempool UTXOs (mempool outputs are appended last by
-            // `mempool_spent_utxos()`), causing policy checks to pair the wrong input with
-            // the wrong spent output.
-            // https://github.com/ZcashFoundation/zebra/issues/10346
+            // `mempool_spent_utxos()` fills the spent outputs in input order, including outputs from the
+            // mempool, so each input is paired with its own spent output. Block verification
+            // reuses this result, so that pairing is a consensus rule here.
             let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
 
             let transaction = VerifiedUnminedTx::new(
@@ -777,6 +778,20 @@ where
 
 /// Checks the rules for `tx` that depend on the block it is in, at `height` with the header
 /// time `time`, without its scripts, proofs or signatures.
+///
+/// The block transaction verifier starts with these checks. The block verifier runs only these
+/// checks on a transaction that it takes from the mempool, and skips the rest of the block
+/// transaction verifier for it, because the mempool has verified that transaction in the same
+/// network upgrade.
+///
+/// # Correctness
+///
+/// A rule that depends on the block's height or time, other than through its network upgrade,
+/// must be checked here, or the block verifier won't check it for transactions from the mempool.
+/// That includes a soft fork that activates at a height inside a network upgrade. The block
+/// verifier only checks that the mempool verified a transaction in the block's network upgrade,
+/// so a soft fork that changes how scripts, proofs or signatures are verified must also stop it
+/// from reusing verifications from before the soft fork's activation height.
 pub(crate) fn check_block_context_rules(
     tx: &Transaction,
     height: block::Height,
@@ -786,7 +801,13 @@ pub(crate) fn check_block_context_rules(
     check_common_consensus_rules(tx, height, network)?;
     // Block transactions are checked against the block's own time directly.
     check::lock_time_has_passed(tx, height, time)?;
-    Ok(())
+    let upgrade = NetworkUpgrade::current(network, height);
+    match tx.tx_version() {
+        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, upgrade),
+        _ => Err(TransactionError::WrongVersion),
+    }
 }
 
 /// Applies every consensus rule that a transaction must satisfy in both block and mempool
@@ -797,9 +818,11 @@ pub(crate) fn check_block_context_rules(
 /// [`BlockTxVerifier`] and [`MempoolTxVerifier`] are separate services with no shared code
 /// path, so a rule added to only one of them silently makes the two disagree. When the
 /// mempool accepts a transaction that block verification would reject, that transaction
-/// reaches block templates but makes the resulting block unmineable, stalling block
-/// production for every pool running Zebra. See
-/// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+/// reaches block templates. The block verifier takes the mempool's verification of a
+/// transaction in a block on the mempool's tip instead of running [`BlockTxVerifier`], so
+/// Zebra would accept that block, while nodes that verify the transaction in full reject it.
+/// The rules in this function still run for that transaction, in `check_block_context_rules`.
+/// See <https://github.com/ZcashFoundation/zebra/issues/9301>.
 ///
 /// Any new rule that applies to a transaction regardless of where it is being verified
 /// belongs here, so that both verifiers pick it up. Rules that only apply to one context

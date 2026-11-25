@@ -265,11 +265,12 @@ proptest! {
     ///
     /// # Correctness
     ///
-    /// This is the invariant that keeps Zebra's block templates mineable. If the mempool
+    /// This is the invariant that keeps the blocks Zebra accepts valid. If the mempool
     /// accepts a transaction that block verification would reject, that transaction is
-    /// selected into a block template, and every block mined from that template is refused
-    /// by the same node that produced it. An attacker who can craft such a transaction
-    /// stalls block production for every mining pool running Zebra.
+    /// selected into a block template. The block verifier takes the mempool's verification of
+    /// a transaction in a block on the mempool's tip, so the node that produced the template
+    /// would accept a block mined from it, while nodes that verify the transaction in full
+    /// reject it.
     ///
     /// [`BlockTxVerifier`](transaction::BlockTxVerifier) and
     /// [`MempoolTxVerifier`](transaction::MempoolTxVerifier) are separate services, so
@@ -325,7 +326,7 @@ proptest! {
             prop_assert!(
                 block_result.is_ok(),
                 "the mempool accepted a transaction that block verification rejected, \
-                 so it would make a block template unmineable: {}",
+                 so the block verifier would accept it from the mempool: {}",
                 block_result.unwrap_err()
             );
 

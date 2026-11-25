@@ -25,6 +25,15 @@
 //! Only `Ok` results are cached. A batch error is not per-item evidence, because
 //! [`Fallback`](tower_fallback::Fallback) re-verifies failures singly, and it may not be a verdict
 //! at all — a shut-down batch worker reports the same way. Caching it would reject a valid block.
+//!
+//! # Reuse of the mempool's verification
+//!
+//! The block verifier skips the transaction verifier, and this cache, for a block transaction that
+//! the mempool has verified, but only when the mempool's tip is the block's parent, and the mempool
+//! verified the same authorizing data in the block's network upgrade. Unlike the removed bypass, it
+//! checks the rules that depend on the block's height and time again, and the state checks the
+//! transaction's spends. The block's other transactions go through the transaction verifier and
+//! this cache.
 
 use std::{
     collections::{HashSet, VecDeque},

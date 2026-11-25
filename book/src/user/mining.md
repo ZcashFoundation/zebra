@@ -236,9 +236,13 @@ previous tip. Miners that long poll `getblocktemplate` see both changes.
 Zebra validates each template as a block proposal in the background. When a miner submits that
 template with only a nonce and an Equihash solution added, Zebra checks the proof of work and
 commits the block without validating it again. A template with a changed coinbase transaction or
-time is verified in full when it is submitted. Zebra still runs every transaction check, and only
-skips the proofs, signatures and transparent scripts that it has already verified for the same
-transaction, for example in the mempool.
+time is verified when it is submitted.
+
+When Zebra verifies a block or a block proposal on its mempool's chain tip, it reuses the mempool's
+verification of the block's transactions that are in the mempool. For those transactions, it only
+checks the rules that depend on the block, such as expiry heights and lock times, and the state
+still checks their spends. Zebra verifies the block's other transactions, and only skips the
+proofs, signatures and transparent scripts that it has already verified for the same transaction.
 
 ## Run a mining pool
 

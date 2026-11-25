@@ -107,7 +107,7 @@ async fn template(
 /// The node reuses the verdicts of successful proposal checks, including the checks of the
 /// templates it serves, for blocks that differ from them only in their nonce and solution.
 /// Templates use the current time or the parent's minimum time, so a time later than both makes
-/// the node verify this block's transactions. It stays well within the consensus time limits.
+/// the node verify this block. It stays well within the consensus time limits.
 fn retimed(block: &Block) -> Result<Block> {
     let mut block = block.clone();
     let later = block
@@ -132,11 +132,12 @@ async fn best_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash
 }
 
 /// Blocks containing transactions from the mempool are accepted and rejected exactly as they
-/// would be if the mempool had not already verified their transparent scripts.
+/// would be if the mempool had not already verified them.
 ///
 /// The transactions are admitted by the node's mempool, which remembers their successful script
-/// verifications, and the blocks are checked by its block verifier and state, never by reusing an
-/// earlier check of the same block. Covers:
+/// verifications, and whose verification the block verifier reuses for blocks on its tip. The
+/// blocks are checked by the block verifier and state, never by reusing an earlier check of the
+/// same block. Covers:
 /// - authorizing data that differs from the admitted transaction, under the same transaction ID,
 /// - a block time before an admitted transaction's lock time,
 /// - acceptance of a block that mines the admitted transactions.
@@ -213,10 +214,10 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
         mempool(&client, &admitted).await?;
         let block = template(&client, &network, tip_hash, &admitted).await?;
 
-        // The admitted transaction's ID still matches, but its authorizing data differs, so its
-        // script must be verified again rather than answered from the mempool's success, which
-        // would leave only the block commitment check to fail. Proposal checks never reuse earlier
-        // verdicts, so they can start from the template.
+        // The admitted transaction's ID still matches, but its authorizing data differs, so the
+        // transaction and its script must be verified again rather than answered from the
+        // mempool's success, which would leave only the block commitment check to fail. Proposal
+        // checks never reuse an earlier proposal check, so they can start from the template.
         let mut forged = block.clone();
         let position = forged
             .transactions
@@ -244,7 +245,7 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
 
         // A block on the same parent mines the admitted transactions. Proposal reuse ignores only
         // the nonce and solution, so a later time than the served template makes the node verify
-        // the block's transactions instead of reusing a template check.
+        // the block instead of reusing a template check.
         let mined = retimed(&block)?;
         assert!(mined.header.time > block.header.time);
         client.submit_block(mined.clone()).await?;

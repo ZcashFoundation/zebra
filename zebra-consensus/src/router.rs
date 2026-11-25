@@ -23,7 +23,11 @@ use std::{
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
@@ -267,6 +271,8 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
+/// The `mempool` channel gives both verifiers the mempool service, which is created after them.
+/// The block verifier uses it to skip verifying transactions the mempool has already verified.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -388,13 +394,23 @@ where
         .instrument(Span::current()),
     );
 
+    // Both the mempool transaction verifier and the block verifier use the mempool.
+    let (transaction_mempool_sender, transaction_mempool) = oneshot::channel();
+    let (block_mempool_sender, block_mempool) = oneshot::channel();
+    tokio::spawn(async move {
+        if let Ok(mempool) = mempool.await {
+            let _ = block_mempool_sender.send(BoxCloneService::new(mempool.clone()));
+            let _ = transaction_mempool_sender.send(mempool);
+        }
+    });
+
     // transaction verification
 
     let block_transaction = transaction::BlockTxVerifier::new(network, state_service.clone());
     let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
 
     let mempool_transaction =
-        transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
+        transaction::MempoolTxVerifier::new(network, state_service.clone(), transaction_mempool);
     let mempool_transaction =
         Buffer::new(BoxService::new(mempool_transaction), VERIFIER_BUFFER_BOUND);
 
@@ -419,7 +435,8 @@ where
     );
 
     let block =
-        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone())
+            .with_mempool(block_mempool);
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,
