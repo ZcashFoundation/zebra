@@ -5525,7 +5525,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7302,8 +7302,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.6.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script?rev=08556638dfd1a517d887b27acbff46bb24273f1e#08556638dfd1a517d887b27acbff46bb24273f1e"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6944ad759dda9a90e8f004cd9cc52987c563d176b9fd80d1c93cace3bf775eda"
 dependencies = [
  "bip32",
  "bitflags",
