@@ -3,8 +3,12 @@
 use std::{
     collections::HashMap,
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, LazyLock,
+    },
     task::{Context, Poll},
 };
 
@@ -14,6 +18,7 @@ use futures::{
     FutureExt,
 };
 use tokio::sync::oneshot;
+#[cfg(test)]
 use tokio_util::task::AbortOnDropHandle;
 use tower::{
     buffer::Buffer,
@@ -69,6 +74,36 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// of the transaction that spends it will fail.
 const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Persistent preparation workers, outside Rayon so lazy keys use its global pool.
+const PREPARATION_THREAD_PREFIX: &str = "zebra-tx-prep-";
+type PreparationJob = Box<dyn FnOnce() + Send + 'static>;
+struct PreparationPool {
+    workers: Vec<mpsc::Sender<PreparationJob>>,
+    next: AtomicUsize,
+}
+
+static PREPARATION_POOL: LazyLock<PreparationPool> = LazyLock::new(|| {
+    let workers = (0..std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
+        .map(|index| {
+            let (sender, receiver) = mpsc::channel::<PreparationJob>();
+            std::thread::Builder::new()
+                .name(format!("{PREPARATION_THREAD_PREFIX}{index}"))
+                .spawn(move || {
+                    for job in receiver {
+                        // A bad transaction reports an error; a bug must not kill this worker.
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                    }
+                })
+                .expect("a transaction preparation worker can be started");
+            sender
+        })
+        .collect();
+    PreparationPool {
+        workers,
+        next: AtomicUsize::new(0),
+    }
+});
+
 /// Asynchronous verification of block transactions.
 ///
 /// # Correctness
@@ -90,6 +125,7 @@ where
 {
     /// Creates a new block transaction verifier.
     pub fn new(network: &Network, state: ZS) -> Self {
+        LazyLock::force(&PREPARATION_POOL);
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
@@ -129,6 +165,7 @@ where
     /// Creates a new mempool transaction verifier.
     /// Read-only lookups bypass the buffered state writer.
     pub fn new(network: &Network, state: ZS, mempool_setup_rx: oneshot::Receiver<Mempool>) -> Self {
+        LazyLock::force(&PREPARATION_POOL);
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
@@ -155,6 +192,7 @@ where
     /// mempool setup channel receiver.
     #[cfg(test)]
     pub fn new_for_tests(network: &Network, state: ZS) -> Self {
+        LazyLock::force(&PREPARATION_POOL);
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
@@ -985,11 +1023,11 @@ fn check_maturity_height(
 
 /// Builds the sighash data and queues the verification requests for `tx`.
 ///
-/// The block verifier polls all its transaction futures from one task, so this CPU work runs on a
-/// blocking thread, except for transactions small enough that the thread hop costs more.
-///
-/// Preparation can wait for lazily built verifying keys, whose construction uses the Rayon pool,
-/// so it must not run on a Rayon thread.
+/// The block verifier polls all its transaction futures from one task, so this CPU work runs on
+/// dedicated preparation workers, except for transactions small enough that the hop costs more.
+/// Preparation can wait for lazily built verifying keys whose construction uses the global Rayon
+/// pool, so these workers must not be Rayon threads. The async checks they construct are not
+/// polled on the preparation workers.
 async fn prepare_transaction(
     tx: Arc<Transaction>,
     spent_outputs: Vec<transparent::Output>,
@@ -1021,17 +1059,43 @@ async fn prepare_transaction(
     }
 
     let span = tracing::Span::current();
+    let handle = tokio::runtime::Handle::current();
     #[cfg(test)]
     let prepare = tests::with_verifier_task_locals(prepare);
-    AbortOnDropHandle::new(tokio::task::spawn_blocking(move || span.in_scope(prepare)))
+    let (response_tx, response_rx) = oneshot::channel();
+    let worker =
+        PREPARATION_POOL.next.fetch_add(1, Ordering::Relaxed) % PREPARATION_POOL.workers.len();
+    PREPARATION_POOL.workers[worker]
+        .send(Box::new(move || {
+            // Dropping the receiver skips a queued job; a job already running finishes normally.
+            if !response_tx.is_closed() {
+                let _rt = handle.enter();
+                let _ = response_tx.send(span.in_scope(prepare));
+            }
+        }))
+        .unwrap_or_else(|_| panic!("the persistent preparation worker must still be receiving"));
+    #[cfg(test)]
+    {
+        // Tokio's paused test clock auto-advances while external threads work, but a blocking
+        // task inhibits that advance until the preparation result arrives.
+        AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+            response_rx.blocking_recv()
+        }))
         .await
-        .expect("preparation reports invalid transactions as errors, and is aborted only on drop")
+        .expect("the test-only waiter only receives a preparation result")
+        .expect("preparation reports invalid transactions as errors; worker panics are bugs")
+    }
+    #[cfg(not(test))]
+    {
+        response_rx
+            .await
+            .expect("preparation reports invalid transactions as errors; worker panics are bugs")
+    }
 }
 
 /// Returns `true` if `tx` has no shielded data and only a few short transparent scripts.
 ///
-/// Preparing such a transaction inline takes 1-2 µs, less than the 2-3 µs that spawning it onto a
-/// blocking thread would add to the polling task, before the thread wakeup.
+/// Preparing such a transaction inline takes 1-2 µs, less than a worker wakeup would cost.
 fn is_small_transparent(tx: &Transaction, spent_outputs: &[transparent::Output]) -> bool {
     if tx.has_shielded_data() {
         return false;
