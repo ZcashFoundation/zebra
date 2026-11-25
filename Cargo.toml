@@ -404,9 +404,9 @@ unwrap_in_result = "warn"
 result_large_err = "allow"
 
 [patch.crates-io]
-halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "360774d03644347de24975737938f06aec4dd521" }
-halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "360774d03644347de24975737938f06aec4dd521" }
-halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "360774d03644347de24975737938f06aec4dd521" }
+halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "a7facdf33077bc6c6d861ea9b5681c6a106f84a3" }
+halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "a7facdf33077bc6c6d861ea9b5681c6a106f84a3" }
+halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "a7facdf33077bc6c6d861ea9b5681c6a106f84a3" }
 orchard = { git = "https://github.com/upbqdn/orchard", rev = "2ea5fef78e9642636d9c8b033f61476093f42e6e" }
 pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "62f83c889634e10a6f0c34cf3e69d0e2f4e05b38" }
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "9d272a0f08def464067673cf92edbe1a0d01986e" }
