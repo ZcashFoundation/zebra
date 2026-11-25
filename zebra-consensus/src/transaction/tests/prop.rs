@@ -710,6 +710,7 @@ fn validate_with_state(
                 transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                parent_utxos: Arc::new(HashMap::new()),
                 height,
                 time: block_time,
             })
@@ -747,6 +748,7 @@ fn validate(
                 transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
+                parent_utxos: Arc::new(HashMap::new()),
                 height,
                 time: block_time,
             })

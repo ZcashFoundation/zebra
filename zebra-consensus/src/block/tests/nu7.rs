@@ -116,6 +116,17 @@ async fn verify(
             zebra_state::Request::MiningCandidate(_) => {
                 return Err("early mining is disabled in this fixture".into());
             }
+            zebra_state::Request::AnyChainUtxos { outpoints } => {
+                assert_eq!(outpoints, vec![outpoint()]);
+                zebra_state::Response::AnyChainUtxos(Arc::new(
+                    [(
+                        outpoint(),
+                        transparent::OrderedUtxo::new(output(10_000), Height(1), 1).utxo,
+                    )]
+                    .into_iter()
+                    .collect(),
+                ))
+            }
             zebra_state::Request::AwaitUtxos(requested) => {
                 assert_eq!(requested, vec![outpoint()]);
                 zebra_state::Response::Utxos(vec![

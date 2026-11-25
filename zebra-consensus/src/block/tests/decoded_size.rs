@@ -180,6 +180,9 @@ async fn check_decoded_evidence(use_reconstruction: bool) {
                             zs::Request::MiningCandidate(_) => {
                                 Ok(zs::Response::MiningCandidate(None))
                             }
+                            zs::Request::AnyChainUtxos { .. } => {
+                                Ok(zs::Response::AnyChainUtxos(Default::default()))
+                            }
                             zs::Request::RejectBlock(_) => {
                                 rejected.fetch_add(1, Ordering::SeqCst);
                                 Ok(zs::Response::Rejected(false))

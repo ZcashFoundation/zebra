@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: '`BlockRequest` now requires a `parent_utxos` field. Construct it from prefetched transparent outputs, or pass an empty map to keep the existing state lookup behavior ([#12579](https://github.com/ZcashFoundation/zebra/pull/12579)).'
+time: 2026-11-22T00:00:02.000000000+00:00
