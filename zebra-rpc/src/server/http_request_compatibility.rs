@@ -500,31 +500,136 @@ pub(super) fn is_canonical_json_rpc_2_request_slow(body: &[u8]) -> bool {
         && request.params.is_none_or(is_canonical_params)
 }
 
-/// A strict subset of canonical requests that needs only one SIMD scan before jsonrpsee parses it.
+/// A single-pass shortcut for canonical submits. Malformed or unfamiliar JSON uses the slow path.
 pub(super) fn is_canonical_submitblock_request(body: &[u8]) -> bool {
-    // Adapted from Zakura (MIT OR Apache-2.0): avoid parsing a large unescaped hex string twice.
-    const PREFIX: &[u8] = br#"{"jsonrpc":"2.0","method":"submitblock","params":[""#;
-    let Some(rest) = body.strip_prefix(PREFIX) else {
+    fn whitespace(body: &mut &[u8]) {
+        while let Some((&byte, rest)) = body.split_first() {
+            if !matches!(byte, b' ' | b'\t' | b'\r' | b'\n') {
+                break;
+            }
+            *body = rest;
+        }
+    }
+
+    fn token(body: &mut &[u8], expected: &[u8]) -> bool {
+        whitespace(body);
+        if let Some(rest) = body.strip_prefix(expected) {
+            *body = rest;
+            true
+        } else {
+            false
+        }
+    }
+
+    // `jsonrpsee` skips at most 128 leading whitespace bytes; the generic path strips them.
+    if body.first() != Some(&b'{') {
         return false;
-    };
-    let Some(end) = memchr::memmem::rfind(rest, br#""],"id":"#) else {
+    }
+    let mut rest = body;
+    if !token(&mut rest, b"{") {
         return false;
-    };
-    let (hex, tail) = rest.split_at(end);
-    let Some(id) = tail
-        .strip_prefix(br#""],"id":"#)
-        .and_then(|tail| tail.strip_suffix(b"}"))
-    else {
-        return false;
-    };
-    let Ok(id) = std::str::from_utf8(id) else {
-        return false;
-    };
-    id.len() <= 20
-        && (id == "0" || !id.starts_with('0'))
-        && id.bytes().all(|byte| byte.is_ascii_digit())
-        && id.parse::<u64>().is_ok()
-        && const_hex::check_raw(hex)
+    }
+    let mut seen = 0u8;
+    loop {
+        whitespace(&mut rest);
+        let (key, bit) = if let Some(tail) = rest.strip_prefix(br#""jsonrpc""#) {
+            (tail, 1)
+        } else if let Some(tail) = rest.strip_prefix(br#""method""#) {
+            (tail, 2)
+        } else if let Some(tail) = rest.strip_prefix(br#""params""#) {
+            (tail, 4)
+        } else if let Some(tail) = rest.strip_prefix(br#""id""#) {
+            (tail, 8)
+        } else {
+            return false;
+        };
+        if seen & bit != 0 {
+            return false;
+        }
+        seen |= bit;
+        rest = key;
+        if !token(&mut rest, b":") {
+            return false;
+        }
+
+        match bit {
+            1 if !token(&mut rest, br#""2.0""#) => return false,
+            2 if !token(&mut rest, br#""submitblock""#) => return false,
+            4 => {
+                if !token(&mut rest, b"[") || !token(&mut rest, b"\"") {
+                    return false;
+                }
+                // Check long hex runs with SIMD; scan only the last chunk byte by byte.
+                while rest.len() >= 512 && const_hex::check_raw(&rest[..512]) {
+                    rest = &rest[512..];
+                }
+                while let Some((&byte, tail)) = rest.split_first() {
+                    if byte == b'"' {
+                        break;
+                    }
+                    if !byte.is_ascii_hexdigit() {
+                        return false;
+                    }
+                    rest = tail;
+                }
+                if !token(&mut rest, b"\"") || !token(&mut rest, b"]") {
+                    return false;
+                }
+            }
+            8 => {
+                whitespace(&mut rest);
+                if let Some(tail) = rest.strip_prefix(b"null") {
+                    rest = tail;
+                } else if let Some(tail) = rest.strip_prefix(b"\"") {
+                    let Some(end) = memchr::memchr2(b'"', b'\\', tail) else {
+                        return false;
+                    };
+                    let id = &tail[..end];
+                    if std::str::from_utf8(id).is_err() || id.iter().any(|byte| *byte < 0x20) {
+                        return false;
+                    }
+                    rest = &tail[end..];
+                    if !token(&mut rest, b"\"") {
+                        return false;
+                    }
+                } else {
+                    let first = rest.first().copied();
+                    let mut value = 0u64;
+                    let mut digits = 0;
+                    while let Some((&byte, tail)) = rest.split_first() {
+                        if !byte.is_ascii_digit() {
+                            break;
+                        }
+                        let Some(next) = value
+                            .checked_mul(10)
+                            .and_then(|value| value.checked_add(u64::from(byte - b'0')))
+                        else {
+                            return false;
+                        };
+                        value = next;
+                        digits += 1;
+                        rest = tail;
+                    }
+                    if digits == 0 || (digits > 1 && first == Some(b'0')) {
+                        return false;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        whitespace(&mut rest);
+        if let Some(tail) = rest.strip_prefix(b"}") {
+            rest = tail;
+            whitespace(&mut rest);
+            return seen == 15 && rest.is_empty();
+        }
+        if let Some(tail) = rest.strip_prefix(b",") {
+            rest = tail;
+        } else {
+            return false;
+        }
+    }
 }
 
 /// Returns true if `params` is an unspaced array of unescaped strings, integers, booleans or nulls.
