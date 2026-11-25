@@ -1,14 +1,15 @@
 //! Regression tests for non-finalized write notifications.
 
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use zebra_chain::{
     amount::NonNegative, block::Block, chain_tip::ChainTip, parameters::Network,
-    value_balance::ValueBalance,
+    serialization::ZcashDeserializeInto, value_balance::ValueBalance,
 };
 
 use crate::{
     arbitrary::Prepare,
+    service::precomputed_trees::REUSED_TREES,
     tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
     Config,
 };
@@ -401,4 +402,77 @@ fn finalizing_does_not_report_ancestors_of_retained_forks() {
         assert!(rejected.insert(hash), "each evicted block is reported once");
     }
     assert_eq!(rejected, [high.hash(), middle.hash()].into());
+}
+
+/// The block write task computes early mining work on a block that extends the best tip, and
+/// then commits that block.
+#[tokio::test]
+async fn write_worker_computes_work_for_a_mining_candidate() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let [mut block1, block2]: [Block; 2] = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ]
+    .map(|bytes| bytes.zcash_deserialize_into().expect("block is valid"));
+
+    // Mainnet block 1 was mined hours after the genesis block, which the contextual time rule
+    // doesn't allow. The state doesn't check proof of work, so the header can be changed.
+    let context =
+        read::difficulty::get_block_template_chain_info(&state, &finalized.db, &Network::Mainnet)
+            .expect("a state with a genesis block has a context for the next block");
+    let header = Arc::make_mut(&mut block1.header);
+    header.time = context.min_time.into();
+    header.difficulty_threshold = context.expected_difficulty;
+    let (block1, block2) = (Arc::new(block1), Arc::new(block2));
+
+    let (tip_sender, latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, _state_receiver) = watch::channel(state.clone());
+    let (sender, _resets, _rejections, _worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    let mining_candidate = |block: Arc<Block>| async {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        tx.send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+            .await
+            .expect("the write task answers")
+            .expect("the write task is running")
+    };
+
+    // A block that doesn't extend the best tip doesn't get any work.
+    assert_eq!(mining_candidate(block2).await, None);
+
+    let chain_info = mining_candidate(block1.clone())
+        .await
+        .expect("a block that extends the best tip gets work");
+    assert_eq!(chain_info.tip_hash, block1.hash());
+    assert_eq!(chain_info.tip_height, Height(1));
+
+    // The commit of the same block reuses the candidate's note commitment trees. It only does
+    // that for the block allocation the candidate was computed from, so this fails if the two
+    // messages stop sharing it.
+    let reused_trees = || REUSED_TREES.load(Ordering::SeqCst);
+    let reused_trees_before = reused_trees();
+
+    let (rsp_tx, rsp_rx) = oneshot::channel();
+    tx.send(NonFinalizedWriteMessage::Commit((
+        block1.clone().prepare(),
+        rsp_tx,
+    )))
+    .unwrap();
+    let committed = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+        .await
+        .expect("the write task answers")
+        .expect("the write task is running");
+    assert_eq!(committed.ok(), Some(block1.hash()));
+    assert_eq!(latest.best_tip_hash(), Some(block1.hash()));
+    assert!(
+        reused_trees() > reused_trees_before,
+        "the commit reuses the trees that were computed for the candidate"
+    );
 }

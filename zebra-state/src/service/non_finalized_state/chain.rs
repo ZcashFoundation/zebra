@@ -385,10 +385,20 @@ impl Chain {
     /// subsidy and miner fees. This method validates the chain updates in
     /// [`Self::update_chain_tip_with`]; success alone does not establish contextual validity.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+    pub fn push(self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+        self.push_with_trees(block, None)
+    }
+
+    /// Pushes `block` like [`Self::push`], reusing the `precomputed` note commitment trees if
+    /// they were computed from the same block body and this chain's tip trees.
+    pub(crate) fn push_with_trees(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+        precomputed: Option<&crate::service::precomputed_trees::PrecomputedTrees>,
+    ) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
         let entries_before = self.shared_map_entry_count();
-        self.update_chain_tip_with(&block)?;
+        self.update_chain_tip_with_block_parallel(&block, precomputed)?;
         let block_entries = self.shared_map_entry_count() - entries_before;
         self.index_entries_by_height
             .insert(block.height, block_entries);
@@ -1982,23 +1992,9 @@ impl Chain {
         tx_ids
     }
 
-    /// Update the chain tip with the `contextually_valid` block,
-    /// running note commitment tree updates in parallel with other updates.
-    ///
-    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(
-        skip(self, contextually_valid),
-        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
-    )]
-    #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with_block_parallel(
-        &mut self,
-        contextually_valid: &ContextuallyVerifiedBlock,
-    ) -> Result<(), ValidateContextError> {
-        let height = contextually_valid.height;
-
-        // Prepare data for parallel execution
-        let mut nct = NoteCommitmentTrees {
+    /// Returns the tip's note commitment trees and subtrees, which a new block's trees extend.
+    pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree_for_tip(),
             sapling: self.sapling_note_commitment_tree_for_tip(),
             sapling_subtree: self.sapling_subtree_for_tip(),
@@ -2006,7 +2002,27 @@ impl Chain {
             orchard_subtree: self.orchard_subtree_for_tip(),
             ironwood: self.ironwood_note_commitment_tree_for_tip(),
             ironwood_subtree: self.ironwood_subtree_for_tip(),
-        };
+        }
+    }
+
+    /// Update the chain tip with the `contextually_valid` block,
+    /// running note commitment tree updates in parallel with other updates.
+    ///
+    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
+    #[instrument(
+        skip(self, contextually_valid, precomputed),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
+    #[allow(clippy::unwrap_in_result)]
+    fn update_chain_tip_with_block_parallel(
+        &mut self,
+        contextually_valid: &ContextuallyVerifiedBlock,
+        precomputed: Option<&crate::service::precomputed_trees::PrecomputedTrees>,
+    ) -> Result<(), ValidateContextError> {
+        let height = contextually_valid.height;
+
+        // Prepare data for parallel execution
+        let mut nct = self.note_commitment_trees_for_tip();
 
         let mut tree_result = None;
         let mut partial_result = None;
@@ -2016,7 +2032,21 @@ impl Chain {
         // - the rest of the Chain updates
         rayon::in_place_scope_fifo(|scope| {
             // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+            tree_result = Some(
+                match precomputed
+                    .and_then(|precomputed| precomputed.reuse(&contextually_valid.block, &nct))
+                {
+                    Some(trees) => {
+                        #[cfg(test)]
+                        crate::service::precomputed_trees::REUSED_TREES
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                        nct = trees;
+                        Ok(())
+                    }
+                    None => nct.update_trees_parallel(&contextually_valid.block.clone()),
+                },
+            );
 
             scope.spawn_fifo(|_scope| {
                 partial_result =
@@ -2285,7 +2315,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
-        self.update_chain_tip_with_block_parallel(contextually_valid)
+        self.update_chain_tip_with_block_parallel(contextually_valid, None)
     }
 
     #[instrument(

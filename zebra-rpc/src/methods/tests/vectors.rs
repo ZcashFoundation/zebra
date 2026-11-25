@@ -3838,6 +3838,10 @@ async fn getblocktemplate_precomputed() {
                             })
                         }
                         ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected read state request: {other:?}"),
                     });
             }
@@ -4013,7 +4017,13 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                 let tip_reads = tip_reads.clone();
                 read_state
                     .expect_request_that(|req| {
-                        matches!(req, ReadRequest::ChainInfo | ReadRequest::Tip)
+                        matches!(
+                            req,
+                            ReadRequest::ChainInfo
+                                | ReadRequest::Tip
+                                | ReadRequest::MiningCandidate
+                                | ReadRequest::MiningCandidateChanges
+                        )
                     })
                     .await
                     .respond_with(move |req| match req {
@@ -4036,6 +4046,10 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                         ReadRequest::Tip => {
                             tip_reads.fetch_add(1, Ordering::SeqCst);
                             ReadResponse::Tip(Some((tip_height, tip_hash)))
+                        }
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
                         }
                         other => panic!("unexpected read state request: {other:?}"),
                     });
@@ -4213,6 +4227,10 @@ async fn getblocktemplate_long_poll_expires_once() {
                             ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
                         }
                         ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected state request: {other:?}"),
                     })
                 }
@@ -4487,6 +4505,10 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
                             })
                         }
                         ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected read state request: {other:?}"),
                     });
             }
@@ -4625,6 +4647,80 @@ async fn rpc_submitblock_errors() {
 
     // See zebrad's `integration::regtest::regtest_block_templates_are_valid_block_submissions`
     // for the success case.
+}
+
+/// `submitblock` stops waiting for a block that the block verifier doesn't answer for, like a
+/// block whose parent is still being verified, and reports that the block wasn't validated. The
+/// block's verification carries on, and the block is announced when it is committed.
+#[tokio::test(start_paused = true)]
+async fn rpc_submitblock_stops_waiting_for_the_block_verifier() {
+    use crate::SubmitBlockChannel;
+
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut block_verifier_router: MockService<_, _, _, BoxError> =
+        MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let submitted_blocks = SubmitBlockChannel::new();
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state, 1),
+        block_verifier_router.clone(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        Some(submitted_blocks.sender()),
+    );
+    let mut mined_blocks = submitted_blocks.receiver();
+
+    let block_bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+    let block: Block = block_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    let mut submission =
+        tokio::spawn(async move { rpc.submit_block(HexData(block_bytes), None).await });
+
+    // Keep the request without answering it, as the verifier does for a block that waits for
+    // its parent.
+    let pending_request = block_verifier_router
+        .expect_request_that(|request| matches!(request, zebra_consensus::Request::Commit(_)))
+        .await;
+
+    let just_before = SUBMIT_BLOCK_TIMEOUT - Duration::from_secs(1);
+    assert!(
+        tokio::time::timeout(just_before, &mut submission)
+            .await
+            .is_err(),
+        "submitblock waits for the block verifier until its timeout",
+    );
+
+    let response = tokio::time::timeout(Duration::from_secs(2), submission)
+        .await
+        .expect("submitblock answers at its timeout")
+        .expect("the submitblock task doesn't panic");
+    assert_eq!(response, Ok(SubmitBlockErrorResponse::Inconclusive.into()));
+    assert!(
+        mined_blocks.try_recv().is_err(),
+        "a block isn't announced before it is committed",
+    );
+
+    // The request wasn't dropped: the block is committed after the answer, and announced.
+    pending_request.respond(block.hash());
+    let mined_block = tokio::time::timeout(Duration::from_secs(1), mined_blocks.recv())
+        .await
+        .expect("the block is announced once it is committed");
+    assert_eq!(mined_block, Some((block.hash(), Height(1))));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5871,6 +5967,14 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     let waiting = rpc.precomputed_template_for_state_tip(&cache);
     tokio::pin!(waiting);
 
+    // Each attempt reads the mining candidate, then the tip.
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("the cache doesn't contain a template for the tip yet"),
+        request = read_state.expect_request(ReadRequest::MiningCandidate) => {
+            request.respond(ReadResponse::MiningCandidate(None));
+        }
+    }
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("the cache doesn't contain a template for the tip yet"),
@@ -5886,6 +5990,13 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("a template for the superseded tip must not be served"),
+        request = read_state.expect_request(ReadRequest::MiningCandidate) => {
+            request.respond(ReadResponse::MiningCandidate(None));
+        }
+    }
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("a template for the superseded tip must not be served"),
         request = read_state.expect_request(ReadRequest::Tip) => {
             request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
         }
@@ -5896,6 +6007,10 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
 
     let (served, ()) = tokio::join!(waiting, async {
         read_state
+            .expect_request(ReadRequest::MiningCandidate)
+            .await
+            .respond(ReadResponse::MiningCandidate(None));
+        read_state
             .expect_request(ReadRequest::Tip)
             .await
             .respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
@@ -5905,6 +6020,141 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
             .expect("the new tip's template should be served")
             .previous_block_hash,
         committed_hash,
+    );
+}
+
+/// Work on a block that the state is still verifying is served while that block is the state's
+/// mining candidate, and not after the state withdraws it.
+#[tokio::test(flavor = "multi_thread")]
+async fn getblocktemplate_serves_work_on_a_mining_candidate() {
+    let _init_guard = zebra_test::init();
+
+    let net = Network::Mainnet;
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let mining_conf = mining::Config {
+        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+            NetworkType::from(NetworkKind::from(&net)),
+            [0x7e; 20],
+        )),
+        extra_coinbase_data: None,
+        miner_memo: None,
+        internal_miner: false,
+    };
+
+    let tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("nu5 activation height");
+    let tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+
+    // The block the state commits while the call below is waiting.
+    let committed_height = tip_height.next().expect("height is below Height::MAX");
+    let committed_hash =
+        Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
+
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(tip_height);
+    mock_tip_sender.send_best_tip_hash(tip_hash);
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        net.clone(),
+        mining_conf,
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        state.clone(),
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        mock_sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let cache = rpc
+        .gbt
+        .template_cache()
+        .expect("the miner params were not overridden")
+        .clone();
+
+    // The updater has published work on a block that extends the tip, and is being verified.
+    let candidate_height = committed_height;
+    let candidate_hash = committed_hash;
+    let candidate = GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        tip_height: candidate_height,
+        tip_hash: candidate_hash,
+        cur_time: DateTime32::now(),
+        min_time: DateTime32::now(),
+        max_time: DateTime32::now(),
+        chain_history_root: fake_history_tree(&net).hash(),
+        chain_value_pools: Default::default(),
+    };
+    cache.publish(template_extending(&net, candidate_height, candidate_hash));
+
+    // While the state has the candidate, the work on it is served without reading the tip.
+    let (served, ()) = tokio::join!(rpc.precomputed_template_for_state_tip(&cache), async {
+        read_state
+            .expect_request(ReadRequest::MiningCandidate)
+            .await
+            .respond(ReadResponse::MiningCandidate(Some(candidate.clone())));
+    });
+    assert_eq!(
+        served
+            .expect("work on the mining candidate should be served")
+            .previous_block_hash,
+        candidate_hash,
+    );
+
+    // Once the state has withdrawn the candidate, the work on it isn't served.
+    let waiting = rpc.precomputed_template_for_state_tip(&cache);
+    tokio::pin!(waiting);
+
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("work on a withdrawn candidate must not be served"),
+        request = read_state.expect_request(ReadRequest::MiningCandidate) => {
+            request.respond(ReadResponse::MiningCandidate(None));
+        }
+    }
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("work on a withdrawn candidate must not be served"),
+        request = read_state.expect_request(ReadRequest::Tip) => {
+            request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+        }
+    }
+    assert!(futures::poll!(&mut waiting).is_pending());
+
+    // The updater publishes work on the tip again, which is served.
+    cache.publish(template_extending(&net, tip_height, tip_hash));
+
+    let (served, ()) = tokio::join!(waiting, async {
+        read_state
+            .expect_request(ReadRequest::MiningCandidate)
+            .await
+            .respond(ReadResponse::MiningCandidate(None));
+        read_state
+            .expect_request(ReadRequest::Tip)
+            .await
+            .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+    },);
+    assert_eq!(
+        served
+            .expect("work on the tip should be served")
+            .previous_block_hash,
+        tip_hash,
     );
 }
 

@@ -1179,6 +1179,18 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Starts computing early mining work on a block that is still being verified, so miners
+    /// can build on it before its transactions are verified.
+    ///
+    /// The caller must have checked the block's proof of work and transaction Merkle root, and
+    /// that its shielded data is within the block limits. The state checks the block's header
+    /// against the best tip.
+    ///
+    /// Returns [`Response::MiningCandidate`] straight away. The work is published once it is
+    /// computed. It is withdrawn when the guard is dropped, which the caller does when the block
+    /// is committed or rejected, and after a timeout.
+    MiningCandidate(Arc<Block>),
 }
 
 impl Request {
@@ -1209,6 +1221,7 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::MiningCandidate(_) => "mining_candidate",
         }
     }
 
@@ -1661,6 +1674,19 @@ pub enum ReadRequest {
     /// best chain state information.
     ChainInfo,
 
+    /// Get the state information for mining on top of a block that is still being verified,
+    /// if there is one whose parent is still the best tip.
+    ///
+    /// Returns [`ReadResponse::MiningCandidate`].
+    MiningCandidate,
+
+    /// Subscribe to publications and withdrawals of early mining work.
+    ///
+    /// The state only computes early mining work while there is a subscription.
+    ///
+    /// Returns [`ReadResponse::MiningCandidateChanges`].
+    MiningCandidateChanges,
+
     /// Get the average solution rate in the best chain.
     ///
     /// Returns [`ReadResponse::SolutionRate`]
@@ -1767,6 +1793,8 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
+            ReadRequest::MiningCandidate => "mining_candidate",
+            ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
@@ -1828,7 +1856,8 @@ impl TryFrom<Request> for ReadRequest {
             Request::CommitSemanticallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
-            | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
+            | Request::ReconsiderBlock(_)
+            | Request::MiningCandidate(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \

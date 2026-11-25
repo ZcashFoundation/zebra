@@ -23,10 +23,11 @@ use crate::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
+        precomputed_trees::PrecomputedTrees,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
+        read, ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
     },
-    SemanticallyVerifiedBlock, ValidateContextError,
+    GetBlockTemplateChainInfo, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // These types are used in doc links
@@ -249,6 +250,16 @@ pub enum NonFinalizedWriteMessage {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
+    /// A block whose proof of work is valid, but which is still being verified.
+    ///
+    /// The block write task computes the chain info for mining on top of it, and keeps the
+    /// block's note commitment trees for its commit. Computing them here, in order with the
+    /// commits, means the work is always based on the latest committed tip, and the commit of
+    /// the same block never computes its trees at the same time.
+    MiningCandidate {
+        block: Arc<block::Block>,
+        rsp_tx: oneshot::Sender<Option<GetBlockTemplateChainInfo>>,
+    },
 }
 
 impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
@@ -465,9 +476,33 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
+        // The note commitment trees of the latest mining candidate, for its commit to reuse.
+        let mut candidate_trees: Option<PrecomputedTrees> = None;
+
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx } => {
+                    let candidate = read::difficulty::mining_candidate_chain_info(
+                        non_finalized_state,
+                        &finalized_state.db,
+                        &block,
+                    );
+
+                    let chain_info = match candidate {
+                        Ok((chain_info, trees)) => {
+                            candidate_trees = Some(trees);
+                            Some(chain_info)
+                        }
+                        Err(error) => {
+                            tracing::debug!(?error, "block can't be used for early mining work");
+                            None
+                        }
+                    };
+
+                    let _ = rsp_tx.send(chain_info);
+                    continue;
+                }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
                     let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));
@@ -510,11 +545,16 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.for_descendant(parent_hash))
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
-                validate_and_commit_non_finalized(
+                // A commit is the only use for a candidate's trees: they are for its own block,
+                // and any other block's commit changes the tip they were computed from.
+                non_finalized_state.precomputed_trees = candidate_trees.take();
+                let result = validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
                     queued_child,
-                )
+                );
+                non_finalized_state.precomputed_trees = None;
+                result
             };
 
             // TODO: fix the test timing bugs that require the result to be sent

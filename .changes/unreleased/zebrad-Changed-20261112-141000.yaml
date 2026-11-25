@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Serve a coinbase-only block template on top of a new block as soon as its proof of work is checked, without waiting for its transactions to be verified. The template is withdrawn if the block is rejected, or if it takes more than a second to verify, and miners get the previous template again.'
+time: 2026-11-12T14:10:00.000000000Z

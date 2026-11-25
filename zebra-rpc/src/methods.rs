@@ -48,7 +48,7 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
-use jsonrpsee_types::{ErrorCode, ErrorObject};
+use jsonrpsee_types::{ErrorCode, ErrorObject, ErrorObjectOwned};
 use schemars::JsonSchema;
 use tokio::{
     sync::{broadcast, mpsc, watch},
@@ -129,7 +129,10 @@ use types::{
     long_poll::{LongPollId, LongPollInput},
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
-    submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
+    submit_block::{
+        SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse, SUBMIT_BLOCK_TIMEOUT,
+        SUBMIT_BLOCK_VERIFY_TIMEOUT,
+    },
     subsidy::GetBlockSubsidyResponse,
     transaction::TransactionObject,
     unified_address::ZListUnifiedReceiversResponse,
@@ -584,6 +587,9 @@ pub trait Rpc {
     /// # Notes
     ///
     ///  - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.
+    ///  - Returns `inconclusive` if the block isn't verified and committed within 30 seconds, for
+    ///    example because its parent block is still being verified, or never arrives. Zebra keeps
+    ///    verifying the block, and commits and announces it if it is valid.
     #[method(name = "submitblock")]
     async fn submit_block(
         &self,
@@ -1218,7 +1224,8 @@ where
         }
     }
 
-    /// Returns the precomputed template, if it extends the tip the state has committed.
+    /// Returns the precomputed template, if it extends the tip the state has committed, or a
+    /// block with a valid proof of work that the state is still verifying on top of that tip.
     ///
     /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
     /// tip change, re-reading the tip every time it publishes.
@@ -1236,6 +1243,21 @@ where
 
         tokio::time::timeout(timeout, async move {
             loop {
+                // A block with a valid proof of work that is still being verified is newer than
+                // the tip, so work on it comes first. The state only returns it while its parent
+                // is the tip, so it is read before the tip: if it has just been committed, the
+                // tip read below sees it, and the same work is served as work on the tip.
+                if let Some(candidate) = precompute::mining_candidate(self.read_state.clone()).await
+                {
+                    if let Some(template) = cache.template_for_tip(
+                        candidate.tip_hash,
+                        &self.network,
+                        self.template_clock_now(),
+                    ) {
+                        return Some(template);
+                    }
+                }
+
                 // The state publishes committed blocks before updating `latest_chain_tip`.
                 // Read its tip on every cache publication, including after a wait, so neither
                 // a lagging tip channel nor a tip snapshot from before the wait admits stale work.
@@ -3091,14 +3113,50 @@ where
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
 
-        let block_verifier_router_response = block_verifier_router
-            .ready()
-            .await
-            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(Arc::new(block)))
-            .await;
+        // The request is boxed, so it can move to another task if it outlasts this call.
+        let mut commit = Box::pin(async move {
+            let response = block_verifier_router
+                .ready()
+                .await
+                .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
+                .call(zebra_consensus::Request::Commit(Arc::new(block)))
+                .await;
 
-        let chain_error = match block_verifier_router_response {
+            Ok::<_, ErrorObjectOwned>(response)
+        });
+
+        // The verifier doesn't answer for a block while its parent is being verified, or if its
+        // parent never arrives.
+        let Ok(block_verifier_router_response) =
+            tokio::time::timeout(SUBMIT_BLOCK_TIMEOUT, &mut commit).await
+        else {
+            tracing::info!(
+                ?block_hash,
+                ?height,
+                "submit block is still being verified, answering before it is committed"
+            );
+
+            // Dropping the request would stop the verification of a block that hasn't reached
+            // the state yet. So it carries on in the background, and the block is announced
+            // like any other mined block if it is committed.
+            let gbt = self.gbt.clone();
+            tokio::spawn(async move {
+                if let Ok(Ok(Ok(hash))) =
+                    tokio::time::timeout(SUBMIT_BLOCK_VERIFY_TIMEOUT, commit).await
+                {
+                    tracing::info!(?hash, ?height, "submit block accepted after its answer");
+
+                    // The gossip task announces the block as a new chain tip if this fails.
+                    let _ = gbt.advertise_mined_block(hash, height);
+                }
+            });
+
+            return Ok(
+                SubmitBlockResponse::from(SubmitBlockErrorResponse::Inconclusive).with_metrics(),
+            );
+        };
+
+        let chain_error = match block_verifier_router_response? {
             // Currently, this match arm returns `null` (Accepted) for blocks committed
             // to any chain, but Accepted is only for blocks in the best chain.
             //

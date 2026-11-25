@@ -34,9 +34,97 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Keeps early mining work on a block available while the block is being verified.
+///
+/// The state withdraws the work when the guard and all its clones are dropped.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateGuard(pub(crate) tokio::sync::watch::Sender<()>);
+
+impl PartialEq for MiningCandidateGuard {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateGuard {}
+
+/// A subscription to publications and withdrawals of early mining work.
+///
+/// A default subscription never reports any changes.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateChanges(
+    pub(crate) tokio::sync::watch::Receiver<Option<crate::service::MiningCandidate>>,
+);
+
+impl MiningCandidateChanges {
+    /// Returns a subscription for tests, and a function that changes what it reports: early
+    /// mining work with a parent hash and chain info is published, and `None` withdraws it.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn new_for_tests() -> (
+        Self,
+        impl Fn(Option<(block::Hash, GetBlockTemplateChainInfo)>) + Send + Sync + 'static,
+    ) {
+        let (sender, receiver) = tokio::sync::watch::channel(None);
+        let set = move |candidate: Option<(block::Hash, GetBlockTemplateChainInfo)>| {
+            sender.send_replace(candidate.map(|(parent_hash, chain_info)| {
+                crate::service::MiningCandidate::new_for_tests(parent_hash, chain_info)
+            }));
+        };
+
+        (Self(receiver), set)
+    }
+
+    /// Marks the changes up to now as seen, so [`Self::changed`] only reports later ones.
+    pub fn mark_seen(&mut self) {
+        self.0.mark_unchanged();
+    }
+
+    /// Waits until early mining work is published or withdrawn.
+    ///
+    /// Never returns if the state has shut down, so it can be used in a `select!`.
+    pub async fn changed(&mut self) {
+        if self.0.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    /// Waits until early mining work is published, ignoring withdrawals.
+    ///
+    /// Never returns if the state has shut down, so it can be used in a `select!`.
+    pub async fn published(&mut self) {
+        loop {
+            self.changed().await;
+
+            if self.0.borrow_and_update().is_some() {
+                return;
+            }
+        }
+    }
+}
+
+impl Default for MiningCandidateChanges {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(None).1)
+    }
+}
+
+impl PartialEq for MiningCandidateChanges {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateChanges {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
+    /// Response to [`Request::MiningCandidate`].
+    ///
+    /// `None` if nothing is subscribed to early mining work, or if the state is already
+    /// computing early work on another block.
+    MiningCandidate(Option<MiningCandidateGuard>),
+
     /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
     /// indicating that a block was successfully committed to the state.
     Committed(block::Hash),
@@ -538,6 +626,15 @@ pub enum ReadResponse {
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
+    /// Response to [`ReadRequest::MiningCandidate`] with the state information needed to build
+    /// a block template on top of a block that is still being verified.
+    ///
+    /// Its chain value pools are empty, because they depend on unverified transactions.
+    MiningCandidate(Option<GetBlockTemplateChainInfo>),
+
+    /// Response to [`ReadRequest::MiningCandidateChanges`].
+    MiningCandidateChanges(MiningCandidateChanges),
+
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
@@ -663,6 +760,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
+            | ReadResponse::MiningCandidate(_)
+            | ReadResponse::MiningCandidateChanges(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {
