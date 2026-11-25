@@ -344,6 +344,25 @@ where
                 return Ok(self.compact_response(block.clone()));
             }
         }
+        if let Some(handler) = self.download_compact(hash, deadline).await? {
+            return Ok(handler);
+        }
+        self.send_compact_request(Message::GetData(vec![hash.into()]), deadline)
+            .await?;
+        Ok(Handler::BlocksByHash {
+            pending_hashes: HashSet::from([hash]),
+            blocks: Vec::with_capacity(1),
+        })
+    }
+
+    /// Rebuilds `hash` from the peer's compact announcement of it and the mempool's transactions,
+    /// or asks the peer for the missing transactions, if this connection keeps that announcement.
+    /// Returns `None` if the block needs to be downloaded in full.
+    async fn download_compact(
+        &mut self,
+        hash: block::Hash,
+        deadline: Instant,
+    ) -> Result<Option<Handler>, PeerError> {
         if self
             .compact
             .received
@@ -377,7 +396,7 @@ where
                             )
                             .await
                         {
-                            return Ok(self.compact_response(block));
+                            return Ok(Some(self.compact_response(block)));
                         }
                     } else if indexes.len() < reconstruction.transaction_count().div_ceil(2) {
                         // Recovering most of a block costs about as much as downloading it, and
@@ -392,21 +411,16 @@ where
                             deadline,
                         )
                         .await?;
-                        return Ok(Handler::CompactBlock {
+                        return Ok(Some(Handler::CompactBlock {
                             reconstruction,
                             permit,
                             deadline,
-                        });
+                        }));
                     }
                 }
             }
         }
-        self.send_compact_request(Message::GetData(vec![hash.into()]), deadline)
-            .await?;
-        Ok(Handler::BlocksByHash {
-            pending_hashes: HashSet::from([hash]),
-            blocks: Vec::with_capacity(1),
-        })
+        Ok(None)
     }
 
     fn compact_response(&self, block: Arc<Block>) -> Handler {
