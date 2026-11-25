@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Use multiple CPU cores to decode large batches of Orchard RedPallas signatures during node verification.
+time: 2026-11-20T17:25:21.239285708+01:00
