@@ -106,7 +106,8 @@ async fn update_finalized_chain_tip(
         // this task must not advance the secondary's view concurrently (which would let a block be
         // finalized between `sync()`'s check and its commit, failing as a duplicate-effects error).
         // `sync()` also owns the published chain tip from then on, via its (higher) non-finalized
-        // tip, so publishing our lagging finalized tip would drag the reported tip backwards.
+        // tip, or the finalized tip when its non-finalized state is empty, so publishing our
+        // lagging finalized tip would drag the reported tip backwards.
         if *started_sync_receiver.borrow() {
             return;
         }
@@ -204,7 +205,8 @@ async fn update_finalized_chain_tip(
             // `sync()`'s `ChainTipSender` latches onto the non-finalized tip, but this task holds a
             // separate `finalized_sender()` handle that doesn't, so `set_finalized_tip` would keep
             // overwriting the non-finalized tip rather than becoming a no-op. The task therefore
-            // stops itself. The non-finalized state only grows once populated, so this handover is
+            // stops itself. From then on `sync()` publishes the tip after every commit, falling back
+            // to the finalized tip when its non-finalized state is empty, so this handover is
             // permanent.
             if *started_sync_receiver.borrow() {
                 return;
@@ -449,13 +451,15 @@ impl TrustedChainSync {
             self.fill_finalized_gap(block.height).await;
         }
 
-        // Catching up can finalize the block after `sync()` checked it. If committing it succeeded,
-        // pruning would then remove every non-finalized block and leave the state empty.
+        // Catching up can finalize the block after `sync()` checked it. Skip it, but still prune
+        // the blocks the catch-up finalized and publish the new tip.
         if self
             .db
             .finalized_tip_height()
             .is_some_and(|tip| block.height <= tip)
         {
+            self.prune_finalized();
+            self.update_channels();
             return Ok(());
         }
 
@@ -627,25 +631,40 @@ impl TrustedChainSync {
         }
     }
 
-    /// Sends the new chain tip and non-finalized state to the latest chain channels.
+    /// Sends the new chain tip and non-finalized state to the latest chain channels. If there is
+    /// no non-finalized chain, uses the finalized tip.
     // TODO: Replace this with the `update_latest_chain_channels()` fn in `write.rs`.
     fn update_channels(&mut self) {
+        let non_finalized_tip = self
+            .non_finalized_state
+            .best_tip_block()
+            .cloned()
+            .map(ChainTipBlock::from);
+
         // If the final receiver was just dropped, ignore the error.
         let _ = self
             .non_finalized_state_sender
             .send(self.non_finalized_state.clone());
 
-        let best_chain = self.non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
+        if let Some(tip) = non_finalized_tip {
+            self.chain_tip_sender.set_best_non_finalized_tip(tip);
+        } else {
+            let finalized_tip = self
+                .db
+                .tip_block()
+                .expect("`db` is a read-only secondary that returns `None` for incomplete blocks")
+                .map(CheckpointVerifiedBlock::from)
+                .map(ChainTipBlock::from);
 
-        let tip_block = best_chain
-            .tip_block()
-            .expect(
-                "unexpected empty chain: must commit at least one block before updating channels",
-            )
-            .clone();
-
-        self.chain_tip_sender
-            .set_best_non_finalized_tip(Some(tip_block.into()));
+            // The secondary returns `None` until the tip body is visible, so keep the published
+            // tip until the next commit, and only clear it when the database is empty.
+            if finalized_tip.is_some() || self.db.tip().is_none() {
+                self.chain_tip_sender
+                    .clear_best_non_finalized_tip(finalized_tip);
+            } else {
+                tracing::debug!("finalized tip body is incomplete, keeping the published tip");
+            }
+        }
     }
 }
 

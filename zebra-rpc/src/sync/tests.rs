@@ -194,7 +194,7 @@ async fn try_commit_skips_block_finalized_by_catch_up() {
     // The read-only secondary and a syncer that never needs the gRPC client on this path.
     let (_read_state, db, non_finalized_state_sender) =
         zebra_state::init_read_only(config.clone(), &Mainnet).expect("secondary opens");
-    let (chain_tip_sender, _latest, _change) = ChainTipSender::new(None, &Mainnet);
+    let (chain_tip_sender, latest_tip, _change) = ChainTipSender::new(None, &Mainnet);
     let (started_sync_sender, _started) = watch::channel(true);
     let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
     let mut syncer = super::TrustedChainSync {
@@ -241,4 +241,99 @@ async fn try_commit_skips_block_finalized_by_catch_up() {
         Some(Height(3)),
         "catch-up reached block 3"
     );
+    assert!(
+        syncer.non_finalized_state.is_chain_set_empty(),
+        "block 2 was pruned after the skip"
+    );
+    assert_eq!(
+        latest_tip.best_tip_hash(),
+        Some(blocks[3].hash()),
+        "the skip published the finalized tip"
+    );
+}
+
+/// `update_channels` falls back to the finalized tip when pruning has emptied the non-finalized
+/// state, instead of failing with "unexpected empty non-finalized state".
+///
+/// With mainnet blocks 0-3 (all coinbase-only):
+/// 1. the primary finalizes 0 and 1; the secondary catches up and commits block 2;
+/// 2. the primary finalizes 2 and 3, and a catch-up reaches 3 after `try_commit`'s check, as the
+///    updater's can right after handover;
+/// 3. committing block 3 adds it onto block 2, then pruning removes both before `update_channels`.
+#[tokio::test]
+async fn update_channels_falls_back_to_finalized_tip_when_state_is_empty() {
+    use futures::FutureExt;
+    use tower::{Service, ServiceExt};
+    use zebra_state::{NonFinalizedState, SemanticallyVerifiedBlock};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+
+    let blocks: Vec<Arc<Block>> = (0..=3)
+        .map(|height| {
+            zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+                .get(&height)
+                .expect("test vector exists")
+                .zcash_deserialize_into()
+                .expect("test vector deserializes")
+        })
+        .collect();
+
+    // The primary: a full state service writing every column family.
+    let (mut primary, _read, _tip, _tip_change) =
+        zebra_state::init(config.clone(), &Mainnet, Height::MAX, 0).await;
+    let mut commit_on_primary = |block: Arc<Block>| {
+        let request = zebra_state::Request::CommitCheckpointVerifiedBlock(
+            CheckpointVerifiedBlock::from(block),
+        );
+        let fut = primary
+            .ready()
+            .now_or_never()
+            .expect("ready")
+            .expect("ready")
+            .call(request);
+        async move { fut.await.expect("primary commits checkpoint block") }
+    };
+    commit_on_primary(blocks[0].clone()).await;
+    commit_on_primary(blocks[1].clone()).await;
+
+    // The read-only secondary and a syncer that never needs the gRPC client on this path.
+    let (_read_state, db, non_finalized_state_sender) =
+        zebra_state::init_read_only(config.clone(), &Mainnet).expect("secondary opens");
+    let non_finalized_state_receiver = non_finalized_state_sender.subscribe();
+    let (chain_tip_sender, latest_tip, _change) = ChainTipSender::new(None, &Mainnet);
+    let (started_sync_sender, _started) = watch::channel(true);
+    let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+    let mut syncer = super::TrustedChainSync {
+        indexer_rpc_client: IndexerClient::new(channel),
+        db,
+        non_finalized_state: NonFinalizedState::new(&Mainnet),
+        chain_tip_sender,
+        non_finalized_state_sender,
+        started_sync_sender,
+    };
+
+    // 1. Secondary catches up to tip 1 and commits block 2 onto it.
+    syncer.try_catch_up_with_primary().await;
+    syncer
+        .commit(SemanticallyVerifiedBlock::from(blocks[2].clone()))
+        .expect("block 2 commits as a new non-finalized chain");
+    assert_eq!(latest_tip.best_tip_hash(), Some(blocks[2].hash()));
+
+    // 2. The primary finalizes 2 and 3, and the secondary catches up to 3.
+    commit_on_primary(blocks[2].clone()).await;
+    commit_on_primary(blocks[3].clone()).await;
+    syncer.try_catch_up_with_primary().await;
+
+    // 3. Committing block 3 prunes every non-finalized block before updating the channels.
+    syncer
+        .commit(SemanticallyVerifiedBlock::from(blocks[3].clone()))
+        .expect("block 3 commits onto block 2");
+    assert!(syncer.non_finalized_state.is_chain_set_empty());
+    assert_eq!(latest_tip.best_tip_hash(), Some(blocks[3].hash()));
+    assert!(non_finalized_state_receiver.borrow().is_chain_set_empty());
 }
