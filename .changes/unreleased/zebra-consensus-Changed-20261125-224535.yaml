@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Orchard proof verification batches more single-action bundles while limiting extra checks after a failed batch.
+time: 2026-11-25T22:45:35.444362306+01:00
