@@ -81,6 +81,7 @@ clap = "4.5"
 color-eyre = { version = "0.6.3", default-features = false }
 console-subscriber = "0.5"
 criterion = "0.5"
+const-hex = { version = "1.19.3", default-features = false, features = ["alloc"] }
 crossbeam-channel = "0.5.14"
 derive-getters = "0.5"
 derive-new = "0.5"
