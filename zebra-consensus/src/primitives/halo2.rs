@@ -1,6 +1,7 @@
 //! Async Halo2 batch verifier service
 
 use std::{
+    collections::VecDeque,
     fmt,
     future::Future,
     mem,
@@ -46,24 +47,101 @@ pub(crate) mod tests;
 /// but just one action in others.
 ///
 /// To compensate for larger proofs, we process the batch once there are at least
-/// [`HALO2_MAX_BATCH_SIZE`] weighted actions among pending items in the queue.
-/// Counting each bundle as at least two actions preserves the previous 64-bundle fallback bound.
+/// [`HALO2_MAX_BATCH_SIZE`] actions among pending items in the queue.
 ///
 /// Each batch ends with one multi-scalar multiplication, so a threshold of twice the shared batch
 /// size reduces those for large Orchard blocks; 256 measured slower.
 const HALO2_MAX_BATCH_SIZE: usize = 2 * super::MAX_BATCH_SIZE;
 
-/// Per-item preparation errors and the shared proof/signature verification result.
+/// Limit extra batch checks when many invalid items are deliberately spread across a batch.
+const MAX_BISECTION_BATCHES: usize = 16;
+
+/// Per-item preparation errors and proof/signature verification results.
 #[derive(Debug)]
 struct BatchResult {
     checks: Vec<Result<(), orchard::bundle::BatchError>>,
     valid: bool,
+    /// Empty for a passing batch; otherwise marks items in passing sub-batches.
+    passing: Vec<bool>,
+    #[cfg(test)]
+    sub_batches: usize,
 }
 
 /// One batch prepared off the async workers, ready for proof verification on Rayon.
 struct PreparedBatch {
     validator: BatchValidator<'static>,
     checks: Vec<Result<(), orchard::bundle::BatchError>>,
+    items: Vec<Item>,
+    vk: &'static ItemVerifyingKey,
+}
+
+impl BatchResult {
+    fn verify(
+        PreparedBatch {
+            validator,
+            checks,
+            items,
+            vk,
+        }: PreparedBatch,
+    ) -> Self {
+        let valid = validator.validate(rand::rng());
+        let mut passing = Vec::new();
+        let mut sub_batches = 0;
+        if !valid {
+            passing.resize(items.len(), false);
+            Self::bisect(&items, &checks, &mut passing, vk, &mut sub_batches);
+        }
+        Self {
+            checks,
+            valid,
+            passing,
+            #[cfg(test)]
+            sub_batches,
+        }
+    }
+
+    fn bisect(
+        items: &[Item],
+        checks: &[Result<(), orchard::bundle::BatchError>],
+        passing: &mut [bool],
+        vk: &'static ItemVerifyingKey,
+        sub_batches: &mut usize,
+    ) {
+        // One bad item in 128 takes at most 2 * log2(128) = 14 extra batch MSMs
+        // and one individual fallback, rather than 64 individual fallbacks (63 wasted).
+        // Search failing nodes level by level so scattered invalid items cannot consume the
+        // budget before other branches pass. Two bad items at offsets 0 and 8 need 16 extra
+        // checks and four fallbacks. With many bad items, stop after 16 extra checks:
+        // passing nodes return Ok; unresolved nodes fall back individually. If all 128
+        // are invalid, this costs 16 extra checks plus 128 fallbacks.
+        let mut failing = VecDeque::new();
+        failing.push_back((0, items.len()));
+        while let Some((start, end)) = failing.pop_front() {
+            if end - start <= 1 || *sub_batches + 2 > MAX_BISECTION_BATCHES {
+                break;
+            }
+            let mid = start + (end - start) / 2;
+            for (start, end) in [(start, mid), (mid, end)] {
+                let mut validator = BatchValidator::new(vk);
+                for (item, check) in items[start..end].iter().zip(&checks[start..end]) {
+                    if check.is_ok() {
+                        validator.queue(item).expect(
+                            "an item accepted by the same key during preparation remains supported",
+                        );
+                    }
+                }
+                *sub_batches += 1;
+                if validator.validate(rand::rng()) {
+                    for (passing, check) in passing[start..end].iter_mut().zip(&checks[start..end])
+                    {
+                        *passing = check.is_ok();
+                    }
+                } else if end - start > 1 {
+                    failing.push_back((start, end));
+                }
+            }
+        }
+    }
 }
 
 /// A single blocking preparer for the open batch.
@@ -179,7 +257,7 @@ pub struct Item {
 
 impl RequestWeight for Item {
     fn request_weight(&self) -> usize {
-        self.bundle.actions().len().max(2)
+        self.bundle.actions().len().max(1)
     }
 }
 
@@ -231,7 +309,7 @@ impl Item {
         let mut batch = BatchValidator::new(vk);
         // `add_bundle` rejects a bundle whose cross-address restriction is not supported by this
         // era's verifying key; such an item is invalid under this key.
-        if batch.queue(self).is_err() {
+        if batch.queue(&self).is_err() {
             return false;
         }
         batch.validate(rand::rng())
@@ -257,17 +335,12 @@ impl CachedItem for Item {
 }
 
 trait QueueBatchVerify {
-    fn queue(&mut self, item: Item) -> Result<(), orchard::bundle::BatchError>;
+    fn queue(&mut self, item: &Item) -> Result<(), orchard::bundle::BatchError>;
 }
 
 impl QueueBatchVerify for BatchValidator<'_> {
-    fn queue(
-        &mut self,
-        Item {
-            bundle, sighash, ..
-        }: Item,
-    ) -> Result<(), orchard::bundle::BatchError> {
-        self.add_bundle(bundle.as_ref(), sighash.0)
+    fn queue(&mut self, item: &Item) -> Result<(), orchard::bundle::BatchError> {
+        self.add_bundle(item.bundle.as_ref(), item.sighash.0)
     }
 }
 
@@ -553,12 +626,7 @@ impl Verifier {
         // The sender was closed by `take`, so cancellation cannot leave it waiting for more items.
         let start = std::time::Instant::now();
         let result = match prepared.await {
-            Ok(PreparedBatch { validator, checks }) => spawn_fifo(move || BatchResult {
-                checks,
-                valid: validator.validate(rand::rng()),
-            })
-            .await
-            .ok(),
+            Ok(prepared) => spawn_fifo(move || BatchResult::verify(prepared)).await.ok(),
             Err(_) => None,
         };
         let duration = start.elapsed().as_secs_f64();
@@ -617,11 +685,18 @@ impl Service<BatchControl<Item>> for Verifier {
                     let prepared = tokio::task::spawn_blocking(move || {
                         let mut validator = BatchValidator::new(vk);
                         let mut checks = Vec::new();
+                        let mut batch_items = Vec::new();
                         while let Some(item) = rx.blocking_recv() {
                             // Unsupported restrictions reject only this item, without queuing it.
-                            checks.push(validator.queue(item));
+                            checks.push(validator.queue(&item));
+                            batch_items.push(item);
                         }
-                        PreparedBatch { validator, checks }
+                        PreparedBatch {
+                            validator,
+                            checks,
+                            items: batch_items,
+                            vk,
+                        }
                     });
                     PendingBatch {
                         items,
@@ -650,7 +725,7 @@ impl Service<BatchControl<Item>> for Verifier {
                                 );
                             }
 
-                            let is_valid = result.valid;
+                            let is_valid = result.valid || result.passing[index];
                             if is_valid {
                                 tracing::trace!(?is_valid, "verified halo2 proof");
                                 metrics::counter!("proofs.halo2.verified").increment(1);
