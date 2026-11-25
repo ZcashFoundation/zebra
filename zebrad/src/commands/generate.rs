@@ -83,8 +83,9 @@ impl Runnable for GenerateCmd {
 # retention only widens the future window; deleted bodies are never restored.
 # After deletion, disabling pruning requires an archive snapshot or a full resync
 # in a separate cache directory. Check getblockchaininfo for actual availability.
-# Catch-up pruning compacts deleted bodies after clearing the backlog. Normal
-# compaction handles ongoing deletion. Retained indexes and validation state still grow.
+# Pruning compacts deleted bodies after every 10,000 deleted heights while behind
+# and after clearing a backlog. Normal RocksDB compaction also runs. Retained
+# indexes and validation state still grow.
 # Enabling pruning clears NODE_NETWORK and NODE_PRUNED. A node retaining and
 # holding at least 2304 recent blocks advertises NODE_NETWORK_LIMITED instead.
 # Pruning rejects zcashd-compat sidecars even before the first deletion.

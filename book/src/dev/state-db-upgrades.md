@@ -267,16 +267,18 @@ spending-index conversion, and detailed format checks finish successfully. The e
 Read-only instances and skipped or cancelled checks never open the pruning gate.
 
 Restart checks still search at most 100,000 blocks for observed transaction branch IDs. Missing
-history is not evidence of a valid branch. Pruning caches a matching witness and checks new finalized
-blocks without rescanning a branchless suffix. Its initial search is bounded to 100,000 blocks;
-without a witness it waits without deleting bodies or rejecting the chain. Deletion preserves the
-witness even when it is older than the requested retention window.
+history is not evidence of a valid branch. Pruning also accepts a committed pre-NU5 checkpoint
+whose hash matches the configured list, and retains that block's body.
+It caches the witness and checks new finalized blocks without rescanning a branchless suffix.
+The initial branch-ID search is bounded to 100,000 blocks; without either witness it waits without
+deleting bodies or rejecting the chain, even beyond the requested retention window.
 With `state.prune_blocks_older_than` set, one state-owned worker starts pruning after this gate
 opens, wakes at startup and on finalized-tip changes, and deletes at most 100 heights per batch.
 Only transaction bodies are deleted; genesis is retained. The retained floor is derived from
 transaction rows, with no new persisted marker or column family. The database-kind boundary
-keeps archive-only readers away from deleted bodies. Normal RocksDB compaction reclaims disk
-space outside the commit path.
+keeps archive-only readers away from deleted bodies. Normal RocksDB compaction and manual body
+compaction after every 10,000 deleted heights in a backlog, or after catch-up, reclaim disk space
+outside the commit path.
 
 Snapshots must retain the `state` or `state-pruned` kind as well as the format version and
 network namespace. Restore into an empty destination; never unpack a pruned snapshot under

@@ -5,9 +5,13 @@ body: >-
   `constants::PRUNED_STATE_DATABASE_KIND` for bounded opt-in finalized-body pruning with isolated
   state directories and a shared format version. The `ZebraDb::ready_for_pruning()` gate opens
   only after migrations, spending-index conversion, and initial format checks complete.
+  The worker compacts deleted transaction bodies after every 10,000 deleted heights while behind
+  and after clearing a backlog.
   New `StateInitError` variants expose database access errors, conflicting state directories,
   required stopped-node activation, invalid retention, missing history, incompatible spending
   indexes, and required read-only upgrades through `DatabaseAccess`, `ConflictingStateDirectories`,
   `PruningRequiresIsolatedState`, `InvalidPruningRetention`, `PrunedDatabase`,
   `PrunedIndexModeMismatch`, and `ReadOnlyDatabaseNeedsUpgrade`.
+  A matching pre-NU5 checkpoint allows earlier pruning while retaining the checkpoint body for
+  restart checks.
 time: 2026-11-05T06:45:01.13088193+01:00

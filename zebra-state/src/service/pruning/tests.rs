@@ -376,6 +376,50 @@ fn catch_up_compaction_reclaims_bodies_but_skips_single_batches() {
 }
 
 #[test]
+fn compaction_reclaims_a_backlog_before_pruning_catches_up() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&config(cache.path().to_path_buf()));
+    let transactions = state.db.cf_handle("tx_by_loc").unwrap();
+    state
+        .db
+        .set_options_cf(&transactions, &[("disable_auto_compactions", "true")])
+        .unwrap();
+    state.db.flush_cf(&transactions).unwrap();
+    let body_entries = || {
+        state
+            .db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|file| file.column_family_name == "tx_by_loc")
+            .map(|file| file.num_entries)
+            .sum::<u64>()
+    };
+    let original_entries = body_entries();
+    state.db.mark_ready_for_pruning();
+    let (cancel, cancelled) = bounded(1);
+    CANCEL_DURING_IDLE_BATCH.with(|hook| *hook.borrow_mut() = Some(cancel));
+    let (_wake, wake) = bounded(1);
+    run(
+        state.db.clone(),
+        RETENTION,
+        wake,
+        cancelled,
+        2 * MAX_PRUNING_BATCH_HEIGHTS,
+    )
+    .unwrap();
+    CANCEL_DURING_IDLE_BATCH.with(|hook| assert!(hook.borrow().is_none()));
+    state.db.flush_cf(&transactions).unwrap();
+    assert_eq!(floor(&state.db), retention_floor(Height(TIP), RETENTION));
+    assert!(
+        body_entries() < original_entries,
+        "backlog compaction must run before the worker catches up"
+    );
+    assert!(state.db.block(floor(&state.db).into()).unwrap().is_some());
+}
+
+#[test]
 fn restarted_worker_reclaims_previously_pruned_bodies_without_a_backlog() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
@@ -461,7 +505,14 @@ fn cancellation_during_a_batch_skips_pending_compaction() {
         let (cancel, cancelled) = bounded(1);
         CANCEL_DURING_IDLE_BATCH.with(|hook| *hook.borrow_mut() = Some(cancel));
         let (_wake, wake) = bounded(1);
-        run(state.db.clone(), RETENTION, wake, cancelled).unwrap();
+        run(
+            state.db.clone(),
+            RETENTION,
+            wake,
+            cancelled,
+            MAX_COMPACTION_HEIGHTS,
+        )
+        .unwrap();
 
         CANCEL_DURING_IDLE_BATCH.with(|hook| assert!(hook.borrow().is_none()));
         assert_eq!(floor(&state.db), retention_floor(Height(TIP), RETENTION));
