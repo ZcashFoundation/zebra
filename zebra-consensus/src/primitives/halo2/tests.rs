@@ -44,9 +44,9 @@ use zebra_chain::{
 use crate::{error::TransactionError, BoxError};
 
 use super::{
-    orchard_v5_verifier_for, orchard_v6_verifier, CacheKey, Cached, CachedItem, Item,
-    VERIFIER_NU6_2, VERIFIER_NU6_3_ONWARD, VERIFIER_PRE_NU6_2, VERIFYING_KEY_NU6_2,
-    VERIFYING_KEY_PRE_NU6_2,
+    orchard_v5_verifier_for, orchard_v6_verifier, BatchResult, CacheKey, Cached, CachedItem, Item,
+    PreparedBatch, QueueBatchVerify, VERIFIER_NU6_2, VERIFIER_NU6_3_ONWARD, VERIFIER_PRE_NU6_2,
+    VERIFYING_KEY_NU6_2, VERIFYING_KEY_PRE_NU6_2,
 };
 
 /// Records actual static-key construction threads, not preload calls or proof-cache hits.
@@ -103,8 +103,9 @@ fn pre_nu6_2_transaction_bundle_and_sighash(
     panic!("mainnet test blocks must contain a transparent-input-free Orchard transaction");
 }
 
+/// A single-action bundle counts as one action, allowing 128 bundles per batch.
 #[test]
-fn one_action_bundles_keep_the_existing_fallback_fanout_bound() {
+fn one_action_bundles_fill_a_128_action_batch() {
     use tower_batch_control::RequestWeight;
 
     let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
@@ -118,14 +119,174 @@ fn one_action_bundles_keep_the_existing_fallback_fanout_bound() {
         bundle.authorization().clone(),
         bundle.bundle_version(),
     )
-    .unwrap();
+    .expect("a nonempty subset of test-vector actions forms a bundle");
     let item = Item::new(bundle, sighash);
     assert_eq!(item.bundle.actions().len(), 1);
-    assert_eq!(
-        item.request_weight() * super::super::MAX_BATCH_SIZE,
-        super::HALO2_MAX_BATCH_SIZE,
-        "a failed batch must not retry more bundles than the previous threshold allowed"
+    assert_eq!(item.request_weight(), 1);
+    assert_eq!(item.request_weight() * 128, super::HALO2_MAX_BATCH_SIZE);
+}
+
+/// Verifies one batch with a counted single-item fallback.
+async fn verify_with_fallback(items: Vec<Item>) -> (Vec<bool>, usize) {
+    use tower_batch_control::{Batch, RequestWeight};
+    use tower_fallback::Fallback;
+
+    // Some mainnet vector bundles have multiple actions; keep all 128 fixture items in one batch.
+    let max_weight = items.iter().map(Item::request_weight).sum();
+    let mut batch = Batch::new(
+        super::Verifier::new(&VERIFYING_KEY_PRE_NU6_2),
+        max_weight,
+        1,
+        Duration::from_secs(3600),
+        Duration::from_secs(3600),
     );
+    let fallbacks = Arc::new(AtomicUsize::new(0));
+    let count = fallbacks.clone();
+    let fallback = tower::service_fn(move |item: Item| {
+        count.fetch_add(1, Ordering::SeqCst);
+        super::Verifier::verify_single_spawning(item, &VERIFYING_KEY_PRE_NU6_2)
+    });
+    let mut verifier = Fallback::new(batch.clone(), fallback);
+    let mut responses = Vec::with_capacity(items.len());
+    for item in items {
+        responses.push(
+            verifier
+                .ready()
+                .await
+                .expect("the batch worker accepts test items")
+                .call(item),
+        );
+    }
+    let _ = batch
+        .try_flush()
+        .expect("a live batch accepts an explicit flush");
+    let results = futures::future::join_all(responses).await;
+    (
+        results.into_iter().map(|result| result.is_ok()).collect(),
+        fallbacks.load(Ordering::SeqCst),
+    )
+}
+
+/// Records the number of sub-batch validations when verifying the same real proofs directly.
+fn verify_prepared(items: &[Item]) -> BatchResult {
+    let vk = &*VERIFYING_KEY_PRE_NU6_2;
+    let mut validator = orchard::bundle::BatchValidator::new(vk);
+    let checks = items.iter().map(|item| validator.queue(item)).collect();
+    BatchResult::verify(PreparedBatch {
+        validator,
+        checks,
+        items: items.to_vec(),
+        vk,
+    })
+}
+
+/// Bisection passes every valid bundle without individual fallback, even in a full batch.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_bad_bundle_in_128_only_retries_itself() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+        let good = Item::new(bundle.clone(), sighash);
+        for bad in [
+            with_wrong_binding_signature(bundle.clone()),
+            with_wrong_proof(bundle),
+        ] {
+            let mut items = vec![good.clone(); 127];
+            items.push(Item::new(bad, sighash));
+            let (results, fallbacks) = verify_with_fallback(items).await;
+            assert!(results[..127].iter().all(|result| *result));
+            assert!(!results[127]);
+            assert_eq!(fallbacks, 1);
+        }
+    })
+    .await
+    .expect("a full bad batch and its isolated fallback finish");
+}
+
+/// Scattered invalid bundles cannot cause unbounded recursive verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn several_bad_bundles_cap_sub_batch_checks() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+        let good = Item::new(bundle.clone(), sighash);
+        let bad = Item::new(with_wrong_binding_signature(bundle), sighash);
+        let mut items = vec![good.clone(); 128];
+        for index in [1, 33, 65, 97] {
+            items[index] = bad.clone();
+        }
+        let result = super::spawn_fifo({
+            let items = items.clone();
+            move || verify_prepared(&items)
+        })
+        .await
+        .expect("the proof worker completes");
+        assert!(!result.valid);
+        assert_eq!(result.sub_batches, super::MAX_BISECTION_BATCHES);
+        let (results, fallbacks) = verify_with_fallback(items).await;
+        for (index, accepted) in results.into_iter().enumerate() {
+            assert_eq!(accepted, ![1, 33, 65, 97].contains(&index), "item {index}");
+        }
+        assert_eq!(fallbacks, 56, "only unresolved failing nodes retry");
+
+        let mut two_bad = vec![good; 128];
+        for index in [0, 8] {
+            two_bad[index] = bad.clone();
+        }
+        let (results, fallbacks) = verify_with_fallback(two_bad).await;
+        for (index, accepted) in results.into_iter().enumerate() {
+            assert_eq!(accepted, ![0, 8].contains(&index), "item {index}");
+        }
+        assert_eq!(fallbacks, 4, "both failing groups shrink before the cap");
+
+        let all_bad = vec![bad; 128];
+        let result = super::spawn_fifo({
+            let items = all_bad.clone();
+            move || verify_prepared(&items)
+        })
+        .await
+        .expect("the proof worker completes");
+        assert_eq!(result.sub_batches, super::MAX_BISECTION_BATCHES);
+        assert!(result.passing.iter().all(|passing| !passing));
+        let (results, fallbacks) = verify_with_fallback(all_bad).await;
+        assert!(results.iter().all(|accepted| !accepted));
+        assert_eq!(fallbacks, 128, "each invalid item is retried only once");
+    })
+    .await
+    .expect("bounded bisection and individual fallbacks finish");
+}
+
+/// Mixed batches produce the same verdicts as individual verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn mixed_batch_verdicts_match_individual_verification() {
+    use rand::{RngExt, SeedableRng};
+
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+        let good = Item::new(bundle.clone(), sighash);
+        let bad = Item::new(with_wrong_binding_signature(bundle), sighash);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0x72616e646f6d);
+        for _ in 0..4 {
+            let items: Vec<_> = (0..32)
+                .map(|_| {
+                    if rng.random_bool(0.5) {
+                        good.clone()
+                    } else {
+                        bad.clone()
+                    }
+                })
+                .collect();
+            let expected = futures::future::join_all(items.iter().cloned().map(|item| {
+                super::Verifier::verify_single_spawning(item, &VERIFYING_KEY_PRE_NU6_2)
+            }))
+            .await
+            .into_iter()
+            .map(|result| result.is_ok())
+            .collect::<Vec<_>>();
+            let (results, _) = verify_with_fallback(items).await;
+            assert_eq!(results, expected);
+        }
+    })
+    .await
+    .expect("random mixed batches and their individual checks finish");
 }
 
 /// A real pre-NU6.2 Orchard proof verifies under the pre-NU6.2 key and is rejected by the
@@ -191,6 +352,22 @@ pub(crate) fn with_wrong_binding_signature(
             Authorized::from_parts(
                 authorization.proof().clone(),
                 Signature::<Binding>::from(signature),
+            )
+        },
+    )
+}
+
+/// Corrupts the proof without changing either signature, exercising Halo2 finalization.
+fn with_wrong_proof(bundle: Bundle<Authorized, ZatBalance>) -> Bundle<Authorized, ZatBalance> {
+    let mut proof = bundle.authorization().proof().as_ref().to_vec();
+    proof[0] ^= 1;
+    bundle.map_authorization(
+        &mut (),
+        |_, _, spend_auth| spend_auth,
+        |_, authorization| {
+            Authorized::from_parts(
+                orchard::Proof::new(proof),
+                authorization.binding_signature().clone(),
             )
         },
     )
@@ -956,9 +1133,10 @@ async fn overlapped_preparation_preserves_batch_results() {
                 let cancelled = Item::new(bundle.clone(), sighash);
                 let retained = Arc::downgrade(&cancelled.bundle);
                 drop(verifier.call(BatchControl::Item(cancelled)));
-                while retained.upgrade().is_some() {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
+                assert!(
+                    retained.upgrade().is_some(),
+                    "the preparer retains the item until proof verification"
+                );
                 for response in &mut responses {
                     assert!(
                         response.as_mut().now_or_never().is_none(),
@@ -1038,10 +1216,7 @@ async fn overlapped_preparation_preserves_batch_results() {
             let results = join_all([valid_response, rejected_response]).await;
             assert!(results[0].is_ok());
             assert!(results[1].is_err());
-            assert_eq!(
-                fallbacks.load(Ordering::SeqCst),
-                if invalid_proof { 2 } else { 1 }
-            );
+            assert_eq!(fallbacks.load(Ordering::SeqCst), 1);
 
             verify_through(&mut cache, valid.clone()).await;
             assert_eq!(
@@ -1077,6 +1252,7 @@ async fn overlapped_preparation_preserves_batch_results() {
 /// Admission never prepares on async workers, and cancellation releases the sole blocking worker.
 #[test]
 fn preparation_overlaps_admission_and_ends_on_cancellation() {
+    use futures::FutureExt;
     use tower_batch_control::BatchControl;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -1108,10 +1284,14 @@ fn preparation_overlaps_admission_and_ends_on_cancellation() {
                 release.send(()).unwrap();
                 blocker.await.unwrap();
 
-                // No flush yet: the preparer must consume the item while admission stays open.
-                while retained.upgrade().is_some() {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
+                // The preparer retains the item and occupies the blocking worker until flush.
+                assert!(retained.upgrade().is_some());
+                let mut next = tokio::task::spawn_blocking(|| ());
+                tokio::task::yield_now().await;
+                assert!(
+                    (&mut next).now_or_never().is_none(),
+                    "the preparer must hold the blocking worker until flush"
+                );
                 drop(response);
                 if drop_service {
                     drop(verifier);
@@ -1121,8 +1301,7 @@ fn preparation_overlaps_admission_and_ends_on_cancellation() {
                     drop(verifier);
                 }
 
-                // This cannot start until the preparer releases the sole blocking worker.
-                tokio::task::spawn_blocking(|| ()).await.unwrap();
+                next.await.unwrap();
             }
         })
         .await
