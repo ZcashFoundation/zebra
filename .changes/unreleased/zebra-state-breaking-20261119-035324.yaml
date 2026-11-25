@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`CheckpointVerifiedBlock` now owns `new_outputs` as `HashMap<OutPoint, OrderedUtxo>` instead of exposing `SemanticallyVerifiedBlock` through `Deref`; use `block()` to read the immutable block body and convert explicitly when semantic metadata is required.'
+time: 2026-11-19T03:53:24.551936445+01:00

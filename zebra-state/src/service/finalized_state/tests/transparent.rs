@@ -55,6 +55,46 @@ fn new_ephemeral_zebra_db(network: &Network) -> ZebraDb {
     .expect("opening an ephemeral database should succeed")
 }
 
+#[test]
+fn checkpoint_finalization_reuses_output_map() {
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![Input::Coinbase {
+            height: Height(1),
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![Output::new(
+            Amount::<NonNegative>::try_from(1).unwrap(),
+            Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    ));
+    let block = Arc::new(Block {
+        header: Arc::new(
+            zebra_test::vectors::DUMMY_HEADER
+                .zcash_deserialize_into()
+                .unwrap(),
+        ),
+        transactions: vec![coinbase],
+    });
+    let checkpoint = CheckpointVerifiedBlock::from(block);
+    let key = checkpoint
+        .new_outputs
+        .keys()
+        .next()
+        .expect("coinbase has an output") as *const OutPoint;
+    let finalized = FinalizedBlock::from_checkpoint_verified(
+        checkpoint,
+        Treestate::default(),
+        DeferredPoolBalanceChange::zero(),
+    );
+
+    assert_eq!(
+        finalized.new_outputs.keys().next().unwrap() as *const OutPoint,
+        key
+    );
+}
+
 /// Cross-version regression test for the credit-before-debit overflow panic.
 ///
 /// Builds a synthetic block whose two transactions form a same-address self-spend

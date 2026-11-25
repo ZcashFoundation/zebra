@@ -37,7 +37,7 @@ async fn replacement_at_byte_limit_preserves_other_requests() -> Result<(), Repo
     ));
     assert_eq!(verifier.queued_bytes, verifier.max_queued_bytes);
     assert!(Arc::ptr_eq(
-        &verifier.queued[&block::Height(4)][0].block.block,
+        verifier.queued[&block::Height(4)][0].block.block(),
         &replacement
     ));
     Ok(())

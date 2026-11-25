@@ -1875,7 +1875,7 @@ async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
                 Err(VerifyCheckpointError::AlreadyVerified { .. })
             ));
             assert!(Arc::ptr_eq(
-                &verifier.queued[&block::Height(2)][0].block.block,
+                verifier.queued[&block::Height(2)][0].block.block(),
                 &ordinary_body,
             ));
             assert!(matches!(
