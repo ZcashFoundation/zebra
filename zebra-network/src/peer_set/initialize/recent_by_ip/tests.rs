@@ -175,3 +175,22 @@ fn huge_time_limit_does_not_panic() {
     assert_eq!(recent_connections.by_time.len(), 1);
     assert_eq!(recent_connections.by_ip.get(&ip), Some(&1));
 }
+
+#[test]
+fn huge_time_limit_still_enforces_per_ip_limit() {
+    let _init_guard = zebra_test::init();
+
+    let ip = "127.0.0.1".parse().expect("should parse");
+
+    for max_connections_per_ip in [None, Some(3)] {
+        let mut recent_connections = RecentByIp::new(Some(Duration::MAX), max_connections_per_ip);
+        let limit = recent_connections.max_connections_per_ip;
+
+        for _ in 0..limit {
+            assert!(!recent_connections.is_past_limit_or_add(ip));
+        }
+        assert!(recent_connections.is_past_limit_or_add(ip));
+        assert_eq!(recent_connections.by_time.len(), limit);
+        assert_eq!(recent_connections.by_ip.get(&ip), Some(&limit));
+    }
+}
