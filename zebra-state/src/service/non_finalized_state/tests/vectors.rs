@@ -957,6 +957,73 @@ fn history_tree_is_updated_for_network_upgrade(
     Ok(())
 }
 
+/// The early mining work on a block is the chain info the state reports once that block is
+/// committed, apart from the value pools, which are only known after the block's transactions
+/// are verified. That holds for the block that starts the history tree, and for its child, whose
+/// early work has a chain history root.
+#[test]
+fn mining_candidate_chain_info_is_the_chain_info_after_the_commit() {
+    use crate::service::read::difficulty::{
+        get_block_template_chain_info, mining_candidate_chain_info,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Heartwood
+        .activation_height(&network)
+        .expect("Heartwood has an activation height")
+        .0;
+    let prev_block: Arc<Block> = network
+        .block_map()
+        .get(&(height - 1))
+        .expect("test vector exists")
+        .zcash_deserialize_into()
+        .expect("block is structurally valid");
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
+    state
+        .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
+        .expect("the block is valid");
+
+    let mut parent = prev_block;
+    for history_root_is_some in [false, true] {
+        // Give the candidate a header that is valid on the best tip, as a block template has.
+        let context = get_block_template_chain_info(&state, &finalized_state.db, &network)
+            .expect("the state has a context for the next block");
+        assert_eq!(context.chain_history_root.is_some(), history_root_is_some);
+        // The Heartwood activation block has an all-zero commitment.
+        let commitment = context.chain_history_root.map_or([0; 32], Into::into);
+        let mut candidate = (*parent.make_fake_child().set_block_commitment(commitment)).clone();
+        let header = Arc::make_mut(&mut candidate.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let candidate = Arc::new(candidate);
+
+        let (early, _trees) = mining_candidate_chain_info(&state, &finalized_state.db, &candidate)
+            .expect("the candidate extends the best tip");
+
+        state
+            .commit_block(candidate.clone().prepare(), &finalized_state)
+            .expect("the block is valid");
+        let committed = get_block_template_chain_info(&state, &finalized_state.db, &network)
+            .expect("the state has a context for the next block");
+
+        assert_eq!(early.tip_hash, candidate.hash());
+        assert_eq!(early.tip_hash, committed.tip_hash);
+        assert_eq!(early.tip_height, committed.tip_height);
+        assert_eq!(early.expected_difficulty, committed.expected_difficulty);
+        assert_eq!(early.min_time, committed.min_time);
+        assert_eq!(early.max_time, committed.max_time);
+        assert_eq!(early.chain_history_root, committed.chain_history_root);
+        assert!(committed.chain_history_root.is_some());
+
+        parent = candidate;
+    }
+}
+
 #[test]
 fn commitment_is_validated() {
     for network in Network::iter() {

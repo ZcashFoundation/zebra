@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`submit_block` returns `SubmitBlockErrorResponse::Inconclusive` for a block that is not verified and committed within 30 seconds, instead of waiting until the block is committed or dropped. The block is still verified in the background.'
+time: 2026-11-24T18:00:01.000000000Z

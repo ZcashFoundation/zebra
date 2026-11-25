@@ -5,5 +5,6 @@
 mod first_template;
 mod prop;
 mod snapshot;
+mod template_updater;
 pub mod utils;
 mod vectors;
