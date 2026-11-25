@@ -38,6 +38,8 @@ pre-release-replacements = [
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }{ archive-suffix }"
 pkg-fmt = "tgz"
 bin-dir = "{ bin }{ binary-ext }"
+# cargo-binstall cannot verify Sigstore signatures, so never fall back to third-party QuickInstall builds.
+disabled-strategies = ["quick-install"]
 
 [package.metadata.docs.rs]
 
