@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Improved the speed of hex encoding and decoding for RPC block and transaction byte payloads without changing accepted inputs or errors.'
+time: 2026-11-25T00:00:00Z

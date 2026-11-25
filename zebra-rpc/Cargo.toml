@@ -87,6 +87,7 @@ tracing = { workspace = true }
 # Metrics collection
 metrics = { workspace = true }
 
+const-hex = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["serde_derive"] }
 

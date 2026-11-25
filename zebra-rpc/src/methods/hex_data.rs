@@ -10,16 +10,6 @@ mod tests;
 
 const DIGITS: &[u8; 16] = b"0123456789abcdef";
 
-const ENCODE: [[u8; 2]; 256] = {
-    let mut table = [[0; 2]; 256];
-    let mut byte = 0;
-    while byte < table.len() {
-        table[byte] = [DIGITS[byte >> 4], DIGITS[byte & 0xf]];
-        byte += 1;
-    }
-    table
-};
-
 const DECODE: [u8; 256] = {
     let mut table = [u8::MAX; 256];
     let mut digit = 0;
@@ -34,17 +24,23 @@ const DECODE: [u8; 256] = {
     table
 };
 
-/// Encode bytes as lowercase hex in a single preallocated buffer.
+/// Encode bytes as lowercase hex.
 pub(super) fn encode(bytes: &[u8]) -> String {
-    let mut encoded = vec![0; bytes.len() * 2];
-    for (byte, pair) in bytes.iter().zip(encoded.chunks_exact_mut(2)) {
-        pair.copy_from_slice(&ENCODE[usize::from(*byte)]);
-    }
-    String::from_utf8(encoded).expect("the encoding table contains only ASCII hex digits")
+    const_hex::encode(bytes)
 }
 
 /// Decode hex with the same byte-indexed errors and precedence as the `hex` crate.
 pub(super) fn decode(bytes: &[u8]) -> Result<Vec<u8>, FromHexError> {
+    // Adapted from Zakura (MIT OR Apache-2.0): const-hex accepts `0x`, unlike the scalar decoder.
+    if matches!(bytes, [b'0', b'x' | b'X', ..]) {
+        return decode_scalar(bytes);
+    }
+
+    const_hex::decode(bytes).or_else(|_| decode_scalar(bytes))
+}
+
+/// Original decoder, retained for exact error compatibility on invalid input.
+fn decode_scalar(bytes: &[u8]) -> Result<Vec<u8>, FromHexError> {
     if !bytes.len().is_multiple_of(2) {
         return Err(FromHexError::OddLength);
     }
@@ -97,7 +93,7 @@ where
     deserializer.deserialize_str(HexVisitor(PhantomData))
 }
 
-/// `#[serde(with = ...)]` helpers for byte fields in RPC responses: lookup-table encoding,
+/// `#[serde(with = ...)]` helpers for byte fields in RPC responses: SIMD encoding,
 /// and the `hex` crate's decoding so accepted input is unchanged.
 pub(crate) mod bytes {
     use serde::{Deserializer, Serializer};
@@ -121,7 +117,7 @@ pub(crate) mod bytes {
     }
 }
 
-/// `serde_with` adapter for byte fields in RPC responses: lookup-table encoding, and
+/// `serde_with` adapter for byte fields in RPC responses: SIMD encoding, and
 /// `serde_with::hex::Hex` decoding so accepted input is unchanged.
 pub(crate) struct Hex;
 
