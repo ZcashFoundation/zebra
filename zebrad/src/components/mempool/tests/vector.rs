@@ -3212,6 +3212,100 @@ async fn mempool_early_output_check_uses_configured_datacarrier_limit() -> Resul
     Ok(())
 }
 
+/// The mempool rejects a peer's transaction that would have too many unconfirmed ancestors
+/// without scoring the peer, because the transaction is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_dependency_limit_rejection_does_not_score_peer() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    };
+    let (mut mempool, mut tx_verifier, mut misbehavior_rx) =
+        enabled_mempool_with_mock_verifier(&network, config).await;
+
+    // Each transaction spends the first output of the one before it, so the last one has the
+    // most unconfirmed ancestors that the mempool allows.
+    let mut transactions = network.unmined_transactions_in_blocks(1..=10);
+    let mut spent_mempool_outpoints = Vec::new();
+    for _ in 0..=storage::MAX_MEMPOOL_ANCESTORS {
+        let tx = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        let tx_id = tx.transaction.id.mined_id();
+
+        mempool
+            .storage()
+            .insert(tx, spent_mempool_outpoints, None)
+            .expect("the chain is within the mempool dependency limits");
+        spent_mempool_outpoints = vec![OutPoint::from_usize(tx_id, 0)];
+    }
+
+    let rejected = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    let rejected_id = rejected.transaction.id;
+
+    let source: std::net::SocketAddr = "203.0.113.7:8233".parse().unwrap();
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![Gossip::Tx(rejected.transaction.clone())],
+            source,
+        })
+        .await
+        .expect("transaction is queued");
+
+    // The verifier accepts the transaction, which spends an output of the last transaction in
+    // the chain.
+    let verifier_request = tx_verifier.expect_request_that(|_| true);
+    let drive = async {
+        loop {
+            let _ = futures::poll!(futures::future::poll_fn(|cx| mempool.poll_ready(cx)));
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::select! {
+        request = verifier_request => request.respond(tx::MempoolResponse {
+            transaction: rejected,
+            spent_mempool_outpoints,
+        }),
+        _ = drive => unreachable!("the drive loop never ends"),
+    }
+
+    let stored = futures::future::poll_fn(|cx| {
+        let _ = mempool.poll_ready(cx);
+        let storage = mempool.storage();
+
+        if let Some(error) = storage.rejection_error(&rejected_id) {
+            std::task::Poll::Ready(Err(error))
+        } else if storage.contains_transaction_exact(&rejected_id.mined_id()) {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
+    });
+    let result = timeout(Duration::from_secs(10), stored)
+        .await
+        .expect("the mempool stores or rejects the verified transaction");
+
+    assert_eq!(
+        result,
+        Err(MempoolError::StorageEffectsTip(
+            SameEffectsTipRejectionError::TooManyAncestors
+        )),
+    );
+    assert!(
+        misbehavior_rx.try_recv().is_err(),
+        "a transaction rejected by the mempool dependency limits doesn't score the peer"
+    );
+
+    Ok(())
+}
+
 /// Queue checks reap abandoned output channels without waiting for a new block.
 #[tokio::test]
 async fn stalled_tip_queue_check_prunes_abandoned_output_waiters() {

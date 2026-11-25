@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Changed the mempool to reject a transaction that would have more than 2 unconfirmed ancestors in the mempool (the unconfirmed transactions it spends outputs of, their unconfirmed parents, and so on), or that would make a group of unconfirmed transactions connected through spent outputs larger than 3 transactions. `sendrawtransaction` now returns an error for these transactions, which can affect wallets and other software that spend unconfirmed outputs, such as unconfirmed change. A rejected transaction can be sent again once enough of the unconfirmed transactions it depends on are mined.'
+time: 2026-11-25T18:00:03.000000000Z
