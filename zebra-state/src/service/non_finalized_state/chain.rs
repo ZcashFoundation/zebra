@@ -1499,6 +1499,9 @@ impl Chain {
     /// block depend on those header fields, so this costs a history tree append rather than a
     /// block push. An error leaves the chain unchanged.
     ///
+    /// Returns the replaced tip block, so the caller chooses when to free what only that block
+    /// holds.
+    ///
     /// # Panics
     ///
     /// If [`Self::can_rebind_tip()`] is false, or `block` is not at the tip height with the
@@ -1507,7 +1510,7 @@ impl Chain {
     pub(crate) fn rebind_tip(
         &mut self,
         block: ContextuallyVerifiedBlock,
-    ) -> Result<(), ValidateContextError> {
+    ) -> Result<Arc<ContextuallyVerifiedBlock>, ValidateContextError> {
         let height = self.non_finalized_tip_height();
         let previous = self
             .tip_block()
@@ -1547,9 +1550,12 @@ impl Chain {
         *info = BlockInfo::new(*info.value_pools(), info.size() + size - previous_size);
         self.height_by_hash.remove(&previous_hash);
         self.height_by_hash.insert(block.hash, height);
-        self.blocks.insert(height, Arc::new(block));
+        let replaced = self
+            .blocks
+            .insert(height, Arc::new(block))
+            .expect("the tip block was read above");
 
-        Ok(())
+        Ok(replaced)
     }
 
     /// Returns `true` if the tip block can be rebound: the chain holds the history tree of the

@@ -716,12 +716,15 @@ impl NonFinalizedState {
     ///
     /// If the chain that the proposal's validation built is still available, this rebinds its
     /// tip to the solved block. Otherwise, it applies the block to its parent chain.
+    ///
+    /// Returns the proposal's block if the solved block replaced it, so the caller can drop it
+    /// after answering the commit.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn commit_prevalidated_contextual(
         &mut self,
         contextual: ContextuallyVerifiedBlock,
         finalized_state: &ZebraDb,
-    ) -> Result<(), ValidateContextError> {
+    ) -> Result<Option<Arc<ContextuallyVerifiedBlock>>, ValidateContextError> {
         // Blocks are invalidated by their solved hashes, which proposals don't have.
         if self
             .invalidated_blocks
@@ -736,6 +739,7 @@ impl NonFinalizedState {
         let parent_hash = contextual.block.header.previous_block_hash;
         let (height, hash) = (contextual.height, contextual.hash);
 
+        let mut replaced_proposal = None;
         let chain = if parent_hash == finalized_state.finalized_tip_hash() {
             Chain::new(
                 &self.network,
@@ -752,7 +756,7 @@ impl NonFinalizedState {
 
             match self.take_prepared_chain_for(&contextual, &parent_chain) {
                 Some(mut prepared_chain) => {
-                    prepared_chain.rebind_tip(contextual)?;
+                    replaced_proposal = Some(prepared_chain.rebind_tip(contextual)?);
                     prepared_chain
                 }
                 None => Arc::unwrap_or_clone(parent_chain).push(contextual)?,
@@ -764,7 +768,7 @@ impl NonFinalizedState {
         });
         self.update_metrics_for_committed_block(height, hash);
 
-        Ok(())
+        Ok(replaced_proposal)
     }
 
     /// Stores `chain`, which has a validated block proposal at its tip, for the commit of the

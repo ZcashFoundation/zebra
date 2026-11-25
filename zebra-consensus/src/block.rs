@@ -68,6 +68,21 @@ type ValidatedProposals = VecDeque<(Arc<block::Block>, Box<zs::ContextuallyVerif
 /// creates and spends, so the limit also bounds that memory.
 const MAX_VALIDATED_PROPOSALS: usize = 8;
 
+/// Returns `true` if `block` has the header of a proposal that has a validation result, with a
+/// different nonce and Equihash solution.
+///
+/// This doesn't compare the transactions, which would hash their authorizing data, so it can run
+/// before the proof of work check. [`take_solved_proposal`] compares them.
+fn header_solves_validated_proposal(
+    validated_proposals: &watch::Sender<ValidatedProposals>,
+    block: &block::Block,
+) -> bool {
+    validated_proposals
+        .borrow()
+        .iter()
+        .any(|(proposal, _)| is_solved_proposal_header(proposal, block))
+}
+
 /// Removes and returns the validation result of the proposal that `block` solves, if there is one.
 fn take_solved_proposal(
     validated_proposals: &watch::Sender<ValidatedProposals>,
@@ -100,13 +115,7 @@ fn take_solved_proposal(
 /// [`UnminedTxId`]: zebra_chain::transaction::UnminedTxId
 /// [`Transaction`]: zebra_chain::transaction::Transaction
 fn is_solved_proposal(proposal: &block::Block, block: &block::Block) -> bool {
-    let unsolved_header = block::Header {
-        nonce: proposal.header.nonce,
-        solution: proposal.header.solution,
-        ..*block.header
-    };
-
-    unsolved_header == *proposal.header
+    is_solved_proposal_header(proposal, block)
         && block.transactions.len() == proposal.transactions.len()
         && block
             .transactions
@@ -118,6 +127,45 @@ fn is_solved_proposal(proposal: &block::Block, block: &block::Block) -> bool {
                 Arc::ptr_eq(transaction, validated)
                     || transaction.unmined_id() == validated.unmined_id()
             })
+}
+
+/// Returns `true` if `block`'s header is `proposal`'s header with a different nonce and Equihash
+/// solution.
+fn is_solved_proposal_header(proposal: &block::Block, block: &block::Block) -> bool {
+    let unsolved_header = block::Header {
+        nonce: proposal.header.nonce,
+        solution: proposal.header.solution,
+        ..*block.header
+    };
+
+    unsolved_header == *proposal.header
+}
+
+/// Returns an error if the state already has the block with `hash`.
+async fn check_block_is_new<S>(
+    state_service: &mut S,
+    hash: block::Hash,
+) -> Result<(), VerifyBlockError>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send,
+    S::Future: Send,
+{
+    // Check that this block is actually a new block.
+    tracing::trace!("checking that block is not already in state");
+    match state_service
+        .ready()
+        .await
+        .map_err(|source| VerifyBlockError::Depth { source, hash })?
+        .call(zs::Request::KnownBlock(hash))
+        .await
+        .map_err(|source| VerifyBlockError::Depth { source, hash })?
+    {
+        zs::Response::KnownBlock(Some(location)) => {
+            Err(BlockError::AlreadyInChain(hash, location).into())
+        }
+        zs::Response::KnownBlock(None) => Ok(()),
+        _ => unreachable!("wrong response to Request::KnownBlock"),
+    }
 }
 
 /// Block verification errors.
@@ -441,21 +489,15 @@ where
 
         async move {
             let hash = block.hash();
-            // Check that this block is actually a new block.
-            tracing::trace!("checking that block is not already in state");
-            match state_service
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::KnownBlock(hash))
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
-                zs::Response::KnownBlock(Some(location)) => {
-                    return Err(BlockError::AlreadyInChain(hash, location).into())
-                }
-                zs::Response::KnownBlock(None) => {}
-                _ => unreachable!("wrong response to Request::KnownBlock"),
+
+            // A block that solves a validated proposal is committed below without any other
+            // state request. The state rejects a duplicate block when it commits it, so a block
+            // with a validated proposal's header skips this check here. Its transactions are
+            // only compared with the proposal's after the proof of work check.
+            let header_solves_proposal = !request.is_proposal()
+                && header_solves_validated_proposal(&validated_proposals, &block);
+            if !header_solves_proposal {
+                check_block_is_new(&mut state_service, hash).await?;
             }
 
             tracing::trace!("performing block checks");
@@ -533,6 +575,14 @@ where
 
                     _ => unreachable!("wrong response for CommitContextuallyVerifiedBlock"),
                 };
+            }
+
+            // This block has a validated proposal's header, but it didn't get the proposal's
+            // validation result: its transactions aren't the proposal's, or a concurrent request
+            // for the same block took the result. So it is verified in full, like any other
+            // block, starting with the check that it skipped.
+            if header_solves_proposal {
+                check_block_is_new(&mut state_service, hash).await?;
             }
 
             // Next, check the Merkle root validity, to ensure that
@@ -717,8 +767,16 @@ where
                 {
                     zs::Response::ValidBlockProposal(contextual) => {
                         // Keep the result, so the solved proposal isn't validated again.
+                        //
+                        // A valid proposal's header commits to its transactions, so proposals
+                        // that only differ in their nonce and solution are the same proposal.
+                        // Keeping one result for them means that no result is left for a header
+                        // once a block has used it, so a later block with that header gets the
+                        // known block check first.
                         validated_proposals.send_modify(|proposals| {
-                            proposals.retain(|(validated, _)| *validated != proposal);
+                            proposals.retain(|(validated, _)| {
+                                !is_solved_proposal_header(validated, &proposal)
+                            });
                             proposals.push_front((proposal, contextual));
                             proposals.truncate(MAX_VALIDATED_PROPOSALS);
                         });

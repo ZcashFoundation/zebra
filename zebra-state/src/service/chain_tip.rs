@@ -88,6 +88,12 @@ impl fmt::Display for ChainTipBlock {
 
 impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
     fn from(contextually_valid: ContextuallyVerifiedBlock) -> Self {
+        Self::from(&contextually_valid)
+    }
+}
+
+impl From<&ContextuallyVerifiedBlock> for ChainTipBlock {
+    fn from(contextually_valid: &ContextuallyVerifiedBlock) -> Self {
         let ContextuallyVerifiedBlock {
             block,
             hash,
@@ -97,11 +103,11 @@ impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
         } = contextually_valid;
 
         Self {
-            hash,
-            height,
+            hash: *hash,
+            height: *height,
             time: block.header.time,
             transactions: block.transactions.clone(),
-            transaction_hashes,
+            transaction_hashes: transaction_hashes.clone(),
             previous_block_hash: block.header.previous_block_hash,
         }
     }

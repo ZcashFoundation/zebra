@@ -28,7 +28,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    serialization::{DateTime32, Duration32},
+    serialization::{DateTime32, Duration32, ZcashSerialize},
     work::difficulty::ParameterDifficulty,
 };
 use zebra_consensus::router::service_trait::BlockVerifierService;
@@ -44,7 +44,7 @@ use super::{
     check_synced_to_tip,
     constants::MEMPOOL_LONG_POLL_INTERVAL,
     fetch_chain_info, fetch_mempool_transactions, nsm_value_balance_for_next_block,
-    proposal::{proposal_block_from_template, BlockTemplateTimeSource},
+    proposal::{proposal_block_from_template, BlockTemplateTimeSource, ProposalTransactions},
     zip317::select_mempool_transactions,
     BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
@@ -528,8 +528,9 @@ async fn verified_transaction_added(
 
 /// Validates each block template that [`run()`] publishes as a block proposal, one at a time.
 ///
-/// The block verifier keeps the result of each successful validation. So when a miner submits a
-/// solved template, Zebra only checks its proof of work before committing it. A template that is
+/// The block verifier keeps the result of each successful validation, and `proposal_transactions`
+/// keeps the validated transactions. So when a miner submits a solved template, Zebra only checks
+/// its proof of work before committing it, without decoding its transactions. A template that is
 /// published during a validation waits for it, and then only the latest template is validated.
 ///
 /// Runs until the task is aborted.
@@ -537,6 +538,7 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
     mut templates: TemplateChanges,
     network: Network,
     block_verifier_router: BlockVerifierRouter,
+    proposal_transactions: ProposalTransactions,
 ) where
     BlockVerifierRouter: BlockVerifierService,
 {
@@ -549,20 +551,40 @@ pub(crate) async fn validate_templates<BlockVerifierRouter>(
 
         // Miners that don't change a template submit it with its current time, so that is the
         // block to validate. Building it re-serializes the template, so it runs off the executor.
+        // A miner's block has the same transaction bytes as this block, so serialize them here,
+        // rather than when the solved block is submitted.
         let proposal = {
             let network = network.clone();
+            let proposal_transactions = proposal_transactions.clone();
             tokio::task::spawn_blocking(move || {
-                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+                let proposal = proposal_block_from_template(
+                    &template,
+                    BlockTemplateTimeSource::CurTime,
+                    &network,
+                )?;
+                let proposal_bytes = proposal.zcash_serialize_to_vec()?;
+
+                // A refreshed template often only has a new time. Its proposal takes the
+                // transactions of the validated proposal with the same transaction bytes, so a
+                // block that solves either proposal has the transaction objects of both.
+                let proposal = proposal_transactions
+                    .block_with_validated_transactions(&proposal_bytes)
+                    .unwrap_or(proposal);
+
+                Ok::<_, zebra_chain::serialization::SerializationError>((
+                    Arc::new(proposal),
+                    proposal_bytes,
+                ))
             })
             .await
         };
 
         let result = match proposal {
-            Ok(Ok(proposal)) => block_verifier_router
+            Ok(Ok((proposal, proposal_bytes))) => block_verifier_router
                 .clone()
-                .oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal)))
+                .oneshot(zebra_consensus::Request::CheckProposal(proposal.clone()))
                 .await
-                .map(|_hash| ()),
+                .map(|_hash| proposal_transactions.insert(proposal, &proposal_bytes)),
             Ok(Err(error)) => Err(error.into()),
             Err(error) => Err(error.into()),
         };

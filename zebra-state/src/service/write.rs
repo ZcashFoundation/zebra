@@ -177,9 +177,9 @@ fn update_latest_chain_channels(
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
 ) -> Option<block::Height> {
+    // The tip only needs the block's transactions and hashes, so don't copy its UTXO maps.
     let non_finalized_tip = non_finalized_state
         .best_tip_block()
-        .cloned()
         .map(ChainTipBlock::from);
     let tip_block_height = if let Some(tip) = &non_finalized_tip {
         Some(tip.height)
@@ -532,6 +532,15 @@ impl WriteBlockWorkerTask {
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
 
+            // A commit replaces the chain that it extends. The published snapshot can hold the
+            // last reference to that chain. Once the best chain is at the reorg limit, the state
+            // holds it instead, because finalizing a block after each commit copies the chain.
+            // Freeing a chain or a block takes time proportional to its indexes, so what this
+            // commit replaces is kept until its caller has the response.
+            let replaced_snapshot = non_finalized_state_sender.borrow().clone();
+            let replaced_chain = non_finalized_state.best_chain().cloned();
+            let mut replaced_proposal = None;
+
             // If the parent block was marked as rejected, also reject all its children.
             //
             // At this point, we know that all the block's descendants
@@ -546,7 +555,9 @@ impl WriteBlockWorkerTask {
             } else if let Some(contextual) = contextual {
                 // The block was validated as a proposal, so only apply it to its parent chain.
                 candidate_trees = None;
-                non_finalized_state.commit_prevalidated_contextual(*contextual, &finalized_state.db)
+                non_finalized_state
+                    .commit_prevalidated_contextual(*contextual, &finalized_state.db)
+                    .map(|replaced| replaced_proposal = replaced)
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 // A commit is the only use for a candidate's trees: they are for its own block,
@@ -622,6 +633,7 @@ impl WriteBlockWorkerTask {
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+            drop((replaced_snapshot, replaced_chain, replaced_proposal));
 
             // A prepared chain that the best chain has passed can't be used any more.
             non_finalized_state.drop_passed_prepared_chain();

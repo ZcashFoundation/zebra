@@ -4743,6 +4743,266 @@ async fn rpc_submitblock_stops_waiting_for_the_block_verifier() {
     assert_eq!(mined_block, Some((block.hash(), Height(1))));
 }
 
+/// `submitblock` gives the block verifier a solved block proposal with the proposal's decoded
+/// transactions, and decodes any other block.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_submitblock_reuses_validated_proposal_transactions() {
+    use crate::{methods::types::get_block_template::BlockProposalResponse, SubmitBlockChannel};
+
+    let _init_guard = zebra_test::init();
+
+    // The verifier accepts every block, and reports the blocks it gets.
+    let (verified_tx, mut verified_rx) = tokio::sync::mpsc::unbounded_channel();
+    let verifier = tower::service_fn(move |request: zebra_consensus::Request| {
+        let block = request.block();
+        let hash = block.hash();
+        verified_tx
+            .send(block)
+            .expect("the test holds the receiver");
+        std::future::ready(Ok::<_, BoxError>(hash))
+    });
+
+    let proposal_bytes = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.to_vec();
+    let proposal: Arc<Block> = proposal_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    let tip_height = Height(1_687_106);
+
+    // The proposal check reads the chain info, to check that the proposal extends the tip.
+    let chain_info = GetBlockTemplateChainInfo {
+        tip_height,
+        tip_hash: proposal.header.previous_block_hash,
+        chain_value_pools: ValueBalance::zero(),
+        expected_difficulty: proposal.header.difficulty_threshold,
+        cur_time: DateTime32::now(),
+        min_time: DateTime32::now(),
+        max_time: DateTime32::now(),
+        chain_history_root: fake_history_tree(&Mainnet).hash(),
+    };
+    let read_state = tower::service_fn(move |request| {
+        assert!(matches!(request, ReadRequest::ChainInfo));
+        std::future::ready(Ok::<_, BoxError>(ReadResponse::ChainInfo(
+            chain_info.clone(),
+        )))
+    });
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (mock_tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(tip_height);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let submitted_blocks = SubmitBlockChannel::new();
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests::<mempool::Request, mempool::Response, BoxError>(),
+        MockService::build()
+            .for_unit_tests::<zebra_state::Request, zebra_state::Response, BoxError>(),
+        read_state,
+        verifier,
+        sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        Some(submitted_blocks.sender()),
+    );
+
+    let response = rpc
+        .get_block_template(Some(GetBlockTemplateParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData(proposal_bytes.clone())),
+            ..Default::default()
+        }))
+        .await
+        .expect("the proposal is checked");
+    assert_eq!(
+        response,
+        GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+    );
+    let proposal = verified_rx.recv().await.expect("the proposal was verified");
+    assert!(proposal.transactions.len() > 1);
+
+    // A refreshed block template with the same transactions only has a new time, which follows
+    // the version and three 32-byte fields in the header. Its proposal has the first proposal's
+    // transaction objects, so the block verifier finds a solved block's transactions in either
+    // proposal by comparing pointers.
+    let mut refreshed_bytes = proposal_bytes.clone();
+    refreshed_bytes[4 + 32 + 32 + 32] ^= 1;
+
+    let response = rpc
+        .get_block_template(Some(GetBlockTemplateParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData(refreshed_bytes.clone())),
+            ..Default::default()
+        }))
+        .await
+        .expect("the refreshed proposal is checked");
+    assert_eq!(
+        response,
+        GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+    );
+    let refreshed = verified_rx
+        .recv()
+        .await
+        .expect("the refreshed proposal was verified");
+    assert_ne!(refreshed.header.time, proposal.header.time);
+    assert!(
+        refreshed
+            .transactions
+            .iter()
+            .zip(&proposal.transactions)
+            .all(|(refreshed, proposal)| Arc::ptr_eq(refreshed, proposal)),
+        "a proposal with a validated proposal's transactions isn't decoded again",
+    );
+
+    // Solving a proposal only changes the nonce and solution in its header. The nonce follows
+    // the time and the difficulty threshold.
+    let mut solved_bytes = refreshed_bytes.clone();
+    solved_bytes[4 + 32 + 32 + 32 + 4 + 4] ^= 1;
+
+    let response = rpc.submit_block(HexData(solved_bytes), None).await;
+    assert_eq!(response, Ok(SubmitBlockResponse::Accepted));
+    let solved = verified_rx.recv().await.expect("the block was verified");
+    assert_ne!(solved.hash(), refreshed.hash());
+    assert_eq!(solved.header.time, refreshed.header.time);
+    assert!(
+        solved
+            .transactions
+            .iter()
+            .zip(&refreshed.transactions)
+            .all(|(solved, refreshed)| Arc::ptr_eq(solved, refreshed)),
+        "a solved proposal's transactions aren't decoded again",
+    );
+
+    // A block that wasn't validated as a proposal is decoded.
+    let other_bytes = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES.to_vec();
+    let other: Arc<Block> = other_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+
+    let response = rpc.submit_block(HexData(other_bytes), None).await;
+    assert_eq!(response, Ok(SubmitBlockResponse::Accepted));
+    let submitted = verified_rx.recv().await.expect("the block was verified");
+    assert_eq!(submitted, other);
+}
+
+/// The bytes after a block proposal aren't kept with its transactions. So proposals that only
+/// differ in those bytes are kept once, and don't take the places of other proposals.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_proposal_transactions_are_kept_without_trailing_bytes() {
+    use crate::methods::types::get_block_template::{
+        proposal::MAX_PROPOSAL_TRANSACTIONS, BlockProposalResponse,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    // The verifier accepts every block.
+    let verifier = tower::service_fn(|request: zebra_consensus::Request| {
+        std::future::ready(Ok::<_, BoxError>(request.block().hash()))
+    });
+
+    let proposal_bytes = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.to_vec();
+    let proposal: Arc<Block> = proposal_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    let tip_height = Height(1_687_106);
+
+    // The proposal check reads the chain info, to check that the proposal extends the tip.
+    let chain_info = GetBlockTemplateChainInfo {
+        tip_height,
+        tip_hash: proposal.header.previous_block_hash,
+        chain_value_pools: ValueBalance::zero(),
+        expected_difficulty: proposal.header.difficulty_threshold,
+        cur_time: DateTime32::now(),
+        min_time: DateTime32::now(),
+        max_time: DateTime32::now(),
+        chain_history_root: fake_history_tree(&Mainnet).hash(),
+    };
+    let read_state = tower::service_fn(move |request| {
+        assert!(matches!(request, ReadRequest::ChainInfo));
+        std::future::ready(Ok::<_, BoxError>(ReadResponse::ChainInfo(
+            chain_info.clone(),
+        )))
+    });
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (mock_tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(tip_height);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests::<mempool::Request, mempool::Response, BoxError>(),
+        MockService::build()
+            .for_unit_tests::<zebra_state::Request, zebra_state::Response, BoxError>(),
+        read_state,
+        verifier,
+        sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let check_proposal = |bytes: Vec<u8>| async {
+        let response = rpc
+            .get_block_template(Some(GetBlockTemplateParameters {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: Some(HexData(bytes)),
+                ..Default::default()
+            }))
+            .await
+            .expect("the proposal is checked");
+        assert_eq!(
+            response,
+            GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+        );
+    };
+    let is_kept = |bytes: &[u8]| {
+        rpc.gbt
+            .proposal_transactions()
+            .block_with_validated_transactions(bytes)
+            .is_some()
+    };
+
+    // Another proposal's transactions are kept first, so they are the first to be dropped.
+    let mut other_bytes = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES.to_vec();
+    let other: Arc<Block> = other_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    rpc.gbt.proposal_transactions().insert(other, &other_bytes);
+    assert!(is_kept(&other_bytes));
+
+    // More proposals than are kept, which only differ in the bytes after the block.
+    for trailing_byte in 0..=MAX_PROPOSAL_TRANSACTIONS {
+        let mut bytes = proposal_bytes.clone();
+        bytes.push(u8::try_from(trailing_byte).expect("the number of kept proposals is small"));
+        check_proposal(bytes).await;
+    }
+
+    assert!(
+        is_kept(&proposal_bytes),
+        "the proposal is found by the block's own bytes"
+    );
+    assert!(
+        is_kept(&other_bytes),
+        "bytes after a proposal don't give it another place"
+    );
+
+    // The same bytes after another block aren't that block's proposal.
+    other_bytes.push(0);
+    assert!(!is_kept(&other_bytes));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_validateaddress() {
     let _init_guard = zebra_test::init();

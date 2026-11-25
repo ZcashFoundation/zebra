@@ -726,6 +726,10 @@ where
     /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
     /// precomputed template pays the configured miner address.
     template_cache: Option<precompute::TemplateCache>,
+
+    /// The decoded transactions of the block proposals that Zebra has validated, so a solved
+    /// proposal is submitted without decoding them again.
+    proposal_transactions: proposal::ProposalTransactions,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -749,6 +753,7 @@ where
                 .unwrap_or(SubmitBlockChannel::default().sender()),
             coinbase_cache: CoinbaseCache::default(),
             template_cache: Some(precompute::TemplateCache::default()),
+            proposal_transactions: proposal::ProposalTransactions::default(),
         }
     }
 
@@ -781,6 +786,11 @@ where
     /// were overridden after cloning.
     pub(crate) fn template_cache(&self) -> Option<&precompute::TemplateCache> {
         self.template_cache.as_ref()
+    }
+
+    /// Returns a handle to the transactions of validated block proposals.
+    pub(crate) fn proposal_transactions(&self) -> &proposal::ProposalTransactions {
+        &self.proposal_transactions
     }
 
     /// Returns the sync status.
@@ -893,6 +903,7 @@ pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncSt
     net: &Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
+    proposal_transactions: &proposal::ProposalTransactions,
 ) -> RpcResult<GetBlockTemplateResponse>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -915,12 +926,28 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    // Large blocks decode their transactions on Rayon, so keep that off the async executor.
-    let block = tokio::task::spawn_blocking(move || {
-        Block::zcash_deserialize_parallel(&mut block_proposal_bytes.as_slice())
-    })
-    .await
-    .map_misc_error()?;
+    // A proposal with the transaction bytes of a validated proposal takes its transactions, so
+    // a block that solves either proposal has the transaction objects of both. Large blocks
+    // decode their transactions on Rayon, so keep that off the async executor.
+    let (block, block_proposal_bytes) =
+        match proposal_transactions.block_with_validated_transactions(&block_proposal_bytes) {
+            Some(block) => (Ok(block), block_proposal_bytes),
+            None => tokio::task::spawn_blocking(move || {
+                let mut block_proposal_bytes = block_proposal_bytes;
+                let mut undecoded_bytes = block_proposal_bytes.as_slice();
+                let block = Block::zcash_deserialize_parallel(&mut undecoded_bytes);
+
+                // The decoder ignores the bytes after a block. Drop them, so the transactions
+                // that are kept for this proposal are found by the block's bytes. Otherwise,
+                // every proposal with other bytes after it would take a place of its own.
+                let block_len = block_proposal_bytes.len() - undecoded_bytes.len();
+                block_proposal_bytes.truncate(block_len);
+
+                (block, block_proposal_bytes)
+            })
+            .await
+            .map_misc_error()?,
+        };
     let block: Block = match block {
         Ok(block) => block,
         Err(parse_error) => {
@@ -971,12 +998,18 @@ where
         // verification, including when the chain reorganizes after this snapshot.
     }
 
+    let block = Arc::new(block);
     let block_verifier_router_response = block_verifier_router
         .ready()
         .await
         .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
+        .call(zebra_consensus::Request::CheckProposal(block.clone()))
         .await;
+
+    // Keep the transactions of a valid proposal, for the submission of the solved proposal.
+    if block_verifier_router_response.is_ok() {
+        proposal_transactions.insert(block, &block_proposal_bytes);
+    }
 
     Ok(block_verifier_router_response
         .map(|_hash| BlockProposalResponse::Valid)

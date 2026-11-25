@@ -55,8 +55,16 @@ impl PendingUtxos {
         &mut self,
         ordered_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) {
+        // Most blocks arrive while nothing is waiting for their outputs, so only copy the
+        // outputs that a request is waiting for.
+        if self.0.is_empty() {
+            return;
+        }
+
         for (outpoint, ordered_utxo) in ordered_utxos.iter() {
-            self.respond(outpoint, ordered_utxo.utxo.clone())
+            if self.0.contains_key(outpoint) {
+                self.respond(outpoint, ordered_utxo.utxo.clone())
+            }
         }
     }
 

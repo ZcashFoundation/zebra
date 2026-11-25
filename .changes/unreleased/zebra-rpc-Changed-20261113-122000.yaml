@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`HexData` decodes hex strings with a lookup table, which is faster for block data. Invalid strings get the same errors as before.'
+time: 2026-11-13T12:20:00.000000000Z
