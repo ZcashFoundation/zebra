@@ -787,3 +787,179 @@ fn coinbase_pays_nsm_subsidy() {
     );
     assert!(cache.get(height, fee, Some(Amount::zero())).is_none());
 }
+
+/// The offset of the nonce in a serialized block header: it follows the version, the previous
+/// block hash, the Merkle root, the block commitments, the time and the difficulty threshold.
+const HEADER_NONCE_OFFSET: usize = 4 + 32 + 32 + 32 + 4 + 4;
+
+/// Returns the bytes of a block with several transactions.
+fn proposal_bytes() -> Vec<u8> {
+    zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.to_vec()
+}
+
+/// A solved block gets the decoded transactions of the validated proposal with the same
+/// transaction bytes, and is the block that the decoder returns for its bytes.
+#[test]
+fn solved_block_reuses_validated_proposal_transactions() {
+    use std::sync::Arc;
+
+    use zebra_chain::block::Block;
+
+    use super::proposal::ProposalTransactions;
+
+    let _init_guard = zebra_test::init();
+
+    let proposal_bytes = proposal_bytes();
+    let proposal: Arc<Block> = proposal_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    assert!(proposal.transactions.len() > 1);
+
+    let proposals = ProposalTransactions::default();
+    assert_eq!(
+        proposals.block_with_validated_transactions(&proposal_bytes),
+        None,
+        "a block that wasn't validated as a proposal is left for the decoder",
+    );
+
+    proposals.insert(proposal.clone(), &proposal_bytes);
+
+    // Solving a proposal only changes the nonce and solution in its header.
+    let mut solved_bytes = proposal_bytes.clone();
+    solved_bytes[HEADER_NONCE_OFFSET] ^= 1;
+
+    let solved = proposals
+        .block_with_validated_transactions(&solved_bytes)
+        .expect("a solved block has the transaction bytes of its proposal");
+    let decoded: Block = solved_bytes
+        .zcash_deserialize_into()
+        .expect("only the nonce changed");
+
+    assert_eq!(solved, decoded);
+    assert_ne!(solved.hash(), proposal.hash());
+    assert!(
+        solved
+            .transactions
+            .iter()
+            .zip(&proposal.transactions)
+            .all(|(solved, proposal)| Arc::ptr_eq(solved, proposal)),
+        "the proposal's transactions are reused rather than decoded again",
+    );
+}
+
+/// Bytes that differ from a validated proposal after the header are left for the decoder, so
+/// their transactions are never assumed.
+#[test]
+fn solved_block_requires_the_exact_transaction_bytes() {
+    use std::sync::Arc;
+
+    use zebra_chain::block::{Block, MAX_BLOCK_BYTES};
+
+    use super::proposal::ProposalTransactions;
+
+    let _init_guard = zebra_test::init();
+
+    let proposal_bytes = proposal_bytes();
+    let proposal: Arc<Block> = proposal_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+
+    let proposals = ProposalTransactions::default();
+    proposals.insert(proposal.clone(), &proposal_bytes);
+
+    let mut changed_transaction = proposal_bytes.clone();
+    *changed_transaction.last_mut().expect("a block has bytes") ^= 1;
+    assert_eq!(
+        proposals.block_with_validated_transactions(&changed_transaction),
+        None
+    );
+
+    let missing_byte = &proposal_bytes[..proposal_bytes.len() - 1];
+    assert_eq!(
+        proposals.block_with_validated_transactions(missing_byte),
+        None
+    );
+
+    let mut extra_byte = proposal_bytes.clone();
+    extra_byte.push(0);
+    assert_eq!(
+        proposals.block_with_validated_transactions(&extra_byte),
+        None
+    );
+
+    let header_only = &proposal_bytes[..HEADER_NONCE_OFFSET];
+    assert_eq!(
+        proposals.block_with_validated_transactions(header_only),
+        None
+    );
+    assert_eq!(proposals.block_with_validated_transactions(&[]), None);
+
+    // The decoder rejects bytes past the block size limit, so they are left for it, even when
+    // they match a proposal that was kept with them.
+    let mut oversized = proposal_bytes.clone();
+    oversized.resize(
+        usize::try_from(MAX_BLOCK_BYTES).expect("the block size limit fits in memory") + 1,
+        0,
+    );
+    proposals.insert(proposal, &oversized);
+    assert_eq!(
+        proposals.block_with_validated_transactions(&oversized),
+        None
+    );
+}
+
+/// Only the latest validated proposals are kept.
+#[test]
+fn proposal_transactions_are_bounded() {
+    use std::sync::Arc;
+
+    use zebra_chain::block::Block;
+
+    use super::proposal::{ProposalTransactions, MAX_PROPOSAL_TRANSACTIONS};
+
+    let _init_guard = zebra_test::init();
+
+    let proposal_bytes = proposal_bytes();
+    let proposal: Arc<Block> = proposal_bytes
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+
+    // Bytes after the block make each proposal's transaction bytes different.
+    let proposal_with_suffix = |suffix: u8| {
+        let mut bytes = proposal_bytes.clone();
+        bytes.push(suffix);
+        bytes
+    };
+
+    let proposals = ProposalTransactions::default();
+    for suffix in 0..=MAX_PROPOSAL_TRANSACTIONS {
+        let suffix = u8::try_from(suffix).expect("the proposal limit is small");
+        proposals.insert(proposal.clone(), &proposal_with_suffix(suffix));
+        // Keeping the same proposal again doesn't use another slot.
+        proposals.insert(proposal.clone(), &proposal_with_suffix(suffix));
+    }
+
+    assert_eq!(
+        proposals.block_with_validated_transactions(&proposal_with_suffix(0)),
+        None
+    );
+    for suffix in 1..=MAX_PROPOSAL_TRANSACTIONS {
+        let suffix = u8::try_from(suffix).expect("the proposal limit is small");
+        assert!(proposals
+            .block_with_validated_transactions(&proposal_with_suffix(suffix))
+            .is_some());
+    }
+
+    // A proposal that is validated again is the latest one again, so the next proposal replaces
+    // another one.
+    proposals.insert(proposal.clone(), &proposal_with_suffix(1));
+    proposals.insert(proposal, &proposal_with_suffix(0));
+
+    assert!(proposals
+        .block_with_validated_transactions(&proposal_with_suffix(1))
+        .is_some());
+    assert_eq!(
+        proposals.block_with_validated_transactions(&proposal_with_suffix(2)),
+        None
+    );
+}

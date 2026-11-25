@@ -420,3 +420,57 @@ fn shielded_miner_addresses_wait_longer_for_a_template() {
         );
     }
 }
+
+/// A refreshed template with the same transactions is validated as a proposal that has the
+/// transaction objects of the last validated proposal. The block verifier compares a solved
+/// block's transactions with its proposal's by pointer before it hashes them, and a solved block
+/// gets the transaction objects of the first validated proposal with its transaction bytes.
+#[tokio::test]
+async fn refreshed_template_proposals_share_their_transactions() {
+    let _init_guard = zebra_test::init();
+
+    // The verifier accepts every proposal, and reports the blocks it gets.
+    let (verified_tx, mut verified_rx) = tokio::sync::mpsc::unbounded_channel();
+    let verifier = tower::service_fn(move |request: zebra_consensus::Request| {
+        let block = request.block();
+        let hash = block.hash();
+        verified_tx
+            .send(block)
+            .expect("the test holds the receiver");
+        std::future::ready(Ok::<_, zebra_consensus::BoxError>(hash))
+    });
+
+    let cache = TemplateCache::default();
+    let validator = tokio::spawn(validate_templates(
+        cache.subscribe(),
+        Network::Mainnet,
+        verifier,
+        ProposalTransactions::default(),
+    ));
+
+    let first_template = template();
+    let mut refreshed_template = first_template.clone();
+    refreshed_template.cur_time = DateTime32::from(first_template.cur_time.timestamp() + 1);
+
+    let mut proposals = Vec::new();
+    for template in [first_template, refreshed_template] {
+        cache.publish(template);
+
+        let proposal = tokio::time::timeout(Duration::from_secs(10), verified_rx.recv())
+            .await
+            .expect("each published template is validated")
+            .expect("the validator holds the sender");
+        proposals.push(proposal);
+    }
+    validator.abort();
+
+    assert_ne!(proposals[0].header.time, proposals[1].header.time);
+    assert!(
+        proposals[0]
+            .transactions
+            .iter()
+            .zip(&proposals[1].transactions)
+            .all(|(first, refreshed)| Arc::ptr_eq(first, refreshed)),
+        "a refreshed proposal reuses the transactions of the proposal it refreshes",
+    );
+}

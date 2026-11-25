@@ -2,12 +2,16 @@
 //!
 //! `BlockProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{collections::VecDeque, num::ParseIntError, str::FromStr, sync::Arc};
+
+use tokio::sync::watch;
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
-    serialization::{BytesInDisplayOrder, DateTime32, SerializationError, ZcashDeserializeInto},
+    serialization::{
+        BytesInDisplayOrder, DateTime32, SerializationError, ZcashDeserialize, ZcashDeserializeInto,
+    },
     work::equihash::Solution,
 };
 use zebra_node_services::BoxError;
@@ -162,6 +166,95 @@ impl FromStr for BlockTemplateTimeSource {
             },
         }
     }
+}
+
+/// The number of validated block proposals whose transactions are kept.
+///
+/// This is the number of proposals that the block verifier keeps validation results for. Each
+/// proposal can be as large as a block.
+pub(crate) const MAX_PROPOSAL_TRANSACTIONS: usize = 8;
+
+/// The decoded transactions of the latest block proposals that Zebra has validated, by their
+/// serialized bytes.
+///
+/// A solved block has the same bytes after its header as the proposal it solves. So when the
+/// transaction bytes of a submitted block are a validated proposal's, the block's transactions
+/// are the proposal's, and they don't have to be decoded again. The block verifier then finds
+/// the proposal's validation result for that block.
+///
+/// A refreshed block template often has the same transactions as the last one. Its proposal
+/// takes them from here as well, so every validated proposal with those transactions has the
+/// same transaction objects as the block that solves it. The block verifier only skips hashing
+/// a solved block's transactions when they are the proposal's own objects.
+///
+/// Clones share the same proposals.
+#[derive(Clone, Debug)]
+pub(crate) struct ProposalTransactions(Arc<watch::Sender<VecDeque<(Arc<[u8]>, Arc<Block>)>>>);
+
+impl Default for ProposalTransactions {
+    fn default() -> Self {
+        Self(Arc::new(watch::Sender::new(VecDeque::new())))
+    }
+}
+
+impl ProposalTransactions {
+    /// Keeps the transactions of `proposal`, a validated block proposal that serializes to
+    /// `proposal_bytes`.
+    ///
+    /// Transactions that are already kept become the latest ones again, like the proposal's
+    /// validation result in the block verifier.
+    pub(crate) fn insert(&self, proposal: Arc<Block>, proposal_bytes: &[u8]) {
+        let Some((_header, transaction_bytes)) = split_header(proposal_bytes) else {
+            return;
+        };
+
+        self.0.send_if_modified(|proposals| {
+            let kept = proposals
+                .iter()
+                .position(|(bytes, _)| **bytes == *transaction_bytes)
+                .and_then(|index| proposals.remove(index));
+
+            if kept.is_none() && proposals.len() >= MAX_PROPOSAL_TRANSACTIONS {
+                proposals.pop_front();
+            }
+            proposals.push_back(kept.unwrap_or_else(|| (transaction_bytes.into(), proposal)));
+
+            // Nothing waits for changes to the proposals.
+            false
+        });
+    }
+
+    /// Returns the block that `block_bytes` decodes to, if its transaction bytes are a validated
+    /// proposal's, without decoding the transactions. The block has that proposal's transactions.
+    ///
+    /// Returns `None` for any other bytes, including bytes that aren't a block. Those are for
+    /// the block decoder.
+    pub(crate) fn block_with_validated_transactions(&self, block_bytes: &[u8]) -> Option<Block> {
+        // The decoder checks the block size limit as it reads, so check it for the bytes it
+        // doesn't read.
+        if u64::try_from(block_bytes.len()).ok()? > MAX_BLOCK_BYTES {
+            return None;
+        }
+
+        let (header, transaction_bytes) = split_header(block_bytes)?;
+
+        self.0
+            .borrow()
+            .iter()
+            .find(|(bytes, _)| **bytes == *transaction_bytes)
+            .map(|(_, proposal)| Block {
+                header: Arc::new(header),
+                transactions: proposal.transactions.clone(),
+            })
+    }
+}
+
+/// Decodes the header of the block in `block_bytes`, and returns it with the bytes that follow
+/// it, which are the block's transactions.
+fn split_header(mut block_bytes: &[u8]) -> Option<(block::Header, &[u8])> {
+    let header = block::Header::zcash_deserialize(&mut block_bytes).ok()?;
+
+    Some((header, block_bytes))
 }
 
 /// Returns a block proposal generated from a [`BlockTemplateResponse`] RPC response.
