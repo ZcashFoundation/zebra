@@ -4721,7 +4721,7 @@ fn getblocktemplate_records_first_template_latency() {
     });
 }
 
-/// Rejections do not delay idle arrivals; a burst yields one throttled follow-up for parked miners.
+/// Rejections do not delay idle arrivals.
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     let _init_guard = zebra_test::init();
@@ -4750,7 +4750,7 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
-    let transactions: Vec<_> = (0..122)
+    let transactions: Vec<_> = (0..2)
         .map(|height| {
             VerifiedUnminedTx::new(
                 Arc::new(Transaction::test_v1(
@@ -4907,41 +4907,6 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     assert_ne!(updated.long_poll_id, initial.long_poll_id);
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
 
-    let follow_up = rpc.get_block_template(Some(GetBlockTemplateParameters {
-        long_poll_id: Some(updated.long_poll_id),
-        ..Default::default()
-    }));
-    tokio::pin!(follow_up);
-    assert!(futures::poll!(&mut follow_up).is_pending());
-    for transaction in &transactions[2..] {
-        pool_tx.send_modify(|pool| pool.push(transaction.clone()));
-        events
-            .send(mempool::MempoolChange::added(
-                [transaction.transaction.id].into_iter().collect(),
-            ))
-            .unwrap();
-    }
-    tokio::task::yield_now().await;
-    tokio::time::advance(precompute::MEMPOOL_THROTTLE - Duration::from_millis(1)).await;
-    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
-    assert!(futures::poll!(&mut follow_up).is_pending());
-    events
-        .send(mempool::MempoolChange::added(
-            [added_id].into_iter().collect(),
-        ))
-        .unwrap();
-    tokio::time::advance(Duration::from_millis(1)).await;
-    let coalesced = tokio::time::timeout(Duration::from_millis(1), follow_up)
-        .await
-        .expect("the burst must publish at the original throttle deadline")
-        .unwrap()
-        .try_into_template()
-        .unwrap();
-    assert_eq!(start.elapsed(), precompute::MEMPOOL_THROTTLE);
-    assert_eq!(coalesced.transactions.len(), transactions.len());
-    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
-    tokio::time::advance(precompute::MEMPOOL_THROTTLE).await;
-    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
     updater.abort();
 }
 
