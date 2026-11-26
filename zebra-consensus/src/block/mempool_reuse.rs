@@ -8,7 +8,7 @@ use tower::{util::BoxCloneService, ServiceExt};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    transaction::{self, UnminedTxId, VerifiedUnminedTx, WtxId},
+    transaction::{self, Transaction, VerifiedUnminedTx},
 };
 use zebra_node_services::mempool;
 
@@ -68,42 +68,66 @@ impl ReuseRules {
     }
 }
 
-/// Removes the `candidates` that the block can't reuse, and checks the block context rules of the
-/// others, which the mempool's verification doesn't cover.
+/// The mempool's verifications of a block's transactions, which the block verifier takes instead
+/// of verifying those transactions when it can.
+pub(super) struct Candidates {
+    /// The mempool's verified transactions, by mined ID. Empty without an answer.
+    verified: HashMap<transaction::Hash, VerifiedUnminedTx>,
+}
+
+impl Candidates {
+    /// Returns the candidates in `verified`, the mempool's answer to a block's lookup.
+    pub(super) fn new(verified: HashMap<transaction::Hash, VerifiedUnminedTx>) -> Self {
+        Self { verified }
+    }
+
+    /// Returns the mempool's verification of the block's `transaction`, whose mined ID is
+    /// `transaction_hash`, if the block verifier takes it instead of verifying the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of a rule that depends on the block, which the mempool's verification
+    /// doesn't cover. The transaction verifier returns the same error for the transaction.
+    pub(super) fn take(
+        &self,
+        transaction: &Arc<Transaction>,
+        transaction_hash: transaction::Hash,
+        rules: &ReuseRules,
+    ) -> Result<Option<&VerifiedUnminedTx>, TransactionError> {
+        let Some(candidate) = self.verified.get(&transaction_hash) else {
+            return Ok(None);
+        };
+        if !check_candidate(candidate, transaction, transaction_hash, rules)? {
+            return Ok(None);
+        }
+        Ok(Some(candidate))
+    }
+}
+
+/// Returns `true` if the block verifier can take `candidate`, the mempool's verification of the
+/// block's `transaction` with the mined ID `hash`, instead of verifying the transaction.
 ///
 /// # Errors
 ///
-/// Returns the error of the first candidate, in block order, that breaks a rule that depends on
-/// the block. The transaction verifier returns the same error for it.
-pub(super) fn recheck_candidates(
-    mut candidates: HashMap<transaction::Hash, VerifiedUnminedTx>,
-    block: &Block,
-    transaction_hashes: &[transaction::Hash],
+/// Returns the error of a rule that depends on the block, which the mempool's verification
+/// doesn't cover. The transaction verifier returns the same error for the transaction.
+pub(super) fn check_candidate(
+    candidate: &VerifiedUnminedTx,
+    transaction: &Arc<Transaction>,
+    hash: transaction::Hash,
     rules: &ReuseRules,
-) -> Result<HashMap<transaction::Hash, VerifiedUnminedTx>, TransactionError> {
-    for (&hash, transaction) in transaction_hashes.iter().zip(&block.transactions) {
-        let Some(candidate) = candidates.get(&hash) else {
-            continue;
-        };
-        if transaction.is_coinbase() || !verified_in(candidate, &rules.epoch) {
-            candidates.remove(&hash);
-            continue;
-        }
-        let id = match transaction.auth_digest() {
-            None => UnminedTxId::Legacy(hash),
-            Some(auth_digest) => UnminedTxId::Witnessed(WtxId {
-                id: hash,
-                auth_digest,
-            }),
-        };
-        if id != candidate.transaction.id {
-            candidates.remove(&hash);
-            continue;
-        }
-        // Cached proofs and scripts do not establish expiry or block lock time.
-        tx::check_block_context_rules(transaction, &rules.block, &rules.network)?;
+) -> Result<bool, TransactionError> {
+    if transaction.is_coinbase() || !verified_in(candidate, &rules.epoch) {
+        return Ok(false);
     }
-    Ok::<_, TransactionError>(candidates)
+    // The mempool verified its own copy of the transaction's authorizing data, which can differ
+    // from the block's under the same mined ID.
+    if candidate.transaction.id != tx::unmined_id(transaction, hash) {
+        return Ok(false);
+    }
+    // Cached proofs and scripts do not establish expiry or block lock time.
+    tx::check_block_context_rules(transaction, &rules.block, &rules.network)?;
+    Ok(true)
 }
 
 /// Returns `true` if the mempool verified `candidate` for a height in `epoch`.

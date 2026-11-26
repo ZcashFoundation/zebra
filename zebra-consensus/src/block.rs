@@ -8,7 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,7 +25,6 @@ use tracing::Instrument;
 
 use zebra_chain::{
     block,
-    diagnostic::task::WaitForPanics,
     parameters::{subsidy::SubsidyError, Network},
     transparent,
     work::equihash,
@@ -685,24 +684,10 @@ where
                 record_phase("block_checks", &mut phase_start);
             }
 
-            let candidates = mempool_reuse::lookup(mempool, &block, &transaction_hashes).await;
-            let verified = if candidates.is_empty() {
-                HashMap::new()
-            } else {
-                let block = block.clone();
-                let transaction_hashes = transaction_hashes.clone();
-                let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
-                tokio::task::spawn_blocking(move || {
-                    mempool_reuse::recheck_candidates(
-                        candidates,
-                        &block,
-                        &transaction_hashes,
-                        &rules,
-                    )
-                })
-                .wait_for_panics()
-                .await?
-            };
+            let candidates = mempool_reuse::Candidates::new(
+                mempool_reuse::lookup(mempool, &block, &transaction_hashes).await,
+            );
+            let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
@@ -715,7 +700,8 @@ where
                 transaction_hashes: &transaction_hashes,
                 known_utxos: &known_utxos,
                 height,
-                verified: &verified,
+                candidates: &candidates,
+                rules: &rules,
             }
             .verify()
             .await?;

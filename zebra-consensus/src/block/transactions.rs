@@ -8,13 +8,15 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::{self, Block},
-    transaction::{self, VerifiedUnminedTx},
-    transparent,
+    transaction, transparent,
 };
 
 use crate::{transaction as tx, BoxError};
 
-use super::VerifyBlockError;
+use super::{
+    mempool_reuse::{Candidates, ReuseRules},
+    VerifyBlockError,
+};
 
 /// The transactions of a block that passed the block checks, and what the block verifier needs to
 /// verify them.
@@ -29,9 +31,11 @@ pub(super) struct BlockTransactions<'a, V> {
     pub(super) known_utxos: &'a Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     /// The block's height.
     pub(super) height: block::Height,
-    /// The mempool's verifications that the block verifier takes instead of verifying their
-    /// transactions, by mined ID.
-    pub(super) verified: &'a HashMap<transaction::Hash, VerifiedUnminedTx>,
+    /// The mempool's verifications of the block's transactions.
+    pub(super) candidates: &'a Candidates,
+    /// The rules that the block verifier checks again for each transaction it takes from the
+    /// mempool.
+    pub(super) rules: &'a ReuseRules,
 }
 
 impl<V> BlockTransactions<'_, V>
@@ -53,7 +57,8 @@ where
             transaction_hashes,
             known_utxos,
             height,
-            verified,
+            candidates,
+            rules,
         } = self;
 
         // Send transactions to the transaction verifier to be checked
@@ -66,9 +71,12 @@ where
         for (&transaction_hash, transaction) in
             transaction_hashes.iter().zip(block.transactions.iter())
         {
-            if let Some(cached) = verified.get(&transaction_hash) {
+            if let Some(cached) = candidates.take(transaction, transaction_hash, rules)? {
                 sigops = sigops.saturating_add(cached.block_sigop_count());
                 block_miner_fees += cached.miner_fee;
+                // Taking a transaction from the mempool doesn't wait for anything, so let other
+                // tasks run when this one has used its budget.
+                tokio::task::coop::consume_budget().await;
                 continue;
             }
             let rsp = transaction_verifier
