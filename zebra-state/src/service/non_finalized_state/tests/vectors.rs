@@ -281,6 +281,108 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     Ok(())
 }
 
+/// Validating a block doesn't change the non-finalized state, and inserting the validated chain
+/// then gives the state that committing the block gives. That holds for a first block on the
+/// finalized tip, a block on the tip of a chain, and a block that forks a chain. Neither step
+/// changes the chain kept for the commit of a solved block proposal.
+#[test]
+fn validated_chain_changes_nothing_until_it_is_inserted() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let child = root.make_fake_child().set_work(10);
+    let fork = root.make_fake_child().set_work(1);
+    let tip = |block: &Arc<Block>| {
+        let height = block
+            .coinbase_height()
+            .expect("test blocks have a coinbase height");
+        Some((height, block.hash()))
+    };
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("an ephemeral database is created in a new temporary directory");
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    // `eq_internal_state` doesn't compare the kept proposal chain, which `&self` can change, so
+    // it is checked by identity.
+    let kept = Arc::new(Chain::new(
+        &network,
+        Height(0),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::zero(),
+    ));
+    let is_kept = |state: &NonFinalizedState| {
+        state
+            .prepared_chain
+            .borrow()
+            .as_ref()
+            .is_some_and(|chain| Arc::ptr_eq(chain, &kept))
+    };
+
+    // Validates and inserts `block`, and checks the state against a copy that commits it.
+    let validate_then_insert =
+        |state: &mut NonFinalizedState, block: &Arc<Block>, on_finalized_tip: bool| -> Result<()> {
+            state.store_prepared_chain(kept.clone());
+            let before = state.clone();
+            let validated = if on_finalized_tip {
+                state.validate_new_chain(block.clone().prepare(), &finalized_state)?
+            } else {
+                state.validate_block(block.clone().prepare(), &finalized_state)?
+            };
+            assert!(
+                state.eq_internal_state(&before),
+                "validating a block must not change the state"
+            );
+            assert!(
+                is_kept(state),
+                "validating a block must not change the kept proposal chain"
+            );
+            assert_eq!(validated.chain.non_finalized_tip_hash(), block.hash());
+
+            let mut committed = before.clone();
+            if on_finalized_tip {
+                committed.commit_new_chain(block.clone().prepare(), &finalized_state)?;
+            } else {
+                committed.commit_block(block.clone().prepare(), &finalized_state)?;
+            }
+            state.insert_validated(validated);
+            assert!(
+                state.eq_internal_state(&committed),
+                "inserting a validated chain must give the state that a commit gives"
+            );
+            assert!(
+                !state.eq_internal_state(&before),
+                "inserting a validated chain must add its block"
+            );
+            assert!(
+                is_kept(state),
+                "inserting a validated chain must not change the kept proposal chain"
+            );
+
+            Ok(())
+        };
+
+    validate_then_insert(&mut state, &root, true)?;
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(state.best_tip(), tip(&root));
+
+    // The block replaces the chain that ends at its parent.
+    validate_then_insert(&mut state, &child, false)?;
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(state.best_tip(), tip(&child));
+    assert_eq!(state.best_chain().map(|chain| chain.blocks.len()), Some(2));
+
+    // The block forks that chain, which stays.
+    validate_then_insert(&mut state, &fork, false)?;
+    assert_eq!(state.chain_count(), 2);
+    assert_eq!(state.best_tip(), tip(&child));
+
+    Ok(())
+}
+
 #[test]
 fn invalidate_block_removes_block_and_descendants_from_chain() -> Result<()> {
     let _init_guard = zebra_test::init();

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Split the non-finalized block commit into a contextual validation that doesn''t change the state, and an insertion of the validated chain. `NonFinalizedState::commit_block` and `commit_new_chain` behave as before.'
+time: 2026-11-25T22:56:16.129138310-05:00
