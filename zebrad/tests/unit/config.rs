@@ -1087,6 +1087,41 @@ fn config_zebra_rpc_static_credentials_env() {
 }
 
 #[test]
+fn config_zebra_rpc_max_connections() {
+    let env = EnvGuard::new();
+
+    let default_config = ZebradConfig::load(None).expect("default config should load");
+    assert_eq!(default_config.rpc.max_connections, 100);
+
+    env.set_var("ZEBRA_RPC__MAX_CONNECTIONS", "200");
+    let env_config = ZebradConfig::load(None).expect("load config with ZEBRA_RPC__MAX_CONNECTIONS");
+    assert_eq!(env_config.rpc.max_connections, 200);
+
+    env.set_var("ZEBRA_RPC__MAX_CONNECTIONS", "0");
+    let zero_env_err = ZebradConfig::load(None)
+        .expect_err("ZEBRA_RPC__MAX_CONNECTIONS=0 must fail config loading");
+    assert!(
+        zero_env_err.to_string().contains("max_connections"),
+        "{zero_env_err}"
+    );
+}
+
+#[test]
+fn config_zero_rpc_max_connections_errors() {
+    let _env = EnvGuard::new();
+
+    let temp_dir = TempDir::new().expect("create temp dir");
+    let config_path = temp_dir.path().join("zero_max_connections.toml");
+
+    fs::write(&config_path, "[rpc]\nmax_connections = 0\n").expect("write config");
+
+    let error = ZebradConfig::load(Some(config_path))
+        .expect_err("zero rpc.max_connections must fail config loading");
+    let error = error.to_string();
+    assert!(error.contains("max_connections"), "{error}");
+}
+
+#[test]
 fn config_zebra_state_cache_dir_env() {
     let env = EnvGuard::new();
 

@@ -947,6 +947,19 @@
       }
     },
     {
+      "name": "rpc.getblocktemplate.active_long_polls",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Active getblocktemplate long-poll requests currently waiting for a new template.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "rpc_getblocktemplate_active_long_polls"
+        ]
+      }
+    },
+    {
       "name": "rpc.getblocktemplate.build.duration_seconds",
       "kind": "histogram",
       "unit": "seconds",

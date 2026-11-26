@@ -28,6 +28,10 @@ cache_dir = "/home/zebra/.cache/zebra"
 # listen_addr = "0.0.0.0:8232" # Mainnet
 # listen_addr = "0.0.0.0:18232" # Testnet
 
+# Maximum concurrent in-flight HTTP JSON-RPC requests on `listen_addr`.
+# At most `max_connections / 2` requests may park in `getblocktemplate` long polling.
+# max_connections = 100
+
 cookie_dir = "/home/zebra/.cache/zebra"
 
 # To disable cookie authentication, uncomment the line below and set the value

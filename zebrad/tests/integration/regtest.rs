@@ -223,6 +223,222 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     Ok(())
 }
 
+/// Waits until `precompute` populates `TemplateCache` so consecutive `getblocktemplate` calls
+/// return a stable cached `longpollid`.
+async fn wait_for_cached_block_template(
+    client: &RpcRequestClient,
+) -> Result<zebra_rpc::client::BlockTemplateResponse> {
+    use zebra_rpc::client::BlockTemplateResponse;
+
+    for _ in 0..10 {
+        let first: BlockTemplateResponse = client
+            .json_result_from_call("getblocktemplate", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let second: BlockTemplateResponse = client
+            .json_result_from_call("getblocktemplate", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        if first.long_poll_id() == second.long_poll_id() {
+            return Ok(second);
+        }
+    }
+
+    Err(eyre!(
+        "block template updater did not settle on a cached template"
+    ))
+}
+
+/// Parks `count` matching long-poll `getblocktemplate` requests and verifies that an additional
+/// matching request receives HTTP 200 with JSON-RPC `ServerIsBusy` (`-32009`).
+async fn park_long_polls_and_assert_overflow(
+    client: &RpcRequestClient,
+    long_poll_id: &str,
+    count: usize,
+) -> Result<Vec<tokio::task::JoinHandle<Result<zebra_rpc::client::BlockTemplateResponse>>>> {
+    use zebra_rpc::client::BlockTemplateResponse;
+
+    let params = format!(r#"[{{"longpollid":"{long_poll_id}"}}]"#);
+    let mut parked = Vec::with_capacity(count);
+    for _ in 0..count {
+        let lp_client = client.clone();
+        let lp_params = params.clone();
+        parked.push(tokio::spawn(async move {
+            lp_client
+                .json_result_from_call::<BlockTemplateResponse>("getblocktemplate", lp_params)
+                .await
+                .map_err(|err| eyre!(err))
+        }));
+    }
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for (idx, lp) in parked.iter_mut().enumerate() {
+        assert!(
+            !lp.is_finished(),
+            "long poll {idx} should stay parked at capacity"
+        );
+    }
+
+    let overflow_res = client.call("getblocktemplate", params).await?;
+    assert_eq!(overflow_res.status(), reqwest::StatusCode::OK);
+    let overflow_json: serde_json::Value = serde_json::from_slice(&overflow_res.bytes().await?)?;
+    assert_eq!(
+        overflow_json["error"]["code"],
+        serde_json::json!(jsonrpsee_types::ErrorCode::ServerIsBusy.code()),
+        "excess long poll should return -32009, got: {overflow_json}"
+    );
+
+    Ok(parked)
+}
+
+/// Asserts that every parked long-poll handle returns a template for a higher tip with
+/// `submit_old == Some(false)` within `timeout`.
+async fn assert_parked_long_polls_return_new_tip(
+    parked: Vec<tokio::task::JoinHandle<Result<zebra_rpc::client::BlockTemplateResponse>>>,
+    previous_height: u32,
+    timeout: Duration,
+) -> Result<()> {
+    for lp in parked {
+        let returned = tokio::time::timeout(timeout, lp)
+            .await
+            .map_err(|_| eyre!("parked long poll did not return within {timeout:?}"))???;
+        assert_eq!(returned.submit_old(), Some(false));
+        assert!(returned.height() > previous_height);
+    }
+
+    Ok(())
+}
+
+/// Verifies `getblockchaininfo`, non-long-poll `getblocktemplate`, and `submitblock` all succeed
+/// while long-poll capacity is saturated, returning the instant the submitted block was accepted.
+async fn assert_other_rpcs_and_submit_block_unstarved(
+    client: &RpcRequestClient,
+    initial_template: &zebra_rpc::client::BlockTemplateResponse,
+    network: &Network,
+) -> Result<std::time::Instant> {
+    use zebra_rpc::{
+        client::{BlockTemplateResponse, BlockTemplateTimeSource, SubmitBlockResponse},
+        proposal_block_from_template,
+    };
+
+    let info = client.blockchain_info().await?;
+    assert_eq!(info.blocks().0 + 1, initial_template.height());
+
+    let immediate_template: BlockTemplateResponse = client
+        .json_result_from_call("getblocktemplate", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(immediate_template.height(), initial_template.height());
+
+    let block = proposal_block_from_template(
+        initial_template,
+        BlockTemplateTimeSource::default(),
+        network,
+    )?;
+    let block_data = hex::encode(block.zcash_serialize_to_vec()?);
+    let submit_res: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{block_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        submit_res,
+        SubmitBlockResponse::Accepted,
+        "submitblock must succeed while long polls are at capacity"
+    );
+
+    Ok(std::time::Instant::now())
+}
+
+/// Regression test for #12404: parked `getblocktemplate` long polls are bounded to half of
+/// `rpc.max_connections` and cannot starve `submitblock`, `getblockchaininfo`, or non-long-poll
+/// `getblocktemplate` calls; advancing the tip releases every parked request and resets the count
+/// to zero.
+#[tokio::test]
+async fn getblocktemplate_long_polls_cannot_starve_other_rpcs() -> Result<()> {
+    use zebra_rpc::client::BlockTemplateResponse;
+
+    const MAX_CONNECTIONS: u32 = 6;
+    // Safe: `MAX_CONNECTIONS / 2` is 3, which fits in `usize` on all supported targets.
+    const MAX_LONG_POLLS: usize = (MAX_CONNECTIONS / 2) as usize;
+    const LONG_POLL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+    const FAST_PATH_RESPONSE_BOUND: Duration = Duration::from_secs(3);
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.rpc.max_connections = MAX_CONNECTIONS;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
+
+    let settled_template = wait_for_cached_block_template(&client).await?;
+    client.generate(1).await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let initial_template: BlockTemplateResponse = client
+        .json_result_from_call("getblocktemplate", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert!(initial_template.height() > settled_template.height());
+
+    let parked = park_long_polls_and_assert_overflow(
+        &client,
+        &initial_template.long_poll_id().to_string(),
+        MAX_LONG_POLLS,
+    )
+    .await?;
+    let tip_changed_at =
+        assert_other_rpcs_and_submit_block_unstarved(&client, &initial_template, &network).await?;
+    assert_parked_long_polls_return_new_tip(
+        parked,
+        initial_template.height(),
+        LONG_POLL_RESPONSE_TIMEOUT,
+    )
+    .await?;
+    assert!(
+        tip_changed_at.elapsed() < FAST_PATH_RESPONSE_BOUND,
+        "parked long polls should return promptly on tip change"
+    );
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let round2_template: BlockTemplateResponse = client
+        .json_result_from_call("getblocktemplate", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert!(round2_template.height() > initial_template.height());
+    let second_round = park_long_polls_and_assert_overflow(
+        &client,
+        &round2_template.long_poll_id().to_string(),
+        MAX_LONG_POLLS,
+    )
+    .await?;
+    client.generate(1).await?;
+    assert_parked_long_polls_return_new_tip(
+        second_round,
+        round2_template.height(),
+        LONG_POLL_RESPONSE_TIMEOUT,
+    )
+    .await?;
+
+    zebrad.kill(false)?;
+    zebrad
+        .wait_with_output()?
+        .assert_failure()?
+        .assert_was_killed()?;
+    Ok(())
+}
+
 /// Extra coinbase data the same-hash forging helper edits.
 const FORGED_BODY_EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
 

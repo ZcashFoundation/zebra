@@ -31,7 +31,10 @@ use zebra_node_services::mempool::MempoolService;
 use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
 use crate::{
-    methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
+    methods::types::{
+        long_poll::{LongPollId, LongPollInput},
+        transaction::TransactionTemplate,
+    },
     server::error::MapError,
 };
 
@@ -117,6 +120,14 @@ impl TemplateCache {
     /// Returns `true` if no [`run()`] task has published a template yet.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.borrow().is_none()
+    }
+
+    /// Returns `true` if the currently cached template has `long_poll_id`.
+    pub(crate) fn holds_long_poll_id(&self, long_poll_id: LongPollId) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_some_and(|template| template.long_poll_id == long_poll_id)
     }
 
     /// Subscribes to the templates [`run()`] publishes from now on.

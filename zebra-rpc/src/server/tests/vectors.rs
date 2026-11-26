@@ -216,3 +216,54 @@ async fn rpc_server_spawn_port_conflict() {
     read_state.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 }
+
+/// Test that `RpcServer::start` rejects `max_connections = 0` before writing an auth cookie.
+#[tokio::test]
+async fn rpc_server_rejects_zero_max_connections_without_writing_cookie() {
+    let _init_guard = zebra_test::init();
+
+    let cookie_dir = tempfile::tempdir().unwrap();
+    let conf = Config {
+        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
+        enable_cookie_auth: true,
+        cookie_dir: cookie_dir.path().to_path_buf(),
+        max_connections: 0,
+        ..Default::default()
+    };
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let block_verifier_router: MockService<_, _, _, BoxError> =
+        MockService::build().for_unit_tests();
+
+    let (_tx, rx) = watch::channel(None);
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        false,
+        "RPC test",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state, 1),
+        Buffer::new(block_verifier_router, 1),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let err = RpcServer::start(rpc_impl, conf)
+        .await
+        .expect_err("RPC server should reject max_connections = 0");
+    let max_conn_err = err
+        .downcast::<config::rpc::MaxConnectionsError>()
+        .expect("error should downcast to MaxConnectionsError");
+    assert_eq!(*max_conn_err, config::rpc::MaxConnectionsError::Zero);
+    assert!(
+        !cookie_dir.path().join(".cookie").exists(),
+        "invalid max_connections must fail before writing the RPC cookie to disk"
+    );
+}

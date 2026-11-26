@@ -396,13 +396,14 @@ impl Application for ZebradApp {
                     // Type checks should be faster than string conversions.
                     //
                     // Don't ask users to create bug reports for timeouts, peer errors, or
-                    // RPC credential configuration errors.
+                    // RPC configuration errors.
                     if error.is::<tower::timeout::error::Elapsed>()
                         || error.is::<tokio::time::error::Elapsed>()
                         || error.is::<zebra_network::PeerError>()
                         || error.is::<zebra_network::SharedPeerError>()
                         || error.is::<zebra_network::HandshakeError>()
                         || error.is::<zebra_rpc::config::rpc::StaticCredentialsError>()
+                        || error.is::<zebra_rpc::config::rpc::MaxConnectionsError>()
                     {
                         return false;
                     }

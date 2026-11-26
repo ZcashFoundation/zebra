@@ -2,9 +2,21 @@
 
 use std::{fmt, net::SocketAddr, path::PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 
 use zebra_chain::common::default_cache_dir;
+
+/// The default maximum number of concurrent in-flight HTTP JSON-RPC requests.
+///
+/// Matches `jsonrpsee`'s default (`100`) as an explicit Zebra setting.
+pub const DEFAULT_MAX_CONNECTIONS: u32 = 100;
+
+/// The default maximum number of parked `getblocktemplate` long-poll requests.
+///
+/// Sized to half of [`DEFAULT_MAX_CONNECTIONS`] so parked long polls cannot starve
+/// `submitblock`, `getblockchaininfo`, or wallet/indexer RPCs.
+// Safe: `DEFAULT_MAX_CONNECTIONS / 2` is 50, which fits in `usize` on all supported targets.
+pub(crate) const DEFAULT_MAX_LONG_POLLS: usize = (DEFAULT_MAX_CONNECTIONS / 2) as usize;
 
 /// A [`String`] whose `Debug` output is redacted, so secrets do not reach the logs.
 ///
@@ -67,6 +79,27 @@ pub enum StaticCredentialsError {
         /// The I/O error.
         source: std::io::Error,
     },
+}
+
+/// The error returned when [`Config::max_connections`] is zero.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum MaxConnectionsError {
+    /// `rpc.max_connections` was set to zero, which would reject every HTTP RPC request.
+    #[error("rpc.max_connections must be at least 1")]
+    Zero,
+}
+
+/// Deserializes [`Config::max_connections`], rejecting `0` during config loading.
+fn deserialize_max_connections<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u32::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(de::Error::custom(MaxConnectionsError::Zero));
+    }
+    Ok(value)
 }
 
 /// RPC configuration section.
@@ -185,9 +218,35 @@ pub struct Config {
 
     /// The maximum size of the response body in bytes.
     pub max_response_body_size: u32,
+
+    /// The maximum number of concurrent in-flight HTTP JSON-RPC requests on `listen_addr`.
+    ///
+    /// Requests past this limit receive HTTP `429 Too Many Requests`. Does not apply to
+    /// `indexer_listen_addr` or `lightwalletd_listen_addr`. Must be at least `1`.
+    ///
+    /// At most `max_connections / 2` requests (`50` at the default `100`) may wait in
+    /// `getblocktemplate` long polling at once, reserving the remaining capacity for
+    /// `submitblock`, `getblockchaininfo`, and other RPCs. Excess long polls receive the
+    /// retryable JSON-RPC error `-32009` (`Server is busy`).
+    #[serde(deserialize_with = "deserialize_max_connections")]
+    pub max_connections: u32,
 }
 
 impl Config {
+    /// Validates [`Self::max_connections`], returning [`MaxConnectionsError::Zero`] if it is `0`.
+    pub(crate) fn validate_max_connections(&self) -> Result<u32, MaxConnectionsError> {
+        if self.max_connections == 0 {
+            return Err(MaxConnectionsError::Zero);
+        }
+        Ok(self.max_connections)
+    }
+
+    /// Returns the maximum number of parked `getblocktemplate` long-poll requests allowed at once.
+    pub(crate) fn max_long_polls(&self) -> usize {
+        usize::try_from(self.max_connections / 2)
+            .expect("u32 fits in usize on all supported 32-bit and 64-bit targets")
+    }
+
     /// Returns `true` if any static credential field is set.
     pub(crate) fn uses_static_auth(&self) -> bool {
         self.rpc_user.is_some() || self.rpc_password.is_some() || self.rpc_password_file.is_some()
@@ -266,6 +325,9 @@ impl Default for Config {
 
             // 50 MiB
             max_response_body_size: 52_428_800,
+
+            // Match jsonrpsee's default explicitly so Zebra owns the connection bound.
+            max_connections: DEFAULT_MAX_CONNECTIONS,
         }
     }
 }
@@ -274,7 +336,10 @@ impl Default for Config {
 mod tests {
     use std::io::Write;
 
-    use super::{Config, RedactedString, StaticCredentialsError};
+    use super::{
+        Config, MaxConnectionsError, RedactedString, StaticCredentialsError,
+        DEFAULT_MAX_CONNECTIONS,
+    };
 
     fn config_with(user: Option<&str>, password: Option<&str>) -> Config {
         Config {
@@ -343,5 +408,45 @@ mod tests {
             config.static_credentials(),
             Err(StaticCredentialsError::ReadPasswordFile { .. })
         ));
+    }
+
+    #[test]
+    fn max_connections_defaults_and_long_poll_limit() {
+        let config = Config::default();
+        assert_eq!(config.max_connections, DEFAULT_MAX_CONNECTIONS);
+        assert_eq!(config.max_connections, 100);
+        assert_eq!(config.max_long_polls(), 50);
+
+        for (max_connections, expected_long_polls) in [(1, 0), (2, 1), (3, 1), (6, 3), (100, 50)] {
+            let config = Config {
+                max_connections,
+                ..Config::default()
+            };
+            assert_eq!(config.validate_max_connections(), Ok(max_connections));
+            assert_eq!(config.max_long_polls(), expected_long_polls);
+        }
+    }
+
+    #[test]
+    fn max_connections_rejects_zero() {
+        let zero_config = Config {
+            max_connections: 0,
+            ..Config::default()
+        };
+        assert_eq!(
+            zero_config.validate_max_connections(),
+            Err(MaxConnectionsError::Zero)
+        );
+
+        let defaulted: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaulted.max_connections, DEFAULT_MAX_CONNECTIONS);
+
+        let explicit: Config = serde_json::from_str(r#"{"max_connections":200}"#).unwrap();
+        assert_eq!(explicit.max_connections, 200);
+        assert_eq!(explicit.max_long_polls(), 100);
+
+        let err = serde_json::from_str::<Config>(r#"{"max_connections":0}"#)
+            .expect_err("zero max_connections must be rejected during deserialization");
+        assert!(err.to_string().contains("at least 1"), "{err}");
     }
 }

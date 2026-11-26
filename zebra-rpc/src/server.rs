@@ -112,7 +112,15 @@ impl RpcServer {
         SyncStatus,
         AddressBook,
     >(
-        rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+        mut rpc: RpcImpl<
+            Mempool,
+            State,
+            ReadState,
+            Tip,
+            AddressBook,
+            BlockVerifierRouter,
+            SyncStatus,
+        >,
         conf: config::rpc::Config,
     ) -> Result<ServerTask, tower::BoxError>
     where
@@ -127,6 +135,7 @@ impl RpcServer {
         let listen_addr = conf
             .listen_addr
             .expect("caller should make sure listen_addr is set");
+        let max_connections = conf.validate_max_connections()?;
 
         // The largest RPC request is submitblock, which sends a full block
         // as a hex string (2x MAX_BLOCK_BYTES) plus a small JSON-RPC wrapper.
@@ -149,6 +158,7 @@ impl RpcServer {
 
         let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
 
+        rpc = rpc.with_max_long_polls(conf.max_long_polls());
         let rpc = rpc.into_rpc();
         let registered_methods: Arc<HashSet<_>> = Arc::new(rpc.method_names().collect());
         let traced_methods = registered_methods.clone();
@@ -163,6 +173,7 @@ impl RpcServer {
             .http_only()
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
+            .max_connections(max_connections)
             .max_response_body_size(conf.max_response_body_size)
             .build(listen_addr)
             .await?;

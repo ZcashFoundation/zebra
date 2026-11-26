@@ -177,6 +177,7 @@ queries can group nodes by the commit they run.
 | `gossip.block.verify_commit.duration_seconds` | seconds | | Time from sending a downloaded gossiped block to the verifier until it was committed. |
 | `rpc.getblocktemplate.build.duration_seconds` | seconds | | Time taken to select transactions and build a block template. |
 | `rpc.getblocktemplate.first_template.duration_seconds` | seconds | | Time from a new best chain tip until the first block template on it was served. Miners keep working on the old tip for this long. |
+| `rpc.getblocktemplate.active_long_polls` | count | | Active `getblocktemplate` long-poll requests currently waiting for a new template. |
 | `rpc.submitblock.outcomes.total` | count | `outcome` | Blocks submitted with `submitblock`, by result: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
 | `sync.mined.block.announcement.duration_seconds` | seconds | | Time from a mined block's acceptance until its announcement to peers finished. |
 | `sync.mined.block.announcement.outcomes.total` | count | `outcome` | Announcements of mined blocks, `completed` or `failed`. |

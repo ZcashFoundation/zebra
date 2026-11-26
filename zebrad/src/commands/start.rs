@@ -95,7 +95,10 @@ use tracing::Instrument;
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{
-    config::rpc::StaticCredentialsError, methods::RpcImpl, server::RpcServer, SubmitBlockChannel,
+    config::rpc::{MaxConnectionsError, StaticCredentialsError},
+    methods::RpcImpl,
+    server::RpcServer,
+    SubmitBlockChannel,
 };
 
 use crate::{
@@ -173,11 +176,14 @@ fn check_tcp_slow_start_after_idle() {
 #[cfg(not(target_os = "linux"))]
 fn check_tcp_slow_start_after_idle() {}
 
-/// Report credential configuration errors while preserving panic diagnostics for other RPC failures.
+/// Report RPC configuration errors while preserving panic diagnostics for other RPC failures.
 fn rpc_startup_error(error: tower::BoxError) -> Report {
     match error.downcast::<StaticCredentialsError>() {
         Ok(credentials_error) => Report::new(*credentials_error),
-        Err(error) => panic!("server should start: {error:?}"),
+        Err(error) => match error.downcast::<MaxConnectionsError>() {
+            Ok(max_connections_error) => Report::new(*max_connections_error),
+            Err(error) => panic!("server should start: {error:?}"),
+        },
     }
 }
 
