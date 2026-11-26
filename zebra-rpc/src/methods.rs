@@ -989,6 +989,14 @@ enum OnDemandTemplatePoll {
     },
 }
 
+/// Fetched state and mempool snapshot inputs for one on-demand `getblocktemplate` iteration.
+struct OnDemandTemplateInputs {
+    server_long_poll_id: LongPollId,
+    chain_info: zebra_state::GetBlockTemplateChainInfo,
+    mempool_txs: Vec<zebra_chain::transaction::VerifiedUnminedTx>,
+    mempool_tx_deps: mempool::TransactionDependencies,
+}
+
 /// Wake outcome from waiting during an on-demand `getblocktemplate` long poll.
 enum OnDemandWake {
     /// A precomputed template became available after a tip change.
@@ -1491,20 +1499,18 @@ where
     /// Builds an [`OnDemandTemplatePoll::Snapshot`] with `submit_old` computed for `now`.
     fn on_demand_snapshot(
         client_long_poll_id: Option<LongPollId>,
-        server_long_poll_id: LongPollId,
-        chain_info: zebra_state::GetBlockTemplateChainInfo,
-        mempool_txs: Vec<zebra_chain::transaction::VerifiedUnminedTx>,
-        mempool_tx_deps: mempool::TransactionDependencies,
+        inputs: OnDemandTemplateInputs,
         now: DateTime32,
     ) -> OnDemandTemplatePoll {
         let submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
-            now <= chain_info.max_time && server_long_poll_id.submit_old(old_long_poll_id)
+            now <= inputs.chain_info.max_time
+                && inputs.server_long_poll_id.submit_old(old_long_poll_id)
         });
         OnDemandTemplatePoll::Snapshot {
-            server_long_poll_id,
-            chain_info: Box::new(chain_info),
-            mempool_txs,
-            mempool_tx_deps,
+            server_long_poll_id: inputs.server_long_poll_id,
+            chain_info: Box::new(inputs.chain_info),
+            mempool_txs: inputs.mempool_txs,
+            mempool_tx_deps: inputs.mempool_tx_deps,
             submit_old,
         }
     }
@@ -1554,18 +1560,16 @@ where
         }
     }
 
-    /// Runs the on-demand fetch and long-poll wait loop for `getblocktemplate`.
-    async fn poll_on_demand_block_template(
+    /// Fetches tip-consistent state and mempool inputs for an on-demand `getblocktemplate`
+    /// iteration, retrying briefly on state/mempool tip mismatches for long polls.
+    async fn fetch_on_demand_template_inputs(
         &self,
-        client_long_poll_id: Option<LongPollId>,
-        long_poll_started: DateTime32,
+        latest_chain_tip: &mut Tip,
+        sync_status: &SyncStatus,
+        is_long_poll: bool,
         long_poll_deadline: tokio::time::Instant,
         long_poll_permit: &mut Option<LongPollPermit>,
-    ) -> Result<OnDemandTemplatePoll> {
-        let mut latest_chain_tip = self.latest_chain_tip.clone();
-        let sync_status = self.gbt.sync_status();
-        let is_long_poll = client_long_poll_id.is_some();
-
+    ) -> Result<OnDemandTemplateInputs> {
         loop {
             types::get_block_template::check_synced_to_tip(
                 &self.network,
@@ -1593,23 +1597,48 @@ where
                 mempool_txs.iter().map(|tx| tx.transaction.id),
             )
             .generate_id();
+
+            return Ok(OnDemandTemplateInputs {
+                server_long_poll_id,
+                chain_info,
+                mempool_txs,
+                mempool_tx_deps,
+            });
+        }
+    }
+
+    /// Runs the on-demand fetch and long-poll wait loop for `getblocktemplate`.
+    async fn poll_on_demand_block_template(
+        &self,
+        client_long_poll_id: Option<LongPollId>,
+        long_poll_started: DateTime32,
+        long_poll_deadline: tokio::time::Instant,
+        long_poll_permit: &mut Option<LongPollPermit>,
+    ) -> Result<OnDemandTemplatePoll> {
+        let mut latest_chain_tip = self.latest_chain_tip.clone();
+        let sync_status = self.gbt.sync_status();
+        let is_long_poll = client_long_poll_id.is_some();
+
+        loop {
+            let inputs = self
+                .fetch_on_demand_template_inputs(
+                    &mut latest_chain_tip,
+                    &sync_status,
+                    is_long_poll,
+                    long_poll_deadline,
+                    long_poll_permit,
+                )
+                .await?;
             let now = self.template_clock_now();
             if Self::should_return_long_poll(
                 client_long_poll_id,
-                server_long_poll_id,
+                inputs.server_long_poll_id,
                 long_poll_started,
-                chain_info.max_time,
+                inputs.chain_info.max_time,
                 now,
                 long_poll_deadline,
             ) {
-                return Ok(Self::on_demand_snapshot(
-                    client_long_poll_id,
-                    server_long_poll_id,
-                    chain_info,
-                    mempool_txs,
-                    mempool_tx_deps,
-                    now,
-                ));
+                return Ok(Self::on_demand_snapshot(client_long_poll_id, inputs, now));
             }
 
             self.acquire_long_poll_permit(long_poll_permit)?;
@@ -1617,9 +1646,9 @@ where
                 .wait_for_on_demand_long_poll_wake(
                     &latest_chain_tip,
                     client_long_poll_id,
-                    server_long_poll_id,
+                    inputs.server_long_poll_id,
                     long_poll_started,
-                    &chain_info,
+                    &inputs.chain_info,
                     now,
                     long_poll_deadline,
                     long_poll_permit,
@@ -1632,10 +1661,7 @@ where
                 OnDemandWake::LifetimeReached => {
                     return Ok(Self::on_demand_snapshot(
                         client_long_poll_id,
-                        server_long_poll_id,
-                        chain_info,
-                        mempool_txs,
-                        mempool_tx_deps,
+                        inputs,
                         self.template_clock_now(),
                     ));
                 }
