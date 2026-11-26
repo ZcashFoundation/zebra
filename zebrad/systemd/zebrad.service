@@ -20,6 +20,7 @@ AssertPathExists=/usr/bin/zebrad
 [Service]
 ExecStart=/usr/bin/zebrad start
 Restart=always
+LimitNOFILE=65536
 PrivateTmp=true
 NoNewPrivileges=true
 StandardOutput=journal
