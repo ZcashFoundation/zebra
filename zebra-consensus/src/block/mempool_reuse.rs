@@ -23,8 +23,9 @@ pub(super) async fn lookup(
     block: &Block,
     transaction_hashes: &Arc<[transaction::Hash]>,
 ) -> HashMap<transaction::Hash, VerifiedUnminedTx> {
-    // Query only this block's candidates, against the mempool's processed tip.
-    if let Some(mempool) = mempool {
+    // Query only this block's candidates, against the mempool's processed tip. The mempool never
+    // has a coinbase transaction, so a block with only a coinbase has nothing to reuse.
+    if let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) {
         match tokio::time::timeout(
             MEMPOOL_REUSE_TIMEOUT,
             mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {

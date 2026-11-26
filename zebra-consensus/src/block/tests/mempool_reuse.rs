@@ -161,6 +161,15 @@ fn mempool(block: &Block, entries: Vec<VerifiedUnminedTx>) -> Mempool {
     }))
 }
 
+/// A mempool that panics when the block verifier sends it a request.
+fn panicking_mempool() -> Mempool {
+    BoxCloneService::new(service_fn(
+        |request: mempool::Request| -> std::future::Ready<Result<mempool::Response, BoxError>> {
+            panic!("the block verifier must not send this mempool request: {request:?}")
+        },
+    ))
+}
+
 fn mock_state() -> State {
     BoxCloneService::new(service_fn(|request| {
         ready(Ok(match request {
@@ -259,6 +268,101 @@ async fn resident_hit_skips_transaction_dispatch_and_utxo_lookup() {
         assert_eq!(result.unwrap(), block.hash(), "{name}");
         assert_dispatches(&calls, 0);
         assert_eq!(calls.commits.load(Ordering::SeqCst), 1, "{name}");
+    }
+}
+
+/// The block verifier doesn't ask the mempool about a block with only a coinbase transaction,
+/// because the mempool never has a coinbase transaction.
+#[tokio::test]
+async fn coinbase_only_block_sends_no_mempool_lookup() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let block = block_with(&network, Height(3), Vec::new(), 0);
+    let (result, calls) = verify(&network, block.clone(), panicking_mempool(), mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_dispatches(&calls, 0);
+    assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
+}
+
+/// The block verifier asks the mempool for its verified transactions only after the block
+/// checks. So a block whose body doesn't match its header sends no lookup, and nor do blocks that
+/// fail the time check or the coinbase position check, the checks after the Merkle root check.
+#[tokio::test]
+async fn block_that_fails_a_block_check_sends_no_mempool_lookup() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let spend = spend(LockTime::unlocked(), Height(0));
+    let block = candidate(&network, Height(3), spend.clone());
+
+    // A header that commits to other transactions.
+    let mut changed_body = (*block).clone();
+    Arc::make_mut(&mut changed_body.header).merkle_root = block::merkle::Root([0xff; 32]);
+
+    // A block from too far in the future. Its time isn't in its Merkle root, so only the time
+    // check fails.
+    let mut future_block = (*block).clone();
+    Arc::make_mut(&mut future_block.header).time = chrono::Utc::now() + chrono::Duration::hours(3);
+
+    // A block with a second coinbase transaction after its spend. Its output differs from the
+    // first coinbase's, so the two have different IDs and the Merkle root check passes.
+    let second_coinbase = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
+            height: Height(3),
+            data: vec![1],
+            sequence: u32::MAX,
+        }],
+        vec![transparent::Output::new(
+            1.try_into().unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(3),
+    ));
+    let two_coinbases = block_with(&network, Height(3), vec![spend, second_coinbase], FEE);
+
+    let is_bad_merkle_root: fn(&VerifyBlockError) -> bool = |error| {
+        matches!(
+            error,
+            VerifyBlockError::Block {
+                source: BlockError::BadMerkleRoot { .. }
+            }
+        )
+    };
+    let is_time_error: fn(&VerifyBlockError) -> bool =
+        |error| matches!(error, VerifyBlockError::Time(_));
+    let is_coinbase_after_first: fn(&VerifyBlockError) -> bool = |error| {
+        matches!(
+            error,
+            VerifyBlockError::Block {
+                source: BlockError::Transaction(TransactionError::CoinbaseAfterFirst)
+            }
+        )
+    };
+    let cases = [
+        (
+            "a header that commits to other transactions",
+            changed_body,
+            is_bad_merkle_root,
+        ),
+        ("a time too far in the future", future_block, is_time_error),
+        (
+            "a coinbase transaction after the first transaction",
+            (*two_coinbases).clone(),
+            is_coinbase_after_first,
+        ),
+    ];
+
+    for (name, block, is_expected_error) in cases {
+        let (result, calls) =
+            verify(&network, Arc::new(block), panicking_mempool(), mock_state()).await;
+        let Err(error) = result else {
+            panic!("{name}: expected a block check error, got {result:?}")
+        };
+        assert!(is_expected_error(&error), "{name}: {error:?}");
+        assert_eq!(calls.coinbase.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(calls.non_coinbase.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(calls.commits.load(Ordering::SeqCst), 0, "{name}");
     }
 }
 
