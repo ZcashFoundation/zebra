@@ -1007,6 +1007,16 @@ enum OnDemandWake {
     Retry,
 }
 
+/// Wake outcome from waiting during a precomputed `getblocktemplate` long poll.
+enum PrecomputedWake {
+    /// Re-check the tip and precomputed template cache.
+    Retry,
+    /// The maximum long-poll lifetime elapsed; validate the current cached template and return.
+    LifetimeReached,
+    /// The chain tip channel closed.
+    Closed,
+}
+
 /// A type alias for the last event logged by the server.
 pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>;
 
@@ -1229,18 +1239,17 @@ where
                 now,
                 long_poll_deadline,
             ) {
-                let mut template = (*template).clone();
-                template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
-                    now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
-                });
-
-                return Ok(Some(template));
+                return Ok(Some(Self::finalize_precomputed_template(
+                    &template,
+                    client_long_poll_id,
+                    now,
+                )));
             }
 
             // Acquire a parked long-poll permit only once we know this call is about to wait.
             self.acquire_long_poll_permit(long_poll_permit)?;
 
-            if !Self::wait_for_precomputed_template_change(
+            match Self::wait_for_precomputed_template_change(
                 &mut tip_change,
                 &mut template_changes,
                 long_poll_started,
@@ -1250,9 +1259,54 @@ where
             )
             .await
             {
-                return Ok(None);
+                PrecomputedWake::Retry => {}
+                PrecomputedWake::LifetimeReached => {
+                    return self
+                        .precomputed_template_on_lifetime_expiry(cache, client_long_poll_id)
+                        .await;
+                }
+                PrecomputedWake::Closed => return Ok(None),
             }
         }
+    }
+
+    /// Clones `template` and sets `submit_old` relative to `client_long_poll_id` and `now`.
+    fn finalize_precomputed_template(
+        template: &BlockTemplateResponse,
+        client_long_poll_id: Option<LongPollId>,
+        now: DateTime32,
+    ) -> BlockTemplateResponse {
+        let mut response = template.clone();
+        response.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
+            now <= response.max_time && response.long_poll_id.submit_old(old_long_poll_id)
+        });
+        response
+    }
+
+    /// Validates the cached template against the committed state tip when a parked precomputed
+    /// long poll reaches `MAX_LONG_POLL_DURATION`.
+    async fn precomputed_template_on_lifetime_expiry(
+        &self,
+        cache: &precompute::TemplateCache,
+        client_long_poll_id: Option<LongPollId>,
+    ) -> Result<Option<BlockTemplateResponse>> {
+        let validation_deadline = tokio::time::Instant::now()
+            + self
+                .gbt
+                .miner_params()
+                .map_or(precompute::NEW_TIP_TIMEOUT, precompute::new_tip_timeout);
+        let Some(tip_hash) = self.read_state_tip_hash_before(validation_deadline).await else {
+            return Err(Self::long_poll_timeout_error());
+        };
+        let now = self.template_clock_now();
+        let Some(current) = cache.template_for_tip(tip_hash, &self.network, now) else {
+            return Err(Self::long_poll_timeout_error());
+        };
+        Ok(Some(Self::finalize_precomputed_template(
+            &current,
+            client_long_poll_id,
+            now,
+        )))
     }
 
     /// Returns `true` when a `getblocktemplate` poll should return immediately instead of waiting.
@@ -1277,7 +1331,7 @@ where
     }
 
     /// Waits for a chain tip change, a new precomputed template, `max_time`, or
-    /// `long_poll_deadline`. Returns `false` if the chain tip channel closed.
+    /// `long_poll_deadline`.
     async fn wait_for_precomputed_template_change(
         tip_change: &mut Tip,
         template_changes: &mut precompute::TemplateChanges,
@@ -1285,7 +1339,7 @@ where
         max_time: DateTime32,
         now: DateTime32,
         long_poll_deadline: tokio::time::Instant,
-    ) -> bool {
+    ) -> PrecomputedWake {
         // `max_time` is inclusive. Wait until the clock passes it, not for the template's
         // original time range again: cached `cur_time` may already be several seconds old.
         // If it was already expired when polling began, wait for changed work instead of
@@ -1298,14 +1352,20 @@ where
             biased;
 
             // A closed chain tip channel means Zebra is shutting down.
-            tip_changed = tip_change.best_tip_changed() => tip_changed.is_ok(),
+            tip_changed = tip_change.best_tip_changed() => {
+                if tip_changed.is_ok() {
+                    PrecomputedWake::Retry
+                } else {
+                    PrecomputedWake::Closed
+                }
+            }
 
-            () = template_changes.changed() => true,
+            () = template_changes.changed() => PrecomputedWake::Retry,
 
             // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
-            () = wait_for_max_time, if long_poll_started <= max_time => true,
+            () = wait_for_max_time, if long_poll_started <= max_time => PrecomputedWake::Retry,
 
-            () = tokio::time::sleep_until(long_poll_deadline) => true,
+            () = tokio::time::sleep_until(long_poll_deadline) => PrecomputedWake::LifetimeReached,
         }
     }
 
@@ -1618,6 +1678,16 @@ where
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.gbt.sync_status();
         let is_long_poll = client_long_poll_id.is_some();
+
+        // Bound long polls whose ID matches the currently published tip before potentially
+        // blocking on state or mempool reads, while keeping plain and stale-tip calls unblocked.
+        if client_long_poll_id.is_some_and(|client_id| {
+            latest_chain_tip
+                .best_tip_height_and_hash()
+                .is_some_and(|(tip_height, tip_hash)| client_id.matches_tip(tip_height, tip_hash))
+        }) {
+            self.acquire_long_poll_permit(long_poll_permit)?;
+        }
 
         loop {
             let inputs = self

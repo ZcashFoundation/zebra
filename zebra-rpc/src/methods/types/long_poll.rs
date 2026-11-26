@@ -213,6 +213,13 @@ impl LongPollId {
             && self.tip_hash_checksum == old_long_poll_id.tip_hash_checksum
             && self.max_timestamp == old_long_poll_id.max_timestamp
     }
+
+    /// Returns `true` if this long poll ID matches the supplied chain tip height and hash checksum.
+    pub(crate) fn matches_tip(&self, tip_height: Height, tip_hash: block::Hash) -> bool {
+        let mut tip_hash_checksum = 0;
+        update_checksum(&mut tip_hash_checksum, tip_hash.0);
+        self.tip_height == tip_height.0 && self.tip_hash_checksum == tip_hash_checksum
+    }
 }
 
 /// Update `checksum` from `item`, so changes in `item` are likely to also change `checksum`.
