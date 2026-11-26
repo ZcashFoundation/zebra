@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use tokio::{
@@ -399,24 +399,98 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     Ok(())
 }
 
+/// An enabled Mainnet mempool, with the services from [`setup`] that it uses.
+struct EnabledMempool {
+    service: Mempool,
+    /// Kept so that the services the mempool uses live as long as it does.
+    _services: (
+        MockPeerSet,
+        StateService,
+        ChainTipChange,
+        MockTxVerifier,
+        RecentSyncLengths,
+        tokio::sync::broadcast::Receiver<MempoolChange>,
+    ),
+}
+
+impl EnabledMempool {
+    /// Returns an enabled Mainnet mempool, whose tip is the genesis block.
+    async fn new() -> Self {
+        let (
+            mut service,
+            peer_set,
+            state_service,
+            chain_tip_change,
+            tx_verifier,
+            mut recent_syncs,
+            mempool_transaction_receiver,
+        ) = setup(&Network::Mainnet, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        Self {
+            service,
+            _services: (
+                peer_set,
+                state_service,
+                chain_tip_change,
+                tx_verifier,
+                recent_syncs,
+                mempool_transaction_receiver,
+            ),
+        }
+    }
+
+    /// Stores the first transaction of Mainnet block 1, verified on the genesis tip, and returns
+    /// its mined ID.
+    fn insert_block_1_transaction(&mut self) -> zebra_chain::transaction::Hash {
+        let transaction = Network::Mainnet
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        self.service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        hash
+    }
+
+    /// Returns the best tip hash, which is the parent of the next block.
+    fn tip_hash(&self) -> block::Hash {
+        self.service.latest_chain_tip.best_tip_hash().unwrap()
+    }
+
+    /// Returns the mempool's answer to [`Request::VerifiedTransactionsForBlock`].
+    async fn verified_transactions_for_block(
+        &mut self,
+        transaction_hashes: Vec<zebra_chain::transaction::Hash>,
+        parent_hash: block::Hash,
+    ) -> HashMap<zebra_chain::transaction::Hash, VerifiedUnminedTx> {
+        let response = (&mut self.service)
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: transaction_hashes.into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        candidates
+    }
+}
+
 #[tokio::test]
 async fn mempool_verified_transactions_for_block_returns_requested_subset() {
     timeout(Duration::from_secs(30), async {
-        let network = Network::Mainnet;
-        let (
-            mut service,
-            _peer_set,
-            _state_service,
-            _chain_tip_change,
-            _tx_verifier,
-            mut recent_syncs,
-            _mempool_transaction_receiver,
-        ) = setup(&network, u64::MAX, true).await;
-        service.enable(&mut recent_syncs).await;
+        let mut mempool = EnabledMempool::new().await;
 
-        let transactions: Vec<_> = network.unmined_transactions_in_blocks(1..=4).collect();
+        let transactions: Vec<_> = Network::Mainnet
+            .unmined_transactions_in_blocks(1..=4)
+            .collect();
         for (index, transaction) in transactions[..3].iter().enumerate() {
-            service
+            mempool
+                .service
                 .storage()
                 .insert(
                     transaction.clone(),
@@ -432,20 +506,18 @@ async fn mempool_verified_transactions_for_block_returns_requested_subset() {
             .collect();
         let expected = [hashes[2], hashes[0]]
             .into_iter()
-            .map(|hash| (hash, service.storage().transactions()[&hash].clone()))
-            .collect();
-        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
-        let response = service
-            .oneshot(Request::VerifiedTransactionsForBlock {
-                transaction_hashes: vec![hashes[2], hashes[3], hashes[0]].into(),
-                parent_hash,
+            .map(|hash| {
+                (
+                    hash,
+                    mempool.service.storage().transactions()[&hash].clone(),
+                )
             })
-            .await
-            .unwrap();
+            .collect();
+        let parent_hash = mempool.tip_hash();
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hashes[2], hashes[3], hashes[0]], parent_hash)
+            .await;
 
-        let Response::VerifiedTransactionsForBlock(candidates) = response else {
-            panic!("expected verified block candidates");
-        };
         assert_eq!(candidates, expected);
         assert_eq!(candidates[&hashes[2]].height, None);
         assert_eq!(candidates[&hashes[0]].height, Some(Height(0)));
@@ -457,47 +529,21 @@ async fn mempool_verified_transactions_for_block_returns_requested_subset() {
 #[tokio::test]
 async fn mempool_verified_transactions_for_block_requires_last_seen_tip() {
     timeout(Duration::from_secs(30), async {
-        let network = Network::Mainnet;
-        let (
-            mut service,
-            _peer_set,
-            _state_service,
-            _chain_tip_change,
-            _tx_verifier,
-            mut recent_syncs,
-            _mempool_transaction_receiver,
-        ) = setup(&network, u64::MAX, true).await;
-        service.enable(&mut recent_syncs).await;
-
-        let transaction = network
-            .unmined_transactions_in_blocks(1..=1)
-            .next()
-            .unwrap();
-        let hash = transaction.transaction.id.mined_id();
-        service
-            .storage()
-            .insert(transaction, Vec::new(), Some(Height(0)))
-            .unwrap();
-        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let mut mempool = EnabledMempool::new().await;
+        let hash = mempool.insert_block_1_transaction();
+        let parent_hash = mempool.tip_hash();
         let ActiveState::Enabled {
             last_seen_tip_hash, ..
-        } = &mut service.active_state
+        } = &mut mempool.service.active_state
         else {
             panic!("mempool was enabled");
         };
         *last_seen_tip_hash = block::Hash([0; 32]);
         assert_ne!(*last_seen_tip_hash, parent_hash);
 
-        let response = service
-            .oneshot(Request::VerifiedTransactionsForBlock {
-                transaction_hashes: vec![hash].into(),
-                parent_hash,
-            })
-            .await
-            .unwrap();
-        let Response::VerifiedTransactionsForBlock(candidates) = response else {
-            panic!("expected verified block candidates");
-        };
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash], parent_hash)
+            .await;
         assert!(candidates.is_empty());
     })
     .await
@@ -544,39 +590,13 @@ async fn mempool_verified_transactions_for_block_disabled_returns_empty() {
 #[tokio::test]
 async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
     timeout(Duration::from_secs(30), async {
-        let network = Network::Mainnet;
-        let (
-            mut service,
-            _peer_set,
-            _state_service,
-            _chain_tip_change,
-            _tx_verifier,
-            mut recent_syncs,
-            _mempool_transaction_receiver,
-        ) = setup(&network, u64::MAX, true).await;
-        service.enable(&mut recent_syncs).await;
-
-        let transaction = network
-            .unmined_transactions_in_blocks(1..=1)
-            .next()
-            .unwrap();
-        let hash = transaction.transaction.id.mined_id();
-        service
-            .storage()
-            .insert(transaction, Vec::new(), Some(Height(0)))
-            .unwrap();
-        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let mut mempool = EnabledMempool::new().await;
+        let hash = mempool.insert_block_1_transaction();
+        let parent_hash = mempool.tip_hash();
         let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
-        let response = service
-            .oneshot(Request::VerifiedTransactionsForBlock {
-                transaction_hashes: vec![hash; max_transactions + 1].into(),
-                parent_hash,
-            })
-            .await
-            .unwrap();
-        let Response::VerifiedTransactionsForBlock(candidates) = response else {
-            panic!("expected verified block candidates");
-        };
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash; max_transactions + 1], parent_hash)
+            .await;
         assert!(candidates.is_empty());
     })
     .await
