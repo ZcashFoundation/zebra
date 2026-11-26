@@ -3,24 +3,47 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
+use hyper::{header, StatusCode};
 use jsonrpsee::{
     core::BoxError,
     server::{HttpBody, HttpRequest, HttpResponse},
 };
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::{Layer, Service};
 
+/// Matches `jsonrpsee`'s default `MAX_CONNECTIONS` limit so [`HttpMetricsLayer`] and
+/// `jsonrpsee::server::Server` enforce the same concurrent connection permit budget.
+pub(super) const DEFAULT_MAX_CONNECTIONS: u32 = 100;
+
 /// [`Layer`] that wraps jsonrpsee's HTTP service in [`HttpMetricsMiddleware`].
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct HttpMetricsLayer;
+#[derive(Clone, Debug)]
+pub(super) struct HttpMetricsLayer {
+    permits: Arc<Semaphore>,
+}
+
+impl HttpMetricsLayer {
+    /// Creates an HTTP metrics layer enforcing at most `max_connections` active connection permits.
+    pub(super) fn new(max_connections: u32) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(
+                usize::try_from(max_connections).expect("u32 fits in usize"),
+            )),
+        }
+    }
+}
 
 impl<S> Layer<S> for HttpMetricsLayer {
     type Service = HttpMetricsMiddleware<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        HttpMetricsMiddleware { service }
+        HttpMetricsMiddleware {
+            service,
+            permits: self.permits.clone(),
+        }
     }
 }
 
@@ -31,6 +54,7 @@ impl<S> Layer<S> for HttpMetricsLayer {
 #[derive(Clone, Debug)]
 pub(super) struct HttpMetricsMiddleware<S> {
     service: S,
+    permits: Arc<Semaphore>,
 }
 
 impl<S> Service<HttpRequest<HttpBody>> for HttpMetricsMiddleware<S>
@@ -48,24 +72,59 @@ where
     }
 
     fn call(&mut self, request: HttpRequest<HttpBody>) -> Self::Future {
-        HttpMetricsFuture {
-            inner: Box::pin(self.service.call(request)),
-            permit_tracked: false,
+        let Ok(permit) = self.permits.clone().try_acquire_owned() else {
+            metrics::counter!("rpc.connections.rejected.total").increment(1);
+            return HttpMetricsFuture::Rejected;
+        };
+
+        metrics::gauge!("rpc.connections.active").increment(1.0);
+        let tracked = TrackedConnectionPermit { _permit: permit };
+        let inner = Box::pin(self.service.call(request));
+
+        HttpMetricsFuture::Admitted {
+            inner: Some(inner),
+            _permit: Some(tracked),
         }
     }
 }
 
+/// Holds an HTTP connection semaphore permit and decrements `rpc.connections.active` before the
+/// permit is released back to `Semaphore`.
+pub(super) struct TrackedConnectionPermit {
+    _permit: OwnedSemaphorePermit,
+}
+
+impl Drop for TrackedConnectionPermit {
+    fn drop(&mut self) {
+        // Decrement before `_permit` drops so another task cannot acquire the released permit and
+        // temporarily bump `rpc.connections.active` above `max_connections`.
+        metrics::gauge!("rpc.connections.active").decrement(1.0);
+    }
+}
+
+/// Returns the HTTP 429 response matching `jsonrpsee`'s connection-limit rejection.
+fn too_many_requests_response() -> HttpResponse<HttpBody> {
+    HttpResponse::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )
+        .body(HttpBody::from(
+            "Too many connections. Please try again later.",
+        ))
+        .expect("static HTTP 429 response is valid")
+}
+
 /// Future returned by [`HttpMetricsMiddleware`].
-///
-/// Uses poll-once-before-incrementing: `jsonrpsee`'s `TowerServiceNoHttp::call` calls
-/// `conn_guard.try_acquire()` synchronously and resolves HTTP 429 rejections (and fast cached
-/// responses) on the first poll, whereas in-flight requests holding a permit return
-/// `Poll::Pending`. Polling the inner future first prevents 429 floods from temporarily spiking
-/// `rpc.connections.active` above `max_connections`, while decrementing in `Drop` keeps the gauge
-/// accurate on client disconnects.
-pub(super) struct HttpMetricsFuture<F> {
-    inner: Pin<Box<F>>,
-    permit_tracked: bool,
+pub(super) enum HttpMetricsFuture<F> {
+    Admitted {
+        // Field declaration order matters: `inner` drops before `_permit`, so jsonrpsee releases
+        // its inner connection state before we decrement the gauge and release the semaphore permit.
+        inner: Option<Pin<Box<F>>>,
+        _permit: Option<TrackedConnectionPermit>,
+    },
+    Rejected,
 }
 
 impl<F, E> Future for HttpMetricsFuture<F>
@@ -77,35 +136,24 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        match this.inner.as_mut().poll(cx) {
-            Poll::Ready(result) => {
-                if let Ok(response) = &result {
-                    if response.status() == hyper::StatusCode::TOO_MANY_REQUESTS {
-                        metrics::counter!("rpc.connections.rejected.total").increment(1);
+        match this {
+            Self::Rejected => Poll::Ready(Ok(too_many_requests_response())),
+            Self::Admitted { inner, _permit } => {
+                let inner_fut = inner.as_mut().expect("future polled after completion");
+                match inner_fut.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        if let Ok(response) = &result {
+                            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                                metrics::counter!("rpc.connections.rejected.total").increment(1);
+                            }
+                        }
+                        *inner = None;
+                        *_permit = None;
+                        Poll::Ready(result.map_err(Into::into))
                     }
+                    Poll::Pending => Poll::Pending,
                 }
-                if this.permit_tracked {
-                    this.permit_tracked = false;
-                    metrics::gauge!("rpc.connections.active").decrement(1.0);
-                }
-                Poll::Ready(result.map_err(Into::into))
             }
-            Poll::Pending => {
-                if !this.permit_tracked {
-                    this.permit_tracked = true;
-                    metrics::gauge!("rpc.connections.active").increment(1.0);
-                }
-                Poll::Pending
-            }
-        }
-    }
-}
-
-impl<F> Drop for HttpMetricsFuture<F> {
-    fn drop(&mut self) {
-        if self.permit_tracked {
-            self.permit_tracked = false;
-            metrics::gauge!("rpc.connections.active").decrement(1.0);
         }
     }
 }
@@ -145,7 +193,7 @@ mod tests {
             }
         });
 
-        let mut service = HttpMetricsLayer.layer(inner);
+        let mut service = HttpMetricsLayer::new(1).layer(inner);
         let request = HttpRequest::new(HttpBody::empty());
         let handle = tokio::spawn(service.ready().await.unwrap().call(request));
 
@@ -180,7 +228,7 @@ mod tests {
             }
         });
 
-        let mut service = HttpMetricsLayer.layer(inner);
+        let mut service = HttpMetricsLayer::new(1).layer(inner);
         let fut = service
             .ready()
             .await
@@ -203,18 +251,35 @@ mod tests {
         let recorder = TestMetricsRecorder::default();
         let _recorder_guard = metrics::set_default_local_recorder(&recorder);
 
-        let inner = service_fn(|_req: HttpRequest<HttpBody>| {
-            future::ready(Ok::<_, BoxError>(
-                HttpResponse::builder()
-                    .status(StatusCode::TOO_MANY_REQUESTS)
-                    .body(HttpBody::from(
-                        "Too many connections. Please try again later.",
-                    ))
-                    .unwrap(),
-            ))
+        let started = Arc::new(Notify::new());
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let started_clone = started.clone();
+
+        let inner = service_fn(move |_req: HttpRequest<HttpBody>| {
+            let started = started_clone.clone();
+            let release_rx = release_rx.clone();
+            async move {
+                started.notify_one();
+                if let Some(rx) = release_rx.lock().await.take() {
+                    let _ = rx.await;
+                }
+                Ok::<_, BoxError>(HttpResponse::new(HttpBody::empty()))
+            }
         });
 
-        let mut service = HttpMetricsLayer.layer(inner);
+        let mut service = HttpMetricsLayer::new(1).layer(inner);
+        let parked = tokio::spawn(
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(HttpRequest::new(HttpBody::empty())),
+        );
+        started.notified().await;
+        tokio::task::yield_now().await;
+        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
+
         let response = service
             .ready()
             .await
@@ -228,8 +293,13 @@ mod tests {
             recorder.counter("rpc.connections.rejected.total", &[]),
             Some(1)
         );
-        assert_eq!(recorder.gauge("rpc.connections.active", &[]), None);
-        assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), None);
+        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
+        assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
+
+        let _ = release_tx.send(());
+        let first_response = parked.await.unwrap().unwrap();
+        assert_eq!(first_response.status(), StatusCode::OK);
+        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
     }
 
     #[tokio::test]
@@ -242,7 +312,7 @@ mod tests {
             future::ready(Ok::<_, BoxError>(HttpResponse::new(HttpBody::empty())))
         });
 
-        let mut service = HttpMetricsLayer.layer(inner);
+        let mut service = HttpMetricsLayer::new(1).layer(inner);
         let response = service
             .ready()
             .await
@@ -256,6 +326,102 @@ mod tests {
             recorder.counter("rpc.connections.rejected.total", &[]),
             None
         );
-        assert_eq!(recorder.gauge_updates("rpc.connections.active", &[]), 0);
+        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
+        assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
+    }
+
+    struct WithLocalRecorder<F> {
+        recorder: Arc<TestMetricsRecorder>,
+        future: Option<Pin<Box<F>>>,
+    }
+
+    impl<F: Future> Future for WithLocalRecorder<F> {
+        type Output = F::Output;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.get_mut();
+            let future = this
+                .future
+                .as_mut()
+                .expect("WithLocalRecorder polled after completion");
+            metrics::with_local_recorder(this.recorder.as_ref(), || future.as_mut().poll(cx))
+        }
+    }
+
+    impl<F> Drop for WithLocalRecorder<F> {
+        fn drop(&mut self) {
+            if let Some(future) = self.future.take() {
+                metrics::with_local_recorder(self.recorder.as_ref(), || drop(future));
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn overlapping_completion_and_admission_never_exceeds_max_connections() {
+        let _init_guard = zebra_test::init();
+        let recorder = Arc::new(TestMetricsRecorder::default());
+        let layer = HttpMetricsLayer::new(1);
+
+        let inner = service_fn(|_req: HttpRequest<HttpBody>| async {
+            tokio::task::yield_now().await;
+            Ok::<_, BoxError>(HttpResponse::new(HttpBody::empty()))
+        });
+
+        const WORKERS: usize = 4;
+        const REQUESTS_PER_WORKER: usize = 250;
+        let barrier = Arc::new(tokio::sync::Barrier::new(WORKERS));
+
+        let mut handles = Vec::with_capacity(WORKERS);
+        for _ in 0..WORKERS {
+            let mut service = layer.layer(inner);
+            let recorder = recorder.clone();
+            let barrier = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let mut ok_count = 0u64;
+                let mut rejected_count = 0u64;
+
+                for _ in 0..REQUESTS_PER_WORKER {
+                    service.ready().await.unwrap();
+                    let fut = metrics::with_local_recorder(recorder.as_ref(), || {
+                        service.call(HttpRequest::new(HttpBody::empty()))
+                    });
+                    let response = WithLocalRecorder {
+                        recorder: recorder.clone(),
+                        future: Some(Box::pin(fut)),
+                    }
+                    .await
+                    .unwrap();
+                    match response.status() {
+                        StatusCode::OK => ok_count += 1,
+                        StatusCode::TOO_MANY_REQUESTS => rejected_count += 1,
+                        other => panic!("unexpected status: {other}"),
+                    }
+                }
+
+                (ok_count, rejected_count)
+            }));
+        }
+
+        let mut total_ok = 0u64;
+        let mut total_rejected = 0u64;
+        for handle in handles {
+            let (ok_count, rejected_count) = handle.await.unwrap();
+            total_ok += ok_count;
+            total_rejected += rejected_count;
+        }
+
+        assert_eq!(
+            total_ok + total_rejected,
+            (WORKERS * REQUESTS_PER_WORKER) as u64
+        );
+        assert!(total_ok > 0);
+        assert!(total_rejected > 0);
+        assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
+        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
+        assert_eq!(
+            recorder.counter("rpc.connections.rejected.total", &[]),
+            Some(total_rejected)
+        );
     }
 }

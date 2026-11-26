@@ -97,7 +97,7 @@ async fn start_test_rpc_server(
     let registered_methods: Arc<HashSet<&'static str>> = Arc::new(module.method_names().collect());
     let http_middleware = tower::ServiceBuilder::new()
         .layer(HttpRequestMiddlewareLayer::new(None, 1024 * 1024))
-        .layer(HttpMetricsLayer);
+        .layer(HttpMetricsLayer::new(max_connections));
     let rpc_middleware = RpcServiceBuilder::new()
         .layer_fn(move |service| RpcMetricsMiddleware::new(service, registered_methods.clone()));
 

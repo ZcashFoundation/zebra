@@ -150,7 +150,9 @@ impl RpcServer {
 
         let http_middleware = tower::ServiceBuilder::new()
             .layer(http_middleware_layer)
-            .layer(http_metrics::HttpMetricsLayer);
+            .layer(http_metrics::HttpMetricsLayer::new(
+                http_metrics::DEFAULT_MAX_CONNECTIONS,
+            ));
 
         let rpc = rpc.into_rpc();
         let registered_methods: Arc<HashSet<_>> = Arc::new(rpc.method_names().collect());
@@ -164,6 +166,7 @@ impl RpcServer {
 
         let server = Server::builder()
             .http_only()
+            .max_connections(http_metrics::DEFAULT_MAX_CONNECTIONS)
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
             .max_response_body_size(conf.max_response_body_size)

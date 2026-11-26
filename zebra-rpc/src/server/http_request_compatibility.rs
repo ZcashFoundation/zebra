@@ -5,7 +5,7 @@
 use std::{fmt, future::Future, pin::Pin};
 
 use futures::{future, FutureExt};
-use http_body_util::{BodyExt, Limited};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::header;
 use jsonrpsee::{
     core::BoxError,
@@ -239,8 +239,7 @@ impl<S> HttpRequestMiddleware<S> {
             version,
             wire_bytes,
             batch_bytes,
-            // `Vec::from` reuses the buffer without copying when it is uniquely owned.
-            request: HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
+            request: HttpRequest::from_parts(parts, bytes_body(bytes)),
         })
     }
 
@@ -262,10 +261,15 @@ impl<S> HttpRequestMiddleware<S> {
             };
         let wire_bytes = bytes.len();
         Ok((
-            HttpResponse::from_parts(parts, HttpBody::from(Vec::from(bytes))),
+            HttpResponse::from_parts(parts, bytes_body(bytes)),
             wire_bytes,
         ))
     }
+}
+
+/// Wraps `bytes` in an [`HttpBody`] without copying them.
+fn bytes_body(bytes: hyper::body::Bytes) -> HttpBody {
+    HttpBody::new(Full::new(bytes))
 }
 
 /// Request metadata captured while parsing and normalizing an HTTP JSON-RPC request.
@@ -764,12 +768,23 @@ mod tests {
     async fn deferred_batch_parsing_retains_array_bytes_only_and_skips_429_batches() {
         let _init_guard = zebra_test::init();
 
-        // Array-shaped body retains bytes without parsing in `request_to_json_rpc_2`.
+        // Array-shaped body retains bytes without parsing or copying in `request_to_json_rpc_2`.
         let array_req = HttpRequest::new(HttpBody::from("  [{\"jsonrpc\":\"2.0\""));
         let parsed_array = HttpRequestMiddleware::<()>::request_to_json_rpc_2(array_req, 4096)
             .await
             .expect("array body should be collected without JSON parsing");
-        assert!(parsed_array.batch_bytes.is_some());
+        let batch_bytes = parsed_array
+            .batch_bytes
+            .expect("array body retains batch bytes");
+        let forwarded = parsed_array
+            .request
+            .into_body()
+            .collect()
+            .await
+            .expect("forwarded body should collect")
+            .to_bytes();
+        assert_eq!(forwarded.as_ptr(), batch_bytes.as_ptr());
+        assert_eq!(forwarded, batch_bytes);
 
         // Single JSON-RPC object does not retain batch bytes.
         let single_req = HttpRequest::new(HttpBody::from(
