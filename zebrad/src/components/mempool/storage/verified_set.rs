@@ -191,6 +191,10 @@ impl VerifiedSet {
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
         transaction.time = Some(chrono::Utc::now());
+        // The block verifier reuses this transaction's verification in blocks in the same network
+        // upgrade as `height + 1`, so `height` must be the tip height the transaction was verified
+        // on. `Mempool::poll_ready` only inserts a transaction while its verification tip height
+        // is still the best tip height. See `VerifiedUnminedTx::height`.
         transaction.height = height;
         self.transactions.insert(tx_id, transaction);
 

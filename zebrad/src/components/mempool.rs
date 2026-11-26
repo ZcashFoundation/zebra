@@ -783,6 +783,10 @@ impl Service<Request> for Mempool {
                         // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
+                        //
+                        // This also makes the stored height the tip height the transaction was
+                        // verified on, which block verification relies on when it reuses the
+                        // mempool's verification. See `VerifiedUnminedTx::height`.
                         if best_tip_height == expected_tip_height {
                             let tx_id = tx.transaction.id;
                             let insert_result =
