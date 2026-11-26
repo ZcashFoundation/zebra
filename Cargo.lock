@@ -1968,9 +1968,9 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 
 [[package]]
 name = "halo2_poseidon"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "800f76fa421515e2729192e3863bb0a58f30fe17a9a165ea5e778a157adeb579"
+checksum = "5788200909f5f2eab561f72bdaf2f61d2315e9bf8690d73545b46bde17834b65"
 dependencies = [
  "bitvec",
  "ff",
@@ -1980,9 +1980,9 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d886268046f1ceedd464c95382a64c7e86520b029b18e02ee92bf94f5120817d"
+checksum = "c4c92149f3c17fd0947ca02500915aed3918f81bb2c66dab83ff6ea5ffc09ac9"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3689,14 +3689,15 @@ dependencies = [
 
 [[package]]
 name = "pasta_curves"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c6ffcfacaf7dc81ca2e318f019b6e09f84327ecfbddb4e58574bcebdd123975"
+checksum = "e4600446f600184497beb7dbe6edfc7a6edb5c999a75f4fd4808f4757063152f"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
  "lazy_static",
+ "maybe-rayon",
  "rand 0.10.2",
  "static_assertions",
  "subtle",
@@ -5283,9 +5284,9 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "sinsemilla"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72744738b764bb3bb7bb5dcf71b62d19c2de8a09f850a7388f6088f244037299"
+checksum = "ae8be47763e68830322a21f6f79ed3f69910f7613d190844f054425c5740615d"
 dependencies = [
  "group",
  "pasta_curves",
@@ -5529,7 +5530,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7305,9 +7306,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10106859d08a2a4119af8a0fa8db72afe35647768b562f94b7a2124adad41275"
+checksum = "6944ad759dda9a90e8f004cd9cc52987c563d176b9fd80d1c93cace3bf775eda"
 dependencies = [
  "bip32",
  "bitflags",
