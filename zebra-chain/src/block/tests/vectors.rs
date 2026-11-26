@@ -1364,3 +1364,13 @@ fn blocks_of_smallest_transactions_of_each_version_parse() {
         assert_eq!(block.transactions.len(), count);
     }
 }
+
+#[test]
+fn serialized_block_into_bytes_matches_as_ref() {
+    let _init_guard = zebra_test::init();
+
+    let expected = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+    let serialized = crate::block::SerializedBlock::from(expected.clone());
+    assert_eq!(serialized.as_ref(), expected.as_slice());
+    assert_eq!(serialized.into_bytes(), expected);
+}
