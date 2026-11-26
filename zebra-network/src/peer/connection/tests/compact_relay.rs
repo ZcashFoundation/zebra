@@ -1,6 +1,8 @@
 //! Compact recovery uses the normal bounded downloader and falls back without scoring collisions.
 
-use super::{new_test_connection, new_test_connection_with_sink};
+use super::{
+    super::compact_relay::smaller_announcement, new_test_connection, new_test_connection_with_sink,
+};
 use crate::{
     compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
     peer::ClientRequest,
@@ -1390,4 +1392,125 @@ async fn compact_recovery_expiry_releases_snapshot_before_stalled_close() {
     })
     .await
     .expect("the retention deadline cancels backpressured recovery before closing");
+}
+
+/// A compact announcement is only sent if it encodes, and its encoding is smaller than the block's.
+#[test]
+fn compact_announcements_that_fail_to_encode_are_not_sent() {
+    let _init_guard = zebra_test::init();
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    let compact = CompactBlock::from_block(&block, 7).unwrap();
+    assert_eq!(
+        smaller_announcement(compact.clone(), &block),
+        Some(compact.clone())
+    );
+
+    // An announcement of a block with only a coinbase is larger than the block.
+    let mut coinbase_only = block.clone();
+    coinbase_only.transactions.truncate(1);
+    let larger = CompactBlock::from_block(&coinbase_only, 7).unwrap();
+    assert_eq!(smaller_announcement(larger, &coinbase_only), None);
+
+    // An announcement whose encoding fails isn't sent.
+    let mut unencodable = compact;
+    unencodable.prefilled.clear();
+    assert!(unencodable.zcash_serialize_to_vec().is_err());
+    assert_eq!(smaller_announcement(unencodable, &block), None);
+}
+
+/// A block of exactly `MAX_BLOCK_BYTES` that is filled with the smallest transparent transactions
+/// is announced in compact form.
+#[tokio::test]
+async fn full_blocks_of_the_smallest_transactions_are_announced_in_compact_form() {
+    let _init_guard = zebra_test::init();
+    let block = Arc::new(crate::compact::tests::full_block_of_the_smallest_transactions());
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+        connection.compact.send = true;
+        let quota = Arc::new(tokio::sync::Semaphore::new(1));
+        let (result, delivered) = tokio::sync::oneshot::channel();
+        let (_, message) = tokio::join!(
+            connection.send_block_advert(crate::peer_set::BlockAdvert {
+                hash: block.hash(),
+                compact_slots: quota.clone(),
+                result,
+            }),
+            async {
+                inbound
+                    .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                    .await
+                    .respond(Response::Blocks(vec![InventoryResponse::Available((
+                        block.clone(),
+                        None,
+                    ))]));
+                outbound.next().await.unwrap()
+            }
+        );
+        assert_eq!(
+            message.command(),
+            "cmpctblock",
+            "the block is announced in compact form"
+        );
+        if let Message::CompactBlock(compact) = message {
+            assert_eq!(compact.block_hash(), block.hash());
+            assert_eq!(compact.short_ids.len(), block.transactions.len() - 1);
+        }
+        delivered.await.unwrap().unwrap();
+        assert_eq!(quota.available_permits(), 0);
+        assert!(errors.try_get_error().is_none());
+    })
+    .await
+    .expect("full blocks of the smallest transactions are announced in compact form");
+}
+
+/// A block that can't be announced in compact form gets an ordinary block inventory, and the
+/// connection doesn't keep the block, use a compact fanout slot, or fail.
+#[tokio::test]
+async fn blocks_without_a_compact_announcement_fall_back_to_block_inventory() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut block: Block = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        // An announcement prefills the coinbase, so it can't be built for a block without one.
+        block.transactions.remove(0);
+        let block = Arc::new(block);
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+        connection.compact.send = true;
+        let quota = Arc::new(tokio::sync::Semaphore::new(1));
+        let (result, delivered) = tokio::sync::oneshot::channel();
+        let (_, message) = tokio::join!(
+            connection.send_block_advert(crate::peer_set::BlockAdvert {
+                hash: block.hash(),
+                compact_slots: quota.clone(),
+                result,
+            }),
+            async {
+                inbound
+                    .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                    .await
+                    .respond(Response::Blocks(vec![InventoryResponse::Available((
+                        block.clone(),
+                        None,
+                    ))]));
+                outbound.next().await.unwrap()
+            }
+        );
+        assert_eq!(message, Message::Inv(vec![block.hash().into()]));
+        delivered.await.unwrap().unwrap();
+        assert_eq!(quota.available_permits(), 1);
+        assert!(!connection.compact.has_cached());
+        assert_eq!(Arc::strong_count(&block), 1, "the block isn't kept");
+        assert!(errors.try_get_error().is_none());
+    })
+    .await
+    .expect("blocks without a compact announcement keep ordinary inventory announcements");
 }
