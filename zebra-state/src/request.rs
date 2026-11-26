@@ -1210,9 +1210,13 @@ pub enum Request {
     ///
     /// The state trusts the caller: it doesn't validate the block's transactions, and it doesn't
     /// check that the result belongs to the block. It only compares the block with the last
-    /// proposal to decide whether it can reuse the chain that validating that proposal built.
-    /// Only send this request with a result that the block verifier has matched to the solved
-    /// block.
+    /// validated proposal, apart from the time and proof of work, to decide whether it can reuse
+    /// the chain that validating that proposal built. Only send this request with a result that
+    /// the block verifier has matched to the solved block.
+    ///
+    /// The state can reuse the chain of a later proposal that only changed the time, so it relies
+    /// on the caller for the block's time: the result must come from validating a proposal with
+    /// the solved block's header, apart from the nonce and Equihash solution.
     ///
     /// The proposal was validated on a snapshot of the state, and the block is committed later.
     /// That is still valid, because a block's parent hash fixes every block below it, and the

@@ -101,9 +101,10 @@ pub struct NonFinalizedState {
     /// A private copy of the best chain with the latest validated block proposal on top.
     ///
     /// Proposal validation runs on a clone of this state, and leaves the chain it built here. A
-    /// commit of the solved proposal rebinds that chain's tip to the solved block, instead of
-    /// applying the block to its parent chain again. Clones share this channel, and only nodes
-    /// that validate proposals keep a chain in it.
+    /// commit of the solved proposal, or of a solved earlier proposal that only had another time,
+    /// rebinds that chain's tip to the solved block, instead of applying the block to its parent
+    /// chain again. Clones share this channel, and only nodes that validate proposals keep a chain
+    /// in it.
     prepared_chain: watch::Sender<Option<Arc<Chain>>>,
 
     // Configuration
@@ -815,11 +816,12 @@ impl NonFinalizedState {
     /// Commits `contextual`, a block that was validated as a block proposal on its parent, and
     /// then solved, without repeating its contextual validation.
     ///
-    /// If the chain that the proposal's validation built is still available, this rebinds its
-    /// tip to the solved block. Otherwise, it applies the block to its parent chain.
+    /// If the chain that the proposal's validation built, or the chain of a later proposal that
+    /// only changed the time, is still available, this rebinds its tip to the solved block.
+    /// Otherwise, it applies the block to its parent chain.
     ///
-    /// Returns the proposal's block if the solved block replaced it, so the caller can drop it
-    /// after answering the commit.
+    /// Returns the proposal block that the solved block replaced, if any, so the caller can drop
+    /// it after answering the commit.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn commit_prevalidated_contextual(
         &mut self,
@@ -911,10 +913,11 @@ impl NonFinalizedState {
         self.prepared_chain.borrow().is_some()
     }
 
-    /// Takes the prepared chain, if it is `parent_chain` with a proposal for `block` on top.
+    /// Takes the prepared chain, if it is `parent_chain` with a proposal on top that has `block`'s
+    /// transactions and header, apart from the time and proof of work.
     ///
     /// The returned chain has the same blocks as `parent_chain` below its tip. Another prepared
-    /// chain is left for the commit of its own proposal.
+    /// chain is left for the commit of a block that it matches.
     fn take_prepared_chain_for(
         &self,
         block: &ContextuallyVerifiedBlock,
@@ -1545,7 +1548,8 @@ impl NonFinalizedState {
     }
 }
 
-/// Returns `true` if `prepared` is `parent_chain` with a validated proposal for `block` on top.
+/// Returns `true` if `prepared` is `parent_chain` with a validated proposal on top that has
+/// `block`'s transactions and header, apart from the time and proof of work.
 ///
 /// A block's hash commits to its ancestors, so two chains with the same block at a height have
 /// the same blocks below it. `prepared` can also have root blocks that `parent_chain` has
@@ -1564,22 +1568,26 @@ fn is_prepared_chain_for(
     };
     let parent_height = parent_chain.non_finalized_tip_height();
 
-    same_block_except_proof_of_work(proposal, block)
+    same_block_except_time_and_proof_of_work(proposal, block)
         && parent_height.next().ok() == Some(prepared.non_finalized_tip_height())
         && prepared.hash_by_height(parent_height) == Some(parent_chain.non_finalized_tip_hash())
         && prepared.non_finalized_root_height() <= parent_chain.non_finalized_root_height()
 }
 
 /// Returns `true` if `proposal` and `block` have the same transactions, height, and header apart
-/// from the nonce and Equihash solution.
+/// from the time, nonce and Equihash solution.
 ///
 /// Both blocks' transactions were validated against their headers: `proposal`'s by the state,
 /// and `block`'s by the sender of [`Request::CommitContextuallyVerifiedBlock`]. A validated
 /// header's Merkle root and block commitments cover the transactions and their authorizing data,
 /// so this means the same block contents.
 ///
+/// The block's own time was checked when the block verifier validated its proposal:
+/// [`Request::CommitContextuallyVerifiedBlock`] results are matched with the solved header, time
+/// included.
+///
 /// [`Request::CommitContextuallyVerifiedBlock`]: crate::Request::CommitContextuallyVerifiedBlock
-fn same_block_except_proof_of_work(
+fn same_block_except_time_and_proof_of_work(
     proposal: &ContextuallyVerifiedBlock,
     block: &ContextuallyVerifiedBlock,
 ) -> bool {
@@ -1591,7 +1599,6 @@ fn same_block_except_proof_of_work(
         && proposal_header.previous_block_hash == header.previous_block_hash
         && proposal_header.merkle_root == header.merkle_root
         && proposal_header.commitment_bytes == header.commitment_bytes
-        && proposal_header.time == header.time
         && proposal_header.difficulty_threshold == header.difficulty_threshold
 }
 

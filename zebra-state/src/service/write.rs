@@ -754,6 +754,7 @@ impl WriteBlockWorkerTask {
             let replaced_chain = non_finalized_state.best_chain().cloned();
             let mut replaced_proposal = None;
             let mut spent_candidate_trees = None;
+            let mut solved_proposal_outputs = None;
 
             // If the parent block was marked as rejected, also reject all its children.
             //
@@ -768,6 +769,9 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.for_descendant(parent_hash))
             } else if let Some(contextual) = contextual {
                 // The block was validated as a proposal, so only apply it to its parent chain.
+                // Rebinding a later proposal's chain keeps that chain's equal created outputs, so
+                // this keeps the block's own until the commit is answered.
+                solved_proposal_outputs = Some(contextual.new_outputs.clone());
                 non_finalized_state
                     .commit_prevalidated_contextual(*contextual, &finalized_state.db)
                     .map(|replaced| replaced_proposal = replaced)
@@ -868,6 +872,7 @@ impl WriteBlockWorkerTask {
                 replaced_proposal,
                 spent_candidate_trees,
                 prepared,
+                solved_proposal_outputs,
             ));
 
             // A prepared chain that the best chain has passed can't be used any more.

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Commit a solved block template without applying it to its parent chain again when a later template only changed the time.'
+time: 2026-11-26T01:19:48.000000000-05:00

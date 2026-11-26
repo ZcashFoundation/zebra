@@ -1181,13 +1181,14 @@ fn mining_candidate_chain_info_is_the_chain_info_after_the_commit() {
 }
 
 /// Rebinding the chain of a validated proposal to the solved block gives the same chain as
-/// committing the solved block, for a tip with a history tree, which depends on the block hash.
-/// That also holds when the proposal's chain still has a root block that the state has finalized.
+/// committing the solved block, for a tip with a history tree, which depends on the block hash
+/// and time. That also holds when the proposal's chain still has a root block that the state has
+/// finalized, and when the rebound chain is a later proposal's that only changed the time.
 #[test]
 fn rebound_chain_is_the_chain_of_the_committed_block() {
     let _init_guard = zebra_test::init();
 
-    for finalize_root in [false, true] {
+    for (finalize_root, retime) in [(false, false), (true, false), (false, true), (true, true)] {
         let network = Network::Mainnet;
         let height = NetworkUpgrade::Heartwood
             .activation_height(&network)
@@ -1240,6 +1241,22 @@ fn rebound_chain_is_the_chain_of_the_committed_block() {
             .tip_block()
             .expect("the proposal is the chain's tip")
             .clone();
+        // A later proposal that only changed the time keeps its own chain instead.
+        let prepared_chain = if retime {
+            let mut later = (*proposal).clone();
+            Arc::make_mut(&mut later.header).time =
+                proposal.header.time + chrono::Duration::seconds(1);
+            let later = Arc::new(later);
+            let mut later_state = state.clone();
+            later_state
+                .commit_block(later.clone().prepare(), &finalized_state)
+                .expect("the later proposal is valid");
+            later_state
+                .remove_chain_with_tip(later.hash())
+                .expect("validation adds the later proposal to a chain")
+        } else {
+            prepared_chain
+        };
         state.store_prepared_chain(prepared_chain);
 
         if finalize_root {
@@ -1285,7 +1302,7 @@ fn rebound_chain_is_the_chain_of_the_committed_block() {
         assert!(
             rebound_chain.eq_internal_state(expected_chain),
             "rebinding gives the same chain as committing the solved block \
-             (finalize_root: {finalize_root})",
+             (finalize_root: {finalize_root}, retime: {retime})",
         );
         // A root block that the prepared chain removes on its own is no longer shared with the
         // chain set, so the chain counts that block's index entries as its own.
