@@ -1944,7 +1944,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "git+https://github.com/upbqdn/halo2?rev=a7facdf33077bc6c6d861ea9b5681c6a106f84a3#a7facdf33077bc6c6d861ea9b5681c6a106f84a3"
+source = "git+https://github.com/upbqdn/halo2?rev=bcb7e1b15441eba94d364684ff4da8025c3cd242#bcb7e1b15441eba94d364684ff4da8025c3cd242"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1968,7 +1968,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.1"
-source = "git+https://github.com/upbqdn/halo2?rev=a7facdf33077bc6c6d861ea9b5681c6a106f84a3#a7facdf33077bc6c6d861ea9b5681c6a106f84a3"
+source = "git+https://github.com/upbqdn/halo2?rev=bcb7e1b15441eba94d364684ff4da8025c3cd242#bcb7e1b15441eba94d364684ff4da8025c3cd242"
 dependencies = [
  "bitvec",
  "ff",
@@ -1979,7 +1979,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.2"
-source = "git+https://github.com/upbqdn/halo2?rev=a7facdf33077bc6c6d861ea9b5681c6a106f84a3#a7facdf33077bc6c6d861ea9b5681c6a106f84a3"
+source = "git+https://github.com/upbqdn/halo2?rev=bcb7e1b15441eba94d364684ff4da8025c3cd242#bcb7e1b15441eba94d364684ff4da8025c3cd242"
 dependencies = [
  "blake2b_simd",
  "ff",
