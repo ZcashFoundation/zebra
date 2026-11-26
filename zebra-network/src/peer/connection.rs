@@ -76,6 +76,12 @@ pub(super) enum Handler {
     FindBlocks {
         extends: Option<block::Hash>,
     },
+    /// A block locator request that waits for the compact discovery barrier's pong before it is
+    /// sent, because the block inventories before that pong reply to an earlier request.
+    HeldFindBlocks {
+        known_blocks: Vec<block::Hash>,
+        stop: Option<block::Hash>,
+    },
     FindHeaders,
     BlocksByHash {
         pending_hashes: HashSet<block::Hash>,
@@ -105,6 +111,7 @@ impl fmt::Display for Handler {
             Handler::Peers => "Peers".to_string(),
 
             Handler::FindBlocks { .. } => "FindBlocks".to_string(),
+            Handler::HeldFindBlocks { .. } => "FindBlocks(held)".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
             Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
@@ -141,7 +148,8 @@ impl Handler {
             Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks { .. } => "FindBlocks".into(),
+            // Waiting requests use the same metric labels.
+            Handler::FindBlocks { .. } | Handler::HeldFindBlocks { .. } => "FindBlocks".into(),
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
@@ -1092,7 +1100,11 @@ where
                                 // It isn't a response, but it can be an inbound block announcement.
                                 Diverted::Announcement(peer_msg) => Some(peer_msg),
                                 // The discovery barrier consumed the message.
-                                Diverted::Consumed | Diverted::Retired => None,
+                                Diverted::Consumed => None,
+                                Diverted::Retired => {
+                                    self.release_held_find_blocks().await;
+                                    None
+                                }
                             };
 
                             self.update_state_metrics(None);
@@ -1468,6 +1480,10 @@ where
                     .and_then(|tip| self.compact.take_discovery(tip))
                 {
                     authorized().map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+                } else if self.compact.has_discovery_barrier() {
+                    // Until the barrier's pong arrives, the peer's block inventories reply to an
+                    // earlier request, so this request is sent after that pong.
+                    authorized().map(|()| Handler::HeldFindBlocks { known_blocks, stop })
                 } else {
                     let extends = known_blocks.first().copied().filter(|_| stop.is_none());
                     self

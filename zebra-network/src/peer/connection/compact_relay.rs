@@ -164,6 +164,10 @@ impl CompactRelay {
             .is_some_and(|barrier| barrier.nonce == nonce)
     }
 
+    pub(super) fn has_discovery_barrier(&self) -> bool {
+        self.discovery_barrier.is_some()
+    }
+
     pub(super) fn barrier_timed_out(&self) -> bool {
         self.discovery_barrier
             .as_ref()
@@ -479,6 +483,20 @@ where
             .await
     }
 
+    /// Recheck peer eligibility immediately before returning a response that needs no write.
+    fn live_authorization(&mut self) -> Result<(), PeerError> {
+        let banned = self
+            .connection_info
+            .connected_addr
+            .get_transient_addr()
+            .is_some_and(|addr| self.bans_receiver.borrow().is_banned(addr.ip()));
+        if banned || self.connection_info.remote.version < self.minimum_peer_version.current() {
+            Err(PeerError::ConnectionDropped)
+        } else {
+            Ok(())
+        }
+    }
+
     fn compact_response(&self, block: ReconstructedBlock) -> Handler {
         Handler::Finished(Ok(Response::ReconstructedBlock(
             block,
@@ -557,6 +575,45 @@ where
                 blocks: Vec::with_capacity(1),
             };
             self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+        }
+    }
+
+    /// Sends a block locator request that waited for the discovery barrier's pong, or answers it
+    /// with an extension of the retired request that arrived before that pong.
+    ///
+    /// The request keeps its original response deadline.
+    pub(super) async fn release_held_find_blocks(&mut self) {
+        let State::AwaitingResponse { handler, .. } = &mut self.state else {
+            return;
+        };
+        if !matches!(handler, Handler::HeldFindBlocks { .. }) {
+            return;
+        }
+        let Handler::HeldFindBlocks { known_blocks, stop } =
+            std::mem::replace(handler, Handler::Finished(Ok(Response::Nil)))
+        else {
+            unreachable!("the waiting request was checked")
+        };
+        let extends = known_blocks.first().copied().filter(|_| stop.is_none());
+        let handler =
+            if let Some(hashes) = extends.and_then(|tip| self.compact.take_discovery(&tip)) {
+                self.live_authorization()
+                    .map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+            } else {
+                self.send_download_request(Message::GetBlocks { known_blocks, stop })
+                    .await
+                    .map(|()| Handler::FindBlocks { extends })
+            };
+        match handler {
+            Ok(handler) => {
+                if let State::AwaitingResponse {
+                    handler: waiting, ..
+                } = &mut self.state
+                {
+                    *waiting = handler;
+                }
+            }
+            Err(error) => self.fail_with(error).await,
         }
     }
 

@@ -351,10 +351,17 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                     })
                     .await
                     .unwrap();
-                assert!(matches!(
-                    outbound.next().await,
-                    Some(Message::GetBlocks { .. })
-                ));
+                if mode == "heartbeat" {
+                    // The barrier's pong already arrived, so the request is sent at once.
+                    assert!(matches!(
+                        outbound.next().await,
+                        Some(Message::GetBlocks { .. })
+                    ));
+                } else {
+                    // The request waits for the barrier's pong.
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    assert!(outbound.try_recv().is_err());
+                }
                 next_discovery = Some(response);
             }
             if mode == "gossip" {
@@ -394,6 +401,12 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
                     assert!(response.try_recv().unwrap().is_none());
                 }
                 peer.send(Ok(Message::Pong(barrier))).await.unwrap();
+                if mode != "multi" {
+                    assert!(
+                        matches!(outbound.next().await, Some(Message::GetBlocks { .. })),
+                        "the waiting request is sent after the barrier's pong"
+                    );
+                }
             }
             if mode == "multi" {
                 let (tx, response) = oneshot::channel();
@@ -459,6 +472,8 @@ struct BarrierConnection {
     outbound: mpsc::Receiver<Message>,
     peer: mpsc::Sender<Result<Message, zebra_chain::serialization::SerializationError>>,
     errors: crate::peer::ErrorSlot,
+    bans: tokio::sync::watch::Sender<crate::BanList>,
+    tip: zebra_chain::chain_tip::mock::MockChainTipSender,
     advertiser: Option<Arc<crate::peer::ConnectionInfo>>,
     barrier: crate::types::Nonce,
 }
@@ -472,7 +487,7 @@ impl BarrierConnection {
         let source: crate::PeerSocketAddr = Self::SOURCE.parse().unwrap();
         let (mut template, _client, mut inbound, _outbound, _errors) =
             new_test_connection::<PanicAssertion>();
-        let (mut minimum, _tip) = crate::peer::MinimumPeerVersion::with_mock_chain_tip(
+        let (mut minimum, tip) = crate::peer::MinimumPeerVersion::with_mock_chain_tip(
             &zebra_chain::parameters::Network::Mainnet,
         );
         let info = Arc::make_mut(&mut template.connection_info);
@@ -486,7 +501,7 @@ impl BarrierConnection {
         });
         let (mut client, client_rx) = mpsc::channel(0);
         let (_adverts, advert_rx) = tokio::sync::mpsc::channel(1);
-        let (_bans, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
+        let (bans, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
         let errors = crate::peer::ErrorSlot::default();
         let connection = crate::peer::Connection::new(
             inbound.clone(),
@@ -558,6 +573,8 @@ impl BarrierConnection {
             outbound,
             peer,
             errors,
+            bans,
+            tip,
             advertiser,
             barrier,
         }
@@ -718,6 +735,160 @@ async fn discovery_barrier_keeps_other_block_announcements() {
     })
     .await
     .expect("the barrier's replies are handled without timers");
+}
+
+/// While the discovery barrier is up, a block locator request waits for the barrier's pong,
+/// because the peer's block inventories before that pong reply to an earlier request. After the
+/// pong, the request is sent, or answered with an extension of the earlier request, if the peer is
+/// still eligible.
+#[tokio::test(start_paused = true)]
+async fn block_locator_request_waits_for_the_discovery_barrier() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source: crate::PeerSocketAddr = BarrierConnection::SOURCE.parse().unwrap();
+        let locator = vec![block.header.previous_block_hash];
+        let extension = vec![block.hash(), zebra_chain::block::Hash([7; 32])];
+        let earlier_reply = vec![
+            zebra_chain::block::Hash([5; 32]),
+            zebra_chain::block::Hash([6; 32]),
+        ];
+        for mode in [
+            "reply",
+            "extension",
+            "ban",
+            "version",
+            "canceled",
+            "timeout",
+        ] {
+            let mut connection = BarrierConnection::start(&compact).await;
+            let start = tokio::time::Instant::now();
+            let mut response = connection
+                .request(Request::FindBlocks {
+                    known_blocks: locator.clone(),
+                    stop: None,
+                })
+                .await;
+            // Let the connection take the request.
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            assert!(
+                connection.outbound.try_recv().is_err(),
+                "{mode}: the request waits for the barrier's pong"
+            );
+
+            // A reply to the earlier request doesn't answer the waiting request.
+            let earlier = if matches!(mode, "extension" | "ban") {
+                &extension
+            } else {
+                &earlier_reply
+            };
+            connection
+                .receive(Message::Inv(
+                    earlier.iter().copied().map(Into::into).collect(),
+                ))
+                .await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            assert!(response.try_recv().unwrap().is_none(), "{mode}");
+
+            match mode {
+                "ban" => connection.bans.send_modify(|bans| bans.ban(source.ip())),
+                "version" => connection.tip.send_best_tip_height(
+                    zebra_chain::parameters::NetworkUpgrade::Nu7
+                        .activation_height(&zebra_chain::parameters::Network::Mainnet),
+                ),
+                "canceled" => {
+                    drop(response);
+                    let barrier = connection.barrier;
+                    connection.receive(Message::Pong(barrier)).await;
+                    // Nothing is sent for the canceled request, and the connection stays open.
+                    let marker = crate::types::Nonce(13);
+                    connection.receive(Message::Ping(marker)).await;
+                    assert_eq!(
+                        connection.outbound.next().await,
+                        Some(Message::Pong(marker))
+                    );
+                    assert!(connection.errors.try_get_error().is_none());
+                    connection.task.abort();
+                    continue;
+                }
+                "timeout" => {
+                    // Without the barrier's pong, the connection and the request time out.
+                    tokio::time::advance(crate::constants::REQUEST_TIMEOUT).await;
+                    assert_eq!(
+                        response.await.unwrap().unwrap_err().inner_debug(),
+                        "ConnectionReceiveTimeout"
+                    );
+                    connection.task.await.unwrap();
+                    assert_eq!(
+                        connection.errors.try_get_error().unwrap().inner_debug(),
+                        "ConnectionReceiveTimeout"
+                    );
+                    continue;
+                }
+                _ => {}
+            }
+            let barrier = connection.barrier;
+            connection.receive(Message::Pong(barrier)).await;
+            match mode {
+                "reply" => {
+                    assert_eq!(
+                        connection.outbound.next().await,
+                        Some(Message::GetBlocks {
+                            known_blocks: locator.clone(),
+                            stop: None,
+                        })
+                    );
+                    let reply = vec![
+                        zebra_chain::block::Hash([2; 32]),
+                        zebra_chain::block::Hash([3; 32]),
+                    ];
+                    connection
+                        .receive(Message::Inv(
+                            reply.iter().copied().map(Into::into).collect(),
+                        ))
+                        .await;
+                    assert_eq!(
+                        response.await.unwrap().unwrap(),
+                        Response::BlockHashes(reply)
+                    );
+                    assert!(
+                        tokio::time::Instant::now() - start < crate::constants::REQUEST_TIMEOUT,
+                        "the reply answers the request before it times out"
+                    );
+                    assert!(connection.errors.try_get_error().is_none());
+                }
+                "extension" => {
+                    assert_eq!(
+                        response.await.unwrap().unwrap(),
+                        Response::BlockHashes(extension.clone())
+                    );
+                    assert!(connection.outbound.try_recv().is_err());
+                    assert!(connection.errors.try_get_error().is_none());
+                }
+                "ban" | "version" => {
+                    assert_eq!(
+                        response.await.unwrap().unwrap_err().inner_debug(),
+                        "ConnectionDropped",
+                        "{mode}"
+                    );
+                    assert_eq!(
+                        connection.errors.try_get_error().unwrap().inner_debug(),
+                        "ConnectionDropped",
+                        "{mode}"
+                    );
+                    assert!(connection.outbound.try_recv().is_err(), "{mode}");
+                }
+                _ => unreachable!("every mode is handled"),
+            }
+            connection.task.abort();
+        }
+    })
+    .await
+    .expect("a waiting block locator request is handled without request timeouts");
 }
 
 #[tokio::test(start_paused = true)]
