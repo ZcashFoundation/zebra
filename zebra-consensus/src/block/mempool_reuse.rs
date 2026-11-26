@@ -14,6 +14,10 @@ use zebra_node_services::mempool;
 
 use crate::{error::TransactionError, transaction as tx, BoxError};
 
+mod audit;
+
+pub(crate) use audit::{Audits, ReuseAudit};
+
 /// The mempool service that the block verifier asks for its verified transactions.
 pub(super) type Mempool = BoxCloneService<mempool::Request, mempool::Response, BoxError>;
 
@@ -38,7 +42,7 @@ enum Lookup {
 }
 
 /// Asks `mempool` for its verifications of `block`'s transactions, and returns them as the
-/// block's candidates. `block_hash` is the block's hash, for logs.
+/// block's candidates. `block_hash` is the block's hash, for logs and audits.
 ///
 /// It waits for the answer for at most [`MEMPOOL_REUSE_TIMEOUT`]. Without an answer, or with an
 /// error, the candidates are empty, so the block's transactions are verified like any other
@@ -52,7 +56,7 @@ pub(super) async fn lookup(
     // The mempool never has a coinbase transaction, so a block with only a coinbase has nothing
     // to reuse.
     let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) else {
-        return Candidates::new(Lookup::NotSent, HashMap::new());
+        return Candidates::new(block_hash, Lookup::NotSent, HashMap::new());
     };
 
     // Query only this block's candidates, against the mempool's processed tip.
@@ -66,7 +70,7 @@ pub(super) async fn lookup(
     .await
     {
         Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(verified))) => {
-            Candidates::new(Lookup::Answered, verified)
+            Candidates::new(block_hash, Lookup::Answered, verified)
         }
         Ok(Ok(_)) => unreachable!(
             "the mempool answers VerifiedTransactionsForBlock with VerifiedTransactionsForBlock"
@@ -78,7 +82,7 @@ pub(super) async fn lookup(
                 "the mempool lookup for a block failed, so the transaction verifier verifies all \
                  its transactions",
             );
-            Candidates::new(Lookup::Failed, HashMap::new())
+            Candidates::new(block_hash, Lookup::Failed, HashMap::new())
         }
         Err(_elapsed) => {
             tracing::debug!(
@@ -86,7 +90,7 @@ pub(super) async fn lookup(
                 "the mempool didn't answer a block's lookup in time, so the transaction verifier \
                  verifies all its transactions",
             );
-            Candidates::new(Lookup::TimedOut, HashMap::new())
+            Candidates::new(block_hash, Lookup::TimedOut, HashMap::new())
         }
     }
 }
@@ -120,26 +124,39 @@ impl ReuseRules {
 /// The mempool's verifications of a block's transactions, which the block verifier takes instead
 /// of verifying those transactions when it can.
 pub(super) struct Candidates {
+    /// The block's hash, for logs and audits.
+    block_hash: block::Hash,
     /// How the lookup ended.
     lookup: Lookup,
     /// The mempool's verified transactions, by mined ID. Empty without an answer.
     verified: HashMap<transaction::Hash, VerifiedUnminedTx>,
     /// The number of transactions that the block verifier took from the mempool.
     reused: usize,
+    /// The reused transaction that is verified again after the block is committed, as its audit
+    /// key and its index in the block.
+    audit: Option<(u64, usize)>,
 }
 
 impl Candidates {
-    /// Returns the candidates in `verified`, from a lookup that ended as `lookup`.
-    fn new(lookup: Lookup, verified: HashMap<transaction::Hash, VerifiedUnminedTx>) -> Self {
+    /// Returns the candidates in `verified` for the block `block_hash`, from a lookup that ended
+    /// as `lookup`.
+    fn new(
+        block_hash: block::Hash,
+        lookup: Lookup,
+        verified: HashMap<transaction::Hash, VerifiedUnminedTx>,
+    ) -> Self {
         Self {
+            block_hash,
             lookup,
             verified,
             reused: 0,
+            audit: None,
         }
     }
 
-    /// Returns the mempool's verification of the block's `transaction`, whose mined ID is
-    /// `transaction_hash`, if the block verifier takes it instead of verifying the transaction.
+    /// Returns the mempool's verification of the block's `transaction` at `index`, whose mined ID
+    /// is `transaction_hash`, if the block verifier takes it instead of verifying the
+    /// transaction.
     ///
     /// # Errors
     ///
@@ -147,6 +164,7 @@ impl Candidates {
     /// doesn't cover. The transaction verifier returns the same error for the transaction.
     pub(super) fn take(
         &mut self,
+        index: usize,
         transaction: &Arc<Transaction>,
         transaction_hash: transaction::Hash,
         rules: &ReuseRules,
@@ -158,7 +176,44 @@ impl Candidates {
             return Ok(None);
         }
         self.reused += 1;
+        // Pick the audited transaction by its ID mixed with the block hash, so which transaction
+        // is audited depends on the block's hash as well as the transaction's ID.
+        let key = low_u64(transaction_hash.0) ^ low_u64(self.block_hash.0);
+        if self.audit.is_none_or(|(smallest, _)| key < smallest) {
+            self.audit = Some((key, index));
+        }
         Ok(Some(candidate))
+    }
+
+    /// Returns the reused transaction of `block` to verify again once the block is committed, if
+    /// the block verifier took any transaction from the mempool.
+    ///
+    /// `transaction_hashes` are the mined IDs of the block's transactions, and `rules` are the
+    /// rules the block verifier checked for them.
+    pub(super) fn audit(
+        &self,
+        block: &Block,
+        transaction_hashes: &[transaction::Hash],
+        rules: &ReuseRules,
+    ) -> Option<audit::ReuseAudit> {
+        let (_, index) = self.audit?;
+        // `take` sampled this index from the block's transactions, and only samples a transaction
+        // that it found in the mempool's verifications.
+        let transaction_hash = transaction_hashes[index];
+        let entry = &self.verified[&transaction_hash];
+        Some(audit::ReuseAudit {
+            request: tx::BlockRequest {
+                transaction_hash,
+                transaction: block.transactions[index].clone(),
+                // The state has the block's outputs, now that the block is committed.
+                known_utxos: Arc::default(),
+                height: rules.block.height,
+                time: rules.block.time,
+            },
+            block_hash: self.block_hash,
+            miner_fee: entry.miner_fee,
+            sigops: entry.block_sigop_count(),
+        })
     }
 
     /// Records how the lookup ended, and how many of the block's `non_coinbase` transactions the
@@ -210,6 +265,12 @@ pub(super) fn check_candidate(
     // Cached proofs and scripts do not establish expiry or block lock time.
     tx::check_block_context_rules(transaction, &rules.block, &rules.network)?;
     Ok(true)
+}
+
+/// Returns the first eight bytes of `bytes` as a number.
+fn low_u64(bytes: [u8; 32]) -> u64 {
+    let [b0, b1, b2, b3, b4, b5, b6, b7, ..] = bytes;
+    u64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7])
 }
 
 /// Returns `true` if the mempool verified `candidate` for a height in `epoch`.
