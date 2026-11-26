@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Use table-driven hex encoding/decoding for RPC block and transaction payloads and verbose transaction byte fields, and serialize each transaction once when building `TransactionObject` without changing RPC output or errors.
+time: 2026-11-26T13:02:36.096306807Z

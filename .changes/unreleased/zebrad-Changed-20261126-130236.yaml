@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Accelerate hex conversion and verbose transaction serialization for `submitblock`, `getblocktemplate`, `getblock`, `getrawtransaction`, and `sendrawtransaction` without changing output or errors.
+time: 2026-11-26T13:02:36.098482715Z

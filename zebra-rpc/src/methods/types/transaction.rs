@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::methods::arrayhex;
+use crate::methods::{arrayhex, hex_data};
 use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
@@ -28,7 +28,6 @@ use zebra_chain::{
     },
     primitives::ed25519,
     sapling::ValueCommitment,
-    serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::{OutPoint, Script, Utxo},
 };
@@ -46,7 +45,7 @@ where
     FeeConstraint: amount::Constraint + Clone + Copy,
 {
     /// The hex-encoded serialized data for this transaction.
-    #[serde(with = "hex")]
+    #[serde(with = "hex_data")]
     pub(crate) data: SerializedTransaction,
 
     /// The transaction ID of this transaction.
@@ -308,7 +307,7 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub(crate) in_active_chain: Option<bool>,
     /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
+    #[serde(with = "hex_data")]
     pub(crate) hex: SerializedTransaction,
     /// The height of the block in the best chain that contains the tx, -1 if
     /// it's in a side chain block, or `None` if the tx is in the mempool.
@@ -474,7 +473,7 @@ pub enum Input {
     /// A coinbase input.
     Coinbase {
         /// The coinbase scriptSig as hex.
-        #[serde(with = "hex")]
+        #[serde(with = "crate::methods::hex_data::bytes")]
         coinbase: Vec<u8>,
         /// The script sequence number.
         sequence: u32,
@@ -603,13 +602,16 @@ impl ScriptPubKey {
         let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
         let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
 
+        // Copy the script bytes once for both `asm` and `type`.
+        let code = zcash_script::script::Code(lock_script.as_raw_bytes().to_vec());
+
         Self {
             // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
             // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
-            asm: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            asm: code.to_asm(false),
             hex: lock_script.clone(),
             req_sigs,
-            r#type: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+            r#type: code
                 .to_component()
                 .ok()
                 .and_then(|c| c.refine().ok())
@@ -655,33 +657,33 @@ pub struct JoinSplit {
     #[serde(rename = "vpub_newZat")]
     new_public_value_zat: i64,
     /// Merkle root of the Sprout note commitment tree.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input notes.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     nullifiers: Vec<[u8; 32]>,
     /// The commitments of the output notes.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     commitments: Vec<[u8; 32]>,
     /// The onetime public key used to encrypt the ciphertexts
     #[serde(rename = "onetimePubKey")]
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     one_time_pubkey: [u8; 32],
     /// The random seed
     #[serde(rename = "randomSeed")]
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     random_seed: [u8; 32],
     /// The input notes MACs.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     macs: Vec<[u8; 32]>,
     /// A zero-knowledge proof using the Sprout circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     proof: Vec<u8>,
     /// The output notes ciphertexts.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     ciphertexts: Vec<Vec<u8>>,
 }
 
@@ -693,23 +695,23 @@ pub struct ShieldedSpend {
     #[getter(skip)]
     cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     nullifier: [u8; 32],
     /// The randomized public key for spendAuthSig.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     rk: [u8; 32],
     /// A zero-knowledge proof using the Sapling Spend circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     proof: [u8; 192],
     /// A signature authorizing this Spend.
-    #[serde(rename = "spendAuthSig", with = "hex")]
+    #[serde(rename = "spendAuthSig", with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     spend_auth_sig: [u8; 64],
 }
@@ -730,19 +732,19 @@ pub struct ShieldedOutput {
     #[getter(skip)]
     cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmu", with = "hex")]
+    #[serde(rename = "cmu", with = "crate::methods::hex_data::bytes")]
     cm_u: [u8; 32],
     /// A Jubjub public key.
-    #[serde(rename = "ephemeralKey", with = "hex")]
+    #[serde(rename = "ephemeralKey", with = "crate::methods::hex_data::bytes")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "outCiphertext", with = "hex")]
+    #[serde(rename = "outCiphertext", with = "crate::methods::hex_data::bytes")]
     out_ciphertext: [u8; 80],
     /// A zero-knowledge proof using the Sapling Output circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     proof: [u8; 192],
 }
 
@@ -770,18 +772,18 @@ pub struct Orchard {
     #[serde(skip_serializing_if = "Option::is_none")]
     flags: Option<OrchardFlags>,
     /// A root of the Orchard note commitment tree at some block height in the past
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     anchor: Option<[u8; 32]>,
     /// Encoding of aggregated zk-SNARK proofs for Orchard Actions
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     proof: Option<Vec<u8>>,
     /// An Orchard binding signature on the SIGHASH transaction hash
     #[serde(rename = "bindingSig")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[getter(copy)]
     binding_sig: Option<[u8; 64]>,
 }
@@ -802,28 +804,28 @@ pub struct OrchardFlags {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     cv: [u8; 32],
     /// The nullifier of the input note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     nullifier: [u8; 32],
     /// The randomized validating key for spendAuthSig.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     rk: [u8; 32],
     /// The x-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmx", with = "hex")]
+    #[serde(rename = "cmx", with = "crate::methods::hex_data::bytes")]
     cm_x: [u8; 32],
     /// An encoding of an ephemeral Pallas public key.
-    #[serde(rename = "ephemeralKey", with = "hex")]
+    #[serde(rename = "ephemeralKey", with = "crate::methods::hex_data::bytes")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "spendAuthSig", with = "hex")]
+    #[serde(rename = "spendAuthSig", with = "crate::methods::hex_data::bytes")]
     spend_auth_sig: [u8; 64],
     /// A signature authorizing the spend in this Action.
-    #[serde(rename = "outCiphertext", with = "hex")]
+    #[serde(rename = "outCiphertext", with = "crate::methods::hex_data::bytes")]
     out_ciphertext: [u8; 80],
 }
 
@@ -928,8 +930,13 @@ impl TransactionObject {
         txid: transaction::Hash,
     ) -> Self {
         let block_time = block_time.map(|bt| bt.timestamp());
+        // Serialize once: `size` is the length of the same bytes.
+        let hex = SerializedTransaction::from(&*tx);
+        let size = hex.as_ref().len().try_into().ok();
+        let sapling_value_balance = tx.sapling_value_balance().sapling_amount();
+        let overwintered = tx.is_overwintered();
         Self {
-            hex: tx.clone().into(),
+            hex,
             height: if in_active_chain.unwrap_or_default() {
                 height.map(|height| height.0 as i32)
             } else if block_hash.is_some() {
@@ -1073,8 +1080,8 @@ impl TransactionObject {
                     }
                 })
                 .collect(),
-            value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
-            value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
+            value_balance: Some(Zec::from(sapling_value_balance).lossy_zec()),
+            value_balance_zat: Some(sapling_value_balance.zatoshis()),
             orchard: Some(orchard_shaped_object(
                 tx.orchard_bundle(),
                 tx.orchard_value_balance().orchard_amount(),
@@ -1093,18 +1100,18 @@ impl TransactionObject {
                 key
             }),
             joinsplit_sig: tx.sprout_bundle().map(|b| b.joinsplit_sig),
-            size: tx.zcash_serialized_size().try_into().ok(),
+            size,
             time: block_time,
             txid,
             in_active_chain,
             auth_digest: tx.auth_digest(),
-            overwintered: tx.is_overwintered(),
+            overwintered,
             version: tx.version(),
             version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
             lock_time: tx.raw_lock_time(),
             // zcashd includes expiryheight only for Overwinter+ transactions.
             // For those, expiry_height of 0 means "no expiry" per ZIP-203.
-            expiry_height: if tx.is_overwintered() {
+            expiry_height: if overwintered {
                 Some(tx.expiry_height().unwrap_or(Height(0)))
             } else {
                 None
@@ -1168,7 +1175,11 @@ impl TransactionObject {
 mod tests {
     use super::*;
 
-    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transparent::Output};
+    use zebra_chain::{
+        block::Block,
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        transparent::Output,
+    };
 
     /// Returns the first non-coinbase, transparent-only transaction in the mainnet block vectors.
     ///
