@@ -44,8 +44,13 @@ where
     transparent_balance_with(|| chain.as_ref(), db, addresses)
 }
 
-/// Like [`transparent_balance`], but re-samples `latest_chain` on every retry attempt so retries
-/// after a concurrent finalization or fork switch observe the updated best chain.
+/// Returns the total transparent balance and received balance for the supplied
+/// [`transparent::Address`]es, along with the tip `(height, hash)` of the chain snapshot
+/// that produced them (or `None` if the state is empty).
+///
+/// Re-samples `latest_chain` on every retry attempt so retries after a concurrent finalization
+/// or fork switch observe the updated best chain. If the addresses do not exist in the
+/// non-finalized chain or finalized `db`, returns zero with the snapshot tip.
 pub fn transparent_balance_with<C>(
     mut latest_chain: impl FnMut() -> Option<C>,
     db: &ZebraDb,
