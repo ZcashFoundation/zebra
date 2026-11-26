@@ -432,6 +432,29 @@ mod tests {
         Arc::new(rival)
     }
 
+    /// Deserializes the mainnet test vector block at `height`.
+    fn mainnet_block(height: u32) -> Arc<Block> {
+        zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&height]
+            .zcash_deserialize_into()
+            .expect("mainnet test vector block should deserialize")
+    }
+
+    /// Commits mainnet test vector blocks in `heights` directly into `finalized_state`.
+    fn commit_finalized_mainnet_blocks(
+        finalized_state: &mut FinalizedState,
+        heights: RangeInclusive<u32>,
+    ) {
+        for height in heights {
+            finalized_state
+                .commit_finalized_direct(
+                    CheckpointVerifiedBlock::from(mainnet_block(height)).into(),
+                    None,
+                    "test",
+                )
+                .expect("finalized commit should succeed");
+        }
+    }
+
     #[test]
     fn empty_state_returns_none_tip() {
         let _init_guard = zebra_test::init();
@@ -618,21 +641,9 @@ mod tests {
 
         let (mut finalized_state, mut non_finalized_state, _genesis) =
             new_state_with_mainnet_genesis();
-        for (&_height, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(1..=5) {
-            let block: Arc<Block> = bytes
-                .zcash_deserialize_into()
-                .expect("block should deserialize");
-            finalized_state
-                .commit_finalized_direct(CheckpointVerifiedBlock::from(block).into(), None, "test")
-                .expect("finalized commit should succeed");
-        }
-
-        let block_6: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&6]
-            .zcash_deserialize_into()
-            .expect("block 6 should deserialize");
-        let block_7: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&7]
-            .zcash_deserialize_into()
-            .expect("block 7 should deserialize");
+        commit_finalized_mainnet_blocks(&mut finalized_state, 1..=5);
+        let block_6 = mainnet_block(6);
+        let block_7 = mainnet_block(7);
         let original_addr = block_6.transactions[0].outputs()[1]
             .address(&Mainnet)
             .expect("coinbase output 1 should have an address");
@@ -711,39 +722,18 @@ mod tests {
         // Also cover the `end_tip.0 < non_finalized_root` branch where the finalized tip is the
         // parent height of `non_finalized_root`, with a mismatched block hash.
         let (mut parent_mismatch_db, _nfs, _gen) = new_state_with_mainnet_genesis();
-        for (&height, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(1..=5) {
-            let block: Arc<Block> = bytes
-                .zcash_deserialize_into()
-                .expect("block should deserialize");
-            let block = if height == 5 {
-                make_rival_block(&block, rival_addr, None)
-            } else {
-                block
-            };
-            parent_mismatch_db
-                .commit_finalized_direct(CheckpointVerifiedBlock::from(block).into(), None, "test")
-                .expect("finalized commit should succeed");
-        }
+        commit_finalized_mainnet_blocks(&mut parent_mismatch_db, 1..=4);
+        let rival_5 = make_rival_block(&mainnet_block(5), rival_addr, None);
+        parent_mismatch_db
+            .commit_finalized_direct(CheckpointVerifiedBlock::from(rival_5).into(), None, "test")
+            .expect("finalized commit should succeed");
+
         let mut fork_a_finalized = new_state_with_mainnet_genesis().0;
+        commit_finalized_mainnet_blocks(&mut fork_a_finalized, 1..=5);
         let mut fork_a_non_finalized = NonFinalizedState::new(&Mainnet);
-        for (&height, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(1..=6) {
-            let block: Arc<Block> = bytes
-                .zcash_deserialize_into()
-                .expect("block should deserialize");
-            if height <= 5 {
-                fork_a_finalized
-                    .commit_finalized_direct(
-                        CheckpointVerifiedBlock::from(block).into(),
-                        None,
-                        "test",
-                    )
-                    .expect("finalized commit should succeed");
-            } else {
-                fork_a_non_finalized
-                    .commit_new_chain(block.prepare(), &fork_a_finalized.db)
-                    .expect("fork A block 6 commit should succeed");
-            }
-        }
+        fork_a_non_finalized
+            .commit_new_chain(mainnet_block(6).prepare(), &fork_a_finalized.db)
+            .expect("fork A block 6 commit should succeed");
         let fork_a_chain = fork_a_non_finalized
             .best_chain()
             .expect("fork A chain should exist");
