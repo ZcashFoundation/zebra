@@ -40,15 +40,22 @@ fn network() -> Network {
     )
 }
 
-fn spend(lock_time: LockTime, expiry_height: Height) -> Arc<Transaction> {
+/// A spend of the output `[8; 32]:index` with the unlock script `unlock_script`, which pays 1
+/// zatoshi to `OP_1`. Spends of different outputs have different transaction IDs.
+fn spend_output(
+    index: u32,
+    unlock_script: &[u8],
+    lock_time: LockTime,
+    expiry_height: Height,
+) -> Arc<Transaction> {
     Arc::new(Transaction::test_v5(
         NetworkUpgrade::Nu5,
         vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: [8; 32].into(),
-                index: 0,
+                index,
             },
-            unlock_script: transparent::Script::new(&[0x51]),
+            unlock_script: transparent::Script::new(unlock_script),
             sequence: 0,
         }],
         vec![transparent::Output::new(
@@ -60,7 +67,33 @@ fn spend(lock_time: LockTime, expiry_height: Height) -> Arc<Transaction> {
     ))
 }
 
-fn candidate(network: &Network, height: Height, spend: Arc<Transaction>) -> Arc<Block> {
+fn spend(lock_time: LockTime, expiry_height: Height) -> Arc<Transaction> {
+    spend_output(0, &[0x51], lock_time, expiry_height)
+}
+
+/// Returns `transaction` with the unlock script of its first input replaced by `unlock_script`.
+/// The mined ID of a v5 transaction doesn't cover its unlock scripts, so it stays the same.
+fn with_unlock_script(transaction: &Transaction, unlock_script: &[u8]) -> Arc<Transaction> {
+    let mut inputs = transaction.inputs();
+    let transparent::Input::PrevOut {
+        unlock_script: script,
+        ..
+    } = &mut inputs[0]
+    else {
+        unreachable!("the test spends have a previous output as their first input")
+    };
+    *script = transparent::Script::new(unlock_script);
+    Arc::new(transaction.clone().with_transparent_inputs(inputs))
+}
+
+/// A block at `height` on `network` with `spends` after a coinbase that claims the block subsidy
+/// and `fees`.
+fn block_with(
+    network: &Network,
+    height: Height,
+    spends: Vec<Arc<Transaction>>,
+    fees: u64,
+) -> Arc<Block> {
     let subsidy = zebra_chain::parameters::subsidy::block_subsidy(height, network).unwrap();
     let coinbase = Arc::new(Transaction::test_v5(
         NetworkUpgrade::Nu5,
@@ -70,7 +103,7 @@ fn candidate(network: &Network, height: Height, spend: Arc<Transaction>) -> Arc<
             sequence: u32::MAX,
         }],
         vec![transparent::Output::new(
-            (subsidy + Amount::<NonNegative>::try_from(FEE).unwrap()).unwrap(),
+            (subsidy + Amount::<NonNegative>::try_from(fees).unwrap()).unwrap(),
             transparent::Script::new(&[0xac]),
         )],
         LockTime::unlocked(),
@@ -79,12 +112,16 @@ fn candidate(network: &Network, height: Height, spend: Arc<Transaction>) -> Arc<
     let genesis = block::genesis::regtest_genesis_block();
     let mut header = *genesis.header;
     header.previous_block_hash = genesis.hash();
-    let transactions = vec![coinbase, spend];
+    let transactions: Vec<_> = std::iter::once(coinbase).chain(spends).collect();
     header.merkle_root = transactions.iter().map(|tx| tx.hash()).collect();
     Arc::new(Block {
         header: Arc::new(header),
         transactions,
     })
+}
+
+fn candidate(network: &Network, height: Height, spend: Arc<Transaction>) -> Arc<Block> {
+    block_with(network, height, vec![spend], FEE)
 }
 
 fn entry(transaction: Arc<Transaction>) -> VerifiedUnminedTx {
@@ -291,30 +328,198 @@ async fn eligible_hits_recheck_expiry_height_and_lock_time() {
     }
 }
 
+/// The block's signature operation limit counts the legacy and the P2SH signature operations of
+/// the transactions that the block verifier takes from the mempool, together with the ones of the
+/// transactions it verifies.
 #[tokio::test]
-async fn cached_p2sh_sigops_share_the_block_limit_with_dispatched_transactions() {
+async fn reused_signature_operations_count_toward_the_block_limit() {
     let _init_guard = zebra_test::init();
     let network = network();
     let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
     assert_eq!(block.transactions[0].sigops().unwrap(), 1);
-    for cached_sigops in [MAX_BLOCK_SIGOPS - 1, MAX_BLOCK_SIGOPS] {
+    const MAX: u32 = MAX_BLOCK_SIGOPS;
+    for (legacy, p2sh) in [
+        (MAX - 1, 0),
+        (MAX, 0),
+        (0, MAX - 1),
+        (0, MAX),
+        (MAX / 2, MAX / 2 - 1),
+        (MAX / 2, MAX / 2),
+    ] {
         let mut cached = entry(block.transactions[1].clone());
-        cached.p2sh_sigop_count = cached_sigops;
+        cached.legacy_sigop_count = legacy;
+        cached.p2sh_sigop_count = p2sh;
         let pool = mempool(&block, vec![cached]);
         let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
-        if cached_sigops < MAX_BLOCK_SIGOPS {
-            assert_eq!(result.unwrap(), block.hash());
+        // The coinbase's signature operation, then the reused transaction's.
+        let total = 1_u32.saturating_add(legacy).saturating_add(p2sh);
+        if total <= MAX {
+            assert_eq!(result.unwrap(), block.hash(), "({legacy}, {p2sh})");
         } else {
-            assert!(matches!(
-                result,
-                Err(VerifyBlockError::Block {
-                    source: BlockError::TooManyTransparentSignatureOperations { sigops, .. }
-                }) if sigops == MAX_BLOCK_SIGOPS + 1
-            ));
+            assert!(
+                matches!(
+                    result,
+                    Err(VerifyBlockError::Block {
+                        source: BlockError::TooManyTransparentSignatureOperations { sigops, .. }
+                    }) if sigops == total
+                ),
+                "({legacy}, {p2sh}): {result:?}"
+            );
             assert_eq!(calls.commits.load(Ordering::SeqCst), 0);
         }
         assert_dispatches(&calls, 0);
     }
+}
+
+/// A block in which the block verifier drops a candidate that it can't reuse, the mempool's
+/// verifications for the block, and the check of the error that a later candidate must fail
+/// with.
+struct DroppedCandidateCase {
+    name: &'static str,
+    entries: Vec<VerifiedUnminedTx>,
+    block: Arc<Block>,
+    is_expected_error: fn(&TransactionError) -> bool,
+}
+
+/// Returns blocks at height 3 on `network` in which the block verifier drops a candidate, and
+/// must then reject a later candidate for its authorizing data or its block context rules.
+fn dropped_candidate_cases(network: &Network) -> [DroppedCandidateCase; 4] {
+    let block = |spends, fees| block_with(network, Height(3), spends, fees);
+    // A spend with other authorizing data and the same mined ID.
+    let twin = |transaction: &Arc<Transaction>| {
+        let twin = with_unlock_script(transaction, &[0x51]);
+        assert_eq!(twin.hash(), transaction.hash());
+        assert_ne!(twin.unmined_id(), transaction.unmined_id());
+        entry(twin)
+    };
+    let unlocked = LockTime::unlocked();
+    // Spends in the same block spend different outputs, so they have different IDs.
+    let expired = spend_output(0, &[0x51], unlocked, Height(2));
+    let valid = spend_output(1, &[0x51], unlocked, Height(0));
+    // `OP_2 OP_1` leaves a true value, so this spend is valid too.
+    let valid_52 = spend_output(1, &[0x52], unlocked, Height(0));
+    // `OP_RETURN` fails the script.
+    let failing = spend_output(1, &[0x6a], unlocked, Height(0));
+    let mut old_epoch = entry(valid.clone());
+    old_epoch.height = Some(Height(0));
+
+    let is_expired: fn(&TransactionError) -> bool =
+        |error| matches!(error, TransactionError::ExpiredTransaction { .. });
+    let coinbase_then_expired = block(vec![expired.clone()], FEE);
+    let coinbase_then_twin = block(vec![failing.clone()], FEE);
+    [
+        DroppedCandidateCase {
+            name: "a coinbase candidate, then an expired spend",
+            entries: vec![
+                entry(coinbase_then_expired.transactions[0].clone()),
+                entry(expired.clone()),
+            ],
+            block: coinbase_then_expired,
+            is_expected_error: is_expired,
+        },
+        DroppedCandidateCase {
+            name: "a candidate from another network upgrade, then an expired spend",
+            entries: vec![old_epoch, entry(expired.clone())],
+            block: block(vec![valid, expired.clone()], 2 * FEE),
+            is_expected_error: is_expired,
+        },
+        DroppedCandidateCase {
+            name: "a candidate with other authorizing data, then an expired spend",
+            entries: vec![twin(&valid_52), entry(expired.clone())],
+            block: block(vec![valid_52, expired], 2 * FEE),
+            is_expected_error: is_expired,
+        },
+        DroppedCandidateCase {
+            name: "a coinbase candidate, then a candidate with other authorizing data",
+            entries: vec![
+                entry(coinbase_then_twin.transactions[0].clone()),
+                twin(&failing),
+            ],
+            block: coinbase_then_twin,
+            is_expected_error: |error| matches!(error, TransactionError::Script(_)),
+        },
+    ]
+}
+
+/// After the block verifier drops a candidate that it can't reuse, it still checks the
+/// candidates after it: their authorizing data, and their block context rules.
+#[tokio::test]
+async fn candidates_after_a_dropped_candidate_are_still_checked() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    for case in dropped_candidate_cases(&network) {
+        let DroppedCandidateCase {
+            name,
+            entries,
+            block,
+            is_expected_error,
+        } = case;
+        let pool = mempool(&block, entries);
+        let (result, calls) = verify(&network, block, pool, mock_state()).await;
+        let Err(VerifyBlockError::Transaction(error)) = result else {
+            panic!("{name}: expected a transaction error, got {result:?}")
+        };
+        assert!(is_expected_error(&error), "{name}: {error:?}");
+        assert_eq!(calls.commits.load(Ordering::SeqCst), 0, "{name}");
+    }
+}
+
+/// A transaction that the block verifier verifies can spend an output of an earlier transaction
+/// in the block, which the block verifier took from the mempool.
+#[tokio::test]
+async fn dispatched_transaction_can_spend_a_reused_transactions_output() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let half_fee = FEE / 2;
+
+    // `reused` spends an output in the state, worth `FEE + 1`, so its fee is half of `FEE`.
+    let reused = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: [8; 32].into(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[0x51]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            (half_fee + 1).try_into().unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(0),
+    ));
+    // `verified` spends `reused`'s output, and isn't in the mempool. Its fee is the other half.
+    let verified = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: reused.hash(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[0x51]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            1.try_into().unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(0),
+    ));
+    let block = block_with(&network, Height(3), vec![reused.clone(), verified], FEE);
+    let mut cached = entry(reused);
+    cached.miner_fee = half_fee.try_into().unwrap();
+
+    let pool = mempool(&block, vec![cached]);
+    let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(calls.coinbase.load(Ordering::SeqCst), 1);
+    // Only `verified`, which finds `reused`'s output in the block's own outputs.
+    assert_eq!(calls.non_coinbase.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
