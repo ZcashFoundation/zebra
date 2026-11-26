@@ -1,4 +1,4 @@
 project: zebra-node-services
 kind: breaking
-body: Added `VerifiedTransactionsForBlock` variants to mempool requests and responses, which return the transactions of a block that the mempool has verified, when the block's parent is the mempool's tip; exhaustive matches must handle them.
+body: '`mempool::Request` and `mempool::Response` are not `#[non_exhaustive]`, so exhaustive matches on them must handle the new `VerifiedTransactionsForBlock` variants.'
 time: 2026-10-23T09:18:47.751805834+02:00
