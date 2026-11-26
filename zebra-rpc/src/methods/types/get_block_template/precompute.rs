@@ -33,7 +33,9 @@ use zebra_chain::{
 };
 use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_node_services::mempool::{MempoolChange, MempoolService};
-use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, ReadState};
+use zebra_state::{
+    GetBlockTemplateChainInfo, MiningCandidateChanges, ReadRequest, ReadResponse, ReadState,
+};
 
 use crate::{
     methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
@@ -268,26 +270,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
 
     // Subscribing tells the state to compute early mining work on blocks it is still verifying.
     // Templates are only precomputed once this succeeds, so it is retried.
-    let mut is_first_attempt = true;
-    let mut candidate_changes = loop {
-        match read_state
-            .clone()
-            .oneshot(ReadRequest::MiningCandidateChanges)
-            .await
-        {
-            Ok(ReadResponse::MiningCandidateChanges(candidate_changes)) => break candidate_changes,
-            response => {
-                if is_first_attempt {
-                    tracing::warn!(
-                        ?response,
-                        "the state is unavailable, so block templates are not precomputed yet"
-                    );
-                    is_first_attempt = false;
-                }
-                sleep(RETRY_DELAY).await;
-            }
-        }
-    };
+    let mut candidate_changes = subscribe_to_mining_candidates(&read_state).await;
 
     loop {
         // `getblocktemplate` returns an error until Zebra is synced to the tip, so there's nothing
@@ -533,6 +516,35 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             _ = candidate_changes.published() => {}
             _ = verified_transaction_added(&mut mempool_changes, next_mempool_build) => {}
             _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
+        }
+    }
+}
+
+/// Subscribes to the state's mining candidate changes, retrying until the state answers.
+async fn subscribe_to_mining_candidates<ReadStateService>(
+    read_state: &ReadStateService,
+) -> MiningCandidateChanges
+where
+    ReadStateService: ReadState,
+{
+    let mut is_first_attempt = true;
+    loop {
+        match read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+        {
+            Ok(ReadResponse::MiningCandidateChanges(candidate_changes)) => break candidate_changes,
+            response => {
+                if is_first_attempt {
+                    tracing::warn!(
+                        ?response,
+                        "the state is unavailable, so block templates are not precomputed yet"
+                    );
+                    is_first_attempt = false;
+                }
+                sleep(RETRY_DELAY).await;
+            }
         }
     }
 }
