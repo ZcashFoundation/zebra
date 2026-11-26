@@ -196,6 +196,42 @@ impl ZebraDb {
         Ok(Some((Arc::new(block), size)))
     }
 
+    /// Returns the complete block's Zcash consensus serialization, or `None` for an unknown block.
+    ///
+    /// The bytes are assembled from the stored header, the CompactSize transaction count and the
+    /// stored transactions, without deserializing them.
+    ///
+    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn raw_block_bytes(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<Option<Vec<u8>>, BlockReadError> {
+        let Some((raw_header, raw_txs)) = self.raw_block(hash_or_height)? else {
+            return Ok(None);
+        };
+
+        let tx_count = CompactSizeMessage::try_from(raw_txs.len())
+            .expect("must work for a previously serialized block")
+            .zcash_serialize_to_vec()
+            .expect("must work for a previously serialized block");
+        let size = raw_header.raw_bytes().len()
+            + tx_count.len()
+            + raw_txs
+                .iter()
+                .map(|raw_tx| raw_tx.raw_bytes().len())
+                .sum::<usize>();
+
+        let mut bytes = Vec::with_capacity(size);
+        bytes.extend_from_slice(raw_header.raw_bytes());
+        bytes.extend_from_slice(&tx_count);
+        for raw_tx in &raw_txs {
+            bytes.extend_from_slice(raw_tx.raw_bytes());
+        }
+
+        Ok(Some(bytes))
+    }
+
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
     fn raw_block(
         &self,

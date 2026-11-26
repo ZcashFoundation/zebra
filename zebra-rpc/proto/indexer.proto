@@ -22,6 +22,15 @@ message BlockAndHash {
   bytes data = 2;
 };
 
+// An encoded block and its height.
+message BlockAndHeight {
+  // The height of the block in the chain.
+  uint32 height = 1;
+
+  // The encoded block data, in the same encoding as `BlockAndHash.data`.
+  bytes data = 2;
+};
+
 // A request for a single block by hash or height from the best chain.
 message BlockRequest {
   // The block to fetch, identified by either its hash or its height.
@@ -30,6 +39,18 @@ message BlockRequest {
   // value is interpreted as a big-endian block height. Any other length is
   // rejected.
   bytes hash_or_height = 1;
+};
+
+// A request for a range of finalized blocks by height.
+message BlockRangeRequest {
+  // The height of the first block in the range.
+  uint32 start_height = 1;
+
+  // The height of the last block in the range, inclusive.
+  //
+  // Must be at least `start_height`; the served range ends at the finalized
+  // tip if that is lower.
+  uint32 end_height = 2;
 };
 
 // A request to subscribe to non-finalized state changes.
@@ -85,4 +106,29 @@ service Indexer {
   // Used by a syncer to fetch finalized blocks that bridge the gap between its
   // local finalized tip and the start of the streamed non-finalized chain.
   rpc GetBlock(BlockRequest) returns (BlockAndHash);
+
+  // Streams the finalized blocks in the requested height range, in ascending
+  // height order, each in the same encoding as `GetBlock`.
+  //
+  // Used by indexers to backfill finalized history without a request round
+  // trip per block. Non-finalized blocks are never included.
+  //
+  // The stream ends with `OK` after the block at `end_height`, or after the
+  // finalized tip if the tip is below `end_height`, possibly with no blocks.
+  // It ends with `FAILED_PRECONDITION`, naming the height, at the first block
+  // at or below the finalized tip whose body is not stored, after the blocks
+  // before it. It ends with `DEADLINE_EXCEEDED`, after the blocks already
+  // queued, if the consumer stops reading for longer than the server's send
+  // timeout; the client can resume from the height after the last block it
+  // received. It ends with `UNAVAILABLE` if the state cannot be read.
+  //
+  // Rejects a range whose end is below its start, or a height above the
+  // maximum block height, with `INVALID_ARGUMENT`, before reading any block.
+  //
+  // The server serves a limited number of these streams at once, across all
+  // connections (16 in zebrad). Beyond that it refuses a request with
+  // `RESOURCE_EXHAUSTED` before reading any block; the client should retry
+  // later or open fewer streams at once. A stream counts against the limit
+  // until it has ended and been closed.
+  rpc GetBlockRange(BlockRangeRequest) returns (stream BlockAndHeight);
 }

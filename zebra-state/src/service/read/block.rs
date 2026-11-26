@@ -27,7 +27,7 @@ use zebra_chain::{
 use crate::{
     response::{AnyTx, MinedTx},
     service::{
-        finalized_state::ZebraDb,
+        finalized_state::{ZebraDb, MAX_ON_DISK_HEIGHT},
         non_finalized_state::{Chain, NonFinalizedState},
         read::tip,
     },
@@ -100,6 +100,34 @@ where
             || db.block_and_size(hash_or_height),
             |block| Ok(Some(block)),
         )
+}
+
+/// Returns up to `count` contiguous finalized blocks from `start`, as their raw Zcash consensus
+/// serializations. See [`ReadRequest::RawBlocksByHeightRange`](crate::ReadRequest::RawBlocksByHeightRange).
+#[allow(clippy::unwrap_in_result)]
+pub fn raw_blocks_by_height_range(
+    db: &ZebraDb,
+    start: Height,
+    count: u32,
+) -> Result<Vec<(Height, Vec<u8>)>, BlockReadError> {
+    let count = usize::try_from(count).expect("Zebra only supports 32-bit or wider usize");
+    let mut blocks = Vec::new();
+    // Heights are stored in 3 bytes, so the database clamps any height above
+    // `MAX_ON_DISK_HEIGHT` to it. Stopping there keeps a block at that height from being read
+    // again as the next one.
+    for height in (start.0..=MAX_ON_DISK_HEIGHT.0).take(count).map(Height) {
+        match db.raw_block_bytes(height.into()) {
+            Ok(Some(bytes)) => blocks.push((height, bytes)),
+            // Above the finalized tip, or not yet visible in a secondary view.
+            Ok(None) => break,
+            // Fail only at `start`, so the caller keeps the blocks before a missing
+            // body and gets the error when it requests that height next.
+            Err(error) if blocks.is_empty() => return Err(error),
+            Err(_) => break,
+        }
+    }
+
+    Ok(blocks)
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or

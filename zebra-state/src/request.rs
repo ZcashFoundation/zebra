@@ -1294,6 +1294,31 @@ pub enum ReadRequest {
     /// Returns `None` for incomplete secondary views.
     BlockAndSize(HashOrHeight),
 
+    /// Looks up contiguous blocks by height in the finalized state, in ascending order, as their
+    /// raw Zcash consensus serializations, read from the stored header and transaction bytes.
+    ///
+    /// Non-finalized blocks are never returned. The response stops early at the finalized tip.
+    /// If a block body at or below the finalized tip is not stored, the response stops before it,
+    /// or, if it is the block at `start`, the request fails with
+    /// [`BlockReadError::BlockBodyUnavailable`](crate::BlockReadError::BlockBodyUnavailable).
+    /// So a caller that gets fewer than `count` blocks can request the next height to tell the
+    /// finalized tip, an empty response, from a missing body, an error.
+    ///
+    /// Like [`ReadRequest::Block`] and [`ReadRequest::BlockAndSize`], an incomplete secondary view
+    /// also stops the response early, before the first block it can't read yet.
+    ///
+    /// All the blocks are held in memory at once, so keep `count` small.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::RawBlocks(Vec<(block::Height, Vec<u8>)>)`](ReadResponse::RawBlocks).
+    RawBlocksByHeightRange {
+        /// The height of the first block to read.
+        start: block::Height,
+        /// The maximum number of blocks to return.
+        count: u32,
+    },
+
     /// Looks up a block header by hash or height in the current best chain.
     ///
     /// Returns
@@ -1715,6 +1740,7 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
+            ReadRequest::RawBlocksByHeightRange { .. } => "raw_blocks_by_height_range",
             ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",

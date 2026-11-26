@@ -1651,6 +1651,11 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height)?,
             )),
 
+            // Used by the indexer `GetBlockRange` gRPC method.
+            ReadRequest::RawBlocksByHeightRange { start, count } => Ok(ReadResponse::RawBlocks(
+                read::raw_blocks_by_height_range(&state.db, start, count)?,
+            )),
+
             // Used by the get_block (verbosity 3) RPC.
             ReadRequest::SpentOutputs(hash_or_height) => {
                 Ok(ReadResponse::SpentOutputs(read::spent_outputs_for_block(

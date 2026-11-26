@@ -412,6 +412,10 @@ pub enum ReadResponse {
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`ReadRequest::RawBlocksByHeightRange`] with each block's height and raw Zcash
+    /// consensus serialization, in ascending height order.
+    RawBlocks(Vec<(block::Height, Vec<u8>)>),
+
     /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
     /// non-coinbase inputs of the specified block, keyed by the spending
     /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
@@ -644,6 +648,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
+            | ReadResponse::RawBlocks(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
