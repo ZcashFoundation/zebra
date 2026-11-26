@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: 'Added a `Clone` implementation to `transaction::BlockTxVerifier`.'
+time: 2026-11-26T16:20:00.000000000Z

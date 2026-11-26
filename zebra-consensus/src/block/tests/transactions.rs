@@ -1,8 +1,8 @@
 //! How the block verifier runs the transaction verifier: one state read for a block's spent
-//! outputs.
+//! outputs, and a task for each transaction.
 
 use std::{
-    future::ready,
+    future::{pending, ready},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -162,10 +162,8 @@ async fn verify(
 ) -> (Result<block::Hash, VerifyBlockError>, Arc<Calls>) {
     let calls = Arc::new(Calls::default());
     let state = state(batched_read, calls.clone());
-    let transactions = Buffer::new(
-        BoxService::new(transaction::BlockTxVerifier::new(network, state.clone())),
-        5,
-    );
+    let transactions =
+        transaction::BlockTxVerifier::new(network, state.clone()).map_err(BoxError::from);
     let verifier = SemanticBlockVerifier::new(network, state, transactions);
 
     let result = tokio::time::timeout(
@@ -287,4 +285,66 @@ async fn an_invalid_transaction_fails_the_block() {
         "unexpected result: {result:?}"
     );
     assert_eq!(calls.commits.load(Ordering::SeqCst), 0);
+}
+
+/// Dropping a block's verification cancels the transaction verification tasks that it
+/// started, so an abandoned block doesn't keep verifying its transactions.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_a_block_cancels_its_transaction_tasks() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+
+    let block = block_with(
+        &network,
+        vec![
+            spend(state_outpoint(), 1),
+            spend(
+                transparent::OutPoint {
+                    hash: [9; 32].into(),
+                    index: 0,
+                },
+                1,
+            ),
+        ],
+        2 * FEE,
+    );
+
+    // Each transaction verification holds a clone of this until it is dropped.
+    let running = Arc::new(());
+    let started = Arc::new(AtomicUsize::new(0));
+    let transactions = service_fn({
+        let running = running.clone();
+        let started = started.clone();
+        move |_request: tx::BlockRequest| {
+            let running = running.clone();
+            let started = started.clone();
+            async move {
+                let _running = running;
+                started.fetch_add(1, Ordering::SeqCst);
+                pending::<Result<tx::BlockResponse, BoxError>>().await
+            }
+        }
+    });
+    let calls = Arc::new(Calls::default());
+    let verifier =
+        SemanticBlockVerifier::new(&network, state(BatchedRead::Found, calls), transactions);
+
+    let verification = tokio::spawn(verifier.oneshot(Request::Commit(block.clone())));
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        // The coinbase transaction and the two spends.
+        while started.load(Ordering::SeqCst) < block.transactions.len() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        // This test and the transaction verifier hold the other two.
+        assert_eq!(Arc::strong_count(&running), 2 + block.transactions.len());
+
+        verification.abort();
+
+        while Arc::strong_count(&running) > 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the transaction tasks start, and stop when the block's verification is dropped");
 }

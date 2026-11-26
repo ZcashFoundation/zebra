@@ -390,8 +390,11 @@ where
 
     // transaction verification
 
-    let block_transaction = transaction::BlockTxVerifier::new(network, state_service.clone());
-    let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
+    // The block verifier calls this verifier from a task for each transaction. It has no
+    // state of its own and is always ready, so each task gets a clone of it. A buffer would
+    // put every transaction of a block through one worker task.
+    let block_transaction =
+        transaction::BlockTxVerifier::new(network, state_service.clone()).map_err(BoxError::from);
 
     let mempool_transaction =
         transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
@@ -418,8 +421,7 @@ where
         "initializing block verifier router"
     );
 
-    let block =
-        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+    let block = SemanticBlockVerifier::new(network, state_service.clone(), block_transaction);
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,

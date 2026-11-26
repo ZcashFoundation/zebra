@@ -17,16 +17,16 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::{sync::watch, task::JoinSet};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
     amount::Amount,
     block::{self, Block},
+    diagnostic::task::CheckForPanics,
     parameters::{subsidy::SubsidyError, Network},
     transparent,
     work::equihash,
@@ -479,7 +479,7 @@ where
         let validated_proposals = self.validated_proposals.clone();
 
         let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
         let block = request.block();
@@ -667,29 +667,34 @@ where
             // so the transaction verifier doesn't send a request for each input.
             let state_utxos = read_state_utxos(state_service.clone(), &block, &known_utxos).await;
 
-            // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesUnordered::new();
+            // Send transactions to the transaction verifier to be checked.
+            //
+            // Each transaction is verified in its own task, so a block's transactions are
+            // verified on every thread of the runtime, rather than one after the other on the
+            // thread that polls this block's future. Dropping the set cancels the tasks that
+            // are left, when this future is dropped, or returns for an invalid transaction.
+            let mut transaction_checks = JoinSet::new();
 
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())
             {
-                let rsp = transaction_verifier
-                    .ready()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::BlockRequest {
-                        transaction_hash,
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        state_utxos: state_utxos.clone(),
-                        height,
-                        time: block.header.time,
-                    });
-                async_checks.push(rsp);
+                let request = tx::BlockRequest {
+                    transaction_hash,
+                    transaction: transaction.clone(),
+                    known_utxos: known_utxos.clone(),
+                    state_utxos: state_utxos.clone(),
+                    height,
+                    time: block.header.time,
+                };
+
+                transaction_checks.spawn(
+                    transaction_verifier
+                        .clone()
+                        .oneshot(request)
+                        .in_current_span(),
+                );
             }
-            // The transaction requests hold the only other references to these outputs.
-            drop(state_utxos);
-            tracing::trace!(len = async_checks.len(), "built async tx checks");
+            tracing::trace!(len = transaction_checks.len(), "spawned tx checks");
 
             // Get the transaction results back from the transaction verifier.
 
@@ -697,10 +702,13 @@ where
             let mut sigops = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
-            use futures::StreamExt;
-            while let Some(result) = async_checks.next().await {
-                tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
+            while let Some(joined) = transaction_checks.join_next().await {
+                tracing::trace!(?joined, remaining = transaction_checks.len());
+                // A task only stops without a result when the runtime shuts down.
+                let response = joined
+                    .panic_if_task_has_panicked()
+                    .map_err(BoxError::from)
+                    .and_then(|result| result)
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
 

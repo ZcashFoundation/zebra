@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra verifies the transactions of a block on all of its threads at once, rather than preparing them one after the other, which speeds up the verification of blocks with many transactions.
+time: 2026-11-26T16:20:00.000000000Z

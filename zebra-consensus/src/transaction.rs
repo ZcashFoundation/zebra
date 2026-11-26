@@ -84,6 +84,7 @@ const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
+#[derive(Clone)]
 pub struct BlockTxVerifier<ZS> {
     network: Network,
     state: Timeout<ZS>,

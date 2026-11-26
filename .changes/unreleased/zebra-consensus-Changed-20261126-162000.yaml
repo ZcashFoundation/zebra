@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'Changed the block verifier to verify each transaction of a block in its own task, and to stop those tasks when the block''s verification is dropped. `router::init` gives it the block transaction verifier without a buffer.'
+time: 2026-11-26T16:20:00.000000000Z
