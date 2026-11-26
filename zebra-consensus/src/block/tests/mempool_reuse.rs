@@ -235,18 +235,31 @@ fn assert_dispatches(calls: &Calls, non_coinbase: usize) {
     assert_eq!(calls.await_utxo.load(Ordering::SeqCst), non_coinbase);
 }
 
+/// The block verifier takes the mempool's verification of a transaction with the mempool's
+/// authorizing data, whether the block has the mempool's transaction object, as a block rebuilt
+/// from a compact announcement does, or a copy with the same bytes.
 #[tokio::test]
 async fn resident_hit_skips_transaction_dispatch_and_utxo_lookup() {
     let _init_guard = zebra_test::init();
     let network = network();
     let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
-    // Even a supplied coinbase candidate must go through the real transaction verifier.
-    let entries = block.transactions.iter().cloned().map(entry).collect();
-    let pool = mempool(&block, entries);
-    let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
-    assert_eq!(result.unwrap(), block.hash());
-    assert_dispatches(&calls, 0);
-    assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
+    let shared: fn(&Arc<Transaction>) -> Arc<Transaction> = Arc::clone;
+    let copied: fn(&Arc<Transaction>) -> Arc<Transaction> =
+        |transaction| Arc::new((**transaction).clone());
+    for (name, mempool_transaction) in [("shared", shared), ("copied", copied)] {
+        // Even a supplied coinbase candidate must go through the real transaction verifier.
+        let entries = block
+            .transactions
+            .iter()
+            .map(mempool_transaction)
+            .map(entry)
+            .collect();
+        let pool = mempool(&block, entries);
+        let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
+        assert_eq!(result.unwrap(), block.hash(), "{name}");
+        assert_dispatches(&calls, 0);
+        assert_eq!(calls.commits.load(Ordering::SeqCst), 1, "{name}");
+    }
 }
 
 /// A version 4 spend of the output `[8; 32]:0`, which pays 1 zatoshi to `OP_1`.

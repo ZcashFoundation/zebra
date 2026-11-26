@@ -121,8 +121,11 @@ pub(super) fn check_candidate(
         return Ok(false);
     }
     // The mempool verified its own copy of the transaction's authorizing data, which can differ
-    // from the block's under the same mined ID.
-    if candidate.transaction.id != tx::unmined_id(transaction, hash) {
+    // from the block's under the same mined ID. A block rebuilt from a compact announcement
+    // shares the mempool's transaction objects, so their authorizing data doesn't need hashing.
+    let same_authorizing_data = Arc::ptr_eq(&candidate.transaction.transaction, transaction)
+        || candidate.transaction.id == tx::unmined_id(transaction, hash);
+    if !same_authorizing_data {
         return Ok(false);
     }
     // Cached proofs and scripts do not establish expiry or block lock time.
