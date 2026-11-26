@@ -1723,6 +1723,57 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     Ok(())
 }
 
+/// Queues `tx` in `mempool` for download and verification, and checks that the mempool queued it.
+async fn queue_for_verification(mempool: &mut Mempool, tx: &Arc<Transaction>) {
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![tx.unmined_id().into()]))
+        .await
+        .unwrap();
+    let Response::Queued(queued_responses) = response else {
+        unreachable!("the mempool answers a queue request with its queue responses")
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+}
+
+/// Answers the mempool's download of `tx` from `peer_set`.
+async fn answer_download(peer_set: &mut MockPeerSet, tx: &Arc<Transaction>) {
+    peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available((tx.clone().into(), None)),
+            ]));
+        })
+        .await;
+}
+
+/// Answers the mempool's verification of a transaction from `tx_verifier`, with a dummy fee and
+/// the signature operation counts `legacy_sigops` and `p2sh_sigops`. Returns the height that the
+/// mempool verified the transaction for, and the verifier's answer.
+async fn answer_verification(
+    tx_verifier: &mut MockTxVerifier,
+    legacy_sigops: u32,
+    p2sh_sigops: u32,
+) -> (Height, VerifiedUnminedTx) {
+    let responder = tx_verifier.expect_request_that(|_| true).await;
+    let height = responder.request().height;
+    let transaction = responder.request().clone().transaction;
+    let verified = VerifiedUnminedTx::new(
+        transaction,
+        Amount::try_from(1_000_000).expect("the fee is a valid amount"),
+        legacy_sigops,
+        p2sh_sigops,
+        Arc::new(vec![]),
+    )
+    .expect("verification should pass");
+    responder.respond(transaction::MempoolResponse::from(verified.clone()));
+    (height, verified)
+}
+
 /// Check that transactions are re-verified if the tip changes
 /// during verification.
 #[tokio::test(flavor = "multi_thread")]
@@ -1760,51 +1811,13 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     // Blocks 1-3 are committed to the state below, so the transaction must come from a
     // later block, or it would be cancelled as a mined transaction instead of re-verified.
     let tx = block4.transactions[0].clone();
-    let txid = block4.transactions[0].unmined_id();
-    let response = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
+    queue_for_verification(&mut mempool, &tx).await;
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
     // Verify the transaction
 
-    peer_set
-        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
-        .map(|responder| {
-            responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available((tx.clone().into(), None)),
-            ]));
-        })
-        .await;
-
-    tx_verifier
-        .expect_request_that(|_| true)
-        .map(|responder| {
-            let transaction = responder.request().clone().transaction;
-
-            // Set a dummy fee and sigops.
-            responder.respond(transaction::MempoolResponse::from(
-                VerifiedUnminedTx::new(
-                    transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
-                    0,
-                    0,
-                    std::sync::Arc::new(vec![]),
-                )
-                .expect("verification should pass"),
-            ));
-        })
-        .await;
+    answer_download(&mut peer_set, &tx).await;
+    answer_verification(&mut tx_verifier, 0, 0).await;
 
     // Push blocks 1 and 2 to the state before the mempool polls its chain tip change
     // receiver again. The mempool then sees the tip jump from the genesis block to
@@ -1839,34 +1852,10 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
 
     // Verify the transaction again
 
-    peer_set
-        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
-        .map(|responder| {
-            responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available((tx.into(), None)),
-            ]));
-        })
-        .await;
+    answer_download(&mut peer_set, &tx).await;
 
     // Verify the transaction now that the mempool has already checked chain_tip_change
-    tx_verifier
-        .expect_request_that(|_| true)
-        .map(|responder| {
-            let transaction = responder.request().clone().transaction;
-
-            // Set a dummy fee and sigops.
-            responder.respond(transaction::MempoolResponse::from(
-                VerifiedUnminedTx::new(
-                    transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
-                    0,
-                    0,
-                    std::sync::Arc::new(vec![]),
-                )
-                .expect("verification should pass"),
-            ));
-        })
-        .await;
+    answer_verification(&mut tx_verifier, 0, 0).await;
 
     // Push block 3 to the state. This will increase the tip height past the expected
     // tip height that the tx was verified at.
@@ -1938,41 +1927,10 @@ async fn mempool_records_the_tip_height_each_transaction_was_verified_on() -> Re
 
     // A transaction from a later block, so that the tip doesn't mine it.
     let tx = block4.transactions[0].clone();
-    let response = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![tx.unmined_id().into()]))
-        .await
-        .unwrap();
-    let Response::Queued(queued_responses) = response else {
-        unreachable!("the mempool answers a queue request with its queue responses")
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-
-    peer_set
-        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
-        .map(|responder| {
-            responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available((tx.clone().into(), None)),
-            ]));
-        })
-        .await;
-
-    let responder = tx_verifier.expect_request_that(|_| true).await;
-    let verification_height = responder.request().height;
-    let transaction = responder.request().clone().transaction;
-    // A dummy fee and signature operation counts, which the stored entry must keep.
-    let verified = VerifiedUnminedTx::new(
-        transaction,
-        Amount::try_from(1_000_000).expect("the fee is a valid amount"),
-        3,
-        2,
-        Arc::new(vec![]),
-    )
-    .expect("verification should pass");
-    responder.respond(transaction::MempoolResponse::from(verified.clone()));
+    queue_for_verification(&mut mempool, &tx).await;
+    answer_download(&mut peer_set, &tx).await;
+    // Signature operation counts, which the stored entry must keep.
+    let (verification_height, verified) = answer_verification(&mut tx_verifier, 3, 2).await;
 
     // The mempool stores the verified transaction when it next checks its downloads.
     timeout(Duration::from_secs(10), async {
