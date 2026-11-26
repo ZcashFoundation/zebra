@@ -1331,9 +1331,8 @@ where
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
             / (zebra_chain::amount::COIN as f64);
-        let difficulty = chain_tip_difficulty(self.network.clone(), self.read_state.clone(), true)
-            .await
-            .expect("should always be Ok when `should_use_default` is true");
+        let difficulty =
+            chain_tip_difficulty(self.network.clone(), self.read_state.clone(), true).await?;
 
         let response = GetInfoResponse {
             version,
@@ -1411,7 +1410,7 @@ where
             use zebra_state::ReadResponse::*;
 
             let UsageInfo(size_on_disk) = usage_info_rsp.map_misc_error()? else {
-                unreachable!("unmatched response to a TipPoolValues request")
+                unreachable!("unmatched response to a UsageInfo request")
             };
 
             let (tip, value_balance) = match tip_pool_values_rsp {
@@ -1424,8 +1423,7 @@ where
                 Err(_) => ((Height::MIN, network.genesis_hash()), Default::default()),
             };
 
-            let difficulty = chain_tip_difficulty
-                .expect("should always be Ok when `should_use_default` is true");
+            let difficulty = chain_tip_difficulty?;
 
             (size_on_disk, tip, value_balance, difficulty)
         };
@@ -5485,29 +5483,25 @@ pub async fn chain_tip_difficulty<State>(
 where
     State: ReadStateService,
 {
-    let request = ReadRequest::ChainInfo;
+    let request = ReadRequest::BestChainNextDifficulty;
 
-    // # TODO
-    // - add a separate request like BestChainNextMedianTimePast, but skipping the
-    //   consistency check, because any block's difficulty is ok for display
-    // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
-    // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
     let response = state
         .ready()
         .and_then(|service| service.call(request))
-        .await;
+        .await
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
-    let response = match (should_use_default, response) {
-        (_, Ok(res)) => res,
-        (true, Err(_)) => {
-            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64);
+    let difficulty_threshold = match response {
+        ReadResponse::BestChainNextDifficulty(Some(difficulty)) => difficulty,
+        ReadResponse::BestChainNextDifficulty(None) if should_use_default => return Ok(1.0),
+        ReadResponse::BestChainNextDifficulty(None) => {
+            return Err(ErrorObject::owned(
+                0,
+                "not enough blocks in the state".to_string(),
+                None::<()>,
+            ));
         }
-        (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
-    };
-
-    let chain_info = match response {
-        ReadResponse::ChainInfo(info) => info,
-        _ => unreachable!("unmatched response to a chain info request"),
+        _ => unreachable!("unmatched response to a BestChainNextDifficulty request"),
     };
 
     // This RPC is typically used for display purposes, so it is not consensus-critical.
@@ -5533,7 +5527,7 @@ where
 
     // Get expanded difficulties (256 bits), these are the inverse of the work
     let pow_limit: U256 = network.target_difficulty_limit().into();
-    let Some(difficulty) = chain_info.expected_difficulty.to_expanded() else {
+    let Some(difficulty) = difficulty_threshold.to_expanded() else {
         return Ok(0.0);
     };
 

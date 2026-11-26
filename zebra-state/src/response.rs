@@ -381,7 +381,7 @@ impl Eq for NonFinalizedBlocksListener {}
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
-    /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
+    /// Response to [`ReadRequest::UsageInfo`] with the estimated disk space usage in bytes.
     UsageInfo(u64),
 
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
@@ -531,6 +531,11 @@ pub enum ReadResponse {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
+    /// Response to [`ReadRequest::BestChainNextDifficulty`] with the standard proof-of-work
+    /// difficulty threshold for the *next* block on the best chain, or `None` if the state
+    /// is empty or the tip is at [`block::Height::MAX`].
+    BestChainNextDifficulty(Option<CompactDifficulty>),
+
     /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
@@ -657,6 +662,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
+            | ReadResponse::BestChainNextDifficulty(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {

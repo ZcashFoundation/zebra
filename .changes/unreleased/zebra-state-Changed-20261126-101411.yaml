@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: '`ReadRequest::UsageInfo` now returns a cached RocksDB disk usage estimate refreshed with periodic database metrics on primary instances and on `try_catch_up_with_primary` on read-only secondary instances, avoiding per-call RocksDB MANIFEST reads and `rlimit` syscalls.'
+time: 2026-11-26T10:14:11.999475145Z

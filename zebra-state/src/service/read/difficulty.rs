@@ -14,7 +14,7 @@ use zebra_chain::{
 
 use crate::{
     service::{
-        block_iter::any_chain_ancestor_iter,
+        block_iter::{any_chain_ancestor_iter, known_chain_ancestor_iter},
         check::{
             difficulty::{
                 pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
@@ -22,6 +22,7 @@ use crate::{
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
+        non_finalized_state::Chain,
         read::{
             self, find::calculate_median_time_past, tree::history_tree,
             FINALIZED_STATE_QUERY_RETRIES,
@@ -30,6 +31,68 @@ use crate::{
     },
     BoxError, GetBlockTemplateChainInfo,
 };
+
+/// Computes the next block's standard difficulty threshold directly from an in-memory
+/// non-finalized [`Chain`], returning `None` if the chain doesn't hold enough blocks
+/// for the difficulty averaging window (or if the tip is at `Height::MAX`).
+pub(crate) fn next_difficulty_from_chain(
+    chain: &Chain,
+    network: &Network,
+) -> Option<CompactDifficulty> {
+    let tip_block = chain.tip_block()?;
+    let tip_height = tip_block.height;
+    let candidate_height = tip_height.next().ok()?;
+    let block_span = pow_adjustment_block_span(network, candidate_height);
+    if chain.len() < block_span {
+        return None;
+    }
+
+    let relevant_data = chain.blocks.values().rev().take(block_span).map(|block| {
+        (
+            block.block.header.difficulty_threshold,
+            block.block.header.time,
+        )
+    });
+
+    Some(
+        AdjustedDifficulty::new_from_header_time(
+            tip_block.block.header.time,
+            tip_height,
+            network,
+            relevant_data,
+        )
+        .standard_difficulty_threshold(),
+    )
+}
+
+/// Returns the standard proof-of-work difficulty threshold for the next block on the best
+/// chain, or `None` if the state is empty or the tip is at `Height::MAX`.
+///
+/// Matches `zcashd`'s `GetNetworkDifficulty()` (`GetNextWorkRequired(tip, nullptr)`),
+/// skipping the wall-clock Testnet minimum-difficulty override, history tree lookup,
+/// value pool lookup, and consistency retry loop used by `getblocktemplate`.
+pub fn next_difficulty(
+    best_chain: Option<Arc<Chain>>,
+    db: &ZebraDb,
+    network: &Network,
+) -> Option<CompactDifficulty> {
+    let (tip_height, _tip_hash) = read::tip(best_chain.as_ref(), db)?;
+    let candidate_height = tip_height.next().ok()?;
+    let block_span = pow_adjustment_block_span(network, candidate_height);
+
+    let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> =
+        known_chain_ancestor_iter::<block::Header>(best_chain, db, tip_height.into())
+            .take(block_span)
+            .map(|header| (header.difficulty_threshold, header.time))
+            .collect();
+
+    let &(_, tip_time) = relevant_data.first()?;
+
+    Some(
+        AdjustedDifficulty::new_from_header_time(tip_time, tip_height, network, relevant_data)
+            .standard_difficulty_threshold(),
+    )
+}
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///

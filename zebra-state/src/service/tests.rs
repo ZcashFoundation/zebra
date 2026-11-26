@@ -1525,3 +1525,175 @@ async fn queued_identical_replacement_keeps_earliest_receipt_time() {
         assert_eq!(queued.received_time, expected);
     }
 }
+
+/// Regression test for #12642:
+/// - `ReadRequest::UsageInfo` returns `cached_size()` on primary (updated by `export_metrics`) and
+///   on `ReadOnlySecondary` (updated by `try_catch_up_with_primary`).
+/// - `ReadRequest::BestChainNextDifficulty` returns `None` when empty and `Some(...)` once blocks
+///   are committed, on both primary and `ReadOnlySecondary`.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_state_usage_info_and_next_difficulty_on_primary_and_secondary() {
+    use tower::ServiceExt as _;
+
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let cache_dir = tempfile::tempdir().expect("temporary directory is writable");
+        let config = Config {
+            cache_dir: cache_dir.path().to_path_buf(),
+            ephemeral: false,
+            ..Config::default()
+        };
+        let network = Network::Mainnet;
+
+        let (mut primary_state, primary_read_state, _tip, _tip_change) =
+            StateService::new(config.clone(), &network, Height::MAX, 0).await;
+
+        // Empty state checks on primary.
+        assert_eq!(
+            primary_read_state
+                .clone()
+                .oneshot(ReadRequest::UsageInfo)
+                .await
+                .unwrap(),
+            crate::ReadResponse::UsageInfo(0)
+        );
+        assert_eq!(
+            primary_read_state
+                .clone()
+                .oneshot(ReadRequest::BestChainNextDifficulty)
+                .await
+                .unwrap(),
+            crate::ReadResponse::BestChainNextDifficulty(None)
+        );
+
+        // Wait until the startup format task writes the version file before opening a secondary.
+        while crate::state_database_format_version_on_disk(&config, &network)
+            .unwrap()
+            .is_none()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let (secondary_read_state, secondary_db, _non_finalized_sender) =
+            super::init_read_only(config.clone(), &network)
+                .expect("read-only secondary opens against primary database");
+
+        assert_eq!(
+            secondary_read_state
+                .clone()
+                .oneshot(ReadRequest::UsageInfo)
+                .await
+                .unwrap(),
+            crate::ReadResponse::UsageInfo(0)
+        );
+        assert_eq!(
+            secondary_read_state
+                .clone()
+                .oneshot(ReadRequest::BestChainNextDifficulty)
+                .await
+                .unwrap(),
+            crate::ReadResponse::BestChainNextDifficulty(None)
+        );
+
+        // Commit blocks to the primary and flush SST files to disk.
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .range(0..=10)
+            .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        for block in blocks {
+            primary_state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::CommitCheckpointVerifiedBlock(
+                    CheckpointVerifiedBlock::from(block),
+                ))
+                .await
+                .unwrap();
+        }
+        for cf_name in ["hash_by_height", "block_header_by_height", "tx_by_loc"] {
+            let cf = primary_read_state
+                .db()
+                .db()
+                .cf_handle(cf_name)
+                .expect("committed block column family exists");
+            primary_read_state
+                .db()
+                .db()
+                .flush_cf(&cf)
+                .expect("primary column family flush succeeds");
+        }
+
+        let live_primary_size = primary_read_state.db().size();
+        assert!(
+            live_primary_size > 0,
+            "flushing committed blocks must produce non-zero SST size"
+        );
+
+        // Trigger metrics export on primary to refresh `cached_size`.
+        primary_read_state.db().export_metrics();
+        assert_eq!(
+            primary_read_state
+                .clone()
+                .oneshot(ReadRequest::UsageInfo)
+                .await
+                .unwrap(),
+            crate::ReadResponse::UsageInfo(live_primary_size)
+        );
+
+        // Secondary UsageInfo stays at 0 until `try_catch_up_with_primary`, then updates to live size.
+        assert_eq!(
+            secondary_read_state
+                .clone()
+                .oneshot(ReadRequest::UsageInfo)
+                .await
+                .unwrap(),
+            crate::ReadResponse::UsageInfo(0)
+        );
+        secondary_db
+            .spawn_try_catch_up_with_primary()
+            .await
+            .expect("secondary catch-up succeeds");
+
+        let live_secondary_size = secondary_db.size();
+        assert_eq!(live_secondary_size, live_primary_size);
+        assert_eq!(
+            secondary_read_state
+                .clone()
+                .oneshot(ReadRequest::UsageInfo)
+                .await
+                .unwrap(),
+            crate::ReadResponse::UsageInfo(live_secondary_size)
+        );
+
+        // BestChainNextDifficulty matches ChainInfo's expected_difficulty on Mainnet.
+        let crate::ReadResponse::ChainInfo(chain_info) = primary_read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("expected ChainInfo");
+        };
+        let expected_difficulty = Some(chain_info.expected_difficulty);
+        assert_eq!(
+            primary_read_state
+                .clone()
+                .oneshot(ReadRequest::BestChainNextDifficulty)
+                .await
+                .unwrap(),
+            crate::ReadResponse::BestChainNextDifficulty(expected_difficulty)
+        );
+        assert_eq!(
+            secondary_read_state
+                .clone()
+                .oneshot(ReadRequest::BestChainNextDifficulty)
+                .await
+                .unwrap(),
+            crate::ReadResponse::BestChainNextDifficulty(expected_difficulty)
+        );
+    })
+    .await
+    .expect("test must complete before timeout");
+}

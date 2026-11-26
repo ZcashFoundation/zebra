@@ -383,6 +383,147 @@ fn template_times_near_timestamp_ceiling_stay_standard_difficulty() {
     }
 }
 
+/// `next_difficulty` and `next_difficulty_from_chain` match `get_block_template_chain_info` on
+/// Mainnet, skip the wall-clock Testnet minimum-difficulty override, and return `None` on empty
+/// state.
+#[test]
+fn next_difficulty_matches_template_and_skips_testnet_wall_clock_override() {
+    use crate::{
+        arbitrary::Prepare,
+        service::{
+            check::difficulty::MAX_POW_ADJUSTMENT_BLOCK_SPAN, finalized_state::FinalizedState,
+        },
+        tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
+        Config,
+    };
+    use zebra_chain::work::difficulty::ParameterDifficulty as _;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    let empty_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
+    assert_eq!(next_difficulty(None, &empty_state.db, &network), None);
+
+    let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+    let db = &finalized_state.db;
+
+    // With 1..=3 non-finalized blocks (< averaging window), `next_difficulty_from_chain` returns
+    // `None` and `next_difficulty` matches `get_block_template_chain_info`.
+    let base = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    non_finalized_state
+        .commit_new_chain(base.clone().prepare(), db)
+        .unwrap();
+
+    let mut prev_block = base;
+    let mut history: Vec<(CompactDifficulty, DateTime<Utc>)> = vec![
+        (
+            zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into::<Block>()
+                .unwrap()
+                .header
+                .difficulty_threshold,
+            zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into::<Block>()
+                .unwrap()
+                .header
+                .time,
+        ),
+        (
+            prev_block.header.difficulty_threshold,
+            prev_block.header.time,
+        ),
+    ];
+
+    for height in 2..=32u32 {
+        let prev_height = Height(height - 1);
+        let next_time = prev_block.header.time + chrono::Duration::seconds(150);
+        let expected_difficulty = AdjustedDifficulty::new_from_header_time(
+            next_time,
+            prev_height,
+            &network,
+            history.iter().rev().copied(),
+        )
+        .expected_difficulty_threshold();
+
+        let mut child = prev_block.make_fake_child();
+        {
+            let header = Arc::make_mut(&mut Arc::make_mut(&mut child).header);
+            header.time = next_time;
+            header.difficulty_threshold = expected_difficulty;
+        }
+        history.push((expected_difficulty, next_time));
+        non_finalized_state
+            .commit_block(child.clone().prepare(), db)
+            .unwrap();
+        prev_block = child;
+
+        let expected = get_block_template_chain_info(&non_finalized_state, db, &network)
+            .unwrap()
+            .expected_difficulty;
+        assert_eq!(
+            next_difficulty(non_finalized_state.best_chain().cloned(), db, &network),
+            Some(expected),
+            "height {height}: next_difficulty must match get_block_template_chain_info on Mainnet"
+        );
+
+        let chain = non_finalized_state.best_chain().unwrap();
+        let block_span = pow_adjustment_block_span(&network, Height(height + 1));
+        if chain.len() < block_span {
+            assert_eq!(next_difficulty_from_chain(chain, &network), None);
+        } else {
+            assert_eq!(
+                next_difficulty_from_chain(chain, &network),
+                Some(expected),
+                "height {height}: in-memory fast path must match next_difficulty"
+            );
+        }
+    }
+
+    // On Testnet, `standard_difficulty_threshold()` ignores the wall-clock min-difficulty override
+    // (matching `zcashd`'s `GetNetworkDifficulty`), even when candidate time is far after tip.
+    let testnet = Network::new_default_testnet();
+    let threshold = (testnet.target_difficulty_limit() / 8_u64).to_compact();
+    let context: Vec<_> = (0..MAX_POW_ADJUSTMENT_BLOCK_SPAN)
+        .map(|index| {
+            let time = DateTime32::from(PREV - u32::try_from(index).unwrap() * 75);
+            (threshold, time.into())
+        })
+        .collect();
+    let stale_candidate_time = DateTime32::from(PREV + GAP + 100);
+    let testnet_adj = AdjustedDifficulty::new_from_header_time(
+        stale_candidate_time.into(),
+        ACTIVE_HEIGHT,
+        &testnet,
+        context.clone(),
+    );
+    assert_eq!(
+        testnet_adj.expected_difficulty_threshold(),
+        testnet.target_difficulty_limit().to_compact(),
+        "template calculation applies Testnet min-difficulty rule when time gap > threshold"
+    );
+    assert_ne!(
+        testnet_adj.standard_difficulty_threshold(),
+        testnet.target_difficulty_limit().to_compact(),
+        "standard_difficulty_threshold must not apply Testnet min-difficulty override"
+    );
+
+    // On Regtest, `standard_difficulty_threshold()` returns powLimit.
+    let regtest = Network::new_regtest(Default::default());
+    let regtest_adj = AdjustedDifficulty::new_from_header_time(
+        DateTime32::from(PREV).into(),
+        Height(100),
+        &regtest,
+        context,
+    );
+    assert_eq!(
+        regtest_adj.standard_difficulty_threshold(),
+        regtest.target_difficulty_limit().to_compact()
+    );
+}
+
 /// Header difficulties and times for template calculation, newest first.
 fn template_block_context(
     network: &Network,
