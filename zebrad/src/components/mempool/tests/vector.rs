@@ -1899,6 +1899,112 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     Ok(())
 }
 
+/// The mempool records the tip height it verified each transaction on, the height before the one
+/// it verified the transaction for. The block verifier relies on this when it reuses the
+/// mempool's verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_records_the_tip_height_each_transaction_was_verified_on() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
+
+    let (
+        mut mempool,
+        mut peer_set,
+        mut state_service,
+        mut chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    // Move the tip to block 1, so that the recorded height isn't the genesis block's.
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            block1.into(),
+        ))
+        .await
+        .unwrap();
+    chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .expect("unexpected chain tip update failure");
+    mempool.dummy_call().await;
+
+    // A transaction from a later block, so that the tip doesn't mine it.
+    let tx = block4.transactions[0].clone();
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![tx.unmined_id().into()]))
+        .await
+        .unwrap();
+    let Response::Queued(queued_responses) = response else {
+        unreachable!("the mempool answers a queue request with its queue responses")
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+
+    peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available((tx.clone().into(), None)),
+            ]));
+        })
+        .await;
+
+    let responder = tx_verifier.expect_request_that(|_| true).await;
+    let verification_height = responder.request().height;
+    let transaction = responder.request().clone().transaction;
+    // A dummy fee and signature operation counts, which the stored entry must keep.
+    let verified = VerifiedUnminedTx::new(
+        transaction,
+        Amount::try_from(1_000_000).expect("the fee is a valid amount"),
+        3,
+        2,
+        Arc::new(vec![]),
+    )
+    .expect("verification should pass");
+    responder.respond(transaction::MempoolResponse::from(verified.clone()));
+
+    // The mempool stores the verified transaction when it next checks its downloads.
+    timeout(Duration::from_secs(10), async {
+        while mempool.storage().transaction_count() == 0 {
+            mempool.dummy_call().await;
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the mempool stores the verified transaction");
+
+    assert_eq!(verification_height, Height(2), "the next block's height");
+    let stored = &mempool.storage().transactions()[&tx.hash()];
+    assert_eq!(
+        stored.height,
+        Some(verification_height.previous()?),
+        "the tip height the transaction was verified on",
+    );
+    // The block verifier adds the stored fee and signature operation counts to a block's totals,
+    // so the mempool stores the verifier's output unmodified, apart from the time and height.
+    assert_eq!(
+        *stored,
+        VerifiedUnminedTx {
+            time: stored.time,
+            height: stored.height,
+            ..verified
+        },
+    );
+
+    Ok(())
+}
+
 /// Checks that the mempool service responds to AwaitOutput requests after verifying transactions
 /// that create those outputs, or immediately if the outputs had been created by transaction that
 /// are already in the mempool.
