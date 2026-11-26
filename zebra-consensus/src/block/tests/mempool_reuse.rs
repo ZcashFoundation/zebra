@@ -21,6 +21,7 @@ use super::*;
 
 type Mempool = BoxCloneService<mempool::Request, mempool::Response, BoxError>;
 type State = BoxCloneService<zs::Request, zs::Response, BoxError>;
+type TxVerifier = BoxCloneService<tx::BlockRequest, tx::BlockResponse, BoxError>;
 
 const FEE: u64 = 10_000;
 
@@ -194,51 +195,85 @@ fn mock_state() -> State {
     }))
 }
 
+/// Returns `state`, which counts the requests that `calls` counts.
+fn counting_state(state: State, calls: &Arc<Calls>) -> State {
+    let calls = calls.clone();
+    BoxCloneService::new(service_fn(move |request| {
+        match &request {
+            zs::Request::AwaitUtxo(_) => {
+                calls.await_utxo.fetch_add(1, Ordering::SeqCst);
+            }
+            zs::Request::CommitSemanticallyVerifiedBlock(_) => {
+                calls.commits.fetch_add(1, Ordering::SeqCst);
+            }
+            _ => {}
+        }
+        state.clone().oneshot(request)
+    }))
+}
+
+/// A block verifier whose state and transaction verifier count the requests they get.
+struct Harness {
+    verifier: SemanticBlockVerifier<State, TxVerifier>,
+    calls: Arc<Calls>,
+}
+
+impl Harness {
+    /// Returns a block verifier on `network` with `state` and a real transaction verifier.
+    fn new(network: &Network, state: State) -> Self {
+        let calls = Arc::new(Calls::default());
+        let state = counting_state(state, &calls);
+        let transaction_verifier =
+            Buffer::new(transaction::BlockTxVerifier::new(network, state.clone()), 1);
+        let transactions = BoxCloneService::new(service_fn({
+            let calls = calls.clone();
+            move |request: tx::BlockRequest| {
+                if request.transaction.is_coinbase() {
+                    calls.coinbase.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    calls.non_coinbase.fetch_add(1, Ordering::SeqCst);
+                }
+                transaction_verifier.clone().oneshot(request)
+            }
+        }));
+        Self {
+            verifier: SemanticBlockVerifier::new(network, state, transactions),
+            calls,
+        }
+    }
+
+    /// Gives the block verifier `mempool` now.
+    fn with_mempool(self, mempool: Mempool) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        sender.send(mempool).unwrap();
+        self.with_mempool_receiver(receiver)
+    }
+
+    /// Gives the block verifier the mempool that `receiver` gets, when it arrives.
+    fn with_mempool_receiver(mut self, receiver: oneshot::Receiver<Mempool>) -> Self {
+        self.verifier = self.verifier.with_mempool(receiver);
+        self
+    }
+
+    /// Verifies and commits `block`.
+    async fn verify(&mut self, block: Arc<Block>) -> Result<block::Hash, VerifyBlockError> {
+        let verification = self.verifier.ready().await?.call(Request::Commit(block));
+        tokio::time::timeout(Duration::from_secs(10), verification)
+            .await
+            .expect("mempool lookup and block verification must finish")
+    }
+}
+
+/// Verifies `block` on `network`, with `mempool` and `state`.
 async fn verify(
     network: &Network,
     block: Arc<Block>,
     mempool: Mempool,
     state: State,
 ) -> (Result<block::Hash, VerifyBlockError>, Arc<Calls>) {
-    let calls = Arc::new(Calls::default());
-    let state = service_fn({
-        let calls = calls.clone();
-        move |request| {
-            match &request {
-                zs::Request::AwaitUtxo(_) => {
-                    calls.await_utxo.fetch_add(1, Ordering::SeqCst);
-                }
-                zs::Request::CommitSemanticallyVerifiedBlock(_) => {
-                    calls.commits.fetch_add(1, Ordering::SeqCst);
-                }
-                _ => {}
-            }
-            state.clone().oneshot(request)
-        }
-    });
-    let transaction_verifier =
-        Buffer::new(transaction::BlockTxVerifier::new(network, state.clone()), 1);
-    let transactions = service_fn({
-        let calls = calls.clone();
-        move |request: tx::BlockRequest| {
-            if request.transaction.is_coinbase() {
-                calls.coinbase.fetch_add(1, Ordering::SeqCst);
-            } else {
-                calls.non_coinbase.fetch_add(1, Ordering::SeqCst);
-            }
-            transaction_verifier.clone().oneshot(request)
-        }
-    });
-    let (sender, receiver) = oneshot::channel();
-    let verifier = SemanticBlockVerifier::new(network, state, transactions).with_mempool(receiver);
-    sender.send(mempool).unwrap();
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        verifier.oneshot(Request::Commit(block)),
-    )
-    .await
-    .expect("mempool lookup and block verification must finish");
-    (result, calls)
+    let mut harness = Harness::new(network, state).with_mempool(mempool);
+    let result = harness.verify(block).await;
+    (result, harness.calls)
 }
 
 fn assert_dispatches(calls: &Calls, non_coinbase: usize) {
