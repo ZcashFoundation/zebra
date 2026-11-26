@@ -163,14 +163,8 @@ async fn rpc_getblockchaininfo_mainnet_ibd_transition_and_latching() {
     let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, max_checkpoint);
 
-    // Close to tip and at checkpoint, but Mainnet tip is older than 125 minutes.
-    harness.sync_status.set_is_close_to_tip(true);
-    let stale_tip = chrono::Utc::now() - chrono::Duration::minutes(126);
-    harness.send_tip(max_checkpoint, tip_hash, stale_tip);
-    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
-    assert_ibd_incomplete(&info, max_checkpoint);
-
     // Synced: at checkpoint, close to tip, and recent tip (10 min old -> would extrapolate >0 blocks).
+    harness.sync_status.set_is_close_to_tip(true);
     harness.send_tip(max_checkpoint, tip_hash, recent_tip);
     let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_complete(&info, max_checkpoint);
@@ -188,6 +182,22 @@ async fn rpc_getblockchaininfo_mainnet_ibd_transition_and_latching() {
         .fetch_info_with(&rpc_clone, Some((max_checkpoint, tip_hash)))
         .await;
     assert_ibd_complete(&clone_info, max_checkpoint);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockchaininfo_mainnet_ibd_stays_incomplete_for_stale_tip() {
+    let _init_guard = zebra_test::init();
+
+    let max_checkpoint = Mainnet.checkpoint_list().max_height();
+    let tip_hash = Hash([0x11; 32]);
+    let mut harness = IbdTestHarness::new(Mainnet, false);
+
+    // Close to tip and at checkpoint, but Mainnet tip is older than 125 minutes.
+    harness.sync_status.set_is_close_to_tip(true);
+    let stale_tip = chrono::Utc::now() - chrono::Duration::minutes(126);
+    harness.send_tip(max_checkpoint, tip_hash, stale_tip);
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
+    assert_ibd_incomplete(&info, max_checkpoint);
 }
 
 #[tokio::test(flavor = "multi_thread")]
