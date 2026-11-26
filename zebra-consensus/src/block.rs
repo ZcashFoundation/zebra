@@ -488,6 +488,21 @@ where
         self.reuse_audits = audits;
         self
     }
+
+    /// Returns the mempool, if the mempool service has finished starting.
+    fn current_mempool(&mut self) -> Option<mempool_reuse::Mempool> {
+        if let Some(receiver) = self.mempool_setup_rx.as_mut() {
+            match receiver.try_recv() {
+                Ok(mempool) => {
+                    self.mempool = Some(mempool);
+                    self.mempool_setup_rx = None;
+                }
+                Err(oneshot::error::TryRecvError::Closed) => self.mempool_setup_rx = None,
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+        }
+        self.mempool.clone()
+    }
 }
 
 impl<S, V> Service<Request> for SemanticBlockVerifier<S, V>
@@ -516,17 +531,7 @@ where
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
-        if let Some(receiver) = self.mempool_setup_rx.as_mut() {
-            match receiver.try_recv() {
-                Ok(mempool) => {
-                    self.mempool = Some(mempool);
-                    self.mempool_setup_rx = None;
-                }
-                Err(oneshot::error::TryRecvError::Closed) => self.mempool_setup_rx = None,
-                Err(oneshot::error::TryRecvError::Empty) => {}
-            }
-        }
-        let mempool = self.mempool.clone();
+        let mempool = self.current_mempool();
         let reuse_audits = self.reuse_audits.clone();
         let validated_proposals = self.validated_proposals.clone();
 
