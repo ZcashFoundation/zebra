@@ -430,8 +430,15 @@ impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[allow(clippy::unwrap_in_result)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        self.decode_message(src)
+    }
+}
+
+impl Codec {
+    /// Decodes the next message in `src`, if `src` holds all of it.
+    #[allow(clippy::unwrap_in_result)]
+    fn decode_message(&mut self, src: &mut BytesMut) -> Result<Option<Message>, Error> {
         use Error::Parse;
         match self.state {
             DecodeState::Head => {
