@@ -54,13 +54,19 @@ impl PrecomputedTrees {
         &self.output
     }
 
+    /// Returns `true` if the trees were computed from the same body as `block`, and from `input`.
+    fn computed_from(&self, block: &Arc<Block>, input: &NoteCommitmentTrees) -> bool {
+        Arc::ptr_eq(&self.block, block) && &self.input == input
+    }
+
     /// Returns the trees after `block` if they were computed from the same body and `input`.
     pub(crate) fn reuse(
         &self,
         block: &Arc<Block>,
         input: &NoteCommitmentTrees,
     ) -> Option<NoteCommitmentTrees> {
-        (Arc::ptr_eq(&self.block, block) && &self.input == input).then(|| self.output.clone())
+        self.computed_from(block, input)
+            .then(|| self.output.clone())
     }
 }
 
