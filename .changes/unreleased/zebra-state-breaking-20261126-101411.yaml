@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `ReadRequest::BestChainNextDifficulty` and `ReadResponse::BestChainNextDifficulty` variants; update exhaustive matches on `ReadRequest` and `ReadResponse`.
+time: 2026-11-26T10:14:11.995050094Z

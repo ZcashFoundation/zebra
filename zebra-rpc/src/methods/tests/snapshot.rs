@@ -1476,8 +1476,14 @@ pub async fn test_mining_rpcs<State, ReadState>(
     // `getdifficulty`
     // This RPC snapshot uses both the mock and populated states
 
-    // Fake the ChainInfo response using the mock state
-    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    // Fake the BestChainNextDifficulty response using the mock state
+    let mut read_state_for_difficulty = read_state.clone();
+    let mock_read_state_request_handler = async move {
+        read_state_for_difficulty
+            .expect_request_that(|req| matches!(req, ReadRequest::BestChainNextDifficulty))
+            .await
+            .respond(ReadResponse::BestChainNextDifficulty(Some(fake_difficulty)));
+    };
 
     let get_difficulty_fut = rpc_mock_state.get_difficulty();
 

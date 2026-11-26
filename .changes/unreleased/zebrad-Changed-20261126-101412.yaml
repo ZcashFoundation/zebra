@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblockchaininfo` now reports `size_on_disk` from a cached RocksDB estimate (refreshed about every 30 seconds on primary nodes and on catch-up for read-only secondaries); `getblockchaininfo`, `getinfo`, and `getdifficulty` compute network difficulty without cloning non-finalized state; and `getblockchaininfo` and `getinfo` now return `1.0` on an empty state (while `getdifficulty` continues to return an error).'
+time: 2026-11-26T10:14:12.00376473Z

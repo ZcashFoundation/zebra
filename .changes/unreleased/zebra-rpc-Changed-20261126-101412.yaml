@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`chain_tip_difficulty` (used by `getblockchaininfo`, `getinfo`, and `getdifficulty`) now queries `ReadRequest::BestChainNextDifficulty` instead of `ReadRequest::ChainInfo` and returns `1.0` on an empty state instead of an unscaled difficulty limit when `should_use_default` is `true` (`getblockchaininfo` and `getinfo`; `getdifficulty` disables the fallback and still returns an error).'
+time: 2026-11-26T10:14:12.001708179Z

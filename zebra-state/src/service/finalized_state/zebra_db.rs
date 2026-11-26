@@ -445,6 +445,11 @@ impl ZebraDb {
     pub fn size(&self) -> u64 {
         self.db.size()
     }
+
+    /// Returns the latest cached disk space usage estimate in bytes.
+    pub(crate) fn cached_size(&self) -> u64 {
+        self.db.cached_size()
+    }
 }
 
 impl Drop for ZebraDb {

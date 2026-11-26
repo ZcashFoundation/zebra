@@ -22,7 +22,6 @@ use zebra_chain::{
     block_info::BlockInfo,
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
-    history_tree::HistoryTree,
     parameters::{
         testnet::{self, Parameters},
         Network::*,
@@ -88,20 +87,11 @@ async fn rpc_getinfo() {
 
     // Make the mock service respond with
     let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::ChainInfo)
+        .expect_request(zebra_state::ReadRequest::BestChainNextDifficulty)
         .await;
-    response_handler.respond(zebra_state::ReadResponse::ChainInfo(
-        GetBlockTemplateChainInfo {
-            tip_hash: Mainnet.genesis_hash(),
-            tip_height: Height::MIN,
-            chain_history_root: HistoryTree::default().hash(),
-            expected_difficulty: Default::default(),
-            cur_time: zebra_chain::serialization::DateTime32::now(),
-            min_time: zebra_chain::serialization::DateTime32::now(),
-            max_time: zebra_chain::serialization::DateTime32::now(),
-            chain_value_pools: Default::default(),
-        },
-    ));
+    response_handler.respond(zebra_state::ReadResponse::BestChainNextDifficulty(Some(
+        Default::default(),
+    )));
 
     let get_info = getinfo_future
         .await
@@ -5156,12 +5146,6 @@ async fn rpc_getdifficulty() {
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
-    //  nu5 block time + 1
-    let fake_min_time = DateTime32::from(1654008606);
-    // nu5 block time + 12
-    let fake_cur_time = DateTime32::from(1654008617);
-    // nu5 block time + 123
-    let fake_max_time = DateTime32::from(1654008728);
 
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
@@ -5187,24 +5171,15 @@ async fn rpc_getdifficulty() {
         None,
     );
 
-    // Fake the ChainInfo response: smallest numeric difficulty
+    // Fake the BestChainNextDifficulty response: smallest numeric difficulty
     // (this is invalid on mainnet and testnet under the consensus rules)
     let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::MAX));
     let mut read_state1 = read_state.clone();
     let mock_read_state_request_handler = async move {
         read_state1
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .expect_request_that(|req| matches!(req, ReadRequest::BestChainNextDifficulty))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
-                chain_value_pools: Default::default(),
-            }));
+            .respond(ReadResponse::BestChainNextDifficulty(Some(fake_difficulty)));
     };
 
     let get_difficulty_fut = rpc.get_difficulty();
@@ -5214,24 +5189,15 @@ async fn rpc_getdifficulty() {
     // of accuracy in our unit tests. (Most clients will hide more than 2-3.)
     assert_eq!(format!("{:.9}", get_difficulty.unwrap()), "0.000122072");
 
-    // Fake the ChainInfo response: difficulty limit - smallest valid difficulty
+    // Fake the BestChainNextDifficulty response: difficulty limit - smallest valid difficulty
     let pow_limit = Mainnet.target_difficulty_limit();
     let fake_difficulty = pow_limit.into();
     let mut read_state2 = read_state.clone();
     let mock_read_state_request_handler = async move {
         read_state2
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .expect_request_that(|req| matches!(req, ReadRequest::BestChainNextDifficulty))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
-                chain_value_pools: Default::default(),
-            }));
+            .respond(ReadResponse::BestChainNextDifficulty(Some(fake_difficulty)));
     };
 
     let get_difficulty_fut = rpc.get_difficulty();
@@ -5239,23 +5205,16 @@ async fn rpc_getdifficulty() {
 
     assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.00000");
 
-    // Fake the ChainInfo response: fractional difficulty
+    // Fake the BestChainNextDifficulty response: fractional difficulty
     let fake_difficulty = pow_limit * 2 / 3;
     let mut read_state3 = read_state.clone();
     let mock_read_state_request_handler = async move {
         read_state3
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .expect_request_that(|req| matches!(req, ReadRequest::BestChainNextDifficulty))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty.into(),
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
-                chain_value_pools: Default::default(),
-            }));
+            .respond(ReadResponse::BestChainNextDifficulty(Some(
+                fake_difficulty.into(),
+            )));
     };
 
     let get_difficulty_fut = rpc.get_difficulty();
@@ -5263,23 +5222,16 @@ async fn rpc_getdifficulty() {
 
     assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.50000");
 
-    // Fake the ChainInfo response: large integer difficulty
+    // Fake the BestChainNextDifficulty response: large integer difficulty
     let fake_difficulty = pow_limit / 4096;
     let mut read_state4 = read_state.clone();
     let mock_read_state_request_handler = async move {
         read_state4
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .expect_request_that(|req| matches!(req, ReadRequest::BestChainNextDifficulty))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty.into(),
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
-                chain_value_pools: Default::default(),
-            }));
+            .respond(ReadResponse::BestChainNextDifficulty(Some(
+                fake_difficulty.into(),
+            )));
     };
 
     let get_difficulty_fut = rpc.get_difficulty();
@@ -6156,4 +6108,111 @@ async fn rpc_getblock_reports_nonzero_nsm_changes() {
             assert_eq!(nsm_json["monitored"], serde_json::json!(true));
         }
     }
+}
+
+/// Regression test for #12642: `getblockchaininfo` and `getdifficulty` work against a
+/// `ReadOnlySecondary` `ReadStateService` (reporting flushed SST `size_on_disk` after catch-up
+/// and difficulty without `ReadRequest::ChainInfo`) as well as an empty state (`difficulty == 1.0`
+/// for `getblockchaininfo` and error for `getdifficulty`).
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockchaininfo_on_read_only_secondary() {
+    let _init_guard = zebra_test::init();
+
+    let cache_dir = tempfile::tempdir().expect("temporary directory is writable");
+    let config = zebra_state::Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..zebra_state::Config::default()
+    };
+
+    // Open a persistent primary state and wait for the version file before opening the secondary.
+    let mut primary = zebra_state::FinalizedState::new(&config, &Mainnet)
+        .expect("opening persistent primary state succeeds");
+    while zebra_state::state_database_format_version_on_disk(&config, &Mainnet)
+        .expect("reading version file succeeds")
+        .is_none()
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Open the read-only secondary while the primary is still empty.
+    let (secondary_read_state, secondary_db, _non_finalized_sender) =
+        zebra_state::init_read_only(config.clone(), &Mainnet)
+            .expect("opening read-only secondary succeeds");
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        false,
+        "0.0.1",
+        "RPC test",
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        secondary_read_state,
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Empty state: `getblockchaininfo` returns `difficulty == 1.0` and `size_on_disk == 0`,
+    // while `getdifficulty` returns an error.
+    let empty_info = rpc
+        .get_blockchain_info()
+        .await
+        .expect("getblockchaininfo succeeds on empty state");
+    assert_eq!(empty_info.size_on_disk, 0);
+    assert_eq!(empty_info.difficulty, 1.0);
+    assert!(
+        rpc.get_difficulty().await.is_err(),
+        "getdifficulty must error when the state has no blocks"
+    );
+
+    // Commit blocks to the primary and flush SST files to disk.
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(0..=10)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let expected_tip_hash = blocks.last().unwrap().hash();
+    for block in blocks {
+        primary
+            .commit_finalized_direct(block.into(), None, "test")
+            .expect("test block commits to primary");
+    }
+    for cf_name in ["hash_by_height", "block_header_by_height", "tx_by_loc"] {
+        let cf = primary
+            .db
+            .db()
+            .cf_handle(cf_name)
+            .expect("committed block column family exists");
+        primary
+            .db
+            .db()
+            .flush_cf(&cf)
+            .expect("primary column family flush succeeds");
+    }
+
+    secondary_db
+        .spawn_try_catch_up_with_primary()
+        .await
+        .expect("secondary catch-up succeeds");
+
+    let info = rpc
+        .get_blockchain_info()
+        .await
+        .expect("getblockchaininfo succeeds on read-only secondary");
+    assert_eq!(info.blocks, Height(10));
+    assert_eq!(info.best_block_hash, expected_tip_hash);
+    assert!(info.size_on_disk > 0, "flushed SST size must be non-zero");
+    assert_eq!(info.size_on_disk, secondary_db.size());
+    assert_eq!(info.difficulty, 1.0);
+
+    let difficulty = rpc
+        .get_difficulty()
+        .await
+        .expect("getdifficulty succeeds on read-only secondary");
+    assert_eq!(difficulty, 1.0);
 }

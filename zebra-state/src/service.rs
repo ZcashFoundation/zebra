@@ -204,6 +204,11 @@ pub(crate) struct StateService {
     /// Set to `f64::NAN` if `finalized_state_queued_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
     max_finalized_queue_height: f64,
+
+    /// Shutdown sender and thread owning the periodic metrics database handle.
+    ///
+    /// Dropping the sender and joining the thread waits for any active export to release the handle.
+    metrics_exporter: Option<(std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>)>,
 }
 
 /// A read-only service for accessing Zebra's cached blockchain state.
@@ -253,6 +258,14 @@ impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some((shutdown_sender, metrics_thread)) = self.metrics_exporter.take() {
+            drop(shutdown_sender);
+            if let Err(thread_panic) = metrics_thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(thread_panic);
+                }
+            }
+        }
 
         // Close the channels (non-blocking)
         // This makes the block write thread exit the next time it checks the channels.
@@ -465,7 +478,7 @@ impl StateService {
                 .await
                 .expect("failed to join blocking task");
 
-        let state = Self {
+        let mut state = Self {
             network: network.clone(),
             max_checkpoint_height,
             full_verifier_utxo_lookahead,
@@ -481,6 +494,7 @@ impl StateService {
             last_prune: Instant::now(),
             read_service: read_service.clone(),
             max_finalized_queue_height: f64::NAN,
+            metrics_exporter: None,
         };
         timer.finish_desc("initializing state service");
 
@@ -521,17 +535,31 @@ impl StateService {
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
 
-        // Spawn a background task to periodically export RocksDB metrics to Prometheus
-        let db_for_metrics = read_service.db.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-            loop {
-                interval.tick().await;
-                db_for_metrics.export_metrics();
-            }
-        });
+        state.metrics_exporter = Some(Self::spawn_metrics_exporter(state.read_service.db.clone()));
 
         (state, read_service, latest_chain_tip, chain_tip_change)
+    }
+
+    /// Spawns a dedicated thread that periodically exports RocksDB metrics to Prometheus
+    /// until the returned shutdown sender is dropped.
+    fn spawn_metrics_exporter(
+        db: ZebraDb,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        // RocksDB property reads are blocking, so export metrics on a dedicated thread.
+        let (shutdown_sender, shutdown_receiver) = std::sync::mpsc::channel();
+        let span = Span::current();
+        let metrics_thread = std::thread::spawn(move || {
+            span.in_scope(|| loop {
+                db.export_metrics();
+                if !matches!(
+                    shutdown_receiver.recv_timeout(Duration::from_secs(30)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    break;
+                }
+            });
+        });
+        (shutdown_sender, metrics_thread)
     }
 
     /// Call read only state service to log rocksdb database metrics.
@@ -1175,6 +1203,24 @@ impl ReadStateService {
             .borrow_mapped(|non_finalized_state| non_finalized_state.best_chain().cloned())
     }
 
+    /// Serves non-blocking read requests inline without spawning a blocking task.
+    fn try_call_inline(&self, req: &ReadRequest) -> Option<ReadResponse> {
+        match req {
+            // Used by the `getblockchaininfo` RPC.
+            // Reading the cached atomic size is lock-free and never blocks.
+            ReadRequest::UsageInfo => Some(ReadResponse::UsageInfo(self.db.cached_size())),
+            // Used by `getblockchaininfo`, `getinfo`, and `getdifficulty` RPCs.
+            // Compute inline from the in-memory best chain when it holds the full averaging window.
+            ReadRequest::BestChainNextDifficulty => self
+                .latest_best_chain()
+                .and_then(|chain| {
+                    read::difficulty::next_difficulty_from_chain(&chain, &self.network)
+                })
+                .map(|difficulty| ReadResponse::BestChainNextDifficulty(Some(difficulty))),
+            _ => None,
+        }
+    }
+
     /// Test-only access to the inner database.
     /// Can be used to modify the database without doing any consensus checks.
     #[cfg(any(test, feature = "proptest-impl"))]
@@ -1570,6 +1616,10 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", level = "debug", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
+        if let Some(response) = self.try_call_inline(&req) {
+            return std::future::ready(Ok(response)).boxed();
+        }
+
         let timer = CodeTimer::start_desc(req.variant_name());
         let span = Span::current();
         let timed_span = TimedSpan::new(timer, span);
@@ -1592,8 +1642,17 @@ impl Service<ReadRequest> for ReadStateService {
         };
 
         let request_handler = move || match req {
-            // Used by the `getblockchaininfo` RPC.
-            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
+            ReadRequest::UsageInfo => unreachable!("should return early"),
+
+            // Used by `getblockchaininfo`, `getinfo`, and `getdifficulty` RPCs when the in-memory
+            // non-finalized best chain doesn't cover the full difficulty averaging window.
+            ReadRequest::BestChainNextDifficulty => Ok(ReadResponse::BestChainNextDifficulty(
+                read::difficulty::next_difficulty(
+                    state.latest_best_chain(),
+                    &state.db,
+                    &state.network,
+                ),
+            )),
 
             // Used by the StateService.
             ReadRequest::Tip => Ok(ReadResponse::Tip(read::tip(
@@ -1943,7 +2002,7 @@ impl Service<ReadRequest> for ReadStateService {
                 read::hash_by_height(state.latest_best_chain(), &state.db, height),
             )),
 
-            // Used by get_block_template and getblockchaininfo RPCs.
+            // Used by the `getblocktemplate` RPC.
             ReadRequest::ChainInfo => {
                 // # Correctness
                 //

@@ -19,16 +19,15 @@ use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
-    history_tree::HistoryTree,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
     value_balance::ValueBalance,
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{BoxError, GetBlockTemplateChainInfo};
+use zebra_state::BoxError;
 use zebra_test::mock_service::MockService;
 
 use crate::methods::{
@@ -401,19 +400,10 @@ proptest! {
                         .respond(Err(BoxError::from("no chain tip available yet")));
 
                     state
-                        .expect_request(zebra_state::ReadRequest::ChainInfo)
+                        .expect_request(zebra_state::ReadRequest::BestChainNextDifficulty)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                            tip_hash: genesis_hash,
-                            tip_height: Height::MIN,
-                            chain_history_root: HistoryTree::default().hash(),
-                            expected_difficulty: Default::default(),
-                            cur_time: DateTime32::now(),
-                            min_time: DateTime32::now(),
-                            max_time: DateTime32::now(),
-                            chain_value_pools: Default::default(),
-                        }));
+                        .respond(zebra_state::ReadResponse::BestChainNextDifficulty(Some(Default::default())));
                 }
             };
 
@@ -482,19 +472,10 @@ proptest! {
                         });
 
                     state
-                        .expect_request(zebra_state::ReadRequest::ChainInfo)
+                        .expect_request(zebra_state::ReadRequest::BestChainNextDifficulty)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                            tip_hash: block_hash,
-                            tip_height: block_height,
-                            chain_history_root: HistoryTree::default().hash(),
-                            expected_difficulty: Default::default(),
-                            cur_time: DateTime32::now(),
-                            min_time: DateTime32::now(),
-                            max_time: DateTime32::now(),
-                            chain_value_pools: Default::default(),
-                        }));
+                        .respond(zebra_state::ReadResponse::BestChainNextDifficulty(Some(Default::default())));
                 }
             };
 
@@ -596,10 +577,10 @@ proptest! {
                     .respond(Err(BoxError::from("tip values not available")));
 
                 state
-                    .expect_request(zebra_state::ReadRequest::ChainInfo)
+                    .expect_request(zebra_state::ReadRequest::BestChainNextDifficulty)
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
-                    .respond(Err(BoxError::from("chain info not available")));
+                    .respond(zebra_state::ReadResponse::BestChainNextDifficulty(None));
 
                 }
             };
@@ -607,6 +588,8 @@ proptest! {
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             let response = response.expect("should succeed with genesis block info");
+
+            prop_assert_eq!(response.difficulty, 1.0);
 
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());

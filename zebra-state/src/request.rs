@@ -1646,6 +1646,13 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::BestChainNextMedianTimePast`] when successful.
     BestChainNextMedianTimePast,
 
+    /// Calculates the standard proof-of-work difficulty threshold for the *next* block on the
+    /// best chain, without the wall-clock Testnet minimum-difficulty override.
+    ///
+    /// Returns [`ReadResponse::BestChainNextDifficulty`] with `Some(CompactDifficulty)`, or
+    /// `None` if the state is empty or the tip is at [`block::Height::MAX`].
+    BestChainNextDifficulty,
+
     /// Looks up a block hash by height in the current best chain.
     ///
     /// Returns
@@ -1743,6 +1750,7 @@ impl ReadRequest {
                 "best_chain_tip_nullifiers_anchors"
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
+            ReadRequest::BestChainNextDifficulty => "best_chain_next_difficulty",
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",

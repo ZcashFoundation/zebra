@@ -236,6 +236,20 @@ impl AdjustedDifficulty {
         }
     }
 
+    /// Calculate the standard `difficulty_threshold` for a candidate block, without the
+    /// wall-clock Testnet minimum-difficulty override.
+    ///
+    /// Returns `target_difficulty_limit().to_compact()` on Regtest (which does not retarget),
+    /// and `ThresholdBits` from the Zcash specification on Mainnet and Testnet — matching
+    /// `zcashd`'s `GetNetworkDifficulty()` (`GetNextWorkRequired(tip, nullptr)`).
+    pub fn standard_difficulty_threshold(&self) -> CompactDifficulty {
+        if self.network.is_regtest() {
+            return self.network.target_difficulty_limit().to_compact();
+        }
+
+        self.threshold_bits()
+    }
+
     /// Calculate the `difficulty_threshold` for a candidate block, based on the
     /// `candidate_height`, `network`, and the relevant `difficulty_threshold`s and
     /// `time`s.

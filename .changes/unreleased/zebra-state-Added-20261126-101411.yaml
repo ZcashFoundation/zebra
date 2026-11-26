@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ReadRequest::BestChainNextDifficulty` to query the best chain's next-block standard proof-of-work difficulty without cloning `NonFinalizedState` or reading the history tree.
+time: 2026-11-26T10:14:11.997305981Z

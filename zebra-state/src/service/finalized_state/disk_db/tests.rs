@@ -223,3 +223,167 @@ fn read_only_secondary_removes_its_directory_on_drop() {
         "dropping a secondary must keep the primary database"
     );
 }
+
+#[test]
+fn cached_disk_size_is_initialized_shared_and_refreshed() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = || {
+        DiskDb::new(
+            &config,
+            "cached-size-test",
+            &Version::new(1, 0, 0),
+            &Network::Mainnet,
+            ["cached_size".to_owned()],
+            false,
+        )
+        .expect("the persistent database configuration is valid")
+    };
+    let db = open();
+    let clone = db.clone();
+    let initial_size = db.size();
+    assert_eq!(db.cached_size(), initial_size);
+
+    let cf = db
+        .cf_handle("cached_size")
+        .expect("the test column family was configured");
+    db.put_cf(&cf, b"key", [0xa5; 4096])
+        .expect("the test column family is writable");
+    db.flush_cf(&cf)
+        .expect("the test column family can be flushed");
+
+    let expected_size = db.size();
+    assert!(
+        expected_size > initial_size,
+        "the live measurement must include the new SST file"
+    );
+    assert_eq!(
+        db.cached_size(),
+        initial_size,
+        "a live size measurement must not refresh the cache"
+    );
+    assert_eq!(clone.cached_size(), initial_size);
+
+    clone.export_metrics();
+    assert_eq!(clone.cached_size(), expected_size);
+    assert_eq!(
+        db.cached_size(),
+        expected_size,
+        "metrics exported by a clone must refresh the shared cache"
+    );
+
+    drop(clone);
+    drop(db);
+    let db = open();
+    assert!(db.cached_size() > 0);
+    assert_eq!(
+        db.cached_size(),
+        db.size(),
+        "opening a populated database must initialize its cached size"
+    );
+}
+
+#[test]
+fn secondary_disk_usage_tracks_primary_growth_on_catch_up() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = |read_only, extra_cfs: &[&str]| {
+        DiskDb::new(
+            &config,
+            "secondary-size-test",
+            &Version::new(1, 0, 0),
+            &Network::Mainnet,
+            extra_cfs.iter().map(|cf| (*cf).to_owned()),
+            read_only,
+        )
+        .expect("the persistent database configuration is valid")
+    };
+    let primary = open(false, &["usage_size"]);
+    let secondary = open(true, &["usage_size"]);
+    let initial_size = secondary.cached_size();
+    assert_eq!(initial_size, secondary.size());
+
+    let cf = primary
+        .cf_handle("usage_size")
+        .expect("the test column family was configured");
+    primary
+        .put_cf(&cf, b"key", [0xa5; 4096])
+        .expect("the primary test column family is writable");
+    primary
+        .flush_cf(&cf)
+        .expect("the primary test column family can be flushed");
+
+    assert_eq!(
+        secondary.cached_size(),
+        initial_size,
+        "secondary cached size must not change before try_catch_up_with_primary"
+    );
+
+    secondary
+        .try_catch_up_with_primary()
+        .expect("the secondary can read the primary's flushed data");
+
+    let live_size = secondary.size();
+    assert!(
+        live_size > initial_size,
+        "catch-up must include the new SST file"
+    );
+    assert_eq!(
+        secondary.cached_size(),
+        live_size,
+        "secondary try_catch_up_with_primary must refresh the cached disk usage"
+    );
+
+    // A newer secondary passing column families not yet on disk must still open and measure size.
+    let secondary_with_extra_cf = open(true, &["usage_size", "future_cf"]);
+    assert_eq!(secondary_with_extra_cf.cached_size(), live_size);
+    assert_eq!(secondary_with_extra_cf.size(), live_size);
+}
+
+#[test]
+fn empty_column_families_database_measures_size_without_panicking() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let db = DiskDb::new(
+        &config,
+        "empty-cf-test",
+        &Version::new(1, 0, 0),
+        &Network::Mainnet,
+        [],
+        false,
+    )
+    .expect("opening a database with no extra column families should succeed");
+
+    assert_eq!(db.size(), 0);
+    assert_eq!(db.cached_size(), 0);
+    db.export_metrics();
+    db.print_db_metrics();
+    assert_eq!(db.cached_size(), 0);
+}

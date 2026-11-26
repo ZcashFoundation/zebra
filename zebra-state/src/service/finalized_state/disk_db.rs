@@ -17,7 +17,7 @@ use std::{
     ops::RangeBounds,
     path::Path,
     sync::{
-        atomic::{self, AtomicBool},
+        atomic::{self, AtomicBool, AtomicU64},
         Arc,
     },
 };
@@ -25,7 +25,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
+use rocksdb::{properties, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use tempfile::TempDir;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
@@ -101,6 +101,15 @@ pub struct DiskDb {
     //
     // Everything contained in this state must be shared by all clones, or read-only.
     //
+    /// The column family names opened by this database instance.
+    column_families: Arc<[String]>,
+
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    /// Database startup, periodic metrics exports (primary), and primary catch-ups
+    /// (read-only secondary) update this cached disk size.
+    cached_size: Arc<AtomicU64>,
+
     /// The shared inner RocksDB database.
     ///
     /// RocksDB allows reads and writes via a shared reference.
@@ -606,34 +615,32 @@ impl DiskWriteBatch {
 impl DiskDb {
     /// Prints rocksdb metrics for each column family along with total database disk size, live data disk size and database memory size.
     pub fn print_db_metrics(&self) {
-        let mut total_size_on_disk = 0;
-        let mut total_live_size_on_disk = 0;
-        let mut total_size_in_mem = 0;
+        let mut total_size_on_disk: u64 = 0;
+        let mut total_live_size_on_disk: u64 = 0;
+        let mut total_size_in_mem: u64 = 0;
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
 
-        for cf_descriptor in column_families {
-            let cf_name = &cf_descriptor.name();
+        for cf_name in self.column_families.iter() {
             let cf_handle = db
                 .cf_handle(cf_name)
-                .expect("Column family handle must exist");
+                .expect("column family handle exists because RocksDB opened every descriptor");
             let live_data_size = db
-                .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                .property_int_value_cf(cf_handle, properties::ESTIMATE_LIVE_DATA_SIZE)
                 .unwrap_or(Some(0));
             let total_sst_files_size = db
-                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                .property_int_value_cf(cf_handle, properties::TOTAL_SST_FILES_SIZE)
                 .unwrap_or(Some(0));
             let cf_disk_size = total_sst_files_size.unwrap_or(0);
-            total_size_on_disk += cf_disk_size;
-            total_live_size_on_disk += live_data_size.unwrap_or(0);
+            total_size_on_disk = total_size_on_disk.saturating_add(cf_disk_size);
+            total_live_size_on_disk =
+                total_live_size_on_disk.saturating_add(live_data_size.unwrap_or(0));
             let mem_table_size = db
-                .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                .property_int_value_cf(cf_handle, properties::SIZE_ALL_MEM_TABLES)
                 .unwrap_or(Some(0));
-            total_size_in_mem += mem_table_size.unwrap_or(0);
+            total_size_in_mem = total_size_in_mem.saturating_add(mem_table_size.unwrap_or(0));
 
             write!(
                 column_families_log_string,
@@ -666,57 +673,66 @@ impl DiskDb {
     /// Call this periodically (e.g., every 30 seconds) from a background task.
     pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
 
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
         let mut total_mem: u64 = 0;
+        let mut measured_column_family = false;
+        let mut complete_disk_measurement = true;
 
-        for cf_descriptor in column_families {
-            let cf_name = cf_descriptor.name().to_string();
-            if let Some(cf_handle) = db.cf_handle(&cf_name) {
-                let disk = db
-                    .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0);
+        for cf_name in self.column_families.iter() {
+            if let Some(cf_handle) = db.cf_handle(cf_name) {
+                measured_column_family = true;
+                let disk =
+                    match db.property_int_value_cf(cf_handle, properties::TOTAL_SST_FILES_SIZE) {
+                        Ok(Some(disk)) => disk,
+                        _ => {
+                            complete_disk_measurement = false;
+                            0
+                        }
+                    };
                 let live = db
-                    .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                    .property_int_value_cf(cf_handle, properties::ESTIMATE_LIVE_DATA_SIZE)
                     .ok()
                     .flatten()
                     .unwrap_or(0);
                 let mem = db
-                    .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                    .property_int_value_cf(cf_handle, properties::SIZE_ALL_MEM_TABLES)
                     .ok()
                     .flatten()
                     .unwrap_or(0);
 
-                total_disk += disk;
-                total_live += live;
-                total_mem += mem;
+                total_disk = total_disk.saturating_add(disk);
+                total_live = total_live.saturating_add(live);
+                total_mem = total_mem.saturating_add(mem);
 
                 metrics::gauge!("zebra.state.rocksdb.cf_disk_size_bytes", "cf" => cf_name.clone())
                     .set(disk as f64);
-                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
+                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name.clone())
                     .set(mem as f64);
+            } else {
+                complete_disk_measurement = false;
             }
         }
 
         metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
+        if measured_column_family && complete_disk_measurement {
+            self.cached_size
+                .store(total_disk, atomic::Ordering::Relaxed);
+        }
         metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
         metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
 
         // Compaction metrics - these use database-wide properties (not per-column-family)
-        if let Ok(Some(pending)) = db.property_int_value("rocksdb.compaction-pending") {
+        if let Ok(Some(pending)) = db.property_int_value(properties::COMPACTION_PENDING) {
             metrics::gauge!("zebra.state.rocksdb.compaction.pending_bytes").set(pending as f64);
         }
 
-        if let Ok(Some(running)) = db.property_int_value("rocksdb.num-running-compactions") {
+        if let Ok(Some(running)) = db.property_int_value(properties::NUM_RUNNING_COMPACTIONS) {
             metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
         }
 
-        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
+        if let Ok(Some(cache)) = db.property_int_value(properties::BLOCK_CACHE_USAGE) {
             metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
         }
 
@@ -732,23 +748,49 @@ impl DiskDb {
 
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
-        let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
-        let mut total_size_on_disk = 0;
-        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
-            let cf_name = &cf_descriptor.name();
-            let cf_handle = db
-                .cf_handle(cf_name)
-                .expect("Column family handle must exist");
+        self.measure_size().0
+    }
 
-            total_size_on_disk += db
-                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
-                .ok()
-                .flatten()
-                .unwrap_or(0);
+    /// Returns the latest cached disk space estimate in bytes.
+    ///
+    /// On a primary database this is initialized at startup and refreshed by periodic metrics
+    /// exports. On a read-only secondary it is initialized at startup and refreshed on every
+    /// [`DiskDb::try_catch_up_with_primary`] call, because RocksDB secondaries only update
+    /// their SST file set during open and primary catch-up.
+    pub(crate) fn cached_size(&self) -> u64 {
+        self.cached_size.load(atomic::Ordering::Relaxed)
+    }
+
+    /// Measures disk usage across all open column families and reports whether every column
+    /// family's property was available.
+    fn measure_size(&self) -> (u64, bool) {
+        let db: &Arc<DB> = &self.db;
+        let mut total_size_on_disk: u64 = 0;
+        let mut measured_column_family = false;
+        let mut complete = true;
+
+        for cf_name in self.column_families.iter() {
+            let Some(cf_handle) = db.cf_handle(cf_name) else {
+                complete = false;
+                continue;
+            };
+            measured_column_family = true;
+
+            match db.property_int_value_cf(cf_handle, properties::TOTAL_SST_FILES_SIZE) {
+                Ok(Some(size)) => total_size_on_disk = total_size_on_disk.saturating_add(size),
+                _ => complete = false,
+            }
         }
 
-        total_size_on_disk
+        (total_size_on_disk, measured_column_family && complete)
+    }
+
+    /// Refreshes the cached disk usage estimate if every open column family's size is available.
+    fn refresh_cached_size(&self) {
+        let (size, complete) = self.measure_size();
+        if complete {
+            self.cached_size.store(size, atomic::Ordering::Relaxed);
+        }
     }
 
     /// Sets `finished_format_upgrades` to true to indicate that Zebra has
@@ -764,9 +806,13 @@ impl DiskDb {
         self.finished_format_upgrades.load(atomic::Ordering::SeqCst)
     }
 
-    /// When called with a secondary DB instance, tries to catch up with the primary DB instance
+    /// When called with a secondary DB instance, tries to catch up with the primary DB instance.
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
-        self.db.try_catch_up_with_primary()
+        let result = self.db.try_catch_up_with_primary();
+        // Refresh unconditionally because RocksDB's `TryCatchUpWithPrimary` can commit new
+        // manifest versions (changing SST sizes) before returning a WAL recovery error.
+        self.refresh_cached_size();
+        result
     }
 
     /// Returns a forward iterator over the items in `cf` in `range`.
@@ -996,6 +1042,7 @@ impl DiskDb {
 
         column_families_on_disk
             .into_iter()
+            .chain([rocksdb::DEFAULT_COLUMN_FAMILY_NAME.to_owned()])
             .chain(column_families_in_code)
             .unique()
             .map(move |cf_name: String| {
@@ -1062,8 +1109,16 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
-        let column_families =
-            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
+        // A read-only secondary can't create column families, so it only opens the ones on disk.
+        // Databases last opened by older Zebra versions don't have newer column families.
+        let column_families_in_code = column_families_in_code.into_iter().filter(|_| !read_only);
+        let column_families: Vec<ColumnFamilyDescriptor> =
+            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code)
+                .collect();
+        let column_family_names: Arc<[String]> = column_families
+            .iter()
+            .map(|cf| cf.name().to_owned())
+            .collect();
 
         let secondary_dir = read_only.then(|| {
             let secondary_dir = tempfile::Builder::new()
@@ -1100,12 +1155,15 @@ impl DiskDb {
                     format_version_in_code: format_version_in_code.clone(),
                     network: network.clone(),
                     mode,
+                    column_families: column_family_names,
+                    cached_size: Arc::new(AtomicU64::new(0)),
                     db: Arc::new(db),
                     secondary_dir,
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();
+                db.refresh_cached_size();
 
                 Ok(db)
             }
