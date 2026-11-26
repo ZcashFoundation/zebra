@@ -250,7 +250,12 @@ impl Inbound {
         }
     }
 
-    /// Provides committed-tip context for negotiated compact block reconstruction.
+    /// Provides committed-tip context for negotiated compact block reconstruction, and for checking
+    /// the blocks of peers that negotiated compact block relay before their later validation
+    /// failures are exempt from scoring.
+    ///
+    /// The gossiped block downloader is created when the setup data arrives, so call this before
+    /// the service is polled.
     pub fn with_compact_relay(mut self, network: Network, state: zs::ReadStateService) -> Self {
         self.compact_relay = Some((network, state));
         self
@@ -298,13 +303,17 @@ impl Service<zn::Request> for Inbound {
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 
-                    let block_downloads = Box::pin(BlockDownloads::new(
+                    let mut block_downloads = BlockDownloads::new(
                         full_verify_concurrency_limit,
                         block_download_peer_set,
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
                         latest_chain_tip,
-                    ));
+                    );
+                    if let Some((_, read_state)) = &self.compact_relay {
+                        block_downloads = block_downloads.with_read_state(read_state.clone());
+                    }
+                    let block_downloads = Box::pin(block_downloads);
 
                     result = Ok(());
                     Setup::Initialized {

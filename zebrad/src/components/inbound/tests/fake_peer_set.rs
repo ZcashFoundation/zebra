@@ -2292,3 +2292,460 @@ async fn compact_requests_fail_during_setup() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+/// A stub semantic block verifier that fails every block with `error()`, and records each request
+/// on the returned channel, so a test can check that a block reached it.
+fn failing_block_verifier(
+    error: fn() -> RouterError,
+) -> (SemanticBlockVerifierStub, tokio::sync::mpsc::Receiver<()>) {
+    let (verifier_called_tx, verifier_called_rx) = tokio::sync::mpsc::channel(1);
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(move |_req: zebra_consensus::Request| {
+            let _ = verifier_called_tx.try_send(());
+            async move { Err::<zebra_chain::block::Hash, RouterError>(error()) }
+        })),
+        10,
+    );
+
+    (block_verifier, verifier_called_rx)
+}
+
+/// A Regtest network where NU5 is active from height 1, so the blocks after genesis commit to their
+/// authorizing data.
+fn regtest_with_nu5() -> Network {
+    Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// Returns a state for `network` that has the Regtest genesis block, with its read-only service and
+/// chain tip.
+async fn state_with_regtest_genesis(
+    network: &Network,
+) -> Result<(StateService, zebra_state::ReadStateService, LatestChainTip), BoxError> {
+    let (state, read, latest_chain_tip, _tip_changes) =
+        zebra_state::init(StateConfig::ephemeral(), network, Height(0), 0).await;
+    let state = Buffer::new(state, 10);
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            zebra_chain::block::genesis::regtest_genesis_block().into(),
+        ))
+        .await?;
+
+    Ok((state, read, latest_chain_tip))
+}
+
+/// Returns a block that extends the best tip of the state that `read` reads, with a coinbase
+/// transaction followed by `transactions`.
+///
+/// The block has the difficulty threshold, time and commitments that the state expects from a
+/// child of the best tip, so it passes the state's part of the checks that authenticate a block for
+/// early relay. Its proof of work isn't valid, which Regtest doesn't check.
+async fn child_of_best_tip(
+    read: &zebra_state::ReadStateService,
+    transactions: Vec<Arc<zebra_chain::transaction::Transaction>>,
+) -> Result<Arc<Block>, BoxError> {
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash},
+        parameters::NetworkUpgrade,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await? else {
+        panic!("chain-info request must return chain info");
+    };
+    let height = info.tip_height.next()?;
+    let coinbase = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![transparent::Output::new(
+            Amount::try_from(1).unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        height,
+    ));
+
+    // The other header fields are replaced below.
+    let mut block =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.zcash_deserialize_into::<Block>()?;
+    block.transactions = std::iter::once(coinbase).chain(transactions).collect();
+    let header = Arc::make_mut(&mut block.header);
+    header.previous_block_hash = info.tip_hash;
+    header.difficulty_threshold = info.expected_difficulty;
+    header.time = info.cur_time.into();
+    header.merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut block.header).commitment_bytes =
+        <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &info
+                .chain_history_root
+                .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+            &block.auth_data_root(),
+        ))
+        .into();
+
+    Ok(Arc::new(block))
+}
+
+/// A peer on a connection that negotiated compact block relay can send a block before it has
+/// validated it. When the block passes the checks that authenticate it for early relay, and then
+/// fails later validation, the draft Compact Block Relay ZIP says the node must not penalize the
+/// peer, so the peer isn't scored. The block's hash commits to its authorizing data, so the
+/// downloader ignores the hash after that.
+///
+/// The peer is still scored if it didn't negotiate compact block relay, if the verifier rejected
+/// the block in its part of the early relay checks, or if the state can't authenticate the block.
+#[tokio::test(flavor = "multi_thread")]
+async fn authenticated_early_block_that_fails_later_does_not_score_serving_peer(
+) -> Result<(), BoxError> {
+    use zebra_chain::{
+        block::{self, merkle},
+        parameters::subsidy::SubsidyError,
+        serialization::ZcashSerialize,
+        transaction::Transaction,
+    };
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let _init_guard = zebra_test::init();
+
+    // A state with the Regtest genesis block, and a valid NU5 child of genesis, which passes the
+    // state's part of the early relay checks.
+    let network = regtest_with_nu5();
+    let (state, read, latest_chain_tip) = state_with_regtest_genesis(&network).await?;
+    let transaction = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Block>()?
+        .transactions
+        .into_iter()
+        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+        .unwrap();
+    let block = child_of_best_tip(&read, vec![transaction.clone()]).await?;
+    let hash = block.hash();
+
+    // The same block with one byte of a signature flipped. It has the same hash and Merkle root,
+    // but its authorizing data doesn't match the commitment in its header.
+    let mut bytes = transaction.zcash_serialize_to_vec()?;
+    let signature_byte = bytes.len() - 1 - usize::from(transaction.orchard_bundle().is_none());
+    bytes[signature_byte] ^= 1;
+    let mut forged = (*block).clone();
+    forged.transactions[1] = bytes.zcash_deserialize_into::<Arc<Transaction>>()?;
+    let forged = Arc::new(forged);
+    assert_eq!(forged.hash(), hash);
+    assert_eq!(forged.transactions[1].hash(), transaction.hash());
+    assert_ne!(forged.auth_data_root(), block.auth_data_root());
+
+    let later_failure: fn() -> RouterError =
+        || VerifyBlockError::Transaction(TransactionError::BadBalance).into();
+    let miner_fees: fn() -> RouterError = || {
+        VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::Subsidy(
+                SubsidyError::InvalidMinerFees,
+            )),
+        }
+        .into()
+    };
+    let funding_streams: fn() -> RouterError = || {
+        VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::Subsidy(
+                SubsidyError::FundingStreamNotFound,
+            )),
+        }
+        .into()
+    };
+    let merkle_root: fn() -> RouterError = || {
+        VerifyBlockError::Block {
+            source: BlockError::BadMerkleRoot {
+                actual: merkle::Root([1; 32]),
+                expected: merkle::Root([2; 32]),
+            },
+        }
+        .into()
+    };
+    let checkpoint: fn() -> RouterError = || {
+        VerifyCheckpointError::CoinbaseHeight {
+            hash: block::Hash([0; 32]),
+        }
+        .into()
+    };
+
+    // A description, whether the block came from a negotiated connection, the block, the
+    // verifier's error, and whether the peer is scored.
+    let cases: [(&str, bool, &Arc<Block>, fn() -> RouterError, bool); 7] = [
+        ("later failure", true, &block, later_failure, false),
+        ("miner fees", true, &block, miner_fees, false),
+        ("not negotiated", false, &block, later_failure, true),
+        ("funding streams", true, &block, funding_streams, true),
+        ("merkle root", true, &block, merkle_root, true),
+        ("checkpoint", true, &block, checkpoint, true),
+        ("forged body", true, &forged, later_failure, true),
+    ];
+
+    let peer = PeerSocketAddr::from(([192, 168, 180, 19], 10_000));
+    for (case, early, served, error, scored) in cases {
+        let expected_score = error().misbehavior_score();
+        assert_ne!(expected_score, 0, "{case}: the error must score the peer");
+
+        let (block_verifier, mut verifier_called) = failing_block_verifier(error);
+        let (inbound, mut peer_set, _mempool, mut misbehavior) =
+            setup_with_mock_mempool(block_verifier, state.clone(), latest_chain_tip.clone()).await;
+        let mut inbound = inbound.with_compact_relay(network.clone(), read.clone());
+
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::AdvertiseBlock(hash, Some(peer)))
+            .await?;
+        assert_eq!(response, Response::Nil, "{case}");
+
+        let blocks = vec![Available((served.clone(), Some(peer)))];
+        peer_set
+            .expect_request(Request::BlockDownload {
+                hash,
+                advertiser: Some(peer),
+            })
+            .await
+            .respond(if early {
+                Response::EarlyBlocks(blocks)
+            } else {
+                Response::Blocks(blocks)
+            });
+
+        let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior).await;
+        assert!(
+            verifier_called.try_recv().is_ok(),
+            "{case}: the block must reach the verifier",
+        );
+        assert_eq!(
+            report.map(|report| (report.addr, report.score)),
+            scored.then_some((peer, expected_score)),
+            "{case}",
+        );
+
+        if !scored {
+            // The peer can advertise the block again, but it isn't downloaded or verified again.
+            let response = inbound
+                .ready()
+                .await?
+                .call(Request::AdvertiseBlock(hash, Some(peer)))
+                .await?;
+            assert_eq!(response, Response::Nil, "{case}");
+            peer_set.expect_no_requests().await;
+        }
+    }
+
+    Ok(())
+}
+
+/// A peer that negotiated compact block relay can relay a block once its parent is the peer's best
+/// tip, so the block can fail later validation before its parent is committed here. Then the
+/// downloader waits for the parent, and doesn't score the peer if the block passes the checks that
+/// authenticate it for early relay once the parent is the best tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_block_that_fails_before_its_parent_commits_does_not_score_serving_peer(
+) -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let network = regtest_with_nu5();
+
+    // The block's difficulty threshold, time and chain history commitment depend on its parent, so
+    // the block is built on another state that already has the parent.
+    let (scratch_state, scratch_read, _) = state_with_regtest_genesis(&network).await?;
+    let parent = child_of_best_tip(&scratch_read, Vec::new()).await?;
+    // Keep a handle until the test ends: dropping the last one shuts the state down, which can fail
+    // the queued commit before the write task answers.
+    scratch_state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            parent.clone().into(),
+        ))
+        .await?;
+    let block = child_of_best_tip(&scratch_read, Vec::new()).await?;
+    let hash = block.hash();
+
+    let (state, read, latest_chain_tip) = state_with_regtest_genesis(&network).await?;
+    let (block_verifier, mut verifier_called) = failing_block_verifier(|| {
+        VerifyBlockError::Transaction(TransactionError::BadBalance).into()
+    });
+    let (inbound, mut peer_set, _mempool, mut misbehavior) =
+        setup_with_mock_mempool(block_verifier, state.clone(), latest_chain_tip).await;
+    let mut inbound = inbound.with_compact_relay(network, read);
+
+    let peer = PeerSocketAddr::from(([192, 168, 180, 20], 10_000));
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::AdvertiseBlock(hash, Some(peer)))
+        .await?;
+    assert_eq!(response, Response::Nil);
+    peer_set
+        .expect_request(Request::BlockDownload {
+            hash,
+            advertiser: Some(peer),
+        })
+        .await
+        .respond(Response::EarlyBlocks(vec![Available((
+            block.clone(),
+            Some(peer),
+        ))]));
+
+    timeout(Duration::from_secs(5), verifier_called.recv())
+        .await?
+        .expect("the block must reach the verifier");
+
+    // The block failed before its parent was committed, so the downloader waits for the parent.
+    let finished = timeout(
+        Duration::from_secs(1),
+        std::future::poll_fn(|cx| {
+            futures::ready!(inbound.poll_ready(cx))
+                .expect("the initialized inbound service must remain ready");
+            let Setup::Initialized {
+                block_downloads, ..
+            } = &inbound.setup
+            else {
+                panic!("the inbound service must be initialized after serving the block");
+            };
+
+            if block_downloads.size_hint() == (0, Some(0)) {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        }),
+    )
+    .await;
+    assert!(
+        finished.is_err(),
+        "the downloader must wait for the block's parent",
+    );
+    assert!(
+        misbehavior.try_recv().is_err(),
+        "the peer must not be scored while the downloader waits for the block's parent",
+    );
+
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            parent.into(),
+        ))
+        .await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior).await;
+    assert_eq!(
+        report.map(|report| (report.addr, report.score)),
+        None,
+        "a block that passes the checks once its parent is the best tip must not score the peer",
+    );
+
+    Ok(())
+}
+
+/// The block verifier only rejects a block for an invalid transaction after its part of the checks
+/// that authenticate the block for early relay. So a peer that negotiated compact block relay isn't
+/// scored for a block with an invalid transaction that passes those checks, and a peer that didn't
+/// negotiate it is.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_block_with_an_invalid_transaction_does_not_score_serving_peer(
+) -> Result<(), BoxError> {
+    use zebra_chain::{
+        parameters::NetworkUpgrade,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+
+    use crate::components::inbound::downloads::is_later_validation_failure;
+
+    let _init_guard = zebra_test::init();
+
+    let network = regtest_with_nu5();
+    let (state, read, latest_chain_tip) = state_with_regtest_genesis(&network).await?;
+    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
+        zebra_consensus::router::init_test(ConsensusConfig::default(), &network, state.clone())
+            .await;
+
+    // A transaction without inputs is invalid, and the block verifier only checks that when it
+    // verifies the block's transactions.
+    let no_inputs = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        vec![transparent::Output::new(
+            Amount::try_from(1).unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(0),
+    ));
+    let block = child_of_best_tip(&read, vec![no_inputs]).await?;
+    let hash = block.hash();
+
+    let error = block_verifier
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .expect_err("a block with a transaction without inputs is invalid");
+    let Some(RouterError::Block { source }) = error.downcast_ref::<RouterError>() else {
+        panic!("the block verifier must reject the block, got: {error:?}");
+    };
+    assert!(
+        matches!(
+            **source,
+            VerifyBlockError::Transaction(TransactionError::NoInputs)
+        ),
+        "the block verifier must reject the transaction, got: {source:?}",
+    );
+    assert!(
+        is_later_validation_failure(&*error),
+        "an invalid transaction must be a later validation failure",
+    );
+
+    let peer = PeerSocketAddr::from(([192, 168, 180, 21], 10_000));
+    for (early, scored) in [(true, false), (false, true)] {
+        let (inbound, mut peer_set, _mempool, mut misbehavior) = setup_with_mock_mempool(
+            block_verifier.clone(),
+            state.clone(),
+            latest_chain_tip.clone(),
+        )
+        .await;
+        let mut inbound = inbound.with_compact_relay(network.clone(), read.clone());
+
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::AdvertiseBlock(hash, Some(peer)))
+            .await?;
+        assert_eq!(response, Response::Nil, "early: {early}");
+
+        let blocks = vec![Available((block.clone(), Some(peer)))];
+        peer_set
+            .expect_request(Request::BlockDownload {
+                hash,
+                advertiser: Some(peer),
+            })
+            .await
+            .respond(if early {
+                Response::EarlyBlocks(blocks)
+            } else {
+                Response::Blocks(blocks)
+            });
+
+        let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior).await;
+        assert_eq!(
+            report.map(|report| (report.addr, report.score)),
+            scored.then_some((peer, 100)),
+            "early: {early}",
+        );
+    }
+
+    Ok(())
+}

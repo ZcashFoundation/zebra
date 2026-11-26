@@ -1789,7 +1789,7 @@ where
                     // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
                     (!missing).then_some(InvOutcome::Failed)
                 }
-                Ok(Response::Blocks(blocks))
+                Ok(Response::Blocks(blocks) | Response::EarlyBlocks(blocks))
                     if (advertised || is_repeat)
                         && blocks.iter().any(|block| block.available().is_some()) =>
                 {

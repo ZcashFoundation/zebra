@@ -120,6 +120,12 @@ pub struct Config {
     /// uses, so the two negotiate compact relay with each other. That release enables the option
     /// by default, and also relays blocks before it commits them, which this node doesn't do.
     ///
+    /// The ZIP lets a peer that sets the service bit relay a block before it has validated it,
+    /// once the block passes the ZIP's early relay checks, and its peer misbehaviour rules treat
+    /// the blocks from such a peer differently. So block downloads from connections where both
+    /// peers set the bit return [`Response::EarlyBlocks`](crate::Response::EarlyBlocks) instead
+    /// of [`Response::Blocks`](crate::Response::Blocks).
+    ///
     /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
     pub compact_block_relay: bool,
 

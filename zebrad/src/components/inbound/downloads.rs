@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -16,20 +17,23 @@ use futures::{
     ready,
     stream::{FuturesUnordered, Stream},
 };
+use indexmap::IndexSet;
 use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{
     sync::oneshot,
     task::JoinHandle,
-    time::{timeout, Instant},
+    time::{sleep, timeout, Instant},
 };
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    block::{self, HeightDiff},
+    block::{self, Block, HeightDiff},
     chain_tip::ChainTip,
+    parameters::subsidy::SubsidyError,
 };
+use zebra_consensus::{error::TransactionError, router::RouterError, BlockError, VerifyBlockError};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
@@ -133,6 +137,211 @@ where
     }
 }
 
+/// How long to wait for the state to check a block from a peer that negotiated compact block
+/// relay against the best tip.
+///
+/// Timing out keeps the peer's score, so a slow state read can't exempt a block from scoring.
+const EARLY_RELAY_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long to wait for the parent of a block from a peer that negotiated compact block relay to
+/// become the best tip, when the block fails later validation first.
+///
+/// The peer can relay the block once its parent is the peer's best tip, so the block can fail here
+/// before its parent is committed. Timing out keeps the peer's score.
+const EARLY_RELAY_PARENT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often to check whether that parent has become the best tip.
+const EARLY_RELAY_PARENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// The maximum number of blocks from peers that negotiated compact block relay that the gossiped
+/// block downloader remembers as invalid, after they passed the checks that authenticate them for
+/// early relay.
+///
+/// Each of these blocks has valid proof of work at the expected difficulty, as a child of the
+/// best tip, so there are only a few of them. The limit bounds their memory on networks where
+/// that proof of work is cheap.
+const MAX_REJECTED_EARLY_BLOCKS: usize = 100;
+
+/// A block from a peer that negotiated compact block relay failed later validation, after it passed
+/// the checks that authenticate it for early relay.
+///
+/// The draft Compact Block Relay ZIP says that a node must not penalize the peer for this block, so
+/// the gossiped block downloader doesn't attribute this error to the peer. The block's hash commits
+/// to its transactions and their authorizing data, so the downloader also ignores the hash after
+/// this error.
+#[derive(Debug, Error)]
+#[error("block failed later validation after it was authenticated for early relay: {0}")]
+pub struct AuthenticatedBlockRejected(#[source] BoxError);
+
+/// Returns `true` if `error` scores the peer that sent a block, and the block verifier only
+/// returns it after the block passed the verifier's part of the checks that authenticate a block
+/// for early relay.
+///
+/// # Security
+///
+/// The [draft Compact Block Relay ZIP] lets a peer that sets the compact block relay service bit
+/// relay a block before it has validated it, once the block passes the ZIP's early relay checks.
+/// The ZIP's peer misbehaviour rules say a node must not penalize that peer when such an
+/// authenticated block fails later validation.
+///
+/// Before it verifies a block's transactions, the block verifier checks the block's proof of work,
+/// its time against the local clock, its Merkle root, transaction IDs and consensus branch IDs, its
+/// coinbase, its shielded action limits, and its subsidy and funding streams when they don't
+/// depend on the chain value pools. It only returns these errors once those checks pass:
+/// - a transaction failure,
+/// - too many transparent signature operations,
+/// - a miner fee failure, or
+/// - a state commit failure, except authorizing data that doesn't match the block's commitment.
+///
+/// [`early_block_is_authenticated()`] asks the state for the rest of the early relay checks. Every
+/// other error keeps its score, including all the checkpoint verifier's errors.
+///
+/// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+pub(crate) fn is_later_validation_failure(
+    error: &(dyn std::error::Error + Send + Sync + 'static),
+) -> bool {
+    let error = match error.downcast_ref::<RouterError>() {
+        Some(RouterError::Block { source }) => source.as_ref(),
+        // The checkpoint verifier doesn't run the early relay checks.
+        Some(RouterError::Checkpoint { .. }) => return false,
+        // The inbound block verifier is a router, but its scoring also handles a block verifier
+        // error.
+        None => match error.downcast_ref::<VerifyBlockError>() {
+            Some(error) => error,
+            None => return false,
+        },
+    };
+
+    error.misbehavior_score() != 0
+        && match error {
+            VerifyBlockError::Transaction(_) => true,
+            VerifyBlockError::Block { source } => matches!(
+                source,
+                BlockError::TooManyTransparentSignatureOperations { .. }
+                    // Only the miner fee check returns these subsidy errors as block errors.
+                    | BlockError::Transaction(TransactionError::Subsidy(
+                        SubsidyError::InvalidMinerFees | SubsidyError::Overflow
+                    ))
+            ),
+            VerifyBlockError::Commit(error) => !error.is_auth_commitment_mismatch(),
+            _ => false,
+        }
+}
+
+/// Returns `true` if the state confirms that `block` passes the rest of the checks that
+/// authenticate it for early relay, against the current best tip.
+///
+/// The state checks that `block` is an NU5 or later child of the best tip, that its difficulty
+/// threshold and time are valid in that context, and that its header commits to the best tip's
+/// chain history and to the block's authorizing data. A failed or timed-out check returns `false`.
+async fn best_tip_commitments_are_valid<ZS>(read_state: ZS, block: Arc<Block>) -> bool
+where
+    ZS: zs::ReadState,
+{
+    matches!(
+        timeout(
+            EARLY_RELAY_CHECK_TIMEOUT,
+            read_state.oneshot(zs::ReadRequest::CheckBestTipBlockCommitments(block)),
+        )
+        .await,
+        Ok(Ok(zs::ReadResponse::ValidBestTipBlockCommitments))
+    )
+}
+
+/// Starts checking `block` against the best tip, if its parent is the best tip, and returns the
+/// task that checks it.
+///
+/// Only call this for a block from a connection that negotiated compact block relay, just before
+/// the block is verified. The check runs while the block is verified, so if the block fails later
+/// validation, the check doesn't depend on whether another block became the best tip first.
+pub(crate) fn start_early_relay_check<ZS, ZSTip>(
+    read_state: &ZS,
+    latest_chain_tip: &ZSTip,
+    block: &Arc<Block>,
+) -> Option<JoinHandle<bool>>
+where
+    ZS: zs::ReadState,
+    ZSTip: ChainTip,
+{
+    (latest_chain_tip.best_tip_hash() == Some(block.header.previous_block_hash)).then(|| {
+        tokio::spawn(best_tip_commitments_are_valid(
+            read_state.clone(),
+            block.clone(),
+        ))
+    })
+}
+
+/// Returns `true` if `block` at `height` passes the rest of the checks that authenticate it for
+/// early relay, so a later validation failure doesn't score the peer that sent it.
+///
+/// `early_check` is the task from [`start_early_relay_check()`], if there is one. Otherwise the
+/// state checks the block now.
+///
+/// Only call this for a block from a connection that negotiated compact block relay, after
+/// [`is_later_validation_failure()`] returns `true` for its error.
+///
+/// # Security
+///
+/// The peer can relay the block once its parent is the peer's best tip, so the block can fail here
+/// before its parent is committed. If the check fails, this waits up to
+/// [`EARLY_RELAY_PARENT_TIMEOUT`] for the parent to become the best tip, and checks the block
+/// again. If the check fails while the parent is the best tip, it is retried once, in case the
+/// best tip changed during the check.
+///
+/// The peer keeps its score if that check fails too, if a block at the same height or above
+/// becomes the best tip instead, or if the parent doesn't become the best tip in time. So a forged
+/// body is still scored, and so is a block that can't be checked against the best tip. The
+/// expected difficulty of a block depends on its parent's chain, so without that check, the block
+/// could have much less proof of work than a valid block.
+pub(crate) async fn early_block_is_authenticated<ZS, ZSTip>(
+    read_state: ZS,
+    latest_chain_tip: ZSTip,
+    block: Arc<Block>,
+    height: block::Height,
+    early_check: Option<JoinHandle<bool>>,
+) -> bool
+where
+    ZS: zs::ReadState,
+    ZSTip: ChainTip + Send + 'static,
+{
+    let authenticated = match early_check {
+        // The check task doesn't panic, so it only fails if the runtime is shutting down.
+        Some(early_check) => early_check.await.unwrap_or(false),
+        None => best_tip_commitments_are_valid(read_state.clone(), block.clone()).await,
+    };
+    if authenticated {
+        return true;
+    }
+
+    let parent = block.header.previous_block_hash;
+    timeout(EARLY_RELAY_PARENT_TIMEOUT, async move {
+        let mut retried = false;
+        loop {
+            let tip = latest_chain_tip.best_tip_height_and_hash();
+            match tip {
+                Some((_, tip_hash)) if tip_hash == parent => {
+                    // The parent became the best tip, or the last check failed while the parent
+                    // was the best tip.
+                    if retried {
+                        return false;
+                    }
+                    retried = true;
+
+                    if best_tip_commitments_are_valid(read_state.clone(), block.clone()).await {
+                        return true;
+                    }
+                }
+                // The block can only be checked against the best tip, and the best tip has
+                // reached its height without it.
+                Some((tip_height, _)) if tip_height >= height => return false,
+                _ => sleep(EARLY_RELAY_PARENT_POLL_INTERVAL).await,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
+
 /// The maximum number of concurrent inbound download and verify tasks.
 /// Also used as the maximum lookahead limit, before block verification.
 ///
@@ -175,6 +384,14 @@ pub enum DownloadAction {
     /// before the first is verified; during reorgs or recovery the same
     /// hash also arrives from other peers or via the syncer.
     TooManyFromPeer,
+
+    /// The block hash belongs to a block from a peer that negotiated compact block relay, which
+    /// passed the checks that authenticate it for early relay and then failed later validation,
+    /// so this request was ignored.
+    ///
+    /// The block's hash commits to its transactions and their authorizing data, so the block
+    /// can't be valid.
+    AlreadyRejected,
 }
 
 /// Manages download and verification of blocks gossiped to this peer.
@@ -210,6 +427,12 @@ where
     /// A service that manages cached blockchain state.
     state: ZS,
 
+    /// A read-only state service, which checks a block from a peer that negotiated compact block
+    /// relay when the block fails later validation, before the failure is exempt from scoring.
+    ///
+    /// Without it, no failure is exempt.
+    read_state: Option<zs::ReadStateService>,
+
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: ZSTip,
 
@@ -235,6 +458,14 @@ where
     /// inherited from the [`DownloadAction::FullQueue`] check on
     /// [`Self::pending`].
     in_flight_ips: HashSet<IpAddr>,
+
+    /// The hashes of blocks from peers that negotiated compact block relay, which passed the
+    /// checks that authenticate them for early relay and then failed later validation, oldest
+    /// first.
+    ///
+    /// The peers that sent these blocks aren't scored, so the downloader ignores their hashes
+    /// instead of verifying the blocks again. Size-bounded by [`MAX_REJECTED_EARLY_BLOCKS`].
+    rejected_early_blocks: IndexSet<block::Hash>,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -267,7 +498,18 @@ where
             let (result, hash) =
                 match join_result.expect("block download and verify tasks must not panic") {
                     Ok(hash) => (Ok(hash), hash),
-                    Err((e, hash, advertiser_addr)) => (Err((e, advertiser_addr)), hash),
+                    Err((e, hash, advertiser_addr)) => {
+                        // The block's hash commits to its transactions and their authorizing
+                        // data, so a later advertisement of the hash is the same invalid block.
+                        if e.is::<AuthenticatedBlockRejected>()
+                            && this.rejected_early_blocks.insert(hash)
+                            && this.rejected_early_blocks.len() > MAX_REJECTED_EARLY_BLOCKS
+                        {
+                            this.rejected_early_blocks.shift_remove_index(0);
+                        }
+
+                        (Err((e, advertiser_addr)), hash)
+                    }
                 };
             if let Some((_, Some(ip))) = this.cancel_handles.remove(&hash) {
                 assert!(
@@ -320,11 +562,22 @@ where
             network,
             verifier,
             state,
+            read_state: None,
             latest_chain_tip,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             in_flight_ips: HashSet::new(),
+            rejected_early_blocks: IndexSet::new(),
         }
+    }
+
+    /// Uses `read_state` to check the blocks from peers that negotiated compact block relay, so
+    /// later validation failures of the blocks that it authenticates don't score those peers.
+    ///
+    /// See [`is_later_validation_failure()`] and [`early_block_is_authenticated()`].
+    pub fn with_read_state(mut self, read_state: zs::ReadStateService) -> Self {
+        self.read_state = Some(read_state);
+        self
     }
 
     /// Queue a block for download and verification.
@@ -338,6 +591,17 @@ where
         hash: block::Hash,
         advertiser: Option<PeerSocketAddr>,
     ) -> DownloadAction {
+        if self.rejected_early_blocks.contains(&hash) {
+            debug!(
+                ?hash,
+                "block hash failed later validation after early relay: ignored block",
+            );
+
+            metrics::counter!("gossip.already.rejected.dropped.block.hash.count").increment(1);
+
+            return DownloadAction::AlreadyRejected;
+        }
+
         if self.cancel_handles.contains_key(&hash) {
             debug!(
                 ?hash,
@@ -385,6 +649,7 @@ where
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
         let state = self.state.clone();
+        let read_state = self.read_state.clone();
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
@@ -410,7 +675,12 @@ where
             .map_err(|e| (e, None))?;
             metrics::histogram!("gossip.block.download.duration_seconds")
                 .record(download_start.elapsed().as_secs_f64());
-            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = response {
+            // A peer that negotiated compact block relay can send a block before it has validated
+            // it.
+            let early_relay = matches!(response, zn::Response::EarlyBlocks(_));
+            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+            | zn::Response::EarlyBlocks(blocks) = response
+            {
                 assert_eq!(
                     blocks.len(),
                     1,
@@ -541,12 +811,58 @@ where
                 ));
             }
 
+            // Keep the block for the state to check, if it fails later validation.
+            let early_block = early_relay.then(|| block.clone());
+            // Check the block while it is verified, if its parent is the best tip, in case another
+            // block becomes the best tip before the verifier rejects this one.
+            let early_check = match (&early_block, &read_state) {
+                (Some(block), Some(read_state)) => {
+                    start_early_relay_check(read_state, &latest_chain_tip, block)
+                }
+                _ => None,
+            };
             let verify_start = Instant::now();
-            verifier
+            let result = verifier
                 .oneshot(zebra_consensus::Request::Commit(block))
                 .await
                 .map(|hash| (hash, block_height, verify_start.elapsed()))
-                .map_err(|e| (e, advertiser_addr))
+                .map_err(|e| (e, advertiser_addr));
+
+            // # Security
+            //
+            // The draft Compact Block Relay ZIP says that a peer that negotiated compact block
+            // relay must not be scored when a block that passes the ZIP's early relay checks fails
+            // later validation. The verifier has run its part of those checks before it returns
+            // a later validation failure, and the state runs the rest of them. Other blocks and
+            // failures keep their score.
+            match (result, early_block, read_state) {
+                (Err((error, Some(advertiser_addr))), Some(block), Some(read_state))
+                    if is_later_validation_failure(&*error) =>
+                {
+                    if early_block_is_authenticated(
+                        read_state,
+                        latest_chain_tip,
+                        block,
+                        block_height,
+                        early_check,
+                    )
+                    .await
+                    {
+                        debug!(
+                            ?hash,
+                            ?advertiser_addr,
+                            ?error,
+                            "authenticated early relay block failed later validation: \
+                             rejected it without scoring the peer",
+                        );
+
+                        Err((BoxError::from(AuthenticatedBlockRejected(error)), None))
+                    } else {
+                        Err((error, Some(advertiser_addr)))
+                    }
+                }
+                (result, _, _) => result,
+            }
         }
         .map_ok(|(hash, height, verify_commit)| {
             metrics::histogram!("gossip.block.verify_commit.duration_seconds")
