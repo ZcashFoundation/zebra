@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `GetAddressBalanceRequest::{new_with_chain_info, with_chain_info, chain_info}` and `GetAddressBalanceResponse::{with_chain_info, hash, height}` for `getaddressbalance` `chainInfo` support.
+time: 2026-11-26T12:58:31.408716102Z

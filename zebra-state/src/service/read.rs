@@ -24,7 +24,7 @@ pub mod tree;
 mod tests;
 
 pub use address::{
-    balance::transparent_balance,
+    balance::transparent_balance_with,
     tx_id::transparent_tx_ids_with,
     utxo::{address_utxos, AddressUtxos},
 };

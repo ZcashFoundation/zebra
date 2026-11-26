@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`ReadResponse::AddressBalance` now includes `tip: Option<(block::Height, block::Hash)>` captured from the same state snapshot as `balance` and `received`.'
+time: 2026-11-26T12:58:31.40627692Z

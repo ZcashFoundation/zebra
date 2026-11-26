@@ -238,8 +238,10 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `address_strings`: (object, example={"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}) A JSON map with a single entry
+    /// - `address_strings`: (object or string, example={"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}) A JSON object or single address string
     ///     - `addresses`: (array of strings) A list of base-58 encoded addresses.
+    ///     - `chainInfo`: (boolean, optional, default=false) Include chain tip `hash` and `height`
+    ///       from the same state snapshot in the response.
     ///
     /// # Notes
     ///
@@ -1539,6 +1541,7 @@ where
         address_strings: GetAddressBalanceRequest,
     ) -> Result<GetAddressBalanceResponse> {
         let valid_addresses = address_strings.valid_addresses()?;
+        let chain_info = address_strings.chain_info();
 
         let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
         let response = self
@@ -1549,11 +1552,18 @@ where
             .map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance { balance, received } => {
-                Ok(GetAddressBalanceResponse {
-                    balance: u64::from(balance),
-                    received,
-                })
+            zebra_state::ReadResponse::AddressBalance {
+                balance,
+                received,
+                tip,
+            } => {
+                let response = GetAddressBalanceResponse::new(u64::from(balance), received);
+                if !chain_info {
+                    return Ok(response);
+                }
+
+                let (height, hash) = tip.ok_or_misc_error("No blocks in state")?;
+                Ok(response.with_chain_info(hash, height))
             }
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
@@ -4221,16 +4231,28 @@ impl GetBlockchainInfoResponse {
 pub struct GetAddressBalanceRequest {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+    /// Whether to return chain info (`hash` and `height`) along with the balance.
+    #[serde(
+        default,
+        rename = "chainInfo",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    chain_info: bool,
 }
 
 impl From<DGetAddressBalanceRequest> for GetAddressBalanceRequest {
     fn from(address_strings: DGetAddressBalanceRequest) -> Self {
         match address_strings {
-            DGetAddressBalanceRequest::Addresses { addresses } => {
-                GetAddressBalanceRequest { addresses }
-            }
+            DGetAddressBalanceRequest::Addresses {
+                addresses,
+                chain_info,
+            } => GetAddressBalanceRequest {
+                addresses,
+                chain_info,
+            },
             DGetAddressBalanceRequest::Address(address) => GetAddressBalanceRequest {
                 addresses: vec![address],
+                chain_info: false,
             },
         }
     }
@@ -4240,8 +4262,12 @@ impl From<DGetAddressBalanceRequest> for GetAddressBalanceRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum DGetAddressBalanceRequest {
-    /// A list of address strings.
-    Addresses { addresses: Vec<String> },
+    /// A list of address strings, with an optional `chainInfo` flag.
+    Addresses {
+        addresses: Vec<String>,
+        #[serde(default, rename = "chainInfo")]
+        chain_info: bool,
+    },
     /// A single address string.
     Address(String),
 }
@@ -4314,7 +4340,32 @@ impl ValidateAddresses for GetAddressBalanceRequest {
 impl GetAddressBalanceRequest {
     /// Creates a new `AddressStrings` given a vector.
     pub fn new(addresses: Vec<String>) -> GetAddressBalanceRequest {
-        GetAddressBalanceRequest { addresses }
+        GetAddressBalanceRequest {
+            addresses,
+            chain_info: false,
+        }
+    }
+
+    /// Creates a new [`GetAddressBalanceRequest`] with an explicit `chain_info` flag.
+    pub fn new_with_chain_info(
+        addresses: Vec<String>,
+        chain_info: bool,
+    ) -> GetAddressBalanceRequest {
+        GetAddressBalanceRequest {
+            addresses,
+            chain_info,
+        }
+    }
+
+    /// Sets whether to include chain info (`hash` and `height`) in the response.
+    pub fn with_chain_info(mut self, chain_info: bool) -> Self {
+        self.chain_info = chain_info;
+        self
+    }
+
+    /// Returns whether chain info (`hash` and `height`) was requested.
+    pub fn chain_info(&self) -> bool {
+        self.chain_info
     }
 
     /// Creates a new [`AddressStrings`] from a given vector, returns an error if any addresses are incorrect.
@@ -4322,7 +4373,7 @@ impl GetAddressBalanceRequest {
         note = "Use `AddressStrings::new` instead. Validity will be checked by the server."
     )]
     pub fn new_valid(addresses: Vec<String>) -> Result<GetAddressBalanceRequest> {
-        let req = Self { addresses };
+        let req = Self::new(addresses);
         req.valid_addresses()?;
         Ok(req)
     }
@@ -4347,6 +4398,25 @@ pub struct GetAddressBalanceResponse {
     balance: u64,
     /// The total received balance, including change.
     pub received: u64,
+    /// The hash of the best chain tip block used for the query, in RPC byte order.
+    #[new(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opthex")]
+    #[getter(copy)]
+    hash: Option<block::Hash>,
+    /// The height of the best chain tip block used for the query.
+    #[new(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    height: Option<block::Height>,
+}
+
+impl GetAddressBalanceResponse {
+    /// Sets the chain tip `hash` and `height` on this balance response.
+    pub fn with_chain_info(mut self, hash: block::Hash, height: block::Height) -> Self {
+        self.hash = Some(hash);
+        self.height = Some(height);
+        self
+    }
 }
 
 #[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]

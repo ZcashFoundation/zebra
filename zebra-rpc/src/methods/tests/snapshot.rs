@@ -309,9 +309,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddressbalance`
     let get_address_balance = rpc
-        .get_address_balance(GetAddressBalanceRequest {
-            addresses: addresses.clone(),
-        })
+        .get_address_balance(GetAddressBalanceRequest::new(addresses.clone()))
         .await
         .expect("We should have an AddressBalance struct");
     snapshot_rpc_getaddressbalance(get_address_balance, &settings);

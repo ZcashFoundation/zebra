@@ -657,12 +657,12 @@ proptest! {
         tokio::time::pause();
 
         // Prepare the list of addresses.
-        let address_strings = GetAddressBalanceRequest {
-            addresses: addresses
+        let address_strings = GetAddressBalanceRequest::new(
+            addresses
                 .iter()
                 .map(|address| address.to_string())
                 .collect(),
-        };
+        );
 
         // Start RPC with the mocked `ChainTip`
         runtime.block_on(async move {
@@ -673,7 +673,11 @@ proptest! {
             let state_query = state
                 .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
                 .map_ok(|responder| {
-                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: balance.into() })
+                    responder.respond(zebra_state::ReadResponse::AddressBalance {
+                        balance,
+                        received: balance.into(),
+                        tip: None,
+                    })
                 });
 
             // Await the RPC call and the state query
@@ -684,7 +688,10 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, GetAddressBalanceResponse { balance: balance.into(), received: balance.into() });
+            prop_assert_eq!(
+                received_balance,
+                GetAddressBalanceResponse::new(balance.into(), balance.into())
+            );
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;
@@ -719,9 +726,7 @@ proptest! {
 
         runtime.block_on(async move {
 
-            let address_strings = GetAddressBalanceRequest {
-                addresses: at_least_one_invalid_address,
-            };
+            let address_strings = GetAddressBalanceRequest::new(at_least_one_invalid_address);
 
             // Build the future to call the RPC
             let result = rpc.get_address_balance(address_strings).await;
