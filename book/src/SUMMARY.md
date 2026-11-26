@@ -15,6 +15,7 @@
   - [Zebra Health Endpoints](user/health.md)
   - [zcashd API Migration Guide](user/zcashd-api-migration-guide.md)
   - [Running Zallet with Zebra](user/zallet.md)
+  - [Running Zebra for Indexers](user/indexers.md)
   - [zcashd-compat Mode](user/zcashd-compat.md)
     - [Migrating an Existing zcashd Node](user/zcashd-compat-migration.md)
   - [Lightwalletd](user/lightwalletd.md)

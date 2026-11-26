@@ -52,7 +52,6 @@ The `zebra-mining` branch of the ZcashFoundation s-nomp fork includes fixes that
 
    [rpc]
    debug_force_finished_sync = false
-   parallel_cpu_threads = 1
    listen_addr = '127.0.0.1:18232'
    enable_cookie_auth = false
 

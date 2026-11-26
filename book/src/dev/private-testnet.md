@@ -236,7 +236,6 @@ NU7 = 4_200_000
 
 [rpc]
 debug_force_finished_sync = false
-parallel_cpu_threads = 0
 listen_addr = "127.0.0.1:8232"
 indexer_listen_addr = "127.0.0.1:8231"
 

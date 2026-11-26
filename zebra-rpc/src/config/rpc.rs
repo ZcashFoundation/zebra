@@ -138,8 +138,13 @@ pub struct Config {
     ///
     /// # Security
     ///
-    /// If you bind Zebra's indexer RPC port to a public IP address,
-    /// anyone on the internet can query your node's state.
+    /// The port serves plaintext HTTP/2, with no TLS and no authentication —
+    /// JSON-RPC cookie and HTTP Basic authentication do not apply to it.
+    /// Anyone who can reach the port can query your node's state, and anyone on
+    /// the network path can read or modify the traffic.
+    ///
+    /// Bind Zebra to a loopback address (`127.0.0.1`) or an isolated private
+    /// network interface, and never expose this port to untrusted networks.
     pub indexer_listen_addr: Option<SocketAddr>,
 
     /// IP address and port for the lightwalletd-compatible gRPC server.
