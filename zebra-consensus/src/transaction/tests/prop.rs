@@ -710,6 +710,7 @@ fn validate_with_state(
 
         verifier
             .oneshot(transaction::BlockRequest {
+                state_utxos: Arc::default(),
                 transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
@@ -747,6 +748,7 @@ fn validate(
         verifier
             .clone()
             .oneshot(transaction::BlockRequest {
+                state_utxos: Arc::default(),
                 transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),

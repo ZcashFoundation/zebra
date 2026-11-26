@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra reads the transparent outputs that a block spends from its state in one request, rather than one request for each input, which speeds up the verification of blocks with many transparent inputs.
+time: 2026-11-26T16:10:00.000000000Z

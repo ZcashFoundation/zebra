@@ -8,7 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -26,7 +26,7 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::Amount,
-    block,
+    block::{self, Block},
     parameters::{subsidy::SubsidyError, Network},
     transparent,
     work::equihash,
@@ -658,13 +658,17 @@ where
                 record_phase("block_checks", &mut phase_start);
             }
 
-            // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesUnordered::new();
-
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
                 &transaction_hashes,
             ));
+
+            // Read the outputs of earlier blocks that this block spends in one state request,
+            // so the transaction verifier doesn't send a request for each input.
+            let state_utxos = read_state_utxos(state_service.clone(), &block, &known_utxos).await;
+
+            // Send transactions to the transaction verifier to be checked
+            let mut async_checks = FuturesUnordered::new();
 
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())
@@ -677,11 +681,14 @@ where
                         transaction_hash,
                         transaction: transaction.clone(),
                         known_utxos: known_utxos.clone(),
+                        state_utxos: state_utxos.clone(),
                         height,
                         time: block.header.time,
                     });
                 async_checks.push(rsp);
             }
+            // The transaction requests hold the only other references to these outputs.
+            drop(state_utxos);
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
             // Get the transaction results back from the transaction verifier.
@@ -807,5 +814,47 @@ where
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+/// Returns the outputs that `block` spends, and that the state has in a verified block.
+///
+/// Leaves out the outputs that the block creates, which are in `block_outputs`, and the
+/// outputs that the state doesn't have yet. The transaction verifier waits for those in the
+/// state, one request for each input, as it does when the state can't answer this request.
+async fn read_state_utxos<S>(
+    state_service: S,
+    block: &Block,
+    block_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> Arc<HashMap<transparent::OutPoint, transparent::Utxo>>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let outpoints: Vec<transparent::OutPoint> = block
+        .transactions
+        .iter()
+        .flat_map(|transaction| transaction.spent_outpoints())
+        .filter(|outpoint| !block_outputs.contains_key(outpoint))
+        .collect();
+
+    if outpoints.is_empty() {
+        return Arc::default();
+    }
+
+    match state_service
+        .oneshot(zs::Request::AnyChainUtxos(outpoints))
+        .await
+    {
+        Ok(zs::Response::AnyChainUtxos(utxos)) => Arc::new(utxos),
+        Ok(_) => unreachable!("wrong response for AnyChainUtxos"),
+        Err(error) => {
+            tracing::debug!(
+                ?error,
+                "reading a block's spent outputs from the state failed"
+            );
+
+            Arc::default()
+        }
     }
 }

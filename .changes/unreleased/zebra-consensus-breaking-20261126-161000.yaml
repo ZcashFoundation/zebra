@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Added the `state_utxos` field to `transaction::BlockRequest`, for UTXOs that the caller has already read from the state for the whole block. `transaction::BlockTxVerifier` uses them instead of asking the state for those inputs. The block verifier fills it with one `zebra_state::Request::AnyChainUtxos` request for each block, so a state service given to `router::init` or `SemanticBlockVerifier` must answer that request.'
+time: 2026-11-26T16:10:00.000000000Z

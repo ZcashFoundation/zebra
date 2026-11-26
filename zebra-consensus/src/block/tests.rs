@@ -30,6 +30,7 @@ use super::*;
 mod mining_candidate;
 mod nu7;
 mod proposals;
+mod transactions;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {

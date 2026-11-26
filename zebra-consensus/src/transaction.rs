@@ -176,6 +176,17 @@ pub struct BlockRequest {
     pub transaction: Arc<Transaction>,
     /// Additional UTXOs which are known at the time of verification.
     pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+    /// UTXOs that the caller has already read from the state, for the whole block.
+    ///
+    /// An input that spends one of them is verified without a state request. The verifier
+    /// asks the state for the other inputs, so this map can be empty or incomplete.
+    ///
+    /// # Correctness
+    ///
+    /// These must be UTXOs from the state, for example from
+    /// [`zebra_state::Request::AnyChainUtxos`]: the verifier checks the transaction's scripts,
+    /// fee and signature operations against them.
+    pub state_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
     /// The height of the block containing this transaction.
     pub height: block::Height,
     /// The time that the block was mined.
@@ -298,6 +309,7 @@ where
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
+        let state_utxos = req.state_utxos.clone();
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
 
@@ -325,7 +337,8 @@ where
             // Load spent UTXOs from the block context and state.
             // The UTXOs are required for almost all the async checks.
             let (spent_utxos, spent_outputs) =
-                Self::block_spent_utxos(tx.clone(), known_utxos, state.clone()).await?;
+                Self::block_spent_utxos(tx.clone(), known_utxos, state_utxos, state.clone())
+                    .await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
@@ -381,13 +394,15 @@ where
     ZS::Future: Send + 'static,
 {
     /// Looks up UTXOs spent by `tx` from the best chain state, also checking
-    /// `known_utxos` for UTXOs from earlier transactions in the same block.
+    /// `known_utxos` for UTXOs from earlier transactions in the same block, and
+    /// `state_utxos` for UTXOs that the caller has already read from the state.
     ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+        state_utxos: Arc<HashMap<transparent::OutPoint, transparent::Utxo>>,
         state: Timeout<ZS>,
     ) -> Result<
         (
@@ -408,6 +423,9 @@ where
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UTXO in known_utxos, discarding query");
                     output.utxo.clone()
+                } else if let Some(utxo) = state_utxos.get(outpoint) {
+                    tracing::trace!("UTXO in state_utxos, discarding query");
+                    utxo.clone()
                 } else {
                     let response = state
                         .clone()

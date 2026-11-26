@@ -113,10 +113,14 @@ async fn verify(
             zebra_state::Request::MiningCandidate(_) => {
                 zebra_state::Response::MiningCandidate(None)
             }
-            zebra_state::Request::AwaitUtxo(requested) => {
-                assert_eq!(requested, outpoint());
-                zebra_state::Response::Utxo(
-                    transparent::OrderedUtxo::new(output(10_000), Height(1), 1).utxo,
+            zebra_state::Request::AnyChainUtxos(requested) => {
+                assert_eq!(requested, vec![outpoint()]);
+                zebra_state::Response::AnyChainUtxos(
+                    [(
+                        outpoint(),
+                        transparent::OrderedUtxo::new(output(10_000), Height(1), 1).utxo,
+                    )]
+                    .into(),
                 )
             }
             zebra_state::Request::CommitSemanticallyVerifiedBlock(block) => {
