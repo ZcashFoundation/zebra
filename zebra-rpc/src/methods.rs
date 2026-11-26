@@ -172,6 +172,10 @@ pub(super) const PARAM_N_DESC: &str = "The output index in the transaction.";
 pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
     "Whether to include mempool transactions in the response.";
 
+/// The `z_gettreestate` error for a block that isn't in the main chain, or that left it while the
+/// request was answered.
+const BLOCK_NOT_IN_MAIN_CHAIN: &str = "the requested block is not in the main chain";
+
 #[cfg(test)]
 mod tests;
 
@@ -1632,7 +1636,7 @@ where
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
-            let request = zebra_state::ReadRequest::Block(hash_or_height);
+            let request = zebra_state::ReadRequest::RawBlock(hash_or_height);
             let response = self
                 .read_state
                 .clone()
@@ -1641,10 +1645,10 @@ where
                 .map_misc_error()?;
 
             match response {
-                zebra_state::ReadResponse::Block(Some(block)) => {
-                    Ok(GetBlockResponse::Raw(block.into()))
+                zebra_state::ReadResponse::RawBlock(Some(block)) => {
+                    Ok(GetBlockResponse::Raw(block))
                 }
-                zebra_state::ReadResponse::Block(None) => {
+                zebra_state::ReadResponse::RawBlock(None) => {
                     Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
                 }
                 _ => unreachable!("unmatched response to a block request"),
@@ -2242,6 +2246,26 @@ where
             None
         };
 
+        // Serve raw transactions from the state's stored bytes, without deserializing them.
+        if !verbose {
+            return match self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::AnyChainRawTransaction(txid))
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::RawTransaction(Some(hex)) => {
+                    Ok(GetRawTransactionResponse::Raw(hex))
+                }
+                zebra_state::ReadResponse::RawTransaction(None) => {
+                    Err("Transaction not found in mempool or best chain")
+                        .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                }
+                _ => unreachable!("unmatched response to an `AnyChainRawTransaction` request"),
+            };
+        }
+
         // If the tx wasn't in the mempool, check the state.
         match self
             .read_state
@@ -2250,7 +2274,7 @@ where
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(
                 if let Some((caller_block_hash, in_best_chain)) = caller_block_context {
                     // Use the caller-provided block context to avoid TOCTOU races
                     // between the validation query and the transaction fetch.
@@ -2325,12 +2349,8 @@ where
                             )),
                         ),
                     }
-                }
-            } else {
-                let tx: Arc<Transaction> = tx.into();
-                let hex = tx.into();
-                GetRawTransactionResponse::Raw(hex)
-            }),
+                },
+            ),
 
             zebra_state::ReadResponse::AnyChainTransaction(None) => {
                 Err("Transaction not found in mempool or best chain")
@@ -2351,43 +2371,48 @@ where
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        // Fetch the block referenced by [`hash_or_height`] from the state.
+        // Fetch the block header referenced by [`hash_or_height`] from the state.
         //
         // # Concurrency
         //
         // For consistency, this lookup must be performed first, then all the other lookups must
         // be based on the hash. The tree lookups check every chain, so a reorg that moves the
-        // block onto a side chain after this lookup can't make its treestate disappear.
+        // block onto a side chain after this lookup can't make its treestate disappear. If the
+        // block is invalidated, or reorged away and pruned, before the tree lookups, they find
+        // nothing, and the request fails as if the block were missing.
         //
-        // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
-        let block = match read_state
+        let header_response = match read_state
             .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
+            .and_then(|service| service.call(zebra_state::ReadRequest::BlockHeader(hash_or_height)))
             .await
-            .map_misc_error()?
         {
-            zebra_state::ReadResponse::Block(Some(block)) => block,
-            zebra_state::ReadResponse::Block(None) => {
+            Ok(response) => response,
+            // `ReadStateService` signals an unknown header with this message rather than an
+            // `Option`; preserve operational and corruption errors as `LegacyCode::Misc` (-1).
+            Err(error) if error.to_string() == "block hash or height not found" => {
                 // Reference for the legacy error code:
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                return Err("the requested block is not in the main chain")
+                return Err(BLOCK_NOT_IN_MAIN_CHAIN)
                     .map_error(server::error::LegacyCode::InvalidParameter);
             }
-            _ => unreachable!("unmatched response to a block request"),
+            Err(error) => return Err(error).map_misc_error(),
+        };
+        let zebra_state::ReadResponse::BlockHeader {
+            header,
+            hash,
+            height,
+            ..
+        } = header_response
+        else {
+            unreachable!("unmatched response to a BlockHeader request");
         };
 
-        let hash = hash_or_height
-            .hash_or_else(|_| Some(block.hash()))
-            .expect("block hash");
+        let time = u32::try_from(header.time.timestamp())
+            .expect("timestamps of valid blocks always fit into u32");
 
-        let height = hash_or_height
-            .height_or_else(|_| block.coinbase_height())
-            .expect("verified blocks have a coinbase height");
-
-        let time = u32::try_from(block.header.time.timestamp())
-            .expect("Timestamps of valid blocks always fit into u32.");
-
-        let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
+        let sapling_active =
+            network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into());
+        let sapling = if sapling_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2404,10 +2429,15 @@ where
         } else {
             None
         };
+        if sapling_active && sapling.is_none() {
+            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
+        let orchard_active = network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into());
+        let orchard = if orchard_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2424,10 +2454,15 @@ where
         } else {
             None
         };
+        if orchard_active && orchard.is_none() {
+            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let ironwood = if network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into()) {
+        let ironwood_active = network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into());
+        let ironwood = if ironwood_active {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2444,6 +2479,10 @@ where
         } else {
             None
         };
+        if ironwood_active && ironwood.is_none() {
+            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
         // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
         let ironwood = ironwood
             .map(|(tree, root)| Treestate::new(trees::Commitments::new(Some(root), Some(tree))));

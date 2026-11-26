@@ -1651,6 +1651,13 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height)?,
             )),
 
+            // Used by the get_block (verbosity 0) and indexer::GetBlock RPCs.
+            ReadRequest::RawBlock(hash_or_height) => Ok(ReadResponse::RawBlock(read::raw_block(
+                state.latest_best_chain(),
+                &state.db,
+                hash_or_height,
+            )?)),
+
             // Used by the get_block (verbosity 3) RPC.
             ReadRequest::SpentOutputs(hash_or_height) => {
                 Ok(ReadResponse::SpentOutputs(read::spent_outputs_for_block(
@@ -1680,8 +1687,14 @@ impl Service<ReadRequest> for ReadStateService {
                 let next_block_hash =
                     read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
 
-                let header = read::block_header(best_chain, &state.db, height.into())
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+                let header =
+                    read::block_header(best_chain, &state.db, height.into()).ok_or_else(|| {
+                        if state.db.is_read_only() {
+                            BoxError::from("block hash or height not found")
+                        } else {
+                            BoxError::from(crate::BlockReadError::CorruptBlock { height })
+                        }
+                    })?;
 
                 Ok(ReadResponse::BlockHeader {
                     header,
@@ -1702,6 +1715,15 @@ impl Service<ReadRequest> for ReadStateService {
                     &state.db,
                     hash,
                 )))
+            }
+
+            // Used by the get_raw_transaction (verbosity 0) RPC.
+            ReadRequest::AnyChainRawTransaction(hash) => {
+                Ok(ReadResponse::RawTransaction(read::any_raw_transaction(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )?))
             }
 
             // Used by the getblock (verbose) RPC.

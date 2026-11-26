@@ -6,9 +6,10 @@ use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::BoxError;
 use zebra_chain::{
-    block::{Block, Height},
+    block::{genesis::regtest_genesis_block, Block, Height, SerializedBlock},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
-    serialization::ZcashDeserializeInto,
+    parameters::Network::Mainnet,
+    serialization::{BytesInDisplayOrder, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
@@ -19,7 +20,8 @@ use zebra_test::{
 };
 
 use crate::indexer::{
-    self, indexer_client::IndexerClient, BlockRequest, Empty, NonFinalizedStateChangeRequest,
+    self, indexer_client::IndexerClient, BlockAndHash, BlockRequest, Empty,
+    NonFinalizedStateChangeRequest,
 };
 
 #[tokio::test]
@@ -142,9 +144,16 @@ async fn test_get_block(
         .expect_err("an out-of-range block height should be rejected");
     assert_eq!(status.code(), tonic::Code::InvalidArgument);
 
-    // A block requested by height is returned along with its hash.
+    // A block requested by height is returned along with its hash, byte-for-byte identical
+    // to constructing `BlockAndHash::new` from the parsed block.
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
     let expected_hash = block.hash();
+    assert_ne!(
+        expected_hash.bytes_in_display_order(),
+        expected_hash.0,
+        "test vector hash must be non-palindromic to verify display-order encoding"
+    );
+    let expected_message = BlockAndHash::new(expected_hash, block.clone());
     let height = block
         .coinbase_height()
         .expect("test block has a coinbase height");
@@ -159,17 +168,201 @@ async fn test_get_block(
     });
 
     mock_read_service
-        .expect_request(ReadRequest::Block(HashOrHeight::Height(height)))
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Height(height)))
         .await
-        .respond(ReadResponse::Block(Some(block.clone())));
+        .respond(ReadResponse::RawBlock(Some(SerializedBlock::from(
+            block.as_ref(),
+        ))));
 
     let response = request_task
         .await?
         .expect("get_block should succeed")
         .into_inner();
+    assert_eq!(response, expected_message);
+    assert_eq!(
+        response.data,
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice()
+    );
     let (decoded_block, decoded_hash) = response.decode().expect("response should decode");
     assert_eq!(decoded_hash, expected_hash);
     assert_eq!(decoded_block.hash(), expected_hash);
+
+    // A block requested by 32-byte display-order hash is also returned byte-identically.
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: expected_hash.bytes_in_display_order().to_vec(),
+            }))
+            .await
+    });
+
+    mock_read_service
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Hash(expected_hash)))
+        .await
+        .respond(ReadResponse::RawBlock(Some(SerializedBlock::from(
+            block.as_ref(),
+        ))));
+
+    let response = request_task
+        .await?
+        .expect("get_block by hash should succeed")
+        .into_inner();
+    assert_eq!(response, expected_message);
+
+    // A missing block returns NotFound.
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: height.0.to_be_bytes().to_vec(),
+            }))
+            .await
+    });
+    mock_read_service
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Height(height)))
+        .await
+        .respond(ReadResponse::RawBlock(None));
+    let status = request_task.await?.expect_err("missing block should fail");
+    assert_eq!(status.code(), tonic::Code::NotFound);
+
+    // Corrupt or truncated stored header bytes return Internal instead of panicking.
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: height.0.to_be_bytes().to_vec(),
+            }))
+            .await
+    });
+    mock_read_service
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Height(height)))
+        .await
+        .respond(ReadResponse::RawBlock(Some(SerializedBlock::from(vec![
+            0u8;
+            4
+        ]))));
+    let status = request_task
+        .await?
+        .expect_err("corrupt header bytes should fail");
+    assert_eq!(status.code(), tonic::Code::Internal);
+
+    // A hash query whose returned raw bytes have a different header hash fails with Internal.
+    let other_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: expected_hash.bytes_in_display_order().to_vec(),
+            }))
+            .await
+    });
+    mock_read_service
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Hash(expected_hash)))
+        .await
+        .respond(ReadResponse::RawBlock(Some(SerializedBlock::from(
+            other_block.as_ref(),
+        ))));
+    let status = request_task
+        .await?
+        .expect_err("mismatched block bytes should fail");
+    assert_eq!(status.code(), tonic::Code::Internal);
+
+    // An incomplete/unavailable state read error returns Unavailable.
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: height.0.to_be_bytes().to_vec(),
+            }))
+            .await
+    });
+    mock_read_service
+        .expect_request(ReadRequest::RawBlock(HashOrHeight::Height(height)))
+        .await
+        .respond(Err(BoxError::from(
+            zebra_state::BlockReadError::BlockBodyUnavailable { height },
+        )));
+    let status = request_task
+        .await?
+        .expect_err("incomplete body read error should fail");
+    assert_eq!(status.code(), tonic::Code::Unavailable);
+
+    Ok(())
+}
+
+/// Tests `BlockAndHash::try_from_serialized` across Mainnet (1,487-byte header) and Regtest
+/// (177-byte header), plus end-to-end `GetBlock` parity against a populated finalized state.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_block_raw_bytes_parity() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Regtest headers use a shorter 36-byte Equihash solution (177-byte header total).
+    let regtest_block = regtest_genesis_block();
+    let regtest_hash = regtest_block.hash();
+    let (actual_regtest, parsed_hash) =
+        BlockAndHash::try_from_serialized(SerializedBlock::from(regtest_block.as_ref()))
+            .expect("regtest header should deserialize");
+    assert_eq!(parsed_hash, regtest_hash);
+    assert_eq!(
+        actual_regtest,
+        BlockAndHash::new(regtest_hash, regtest_block.clone())
+    );
+
+    // Finalized Mainnet blocks served by `ReadStateService` via `GetBlock` must match
+    // `BlockAndHash::new` byte for byte.
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let (_state, read_state, _tip, _tip_change) =
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
+        .parse()
+        .expect("hard-coded IP and u16 port should parse successfully");
+    let (mock_chain_tip_change, _tip_sender) = MockChainTip::new();
+    let (mempool_tx_sender, _) = tokio::sync::broadcast::channel(1);
+    let mempool_tx_subscriber = MempoolTxSubscriber::new(mempool_tx_sender);
+    let (_server_task, listen_addr) = indexer::server::init(
+        listen_addr,
+        read_state,
+        mock_chain_tip_change,
+        mempool_tx_subscriber,
+    )
+    .await
+    .map_err(|err| eyre!(err))?;
+
+    let endpoint = tonic::transport::channel::Endpoint::new(format!("http://{listen_addr}"))
+        .unwrap()
+        .timeout(Duration::from_secs(2));
+    let mut client = IndexerClient::connect(endpoint)
+        .await
+        .expect("server should receive connection");
+
+    for block in blocks {
+        let height = block.coinbase_height().expect("block has coinbase height");
+        let hash = block.hash();
+        let expected = BlockAndHash::new(hash, block.clone());
+        assert_eq!(expected.data, block.zcash_serialize_to_vec()?);
+
+        let by_height = client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: height.0.to_be_bytes().to_vec(),
+            }))
+            .await?
+            .into_inner();
+        assert_eq!(by_height, expected);
+
+        let by_hash = client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: hash.bytes_in_display_order().to_vec(),
+            }))
+            .await?
+            .into_inner();
+        assert_eq!(by_hash, expected);
+    }
 
     Ok(())
 }

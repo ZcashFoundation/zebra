@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Served `getblock` verbosity 0, `getrawtransaction` verbosity 0, and indexer gRPC `GetBlock` from stored raw bytes via `ReadRequest::RawBlock` and `ReadRequest::AnyChainRawTransaction`, and switched `z_gettreestate` to `ReadRequest::BlockHeader` while returning "the requested block is not in the main chain" if an active pool tree is missing after its header.
+time: 2026-11-26T10:31:59.838143079Z

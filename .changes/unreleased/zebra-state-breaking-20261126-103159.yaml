@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `ReadRequest::RawBlock`, `ReadRequest::AnyChainRawTransaction`, `ReadResponse::RawBlock`, and `ReadResponse::RawTransaction`. Code matching exhaustively on `ReadRequest` or `ReadResponse` must handle the new variants.
+time: 2026-11-26T10:31:59.834207352Z

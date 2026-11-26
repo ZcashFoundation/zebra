@@ -224,10 +224,12 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
             R::Block(_) => Ok(Resp::Block(None)),
+            R::RawBlock(_) => Ok(Resp::RawBlock(None)),
             R::AnyChainBlock(_) => Ok(Resp::Block(None)),
             R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
             R::Transaction(_) => Ok(Resp::Transaction(None)),
             R::AnyChainTransaction(_) => Ok(Resp::AnyChainTransaction(None)),
+            R::AnyChainRawTransaction(_) => Ok(Resp::RawTransaction(None)),
             R::TransactionIdsForBlock(_) => Ok(Resp::TransactionIdsForBlock(None)),
             R::AnyChainTransactionIdsForBlock(_) => Ok(Resp::AnyChainTransactionIdsForBlock(None)),
             R::UnspentBestChainUtxo(_) => Ok(Resp::UnspentBestChainUtxo(None)),
