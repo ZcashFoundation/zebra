@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Raised the ideal open file descriptor limit from 1024 to 16384 and added `LimitNOFILE=65536` to the example `zebrad.service` systemd unit so RocksDB and concurrent JSON-RPC/gRPC connections have ample file descriptor headroom ([#12661](https://github.com/ZcashFoundation/zebra/issues/12661)).
+time: 2026-11-26T12:49:41.869494819Z

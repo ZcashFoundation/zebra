@@ -57,7 +57,7 @@ Zebra opens the configured cached state, or creates a new empty state.
 
 ```text
 zebrad::commands::start: initializing node state
-zebra_state::service::finalized_state::disk_db: the open file limit is high enough for Zebra current_limit=1048576 min_limit=512 ideal_limit=1024
+zebra_state::service::finalized_state::disk_db: the open file limit is high enough for Zebra current_limit=1048576 min_limit=512 ideal_limit=16384
 zebra_state::service::finalized_state::disk_db: Opened Zebra state cache at /home/user/.cache/state/v28/mainnet
 zebra_state::service::finalized_state: loaded Zebra state cache tip=None
 zebra_state::service: created new read-only state service

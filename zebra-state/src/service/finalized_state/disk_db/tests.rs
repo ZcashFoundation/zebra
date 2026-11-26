@@ -223,3 +223,60 @@ fn read_only_secondary_removes_its_directory_on_drop() {
         "dropping a secondary must keep the primary database"
     );
 }
+
+/// Check that `get_db_open_file_limit` splits the descriptors remaining after
+/// `RESERVED_FILE_COUNT` and saturates safely on small or very large inputs.
+#[test]
+fn get_db_open_file_limit_handles_bounds_and_saturation() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(DiskDb::get_db_open_file_limit(0), 0);
+    assert_eq!(
+        DiskDb::get_db_open_file_limit(DiskDb::RESERVED_FILE_COUNT - 1),
+        0
+    );
+    assert_eq!(
+        DiskDb::get_db_open_file_limit(DiskDb::RESERVED_FILE_COUNT),
+        0
+    );
+    assert_eq!(
+        DiskDb::get_db_open_file_limit(DiskDb::MIN_OPEN_FILE_LIMIT),
+        (DiskDb::MIN_OPEN_FILE_LIMIT - DiskDb::RESERVED_FILE_COUNT) / 2
+    );
+    assert_eq!(
+        DiskDb::get_db_open_file_limit(DiskDb::IDEAL_OPEN_FILE_LIMIT),
+        8_168
+    );
+    assert_eq!(DiskDb::get_db_open_file_limit(65_536), 32_744);
+    assert_eq!(
+        DiskDb::get_db_open_file_limit(u64::MAX),
+        (u64::MAX - DiskDb::RESERVED_FILE_COUNT) / 2
+    );
+}
+
+/// Check that `IDEAL_OPEN_FILE_LIMIT` fits in `c_int`, leaves ample headroom for
+/// RocksDB and network/RPC sockets, and serves as the overflow fallback for huge OS limits.
+#[test]
+fn ideal_open_file_limit_fits_c_int_with_headroom() {
+    let _init_guard = zebra_test::init();
+
+    const {
+        assert!(DiskDb::IDEAL_OPEN_FILE_LIMIT >= 16_384);
+        assert!(DiskDb::IDEAL_OPEN_FILE_LIMIT > DiskDb::MIN_OPEN_FILE_LIMIT);
+    }
+
+    let db_share = DiskDb::get_db_open_file_limit(DiskDb::IDEAL_OPEN_FILE_LIMIT);
+    let socket_share = DiskDb::IDEAL_OPEN_FILE_LIMIT - DiskDb::RESERVED_FILE_COUNT - db_share;
+
+    assert!(db_share >= 8_000);
+    assert!(socket_share >= 8_000);
+
+    let ideal_c_int: std::ffi::c_int = db_share
+        .try_into()
+        .expect("ideal DB open file limit fits in a c_int");
+    let huge_db_limit: std::ffi::c_int = DiskDb::get_db_open_file_limit(u64::MAX)
+        .try_into()
+        .unwrap_or(ideal_c_int);
+
+    assert_eq!(huge_db_limit, ideal_c_int);
+}

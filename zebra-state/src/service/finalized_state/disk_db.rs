@@ -952,8 +952,12 @@ impl DiskDb {
         }
     }
 
-    /// The ideal open file limit for Zebra
-    const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
+    /// The ideal open file limit for Zebra.
+    ///
+    /// After subtracting [`Self::RESERVED_FILE_COUNT`], half of the remaining
+    /// descriptors are allocated to RocksDB (`max_open_files`) and half to
+    /// P2P peers, JSON-RPC, and gRPC sockets.
+    const IDEAL_OPEN_FILE_LIMIT: u64 = 16_384;
 
     /// The minimum number of open files for Zebra to operate normally. Also used
     /// as the default open file limit, when the OS doesn't tell us how many
@@ -1397,8 +1401,8 @@ impl DiskDb {
 
     /// Calculate the database's share of `open_file_limit`
     fn get_db_open_file_limit(open_file_limit: u64) -> u64 {
-        // Give the DB half the files, and reserve half the files for peers
-        (open_file_limit - DiskDb::RESERVED_FILE_COUNT) / 2
+        // Give the DB half the files, and reserve half the files for peers and RPC/gRPC sockets.
+        open_file_limit.saturating_sub(DiskDb::RESERVED_FILE_COUNT) / 2
     }
 
     /// Increase the open file limit for this process to `IDEAL_OPEN_FILE_LIMIT`.
@@ -1417,9 +1421,11 @@ impl DiskDb {
         // (`zebra-state` database).
         //
         // On Unix-based platforms, `increase_nofile_limit` changes the limit for
-        // both database files and TCP connections.
+        // both database files and TCP connections (clamping to `hard` and, on
+        // macOS, `kern.maxfilesperproc`).
         //
-        // But it doesn't do anything on Windows in rlimit 0.7.0.
+        // On Windows, `rlimit`'s `increase_nofile_limit` is a no-op that returns
+        // `Ok(lim)` without calling `_setmaxstdio`.
         //
         // On Windows, the default limits are:
         // - 512 high-level stream I/O files (via the C standard functions),
@@ -1429,8 +1435,8 @@ impl DiskDb {
         // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
         // http://smallvoid.com/article/winnt-tcpip-max-limit.html
         //
-        // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is much less than
-        // the Windows low-level I/O file limit.
+        // `get_db_open_file_limit(IDEAL_OPEN_FILE_LIMIT)` (`8_168`) stays below
+        // Windows' 8192 low-level I/O file limit, and RocksDB uses Win32 handles.
         //
         // The [`setmaxstdio` and `getmaxstdio`](https://docs.rs/rlimit/latest/rlimit/#windows)
         // functions from the `rlimit` crate only change the high-level I/O file limit.
