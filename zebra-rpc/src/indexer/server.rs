@@ -13,10 +13,21 @@ use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_
 
 /// Maximum concurrent HTTP/2 streams per connection.
 ///
-/// The primary clients (Zaino and Zallet) each open 1-2 streams via
-/// `init_read_state_with_syncer`. 20 provides generous headroom while
-/// bounding resource usage from untrusted clients.
-const MAX_CONCURRENT_STREAMS: u32 = 20;
+/// Matches hyper's HTTP/2 default so single-connection indexers can pipeline
+/// concurrent `GetBlock` requests alongside long-lived change streams.
+/// Paired with [`MAX_DECODING_MESSAGE_SIZE`], worst-case per-connection request
+/// receive memory is bounded at `200 * 16 KiB = 3.125 MiB` (down from
+/// `20 * 4 MiB = 80 MiB` under tonic's default 4 MiB decode cap).
+pub(super) const MAX_CONCURRENT_STREAMS: u32 = 200;
+
+/// Maximum encoded size of an incoming indexer or reflection gRPC request, in bytes.
+///
+/// The largest valid indexer request is `NonFinalizedStateChangeRequest` with
+/// [`zebra_state::MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS`] (100) 32-byte
+/// hashes, which encodes to 3,400 bytes (`100 * (1 tag + 1 length + 32 payload)`).
+/// A 16 KiB cap leaves headroom for protobuf framing and reflection queries while
+/// bounding pre-handler decode buffers and repeated-field expansion.
+pub(super) const MAX_DECODING_MESSAGE_SIZE: usize = 16 * 1024;
 
 /// Interval between HTTP/2 keepalive pings sent to detect dead connections.
 const HTTP2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -58,7 +69,8 @@ where
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::indexer::FILE_DESCRIPTOR_SET)
         .build_v1()
-        .unwrap();
+        .unwrap()
+        .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE);
 
     tracing::info!("Trying to open indexer RPC endpoint at {}...", listen_addr,);
 
@@ -73,7 +85,10 @@ where
             .http2_keepalive_interval(Some(HTTP2_KEEPALIVE_INTERVAL))
             .http2_keepalive_timeout(Some(HTTP2_KEEPALIVE_TIMEOUT))
             .add_service(reflection_service)
-            .add_service(IndexerServer::new(indexer_service))
+            .add_service(
+                IndexerServer::new(indexer_service)
+                    .max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE),
+            )
             .serve_with_incoming(tcp_incoming(tcp_listener))
             .await?;
 
