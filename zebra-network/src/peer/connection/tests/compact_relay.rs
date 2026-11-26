@@ -244,6 +244,113 @@ async fn connection_find_blocks_inflight_compact_rechecks_authorization() {
     .expect("in-flight compact discovery rechecks bans and the live minimum version");
 }
 
+/// A block rebuilt from a compact announcement is only returned if the peer still isn't banned,
+/// and still meets the minimum version. Rebuilding can wait for the inbound service, so the peer
+/// is checked after that wait, and before a cached rebuilt block is returned again.
+#[tokio::test(start_paused = true)]
+async fn rebuilt_block_downloads_recheck_bans_and_the_minimum_version() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source: crate::PeerSocketAddr = BarrierConnection::SOURCE.parse().unwrap();
+        let candidates: Vec<zebra_chain::transaction::UnminedTx> = block.transactions[1..]
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect();
+        let is_check = |request: &Request| {
+            matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                if **checked == *block && evidence.evidence_for(checked).is_some())
+        };
+        for mode in ["cached", "rebuilt", "recovered"] {
+            for revocation in ["ban", "version"] {
+                // The connection keeps the screened compact block for reconstruction. Its discovery
+                // barrier doesn't change how blocks are downloaded.
+                let mut connection = BarrierConnection::start(&compact).await;
+                let revoke = |connection: &BarrierConnection| {
+                    if revocation == "ban" {
+                        connection.bans.send_modify(|bans| bans.ban(source.ip()));
+                    } else {
+                        connection.tip.send_best_tip_height(
+                            zebra_chain::parameters::NetworkUpgrade::Nu7
+                                .activation_height(&zebra_chain::parameters::Network::Mainnet),
+                        );
+                    }
+                };
+                let download = Request::BlockDownload {
+                    hash: block.hash(),
+                    advertiser: connection.advertiser.clone(),
+                };
+                let response = if mode == "cached" {
+                    let response = connection.request(download.clone()).await;
+                    connection
+                        .inbound
+                        .expect_request(Request::CompactBlockTransactions(compact.clone()))
+                        .await
+                        .respond(Response::CompactBlockTransactions(candidates.clone()));
+                    connection
+                        .inbound
+                        .expect_request_that(is_check)
+                        .await
+                        .respond(Response::Nil);
+                    assert_reconstructed(response.await.unwrap().unwrap(), &block, source);
+                    revoke(&connection);
+                    connection.request(download).await
+                } else {
+                    let response = connection.request(download).await;
+                    let candidates = if mode == "rebuilt" {
+                        candidates.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    connection
+                        .inbound
+                        .expect_request(Request::CompactBlockTransactions(compact.clone()))
+                        .await
+                        .respond(Response::CompactBlockTransactions(candidates));
+                    if mode == "recovered" {
+                        assert!(matches!(
+                            connection.outbound.next().await,
+                            Some(Message::GetBlockTransactions(_))
+                        ));
+                        connection
+                            .receive(Message::BlockTransactions(BlockTransactions {
+                                block_hash: block.hash(),
+                                transactions: block.transactions[1..].to_vec(),
+                            }))
+                            .await;
+                    }
+                    let check = connection.inbound.expect_request_that(is_check).await;
+                    revoke(&connection);
+                    check.respond(Response::Nil);
+                    response
+                };
+                assert_eq!(
+                    response.await.unwrap().unwrap_err().inner_debug(),
+                    "ConnectionDropped",
+                    "{mode} {revocation}"
+                );
+                connection.task.await.unwrap();
+                assert_eq!(
+                    connection.errors.try_get_error().unwrap().inner_debug(),
+                    "ConnectionDropped",
+                    "{mode} {revocation}"
+                );
+                assert!(
+                    connection.outbound.try_recv().is_err(),
+                    "{mode} {revocation}: nothing else is requested from the peer"
+                );
+            }
+        }
+    })
+    .await
+    .expect("rebuilt blocks are checked without timers");
+}
+
 #[tokio::test(start_paused = true)]
 async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
     let _init_guard = zebra_test::init();

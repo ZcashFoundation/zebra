@@ -413,10 +413,15 @@ where
 
     pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {
         self.compact.expire();
-        if let Some((block, _, _)) = &self.compact.reconstructed {
-            if block.block().hash() == hash {
-                return Ok(self.compact_response(block.clone()));
-            }
+        let cached = self
+            .compact
+            .reconstructed
+            .as_ref()
+            .map(|(block, _, _)| block)
+            .filter(|block| block.block().hash() == hash)
+            .cloned();
+        if let Some(block) = cached {
+            return self.compact_response(block);
         }
         if self
             .compact
@@ -450,7 +455,7 @@ where
                             )
                             .await
                         {
-                            return Ok(self.compact_response(block));
+                            return self.compact_response(block);
                         }
                     } else {
                         self.send_download_request(Message::GetBlockTransactions(
@@ -509,11 +514,16 @@ where
         }
     }
 
-    fn compact_response(&self, block: ReconstructedBlock) -> Handler {
-        Handler::Finished(Ok(Response::ReconstructedBlock(
+    /// Returns a block rebuilt from the peer's compact announcement, if the peer is still eligible.
+    ///
+    /// Rebuilding can wait for the inbound service, so the peer can be banned, or fall below the
+    /// minimum version, while it waits.
+    fn compact_response(&mut self, block: ReconstructedBlock) -> Result<Handler, PeerError> {
+        self.live_authorization()?;
+        Ok(Handler::Finished(Ok(Response::ReconstructedBlock(
             block,
             self.connection_info.connected_addr.get_transient_addr(),
-        )))
+        ))))
     }
 
     async fn finish_compact(
@@ -563,9 +573,14 @@ where
             unreachable!("the matching reconstruction was checked")
         };
         if let Some(block) = self.finish_compact(reconstruction, response, permit).await {
-            let response = self.compact_response(block);
-            if let State::AwaitingResponse { handler, .. } = &mut self.state {
-                *handler = response;
+            match self.compact_response(block) {
+                Ok(response) => {
+                    if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                        *handler = response;
+                    }
+                }
+                // Failing the connection also fails the waiting request.
+                Err(error) => self.fail_with(error).await,
             }
         } else {
             self.fallback_compact(hash).await;
