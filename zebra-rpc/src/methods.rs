@@ -952,24 +952,106 @@ where
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
 }
 
+/// How often the IBD observer re-checks [`ChainSyncStatus::is_close_to_tip`] while waiting
+/// for a new tip notification. Once IBD latches to `true`, the observer task exits.
+const IBD_OBSERVER_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Drop guard that aborts a spawned background task when the last owning handle is dropped.
+#[derive(Debug)]
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Monotonic latch tracking whether initial block download has completed,
 /// shared across all [`RpcImpl`] clones.
 ///
 /// Matches `zcashd`'s `IBDLatchToFalse` in `src/main.cpp`: once `true`, it stays `true`
 /// for the lifetime of the node.
 #[derive(Clone, Debug, Default)]
-struct InitialBlockDownloadLatch(Arc<AtomicBool>);
+struct InitialBlockDownloadLatch {
+    complete: Arc<AtomicBool>,
+    _observer: Option<Arc<AbortOnDrop>>,
+}
 
 impl InitialBlockDownloadLatch {
+    /// Creates a latch and spawns a lightweight background observer that latches to `true`
+    /// as soon as ongoing chain tip and sync status updates satisfy IBD completion, even if
+    /// `getblockchaininfo` is never called while synced.
+    ///
+    /// The observer exits immediately once IBD latches, when the tip channel closes, or when
+    /// the last [`RpcImpl`] clone is dropped.
+    fn spawn_observer<Tip, SyncStatus>(
+        network: Network,
+        debug_force_finished_sync: bool,
+        sync_status: SyncStatus,
+        mut latest_chain_tip: Tip,
+    ) -> Self
+    where
+        Tip: ChainTip + Send + 'static,
+        SyncStatus: ChainSyncStatus + Send + 'static,
+    {
+        let complete = Arc::new(AtomicBool::new(false));
+        let weak_complete = Arc::downgrade(&complete);
+
+        let handle = tokio::spawn(
+            async move {
+                loop {
+                    let Some(flag) = weak_complete.upgrade() else {
+                        break;
+                    };
+
+                    if flag.load(Ordering::Acquire) {
+                        break;
+                    }
+
+                    let latest_tip = latest_chain_tip.best_tip_height_and_block_time();
+                    if is_initial_block_download_complete(
+                        latest_tip,
+                        &network,
+                        debug_force_finished_sync,
+                        &sync_status,
+                        Utc::now(),
+                    ) {
+                        if !flag.swap(true, Ordering::AcqRel) {
+                            tracing::info!("initial block download complete");
+                        }
+                        break;
+                    }
+
+                    drop(flag);
+
+                    tokio::select! {
+                        changed = latest_chain_tip.best_tip_changed() => {
+                            if changed.is_err() {
+                                break;
+                            }
+                        }
+                        _ = tokio::time::sleep(IBD_OBSERVER_POLL_INTERVAL) => {}
+                    }
+                }
+            }
+            .in_current_span(),
+        );
+
+        Self {
+            complete,
+            _observer: Some(Arc::new(AbortOnDrop(handle))),
+        }
+    }
+
     /// Returns `true` if initial block download has already completed, or evaluates
     /// `is_complete` and latches to `true` when it succeeds.
     fn is_complete_or_latch(&self, is_complete: impl FnOnce() -> bool) -> bool {
-        if self.0.load(Ordering::Acquire) {
+        if self.complete.load(Ordering::Acquire) {
             return true;
         }
 
         if is_complete() {
-            if !self.0.swap(true, Ordering::AcqRel) {
+            if !self.complete.swap(true, Ordering::AcqRel) {
                 tracing::info!("initial block download complete");
             }
             return true;
@@ -977,6 +1059,88 @@ impl InitialBlockDownloadLatch {
 
         false
     }
+
+    /// Returns whether the latch has already transitioned to `true`.
+    #[cfg(test)]
+    fn is_complete(&self) -> bool {
+        self.complete.load(Ordering::Acquire)
+    }
+}
+
+/// Evaluates whether the node's current tip and sync status satisfy initial block download
+/// completion criteria.
+fn is_initial_block_download_complete(
+    latest_tip: Option<(Height, chrono::DateTime<Utc>)>,
+    network: &Network,
+    debug_force_finished_sync: bool,
+    sync_status: &impl ChainSyncStatus,
+    now: chrono::DateTime<Utc>,
+) -> bool {
+    let Some((chain_tip_height, tip_block_time)) = latest_tip else {
+        return false;
+    };
+    if debug_force_finished_sync {
+        return true;
+    }
+    if chain_tip_height < network.checkpoint_list().max_height() {
+        return false;
+    }
+    if network.disable_pow() {
+        return true;
+    }
+    sync_status.is_close_to_tip()
+        && (!matches!(network, Network::Mainnet)
+            || now - tip_block_time <= MAX_TIME_SINCE_CHAIN_TIP)
+}
+
+/// Computes `(estimated_height, verification_progress)` for `getblockchaininfo`.
+fn estimated_height_and_progress(
+    initial_block_download_complete: bool,
+    tip_height: Height,
+    latest_tip: Option<(Height, chrono::DateTime<Utc>)>,
+    network: &Network,
+    now: chrono::DateTime<Utc>,
+) -> (Height, f64) {
+    let (estimated_height, verification_progress) = if initial_block_download_complete {
+        // Match `zcashd` (`src/rpc/blockchain.cpp`): stop wall-clock extrapolation once
+        // initial block download completes, and report this response's `blocks` height.
+        (tip_height, 1.0)
+    } else {
+        latest_tip
+            .map(|(chain_tip_height, tip_block_time)| {
+                let height =
+                    NetworkChainTipHeightEstimator::new(tip_block_time, chain_tip_height, network)
+                        .estimate_height_at(now);
+
+                // Check if the estimated height is below Zebra's latest tip height, or if the
+                // latest tip's block time is later than the current time on the local clock.
+                let height = if tip_block_time > now || height < chain_tip_height {
+                    chain_tip_height
+                } else {
+                    height
+                };
+
+                // Guard against `0.0 / 0.0 = NaN` at genesis (`Height(0)`) when no time has
+                // elapsed or the block timestamp is ahead of the local clock.
+                let progress = if height.0 == 0 {
+                    0.0
+                } else {
+                    (f64::from(chain_tip_height.0) / f64::from(height.0)).min(1.0)
+                };
+
+                (height, progress)
+            })
+            // TODO: Add a `genesis_block_time()` method on `Network` to use here.
+            .unwrap_or((Height::MIN, 0.0))
+    };
+
+    let verification_progress = if network.is_regtest() {
+        1.0
+    } else {
+        verification_progress
+    };
+
+    (estimated_height, verification_progress)
 }
 
 /// The last best tip publication that a block template was served for, shared by all RPC clones.
@@ -1082,6 +1246,13 @@ where
             build_version.insert(0, 'v');
         }
 
+        let initial_block_download_complete = InitialBlockDownloadLatch::spawn_observer(
+            network.clone(),
+            debug_force_finished_sync,
+            sync_status.clone(),
+            latest_chain_tip.clone(),
+        );
+
         let gbt = GetBlockTemplateHandler::new(
             &network,
             mining_config.clone(),
@@ -1106,7 +1277,7 @@ where
             last_warn_error_log_rx,
             gbt,
             first_template_tip: Default::default(),
-            initial_block_download_complete: Default::default(),
+            initial_block_download_complete,
             #[cfg(test)]
             template_clock: None,
         };
@@ -1127,6 +1298,32 @@ where
         self.first_template_tip
             .record(&self.latest_chain_tip, template.previous_block_hash);
         template.into()
+    }
+
+    /// Evaluates or reads the monotonic initial block download completion latch.
+    fn evaluate_initial_block_download_complete(
+        &self,
+        tip_pool_values_found: bool,
+        latest_tip: Option<(Height, chrono::DateTime<Utc>)>,
+        now: chrono::DateTime<Utc>,
+    ) -> bool {
+        self.initial_block_download_complete
+            .is_complete_or_latch(|| {
+                tip_pool_values_found
+                    && is_initial_block_download_complete(
+                        latest_tip,
+                        &self.network,
+                        self.debug_force_finished_sync,
+                        &self.gbt.sync_status(),
+                        now,
+                    )
+            })
+    }
+
+    /// Returns whether the initial block download latch has already transitioned to `true`.
+    #[cfg(test)]
+    pub(crate) fn is_ibd_latched(&self) -> bool {
+        self.initial_block_download_complete.is_complete()
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -1427,7 +1624,6 @@ where
 
     #[allow(clippy::unwrap_in_result)]
     async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse> {
-        let debug_force_finished_sync = self.debug_force_finished_sync;
         let network = &self.network;
 
         let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
@@ -1466,71 +1662,15 @@ where
 
         let now = Utc::now();
         let latest_tip = self.latest_chain_tip.best_tip_height_and_block_time();
-
-        let initial_block_download_complete = self
-            .initial_block_download_complete
-            .is_complete_or_latch(|| {
-                let Some((chain_tip_height, tip_block_time)) = latest_tip else {
-                    return false;
-                };
-                if !tip_pool_values_found {
-                    return false;
-                }
-                if debug_force_finished_sync {
-                    return true;
-                }
-                if chain_tip_height < network.checkpoint_list().max_height() {
-                    return false;
-                }
-                if network.disable_pow() {
-                    return true;
-                }
-                self.gbt.sync_status().is_close_to_tip()
-                    && (!matches!(network, Network::Mainnet)
-                        || now - tip_block_time <= MAX_TIME_SINCE_CHAIN_TIP)
-            });
-
-        let (estimated_height, verification_progress) = if initial_block_download_complete {
-            // Match `zcashd` (`src/rpc/blockchain.cpp`): stop wall-clock extrapolation once
-            // initial block download completes, and report this response's `blocks` height.
-            (tip_height, 1.0)
-        } else {
-            latest_tip
-                .map(|(chain_tip_height, tip_block_time)| {
-                    let height = NetworkChainTipHeightEstimator::new(
-                        tip_block_time,
-                        chain_tip_height,
-                        network,
-                    )
-                    .estimate_height_at(now);
-
-                    // Check if the estimated height is below Zebra's latest tip height, or if the
-                    // latest tip's block time is later than the current time on the local clock.
-                    let height = if tip_block_time > now || height < chain_tip_height {
-                        chain_tip_height
-                    } else {
-                        height
-                    };
-
-                    // Guard against `0.0 / 0.0 = NaN` at genesis (`Height(0)`) when no time has
-                    // elapsed or the block timestamp is ahead of the local clock.
-                    let progress = if height.0 == 0 {
-                        0.0
-                    } else {
-                        (f64::from(chain_tip_height.0) / f64::from(height.0)).min(1.0)
-                    };
-
-                    (height, progress)
-                })
-                // TODO: Add a `genesis_block_time()` method on `Network` to use here.
-                .unwrap_or((Height::MIN, 0.0))
-        };
-
-        let verification_progress = if network.is_regtest() {
-            1.0
-        } else {
-            verification_progress
-        };
+        let initial_block_download_complete =
+            self.evaluate_initial_block_download_complete(tip_pool_values_found, latest_tip, now);
+        let (estimated_height, verification_progress) = estimated_height_and_progress(
+            initial_block_download_complete,
+            tip_height,
+            latest_tip,
+            network,
+            now,
+        );
 
         // `upgrades` object
         //
