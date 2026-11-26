@@ -32,6 +32,31 @@ fn populated_state() -> (NonFinalizedState, FinalizedState, Arc<Block>, Arc<Bloc
     (state, finalized, root, child)
 }
 
+/// Closes the block write channels and waits for the block write thread to exit.
+///
+/// The thread shuts down the database when its channels close. If a test returns without waiting
+/// for that, the process can exit while RocksDB is still flushing on that thread, and RocksDB
+/// aborts with `pthread lock: Invalid argument` when its static state is destroyed.
+async fn join_write_worker(
+    sender: BlockWriteSender,
+    worker: Option<Arc<std::thread::JoinHandle<()>>>,
+) {
+    drop(sender);
+    let worker = worker.expect("the block write thread was spawned");
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            Arc::try_unwrap(worker)
+                .expect("the test holds the only handle to the block write thread")
+                .join()
+                .expect("the block write thread does not panic");
+        }),
+    )
+    .await
+    .expect("the block write thread exits once its channels close")
+    .expect("the join task does not panic");
+}
+
 #[test]
 fn invalidating_only_root_keeps_chain_channels_available() {
     let _init_guard = zebra_test::init();
@@ -145,17 +170,7 @@ async fn write_worker_survives_rejected_root_invalidation() {
         .unwrap();
     assert_eq!(latest.best_tip_hash(), Some(root.hash()));
 
-    drop(sender);
-    let worker = worker.unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            Arc::try_unwrap(worker).unwrap().join().unwrap();
-        }),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    join_write_worker(sender, worker).await;
 }
 
 #[tokio::test]
@@ -210,17 +225,7 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     assert_eq!(latest.best_tip_hash(), Some(genesis.hash));
     assert!(state_receiver.borrow().is_chain_set_empty());
 
-    drop(sender);
-    let worker = worker.unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            Arc::try_unwrap(worker).unwrap().join().unwrap();
-        }),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    join_write_worker(sender, worker).await;
 }
 
 /// Blocks evicted by the fork limit are reported like rejected blocks, so the state service can
@@ -429,7 +434,7 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
 
     let (tip_sender, latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, _state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, _worker) =
+    let (sender, _resets, _rejections, worker) =
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -476,6 +481,8 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
         reused_trees() > reused_trees_before,
         "the commit reuses the trees that were computed for the candidate"
     );
+
+    join_write_worker(sender, worker).await;
 }
 
 /// A block that was validated as a proposal is committed by rebinding the chain its validation
@@ -495,7 +502,7 @@ async fn write_worker_rebinds_a_solved_proposal() {
     let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
     let (state_sender, state_receiver) = watch::channel(state.clone());
     let db = finalized.db.clone();
-    let (sender, _resets, _rejections, _worker) =
+    let (sender, _resets, _rejections, worker) =
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -580,6 +587,8 @@ async fn write_worker_rebinds_a_solved_proposal() {
         best_chain.eq_internal_state(expected.best_chain().expect("the state has a best chain")),
         "rebinding gives the same chain as pushing the solved block",
     );
+
+    join_write_worker(sender, worker).await;
 }
 
 /// The block write task drops a prepared chain once the best chain is longer than it, and keeps
@@ -600,7 +609,7 @@ async fn write_worker_drops_a_prepared_chain_that_the_best_chain_passed() {
     let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
     let (state_sender, state_receiver) = watch::channel(state.clone());
     let db = finalized.db.clone();
-    let (sender, _resets, _rejections, _worker) =
+    let (sender, _resets, _rejections, worker) =
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -676,4 +685,6 @@ async fn write_worker_drops_a_prepared_chain_that_the_best_chain_passed() {
         !snapshot.has_prepared_chain(),
         "a proposal below the best tip can't extend the best chain",
     );
+
+    join_write_worker(sender, worker).await;
 }
