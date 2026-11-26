@@ -999,11 +999,7 @@ impl InitialBlockDownloadLatch {
 
         let handle = tokio::spawn(
             async move {
-                loop {
-                    let Some(flag) = weak_complete.upgrade() else {
-                        break;
-                    };
-
+                while let Some(flag) = weak_complete.upgrade() {
                     if flag.load(Ordering::Acquire) {
                         break;
                     }

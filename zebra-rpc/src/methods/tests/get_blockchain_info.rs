@@ -278,88 +278,90 @@ async fn rpc_getblockchaininfo_testnet_ibd_respects_checkpoint_floor_without_tip
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblockchaininfo_regtest_debug_force_empty_state_and_genesis_nan_guard() {
+async fn rpc_getblockchaininfo_debug_force_empty_state_then_tip() {
     let _init_guard = zebra_test::init();
 
-    // 1. Empty state must not report IBD complete or latch, even with `debug_force_finished_sync`.
-    {
-        let network = Mainnet;
-        let (rpc, mut read_state, _sync_status, tip_sender) =
-            test_get_blockchain_info_rpc(network.clone(), true);
+    // Empty state must not report IBD complete or latch, even with `debug_force_finished_sync`.
+    let network = Mainnet;
+    let (rpc, mut read_state, _sync_status, tip_sender) =
+        test_get_blockchain_info_rpc(network.clone(), true);
 
-        let info =
-            drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None)
-                .await;
-        assert!(!info.initial_block_download_complete());
+    let info =
+        drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None).await;
+    assert!(!info.initial_block_download_complete());
 
-        let tip_height = Height(10);
-        let tip_hash = Hash([0x33; 32]);
-        tip_sender.send_best_tip_height(tip_height);
-        tip_sender.send_best_tip_hash(tip_hash);
-        tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(10));
+    let tip_height = Height(10);
+    let tip_hash = Hash([0x33; 32]);
+    tip_sender.send_best_tip_height(tip_height);
+    tip_sender.send_best_tip_hash(tip_hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(10));
 
-        let info = drive_get_blockchain_info(
-            rpc.get_blockchain_info(),
-            &mut read_state,
-            &network,
-            Some((tip_height, tip_hash)),
-        )
-        .await;
-        assert_ibd_complete(&info, tip_height);
-    }
+    let info = drive_get_blockchain_info(
+        rpc.get_blockchain_info(),
+        &mut read_state,
+        &network,
+        Some((tip_height, tip_hash)),
+    )
+    .await;
+    assert_ibd_complete(&info, tip_height);
+}
 
-    // 2. Regtest requires a committed tip, then completes IBD even when `MockSyncStatus` is false.
-    {
-        let network = Network::new_regtest(Default::default());
-        let genesis_hash = network.genesis_hash();
-        let (rpc, mut read_state, _sync_status, tip_sender) =
-            test_get_blockchain_info_rpc(network.clone(), false);
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockchaininfo_regtest_empty_state_then_genesis() {
+    let _init_guard = zebra_test::init();
 
-        let info =
-            drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None)
-                .await;
-        assert!(!info.initial_block_download_complete());
-        assert_eq!(info.verification_progress(), 1.0);
+    // Regtest requires a committed tip, then completes IBD even when `MockSyncStatus` is false.
+    let network = Network::new_regtest(Default::default());
+    let genesis_hash = network.genesis_hash();
+    let (rpc, mut read_state, _sync_status, tip_sender) =
+        test_get_blockchain_info_rpc(network.clone(), false);
 
-        tip_sender.send_best_tip_height(Height(0));
-        tip_sender.send_best_tip_hash(genesis_hash);
-        tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(100));
+    let info =
+        drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None).await;
+    assert!(!info.initial_block_download_complete());
+    assert_eq!(info.verification_progress(), 1.0);
 
-        let info = drive_get_blockchain_info(
-            rpc.get_blockchain_info(),
-            &mut read_state,
-            &network,
-            Some((Height(0), genesis_hash)),
-        )
-        .await;
-        assert_ibd_complete(&info, Height(0));
-    }
+    tip_sender.send_best_tip_height(Height(0));
+    tip_sender.send_best_tip_hash(genesis_hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(100));
 
-    // 3. Mainnet at genesis with a future timestamp during IBD must report `0.0` (not `NaN`).
-    {
-        let network = Mainnet;
-        let genesis_hash = network.genesis_hash();
-        let (rpc, mut read_state, _sync_status, tip_sender) =
-            test_get_blockchain_info_rpc(network.clone(), false);
+    let info = drive_get_blockchain_info(
+        rpc.get_blockchain_info(),
+        &mut read_state,
+        &network,
+        Some((Height(0), genesis_hash)),
+    )
+    .await;
+    assert_ibd_complete(&info, Height(0));
+}
 
-        tip_sender.send_best_tip_height(Height(0));
-        tip_sender.send_best_tip_hash(genesis_hash);
-        tip_sender.send_best_tip_block_time(chrono::Utc::now() + chrono::Duration::minutes(5));
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockchaininfo_mainnet_genesis_future_timestamp_is_not_nan() {
+    let _init_guard = zebra_test::init();
 
-        let info = drive_get_blockchain_info(
-            rpc.get_blockchain_info(),
-            &mut read_state,
-            &network,
-            Some((Height(0), genesis_hash)),
-        )
-        .await;
-        assert!(!info.initial_block_download_complete());
-        assert_eq!(info.estimated_height(), Height(0));
-        assert_eq!(info.verification_progress(), 0.0);
+    // Mainnet at genesis with a future timestamp during IBD must report `0.0` (not `NaN`).
+    let network = Mainnet;
+    let genesis_hash = network.genesis_hash();
+    let (rpc, mut read_state, _sync_status, tip_sender) =
+        test_get_blockchain_info_rpc(network.clone(), false);
 
-        let json = serde_json::to_string(&info).expect("response serializes without NaN/null");
-        let parsed: GetBlockchainInfoResponse =
-            serde_json::from_str(&json).expect("serialized response parses back cleanly");
-        assert_eq!(parsed, info);
-    }
+    tip_sender.send_best_tip_height(Height(0));
+    tip_sender.send_best_tip_hash(genesis_hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now() + chrono::Duration::minutes(5));
+
+    let info = drive_get_blockchain_info(
+        rpc.get_blockchain_info(),
+        &mut read_state,
+        &network,
+        Some((Height(0), genesis_hash)),
+    )
+    .await;
+    assert!(!info.initial_block_download_complete());
+    assert_eq!(info.estimated_height(), Height(0));
+    assert_eq!(info.verification_progress(), 0.0);
+
+    let json = serde_json::to_string(&info).expect("response serializes without NaN/null");
+    let parsed: GetBlockchainInfoResponse =
+        serde_json::from_str(&json).expect("serialized response parses back cleanly");
+    assert_eq!(parsed, info);
 }
