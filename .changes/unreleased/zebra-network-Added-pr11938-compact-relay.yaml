@@ -15,7 +15,8 @@ body: >-
   ([#12250](https://github.com/ZcashFoundation/zebra/pull/12250)).
   Compact relay uses at most three receive sources, credits announcements only after local
   commitment, and releases demoted or failed delivery slots before peer writes; delivered
-  blocks retain a shared block-size recovery budget for fifteen seconds even after publication
-  withdrawal, with expired snapshots released before connection cleanup
+  blocks answer at most two transaction recovery requests within a shared block-size budget for
+  fifteen seconds even after publication withdrawal, with expired snapshots released before
+  connection cleanup
   ([#11981](https://github.com/ZcashFoundation/zebra/pull/11981)).
 time: 2026-11-05T06:30:56.609332378+01:00
