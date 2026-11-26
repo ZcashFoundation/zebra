@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: Changed `methods::{Rpc, RpcServer}::get_address_tx_ids` to return `Result<GetAddressTxIdsResponse>` instead of `Result<Vec<String>>`. Match on `GetAddressTxIdsResponse::TxIds` for requests without `chainInfo`.
+time: 2026-11-26T10:00:23.247782607Z

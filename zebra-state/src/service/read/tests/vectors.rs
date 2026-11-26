@@ -902,16 +902,24 @@ fn address_tx_ids_limit_spans_finalized_and_non_finalized_blocks() -> Result<()>
         )
     };
 
-    let all: Vec<_> = query(None).expect("query succeeds").into_iter().collect();
+    let expected_tip = Some(
+        non_finalized_state
+            .best_chain()
+            .expect("non-finalized chain should exist")
+            .non_finalized_tip(),
+    );
+
+    let (all, tip) = query(None).expect("query succeeds");
+    assert_eq!(tip, expected_tip);
+    let all: Vec<_> = all.into_iter().collect();
     assert!(all.iter().any(|(location, _)| location.height <= Height(5)));
     assert!(all.iter().any(|(location, _)| location.height > Height(5)));
 
     // Small limits cut each address's finalized scan, larger ones cut after the merge.
     for limit in 1..all.len() {
-        let limited: Vec<_> = query(Some(limit))
-            .expect("query succeeds")
-            .into_iter()
-            .collect();
+        let (limited, tip) = query(Some(limit)).expect("query succeeds");
+        assert_eq!(tip, expected_tip);
+        let limited: Vec<_> = limited.into_iter().collect();
         assert_eq!(limited, all[..limit], "limit {limit}");
     }
 

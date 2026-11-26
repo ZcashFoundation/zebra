@@ -516,8 +516,15 @@ pub enum ReadResponse {
     },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
-    /// with the obtained transaction ids, in the order they appear in blocks.
-    AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
+    /// with the obtained transaction ids, in the order they appear in blocks,
+    /// and the tip height and hash of the chain snapshot that was queried.
+    AddressesTransactionIds {
+        /// The transaction IDs in chain order.
+        tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+        /// The tip height and hash of the chain snapshot that produced `tx_ids`,
+        /// or `None` if the state is empty.
+        tip: Option<(block::Height, block::Hash)>,
+    },
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
@@ -654,7 +661,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::IronwoodSubtrees(_)
             | ReadResponse::AddressBalance { .. }
-            | ReadResponse::AddressesTransactionIds(_)
+            | ReadResponse::AddressesTransactionIds { .. }
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
             | ReadResponse::NonFinalizedBlocksListener(_)

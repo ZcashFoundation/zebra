@@ -240,9 +240,10 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
                 balance: Amount::zero(),
                 received: 0,
             }),
-            R::TransactionIdsByAddresses { .. } => {
-                Ok(Resp::AddressesTransactionIds(Default::default()))
-            }
+            R::TransactionIdsByAddresses { .. } => Ok(Resp::AddressesTransactionIds {
+                tx_ids: Default::default(),
+                tip: Some((block::Height(0), block::Hash([0u8; 32]))),
+            }),
             R::UsageInfo => Ok(Resp::UsageInfo(0)),
             R::SolutionRate { .. } => Ok(Resp::SolutionRate(None)),
             R::TipBlockSize => Ok(Resp::TipBlockSize(None)),

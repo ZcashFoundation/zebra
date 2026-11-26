@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: '`getaddresstxids` now accepts an optional `chainInfo` boolean in request objects; when `true`, it returns `{"txids", "hash", "height"}` captured atomically from the same chain snapshot as the index read ([#12575](https://github.com/ZcashFoundation/zebra/issues/12575)).'
+time: 2026-11-26T10:00:23.261243997Z

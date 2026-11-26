@@ -565,51 +565,51 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(1),
-            end: Some(10),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(1),
+            Some(10),
+        ))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("multi_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(2),
-            end: Some(2),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(2),
+            Some(2),
+        ))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("single_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(3),
-            end: Some(EXCESSIVE_BLOCK_HEIGHT),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(3),
+            Some(EXCESSIVE_BLOCK_HEIGHT),
+        ))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(EXCESSIVE_BLOCK_HEIGHT),
-            end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(EXCESSIVE_BLOCK_HEIGHT),
+            Some(EXCESSIVE_BLOCK_HEIGHT + 1),
+        ))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(2),
-            end: Some(1),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(2),
+            Some(1),
+        ))
         .await;
     snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 
@@ -826,10 +826,10 @@ fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHashResponse, settings: &inst
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
-/// Snapshot valid `getaddressbalance` response, using `cargo insta` and JSON serialization.
+/// Snapshot valid `getaddresstxids` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddresstxids_valid(
     variant: &'static str,
-    transactions: Vec<String>,
+    transactions: GetAddressTxIdsResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -837,10 +837,10 @@ fn snapshot_rpc_getaddresstxids_valid(
     });
 }
 
-/// Snapshot invalid `getaddressbalance` response, using `cargo insta` and JSON serialization.
+/// Snapshot invalid `getaddresstxids` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddresstxids_invalid(
     variant: &'static str,
-    transactions: Result<Vec<String>>,
+    transactions: Result<GetAddressTxIdsResponse>,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {

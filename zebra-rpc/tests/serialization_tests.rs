@@ -25,12 +25,13 @@ use zebra_rpc::client::zebra_chain::{
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots, EndOfService,
     FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
-    GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
-    GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
-    GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-    GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
-    GetBlockchainInfoResponse, GetDeprecationInfoResponse, GetInfoResponse, GetMiningInfoResponse,
-    GetNetworkInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetAddressTxIdsResponse, GetAddressTxIdsResponseObject, GetAddressUtxosResponse,
+    GetAddressUtxosResponseObject, GetBlockHashResponse, GetBlockHeaderResponse,
+    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
+    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance, GetBlockchainInfoResponse,
+    GetDeprecationInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetNetworkInfoResponse,
+    GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
     GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject,
     Orchard, OrchardAction, OrchardFlags, Output, ScriptPubKey, ScriptSig,
     SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
@@ -978,7 +979,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn test_get_address_tx_ids() -> Result<(), Box<dyn std::error::Error>> {
-    // Test request only (response is trivial)
+    // Default (`chain_info: false`) omits `"chainInfo"` from the serialized JSON.
     let json =
         r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"],"start":2931856,"end":2932856}"#;
     let obj = GetAddressTxIdsRequest::new(
@@ -986,8 +987,76 @@ fn test_get_address_tx_ids() -> Result<(), Box<dyn std::error::Error>> {
         Some(2931856),
         Some(2932856),
     );
+    assert!(!obj.chain_info());
     let new_json = serde_json::to_string(&obj)?;
     assert_eq!(json, new_json);
+
+    let parsed: GetAddressTxIdsRequest = serde_json::from_str(json)?;
+    assert_eq!(parsed, obj);
+
+    let single_json = r#""t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak""#;
+    let single: GetAddressTxIdsRequest = serde_json::from_str(single_json)?;
+    assert!(!single.chain_info());
+    assert_eq!(
+        single,
+        GetAddressTxIdsRequest::new(
+            vec!["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak".to_string()],
+            None,
+            None,
+        )
+    );
+
+    let false_json = r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"],"start":2931856,"end":2932856,"chainInfo":false}"#;
+    let parsed_false: GetAddressTxIdsRequest = serde_json::from_str(false_json)?;
+    assert_eq!(parsed_false, obj);
+
+    let true_json = r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"],"start":2931856,"end":2932856,"chainInfo":true}"#;
+    let obj_true = obj.with_chain_info(true);
+    assert!(obj_true.chain_info());
+    assert_eq!(serde_json::to_string(&obj_true)?, true_json);
+    let parsed_true: GetAddressTxIdsRequest = serde_json::from_str(true_json)?;
+    assert_eq!(parsed_true, obj_true);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_address_tx_ids_chain_info_false() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"["6ee3e8a86dfeca629aeaf794aacb714db1cf1868bc9fe487de443e6197d8764a"]"#;
+    let obj: GetAddressTxIdsResponse = serde_json::from_str(json)?;
+
+    let GetAddressTxIdsResponse::TxIds(txids) = &obj else {
+        panic!("Expected TxIds variant");
+    };
+
+    assert_eq!(
+        txids,
+        &vec!["6ee3e8a86dfeca629aeaf794aacb714db1cf1868bc9fe487de443e6197d8764a".to_string()]
+    );
+    assert_eq!(serde_json::to_string(&obj)?, json);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_address_tx_ids_chain_info_true() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"{"txids":["6ee3e8a86dfeca629aeaf794aacb714db1cf1868bc9fe487de443e6197d8764a"],"hash":"000000000079a1a696c9d2073ec4cd8729d2a59bbb26999263cbaab992e09280","height":3053274}"#;
+    let obj: GetAddressTxIdsResponse = serde_json::from_str(json)?;
+
+    let GetAddressTxIdsResponse::TxIdsAndChainInfo(obj) = &obj else {
+        panic!("Expected TxIdsAndChainInfo variant");
+    };
+
+    let txids = obj.txids().clone();
+    let hash = obj.hash();
+    let height = obj.height();
+
+    let new_obj = GetAddressTxIdsResponseObject::new(txids, hash, height);
+    assert_eq!(obj.clone(), new_obj);
+
+    let serialized = serde_json::to_string(&GetAddressTxIdsResponse::TxIdsAndChainInfo(new_obj))?;
+    assert_eq!(serialized, json);
+
     Ok(())
 }
 

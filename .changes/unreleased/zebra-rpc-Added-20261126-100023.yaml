@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `GetAddressTxIdsRequest::with_chain_info`, `GetAddressTxIdsRequest::chain_info`, and `client::{GetAddressTxIdsResponse, GetAddressTxIdsResponseObject}` for `getaddresstxids` `chainInfo` support.
+time: 2026-11-26T10:00:23.255351881Z
