@@ -39,8 +39,8 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, Request, Response,
-    SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
+    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -296,6 +296,139 @@ async fn state_service_commits_a_prepared_block() {
         PREPARED_COMMITS.load(Ordering::SeqCst),
         prepared_commits_before + 1,
         "the commit adds the prepared chain",
+    );
+}
+
+/// The read state service lends a block proposal's note commitment trees to the proposal's
+/// validation, and returns them with the result, for the commit of the solved proposal. The state
+/// service's queue keeps them with the result, so that commit reuses them.
+#[tokio::test]
+async fn proposal_validation_result_keeps_its_trees() {
+    use std::sync::atomic::Ordering;
+
+    use super::precomputed_trees::REUSED_TREES;
+    use crate::tests::FakeChainHelper;
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+
+    let [genesis, block1, mut block2]: [Block; 3] = [
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ]
+    .map(|bytes| bytes.zcash_deserialize_into().expect("block is valid"));
+
+    // The state service's queue methods skip the request handler's checkpoint height check.
+    state
+        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(Arc::new(genesis)))
+        .await
+        .expect("the write task responds")
+        .expect("the genesis block is valid");
+    let block1 = Arc::new(block1);
+    state
+        .queue_and_commit_to_non_finalized_state(block1.clone().prepare(), None)
+        .await
+        .expect("the write task responds")
+        .expect("block 1 is valid");
+
+    // Give block 2 the time and difficulty threshold of a block template on block 1. The state
+    // doesn't check proof of work, so the header can be changed.
+    let latest = state.read_service.latest_non_finalized_state();
+    let context = super::read::difficulty::get_block_template_chain_info(
+        &latest,
+        &state.read_service.db,
+        &network,
+    )
+    .expect("a state with block 1 has a context for the next block");
+    let on_block1 = |block: &mut Block| {
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+    };
+    on_block1(&mut block2);
+    let block2 = Arc::new(block2);
+    let parent_trees = latest
+        .best_chain()
+        .expect("block 1 is in the best chain")
+        .note_commitment_trees_for_tip();
+
+    let reused_trees_before = REUSED_TREES.load(Ordering::SeqCst);
+    let response = state
+        .read_service
+        .clone()
+        .oneshot(ReadRequest::CheckBlockProposalValidity(
+            block2.clone().prepare(),
+        ))
+        .await
+        .expect("the proposal is valid");
+    let ReadResponse::ValidBlockProposal(mut contextual) = response else {
+        panic!("the state validates the proposal: {response:?}");
+    };
+    assert_eq!(
+        REUSED_TREES.load(Ordering::SeqCst),
+        reused_trees_before + 1,
+        "the validation reuses the trees that were computed for the proposal",
+    );
+
+    let trees = contextual
+        .proposal_trees
+        .as_ref()
+        .expect("the result keeps the proposal's trees");
+    assert!(trees.is_for(&block2));
+    assert!(
+        trees.reuse(&block2, &parent_trees).is_some(),
+        "the trees are computed from the trees of the proposal's parent",
+    );
+
+    // A later proposal with other transactions replaces the chain the read state service keeps,
+    // so a block that solves the first proposal is applied to its parent chain.
+    let mut later = Block::clone(&block1.make_fake_child());
+    on_block1(&mut later);
+    let response = state
+        .read_service
+        .clone()
+        .oneshot(ReadRequest::CheckBlockProposalValidity(
+            Arc::new(later).prepare(),
+        ))
+        .await
+        .expect("the later proposal is valid");
+    assert!(matches!(response, ReadResponse::ValidBlockProposal(_)));
+
+    // A miner solves the first proposal, and the block verifier commits it with that result.
+    let mut solved = Block::clone(&block2);
+    Arc::make_mut(&mut solved.header).nonce = [0xff; 32].into();
+    let solved = Arc::new(solved);
+    contextual.rebind(solved.clone(), Instant::now());
+
+    let reused_trees_before = REUSED_TREES.load(Ordering::SeqCst);
+    assert_eq!(
+        state
+            .queue_and_commit_to_non_finalized_state(solved.clone().prepare(), Some(contextual))
+            .await
+            .expect("the write task responds")
+            .expect("the solved block is valid"),
+        solved.hash(),
+    );
+    assert_eq!(
+        REUSED_TREES.load(Ordering::SeqCst),
+        reused_trees_before + 1,
+        "the commit reuses the trees that the queued result kept",
+    );
+
+    let latest = state.read_service.latest_non_finalized_state();
+    let tip = latest
+        .best_chain()
+        .expect("the state has a best chain")
+        .tip_block()
+        .expect("the best chain has blocks");
+    assert_eq!(tip.hash, solved.hash());
+    assert!(
+        tip.proposal_trees.is_none(),
+        "the chain's blocks don't keep the proposal's trees",
     );
 }
 

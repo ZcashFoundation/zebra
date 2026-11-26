@@ -932,11 +932,13 @@ fn time_refresh(proposal: &Block) -> Arc<Block> {
 /// proposal on the same parent. Each is validated on its own snapshot of the state, as the read
 /// state service does, and only the later proposal's chain is kept for the commit of a solved
 /// proposal. Then commits a block that solves the first proposal, with the first proposal's
-/// result, as the block verifier does.
+/// result and its note commitment trees, as the block verifier does.
 ///
 /// Checks that the commit gives the same best chain as applying the solved block to its parent
-/// chain. Returns `true` if the commit rebound the later proposal's chain, which is then no longer
-/// kept, or `false` if it applied the block to its parent chain, and kept the later chain.
+/// chain, that only a commit that applies the block reuses the trees, and that the chain's blocks
+/// don't keep them. Returns `true` if the commit rebound the later proposal's chain, which is then
+/// no longer kept, or `false` if it applied the block to its parent chain, and kept the later
+/// chain.
 async fn commit_solved_proposal_after_a_later_one(
     later_proposal: impl FnOnce(&Block) -> Arc<Block>,
 ) -> bool {
@@ -969,14 +971,7 @@ async fn commit_solved_proposal_after_a_later_one(
     header.difficulty_threshold = context.expected_difficulty;
     let proposal = Arc::new(proposal);
     let mut expected = snapshot.clone();
-    validate_and_commit_non_finalized(&db, &mut snapshot, proposal.clone().prepare())
-        .expect("the proposal is contextually valid");
-    let contextual = snapshot
-        .remove_chain_with_tip(proposal.hash())
-        .expect("validation adds the proposal to a chain")
-        .tip_block()
-        .expect("the proposal is the chain's tip")
-        .clone();
+    let contextual = validate_proposal_with_trees(&db, &mut snapshot, &proposal);
 
     // The read state service keeps the chain of the latest proposal it validated.
     let later = later_proposal(&proposal);
@@ -1002,6 +997,7 @@ async fn commit_solved_proposal_after_a_later_one(
     let received_time = std::time::Instant::now();
     let mut rebound = contextual;
     rebound.rebind(solved.clone(), received_time);
+    let before = early_mining_work_counts();
     let committed = send_commit(tx, solved.clone().prepare(), Some(Box::new(rebound))).await;
     assert_eq!(committed.ok(), Some(solved.hash()));
     assert_eq!(latest.best_tip_hash(), Some(solved.hash()));
@@ -1015,27 +1011,228 @@ async fn commit_solved_proposal_after_a_later_one(
         .best_chain()
         .expect("the state has a best chain")
         .clone();
+    let tip = best_chain.tip_block().expect("the best chain has blocks");
+    assert!(
+        tip.proposal_trees.is_none(),
+        "the chain's blocks don't keep the proposal's trees",
+    );
     assert!(
         best_chain.eq_internal_state(expected.best_chain().expect("the state has a best chain")),
         "the commit gives the same chain as applying the solved block to its parent chain",
     );
 
-    let rebound_later_chain = Arc::ptr_eq(
-        &best_chain
-            .tip_block()
-            .expect("the best chain has blocks")
-            .new_outputs,
-        &later_outputs,
-    );
+    let rebound_later_chain = Arc::ptr_eq(&tip.new_outputs, &later_outputs);
     assert_eq!(
         snapshot.has_prepared_chain(),
         !rebound_later_chain,
         "the commit takes the later proposal's chain only to rebind it",
     );
+    assert_eq!(
+        early_mining_work_counts(),
+        EarlyMiningWorkCounts {
+            reused_trees: before.reused_trees + usize::from(!rebound_later_chain),
+            ..before
+        },
+        "only a commit that applies the block to its parent chain reuses the proposal's trees",
+    );
 
     join_write_worker(sender, worker).await;
 
     rebound_later_chain
+}
+
+/// A block that solves a validated proposal is applied to its parent chain with the proposal's
+/// note commitment trees, when a later proposal with other transactions has replaced the chain
+/// that the first proposal's validation built.
+#[tokio::test]
+async fn write_worker_reuses_an_older_proposals_trees() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block1 = block1_on_genesis(&state, &finalized.db);
+    let block2: Block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .expect("block is valid");
+
+    let (tip_sender, _latest, _change) = ChainTipSender::new(None, &network);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    // The proposals' parent has to be in the non-finalized state for a chain to be rebound.
+    let committed = send_commit(tx, block1.clone().prepare(), None).await;
+    assert_eq!(committed.ok(), Some(block1.hash()));
+
+    // Gives `block` a header that is contextually valid on the best tip, as a block template has.
+    let on_best_tip = |mut block: Block| {
+        let snapshot = state_receiver.borrow().clone();
+        let context = read::difficulty::get_block_template_chain_info(&snapshot, &db, &network)
+            .expect("the state has a context for the next block");
+        let header = Arc::make_mut(&mut block.header);
+        header.previous_block_hash = context.tip_hash;
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        Arc::new(block)
+    };
+
+    // The block verifier keeps the proposal's result, with its trees.
+    let proposal = on_best_tip(block2);
+    let mut snapshot = state_receiver.borrow().clone();
+    let expected = snapshot.clone();
+    let contextual = validate_proposal_with_trees(&db, &mut snapshot, &proposal);
+
+    // The read state service keeps the chain of the latest proposal it validated. This one has
+    // another coinbase transaction, so a block that solves the first proposal can't use it.
+    let later = on_best_tip(Arc::unwrap_or_clone(block1.make_fake_child()));
+    let mut snapshot = state_receiver.borrow().clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, later.clone().prepare())
+        .expect("the later proposal is contextually valid");
+    let later_chain = snapshot
+        .remove_chain_with_tip(later.hash())
+        .expect("validation adds the later proposal to a chain");
+    snapshot.store_prepared_chain(later_chain);
+
+    commit_solved_proposal_with_its_trees(
+        tx,
+        &state_receiver,
+        &db,
+        expected,
+        &proposal,
+        contextual,
+    )
+    .await;
+    assert!(
+        snapshot.has_prepared_chain(),
+        "the commit applies the block to its parent chain, and keeps the later proposal's chain",
+    );
+
+    join_write_worker(sender, worker).await;
+}
+
+/// A block that solves a validated proposal on the finalized tip starts a chain with the
+/// proposal's note commitment trees.
+#[tokio::test]
+async fn write_worker_reuses_a_proposals_trees_on_the_finalized_tip() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let proposal = block1_on_genesis(&state, &finalized.db);
+
+    let (tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    let mut snapshot = state_receiver.borrow().clone();
+    let expected = snapshot.clone();
+    let contextual = validate_proposal_with_trees(&db, &mut snapshot, &proposal);
+
+    commit_solved_proposal_with_its_trees(
+        tx,
+        &state_receiver,
+        &db,
+        expected,
+        &proposal,
+        contextual,
+    )
+    .await;
+
+    join_write_worker(sender, worker).await;
+}
+
+/// Validates `proposal` on `snapshot` as the read state service does: the validation reuses note
+/// commitment trees computed from the trees of the proposal's parent, and the returned result
+/// keeps them.
+fn validate_proposal_with_trees(
+    db: &ZebraDb,
+    snapshot: &mut NonFinalizedState,
+    proposal: &Arc<Block>,
+) -> ContextuallyVerifiedBlock {
+    let parent_trees = match snapshot.best_chain() {
+        Some(chain) => chain.note_commitment_trees_for_tip(),
+        None => db.note_commitment_trees_for_tip(),
+    };
+    snapshot.precomputed_trees = Some(
+        PrecomputedTrees::compute(proposal.clone(), parent_trees)
+            .expect("the proposal's note commitments fit its parent's trees"),
+    );
+    validate_and_commit_non_finalized(db, snapshot, proposal.clone().prepare())
+        .expect("the proposal is contextually valid");
+    let trees = snapshot.precomputed_trees.take();
+
+    let mut contextual = snapshot
+        .remove_chain_with_tip(proposal.hash())
+        .expect("validation adds the proposal to a chain")
+        .tip_block()
+        .expect("the proposal is the chain's tip")
+        .clone();
+    contextual.proposal_trees = trees.map(Box::new);
+
+    contextual
+}
+
+/// Commits a block that solves `proposal` with `contextual`, the proposal's result with its note
+/// commitment trees, as the block verifier does.
+///
+/// Checks that the commit reuses the trees, that the committed block doesn't keep them, and that
+/// the commit gives the same best chain as applying the solved block to its parent chain in
+/// `expected`.
+async fn commit_solved_proposal_with_its_trees(
+    tx: &UnboundedSender<NonFinalizedWriteMessage>,
+    published: &watch::Receiver<NonFinalizedState>,
+    db: &ZebraDb,
+    mut expected: NonFinalizedState,
+    proposal: &Block,
+    mut contextual: ContextuallyVerifiedBlock,
+) {
+    let solved = nonce_variant(proposal, [0xff; 32]);
+    let received_time = std::time::Instant::now();
+    contextual.rebind(solved.clone(), received_time);
+    assert!(
+        contextual
+            .proposal_trees
+            .as_ref()
+            .is_some_and(|trees| trees.is_for(&solved)),
+        "rebinding the result moves the proposal's trees to the solved block",
+    );
+
+    let before = early_mining_work_counts();
+    let committed = send_commit(tx, solved.clone().prepare(), Some(Box::new(contextual))).await;
+    assert_eq!(committed.ok(), Some(solved.hash()));
+    assert_eq!(
+        early_mining_work_counts(),
+        EarlyMiningWorkCounts {
+            reused_trees: before.reused_trees + 1,
+            ..before
+        },
+        "the commit reuses the proposal's trees",
+    );
+
+    let best_chain = published
+        .borrow()
+        .best_chain()
+        .expect("the state has a best chain")
+        .clone();
+    let tip = best_chain.tip_block().expect("the best chain has blocks");
+    assert_eq!(tip.hash, solved.hash());
+    assert!(
+        tip.proposal_trees.is_none(),
+        "the chain's blocks don't keep the proposal's trees",
+    );
+
+    let mut pushed = solved.clone().prepare();
+    pushed.received_time = Some(received_time);
+    validate_and_commit_non_finalized(db, &mut expected, pushed)
+        .expect("the solved block is contextually valid");
+    assert!(
+        best_chain.eq_internal_state(expected.best_chain().expect("the state has a best chain")),
+        "the commit gives the same chain as applying the solved block to its parent chain",
+    );
 }
 
 /// The block write task drops a prepared chain once the best chain is longer than it, and keeps

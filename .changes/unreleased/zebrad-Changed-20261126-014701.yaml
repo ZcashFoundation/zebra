@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Commit a solved block template sooner when Zebra has validated a newer template since.'
+time: 2026-11-26T01:47:01.000000000-05:00

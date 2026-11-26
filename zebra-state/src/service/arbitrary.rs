@@ -287,14 +287,15 @@ pub async fn populated_state_with_debug(
     (state, read_state, latest_chain_tip, chain_tip_change)
 }
 
-/// Counts of the early mining work that the block write task computed and reused, for tests.
+/// Counts of the early mining work that the state computed and reused, for tests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EarlyMiningWorkCounts {
     /// Mining candidates that got early work.
     pub candidates: usize,
 
-    /// Block validations that reused a mining candidate's note commitment trees.
+    /// Block validations that reused a mining candidate's or a block proposal's note commitment
+    /// trees.
     pub reused_trees: usize,
 
     /// Block validations that reused a mining candidate's history tree.

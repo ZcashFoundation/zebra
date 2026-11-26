@@ -1,6 +1,7 @@
 //! Work computed for a block before its commit, so the commit can reuse it: the block's note
 //! commitment trees, and for a mining candidate, its chain history and the result of its header
-//! commitment check.
+//! commitment check. A validated block proposal's trees are also kept for the commit of its
+//! solved block.
 //!
 //! A mining candidate computes the trees for a block right after its proof of work is checked.
 //! The block's commit needs the same trees, so it reuses the candidate's result when the inputs
@@ -14,7 +15,8 @@ use zebra_chain::{
     parallel::tree::{NoteCommitmentTreeError, NoteCommitmentTrees},
 };
 
-/// The number of block validations that reused precomputed note commitment trees, for tests.
+/// The number of block validations that reused a mining candidate's or a block proposal's note
+/// commitment trees, for tests.
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) static REUSED_TREES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -37,9 +39,10 @@ pub(crate) static SKIPPED_COMMITMENT_CHECKS: std::sync::atomic::AtomicUsize =
 
 /// The note commitment trees after a block, the parent trees they were computed from, and for a
 /// mining candidate, its chain history after the block.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PrecomputedTrees {
-    /// The exact block body the trees were computed from.
+    /// The exact block body the trees are for: the block they were computed from, or a solved
+    /// block proposal with that block's transactions, which they were rebound to.
     ///
     /// The trees are only reused for this same allocation, so a different body with the same
     /// header hash can never use them.
@@ -106,22 +109,32 @@ impl PrecomputedTrees {
         }
     }
 
+    /// Binds the trees to `block`, a solved block proposal with the transactions of the block
+    /// they were computed for. The chain history after a block depends on its hash, so it isn't
+    /// kept.
+    pub(crate) fn rebind(&mut self, block: Arc<Block>) {
+        self.block = block;
+        self.history = None;
+    }
+
     /// Returns the trees after the block.
     pub(crate) fn output(&self) -> &NoteCommitmentTrees {
         &self.output
     }
 
-    /// Returns `true` if the trees were computed from the same body as `block`.
+    /// Returns `true` if the trees are for the same body as `block`.
     pub(crate) fn is_for(&self, block: &Arc<Block>) -> bool {
         Arc::ptr_eq(&self.block, block)
     }
 
-    /// Returns `true` if the trees were computed from the same body as `block`, and from `input`.
+    /// Returns `true` if the trees are for the same body as `block`, and were computed from
+    /// `input`.
     fn computed_from(&self, block: &Arc<Block>, input: &NoteCommitmentTrees) -> bool {
         Arc::ptr_eq(&self.block, block) && &self.input == input
     }
 
-    /// Returns the trees after `block` if they were computed from the same body and `input`.
+    /// Returns the trees after `block` if they are for the same body, and were computed from
+    /// `input`.
     pub(crate) fn reuse(
         &self,
         block: &Arc<Block>,
@@ -131,8 +144,8 @@ impl PrecomputedTrees {
             .then(|| self.output.clone())
     }
 
-    /// Returns the history tree after `block` if the trees were computed from the same body and
-    /// `input`, and the history tree after the block's parent has the same root as
+    /// Returns the history tree after `block` if the trees are for the same body and were
+    /// computed from `input`, and the history tree after the block's parent has the same root as
     /// `parent_history`.
     ///
     /// The history tree after a block depends on the parent's history tree, the block, and the
@@ -338,5 +351,47 @@ mod tests {
             !precomputed.commitment_is_checked(&block, &other_parent_history),
             "another non-empty parent root needs another commitment",
         );
+    }
+
+    /// Trees rebound to a solved block proposal are only reused for that block, and keep no chain
+    /// history.
+    #[test]
+    fn rebound_trees_are_only_reused_for_the_solved_block() {
+        let _init_guard = zebra_test::init();
+
+        let block = orchard_block();
+        let input = NoteCommitmentTrees::default();
+        let parent_history = parent_history(&block);
+        let mut precomputed = PrecomputedTrees::compute(block.clone(), input.clone())
+            .expect("a block's commitments fit an empty tree")
+            .with_history(parent_history.hash(), Arc::new(HistoryTree::default()));
+        let output = precomputed.output().clone();
+
+        // A solved proposal only differs in its nonce and solution.
+        let mut solved = Block::clone(&block);
+        Arc::make_mut(&mut solved.header).nonce = [0xff; 32].into();
+        let solved = Arc::new(solved);
+        precomputed.rebind(solved.clone());
+
+        // The trees only depend on the block's note commitments and its height, which a solved
+        // proposal shares with its proposal.
+        assert_eq!(
+            PrecomputedTrees::compute(solved.clone(), input.clone())
+                .expect("a block's commitments fit an empty tree")
+                .output(),
+            &output,
+            "a solved block has the trees of the proposal it solves",
+        );
+
+        assert!(precomputed.is_for(&solved));
+        assert!(!precomputed.is_for(&block));
+        assert_eq!(precomputed.reuse(&solved, &input), Some(output));
+        assert_eq!(precomputed.reuse(&block, &input), None);
+        assert_eq!(
+            precomputed.reuse_history(&solved, &input, &parent_history),
+            None,
+            "the chain history after a block depends on its hash",
+        );
+        assert!(!precomputed.commitment_is_checked(&solved, &parent_history));
     }
 }
