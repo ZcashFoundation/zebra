@@ -370,17 +370,18 @@ impl Reconstruction {
             let expected = short_ids
                 .next()
                 .expect("each non-prefilled slot has a short ID");
-            if slot.is_none() {
-                let tx = recovered
-                    .next()
-                    .expect("response count equals missing slot count");
-                if short_id(keys, tx.as_ref().into()) != *expected {
-                    return Err(SerializationError::Parse(
-                        "compact recovery identity or order mismatch",
-                    ));
-                }
-                *slot = Some(tx);
+            if slot.is_some() {
+                continue;
             }
+            let tx = recovered
+                .next()
+                .expect("response count equals missing slot count");
+            if short_id(keys, tx.as_ref().into()) != *expected {
+                return Err(SerializationError::Parse(
+                    "compact recovery identity or order mismatch",
+                ));
+            }
+            *slot = Some(tx);
         }
         Ok(())
     }
