@@ -418,12 +418,28 @@ where
     // Both the mempool transaction verifier and the block verifier use the mempool.
     let (transaction_mempool_sender, transaction_mempool) = oneshot::channel();
     let (block_mempool_sender, block_mempool) = oneshot::channel();
-    tokio::spawn(async move {
-        if let Ok(mempool) = mempool.await {
-            let _ = block_mempool_sender.send(BoxCloneService::new(mempool.clone()));
-            let _ = transaction_mempool_sender.send(mempool);
+    tokio::spawn(
+        async move {
+            // A caller without a mempool, such as `init_test`, drops the sender.
+            let Ok(mempool) = mempool.await else {
+                return;
+            };
+            if block_mempool_sender
+                .send(BoxCloneService::new(mempool.clone()))
+                .is_err()
+            {
+                tracing::warn!(
+                    "error setting up the block verifier with a handle to the mempool service"
+                );
+            }
+            if transaction_mempool_sender.send(mempool).is_err() {
+                tracing::warn!(
+                    "error setting up the transaction verifier with a handle to the mempool service"
+                );
+            }
         }
-    });
+        .instrument(Span::current()),
+    );
 
     // transaction verification
 
