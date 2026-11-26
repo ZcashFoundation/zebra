@@ -114,13 +114,13 @@ use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
     get_block_template::{
         constants::{
-            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MAX_LONG_POLL_DURATION, MEMPOOL_LONG_POLL_INTERVAL,
             ZCASHD_FUNDING_STREAM_ORDER,
         },
         precompute,
         proposal::proposal_block_from_template,
         BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
-        GetBlockTemplateParameters, GetBlockTemplateResponse, MinerParams,
+        GetBlockTemplateParameters, GetBlockTemplateResponse, LongPollPermit, MinerParams,
     },
     get_blockchain_info::GetBlockchainInfoBalance,
     get_mempool_info::GetMempoolInfoResponse,
@@ -1146,19 +1146,24 @@ where
     /// between a cached template and a freshly built one, each call returning immediately, and it
     /// never waits. Its work is cancelled on every response, so it mines nothing.
     ///
-    /// Returns `None` if there is no updater task, if it hasn't caught up with a recent chain tip
-    /// change, or if the chain tip channel closed.
+    /// Returns `Ok(None)` if there is no updater task, if it hasn't caught up with a recent chain
+    /// tip change, or if the chain tip channel closed. Returns `Err(ServerIsBusy)` if the parked
+    /// long-poll limit is already reached.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
         long_poll_started: DateTime32,
-    ) -> Option<BlockTemplateResponse> {
-        let cache = self.gbt.template_cache()?;
+        long_poll_deadline: tokio::time::Instant,
+        long_poll_permit: &mut Option<LongPollPermit>,
+    ) -> Result<Option<BlockTemplateResponse>> {
+        let Some(cache) = self.gbt.template_cache() else {
+            return Ok(None);
+        };
 
         // Skip the tip read when there's nothing to serve: without an updater task, every request
         // builds its own template anyway.
         if cache.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // Subscribe before the first read below. A template published between reading the cache
@@ -1175,21 +1180,28 @@ where
         tip_change.mark_best_tip_seen();
 
         loop {
-            let template = self.precomputed_template_for_state_tip(cache).await?;
+            let Some(template) = self.precomputed_template_for_state_tip(cache).await else {
+                return Ok(None);
+            };
 
             let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
             let now = self.template_clock_now();
             let max_time_reached =
                 long_poll_started <= template.max_time && now > template.max_time;
+            let lifetime_reached =
+                client_long_poll_id.is_some() && tokio::time::Instant::now() >= long_poll_deadline;
 
-            if !is_client_template || max_time_reached {
+            if !is_client_template || max_time_reached || lifetime_reached {
                 let mut template = (*template).clone();
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
 
-                return Some(template);
+                return Ok(Some(template));
             }
+
+            // Acquire a parked long-poll permit only once we know this call is about to wait.
+            self.acquire_long_poll_permit(long_poll_permit)?;
 
             // The client is long polling on exactly this template, so wait for a reason to send
             // another one.
@@ -1208,15 +1220,27 @@ where
 
                 tip_changed = tip_change.best_tip_changed() => {
                     // A closed chain tip channel means Zebra is shutting down.
-                    tip_changed.ok()?;
+                    if tip_changed.is_err() {
+                        return Ok(None);
+                    }
                 }
 
                 () = template_changes.changed() => {}
 
                 // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
                 () = wait_for_max_time, if long_poll_started <= max_time => {}
+
+                () = tokio::time::sleep_until(long_poll_deadline) => {}
             }
         }
+    }
+
+    /// Acquires a parked long-poll permit if this request does not hold one yet.
+    fn acquire_long_poll_permit(&self, permit: &mut Option<LongPollPermit>) -> Result<()> {
+        if permit.is_none() {
+            *permit = Some(self.gbt.try_acquire_long_poll_permit()?);
+        }
+        Ok(())
     }
 
     /// Returns the precomputed template, if it extends the tip the state has committed.
@@ -1274,6 +1298,12 @@ where
     /// When unset, or set to `None`, `getdeprecationinfo` omits the `end_of_service` object.
     pub fn with_end_of_support_height(mut self, end_of_support_height: Option<Height>) -> Self {
         self.end_of_support_height = end_of_support_height;
+        self
+    }
+
+    /// Sets the maximum number of concurrently parked `getblocktemplate` long-poll requests.
+    pub(crate) fn with_max_long_polls(mut self, max_long_polls: usize) -> Self {
+        self.gbt.set_max_long_polls(max_long_polls);
         self
     }
 
@@ -2783,6 +2813,7 @@ where
         parameters: Option<GetBlockTemplateParameters>,
     ) -> Result<GetBlockTemplateResponse> {
         let long_poll_started = self.template_clock_now();
+        let long_poll_deadline = tokio::time::Instant::now() + MAX_LONG_POLL_DURATION;
 
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
@@ -2827,10 +2858,18 @@ where
         // extends the current chain tip.
         check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
 
+        let mut long_poll_permit = None;
+
         if let Some(template) = self
-            .precomputed_block_template(client_long_poll_id, long_poll_started)
-            .await
+            .precomputed_block_template(
+                client_long_poll_id,
+                long_poll_started,
+                long_poll_deadline,
+                &mut long_poll_permit,
+            )
+            .await?
         {
+            drop(long_poll_permit);
             return Ok(self.served_block_template(template));
         }
 
@@ -2903,12 +2942,18 @@ where
             let now = self.template_clock_now();
             let max_time_reached =
                 client_long_poll_id.is_some() && long_poll_started <= max_time && now > max_time;
+            let lifetime_reached =
+                client_long_poll_id.is_some() && tokio::time::Instant::now() >= long_poll_deadline;
 
             // The loop finishes if:
             // - the client didn't pass a long poll ID,
-            // - the server long poll ID is different to the client long poll ID, or
-            // - the timestamp range expired during this request.
-            if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
+            // - the server long poll ID is different to the client long poll ID,
+            // - the timestamp range expired during this request, or
+            // - the maximum long-poll lifetime elapsed.
+            if Some(&server_long_poll_id) != client_long_poll_id.as_ref()
+                || max_time_reached
+                || lifetime_reached
+            {
                 // Expired work cannot be retained, even when only the mempool changed the ID.
                 let submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= max_time && server_long_poll_id.submit_old(old_long_poll_id)
@@ -2922,6 +2967,9 @@ where
                     submit_old,
                 );
             }
+
+            // Acquire a parked long-poll permit only once we know this call is about to wait.
+            self.acquire_long_poll_permit(&mut long_poll_permit)?;
 
             // - Polling wait conditions
             //
@@ -2973,9 +3021,15 @@ where
                     // miner doesn't waste any effort extending the shorter chain. Otherwise, loop
                     // around to build a template for the new tip from the state and the mempool.
                     if let Some(template) = self
-                        .precomputed_block_template(client_long_poll_id, long_poll_started)
-                        .await
+                        .precomputed_block_template(
+                            client_long_poll_id,
+                            long_poll_started,
+                            long_poll_deadline,
+                            &mut long_poll_permit,
+                        )
+                        .await?
                     {
+                        drop(long_poll_permit);
                         return Ok(self.served_block_template(template));
                     }
                 }
@@ -2994,8 +3048,22 @@ where
 
                     // Recheck wall time in the next iteration in case the clock moved backwards.
                 }
+
+                () = tokio::time::sleep_until(long_poll_deadline) => {
+                    tracing::debug!(
+                        ?max_time,
+                        ?cur_time,
+                        ?server_long_poll_id,
+                        ?client_long_poll_id,
+                        ?MAX_LONG_POLL_DURATION,
+                        "ending long poll after reaching maximum long-poll lifetime"
+                    );
+                }
             }
         };
+
+        // Release the long-poll slot before transaction selection and shielded coinbase proving.
+        drop(long_poll_permit);
 
         // - Processing fetched data to create a transaction template
         //

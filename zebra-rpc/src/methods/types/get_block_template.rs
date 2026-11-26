@@ -20,7 +20,10 @@ use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{
+    mpsc::{self, error::TrySendError},
+    OwnedSemaphorePermit, Semaphore, TryAcquireError,
+};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
@@ -695,6 +698,69 @@ impl CoinbaseCache {
     }
 }
 
+/// Bounds the number of concurrent parked `getblocktemplate` long-poll requests.
+#[derive(Clone, Debug)]
+pub(crate) struct LongPollLimiter {
+    permits: Arc<Semaphore>,
+    #[cfg(test)]
+    max_permits: usize,
+}
+
+impl Default for LongPollLimiter {
+    fn default() -> Self {
+        Self::new(config::rpc::DEFAULT_MAX_LONG_POLLS)
+    }
+}
+
+impl LongPollLimiter {
+    /// Creates a new limiter allowing up to `max_permits` concurrent parked long polls.
+    pub(crate) fn new(max_permits: usize) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(max_permits)),
+            #[cfg(test)]
+            max_permits,
+        }
+    }
+
+    /// Acquires a permit to park a `getblocktemplate` long poll, or returns
+    /// `ErrorCode::ServerIsBusy` (`-32009`) if the cap is reached.
+    pub(crate) fn try_acquire(&self) -> RpcResult<LongPollPermit> {
+        match Arc::clone(&self.permits).try_acquire_owned() {
+            Ok(permit) => {
+                metrics::gauge!("rpc.getblocktemplate.active_long_polls").increment(1.0);
+                Ok(LongPollPermit { _permit: permit })
+            }
+            Err(TryAcquireError::NoPermits) => Err(ErrorObject::owned(
+                ErrorCode::ServerIsBusy.code(),
+                "too many active getblocktemplate long polls, try again later",
+                None::<()>,
+            )),
+            Err(TryAcquireError::Closed) => {
+                unreachable!("the long-poll semaphore is never closed")
+            }
+        }
+    }
+
+    /// Returns the number of currently active parked long-poll permits.
+    #[cfg(test)]
+    pub(crate) fn active(&self) -> usize {
+        self.max_permits
+            .saturating_sub(self.permits.available_permits())
+    }
+}
+
+/// RAII guard for a parked `getblocktemplate` long-poll slot.
+#[derive(Debug)]
+pub(crate) struct LongPollPermit {
+    _permit: OwnedSemaphorePermit,
+}
+
+impl Drop for LongPollPermit {
+    fn drop(&mut self) {
+        metrics::gauge!("rpc.getblocktemplate.active_long_polls").decrement(1.0);
+    }
+}
+
 /// Handler for the `getblocktemplate` RPC.
 #[derive(Clone)]
 pub struct GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -726,6 +792,9 @@ where
     /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
     /// precomputed template pays the configured miner address.
     template_cache: Option<precompute::TemplateCache>,
+
+    /// Semaphore limiting the number of concurrently parked long-polling requests.
+    long_poll_limiter: LongPollLimiter,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -749,7 +818,24 @@ where
                 .unwrap_or(SubmitBlockChannel::default().sender()),
             coinbase_cache: CoinbaseCache::default(),
             template_cache: Some(precompute::TemplateCache::default()),
+            long_poll_limiter: LongPollLimiter::default(),
         }
+    }
+
+    /// Replaces the long-poll limiter with a fresh semaphore sized to `max_long_polls`.
+    pub(crate) fn set_max_long_polls(&mut self, max_long_polls: usize) {
+        self.long_poll_limiter = LongPollLimiter::new(max_long_polls);
+    }
+
+    /// Attempts to acquire a permit to park a `getblocktemplate` long poll.
+    pub(crate) fn try_acquire_long_poll_permit(&self) -> RpcResult<LongPollPermit> {
+        self.long_poll_limiter.try_acquire()
+    }
+
+    /// Returns the number of currently parked `getblocktemplate` long polls.
+    #[cfg(test)]
+    pub(crate) fn active_long_polls(&self) -> usize {
+        self.long_poll_limiter.active()
     }
 
     /// Returns the miner parameters, including the address, data, and memo.
@@ -826,6 +912,7 @@ where
         // Skip fields without debug impls
         f.debug_struct("GetBlockTemplateHandler")
             .field("miner_params", &self.miner_params)
+            .field("long_poll_limiter", &self.long_poll_limiter)
             .finish()
     }
 }

@@ -111,8 +111,8 @@ You can verify your configuration by inspecting Zebra's logs at startup.
 
 Zebra's RPC server is disabled by default. Enable and configure it via the TOML configuration file, or configuration environment variables:
 
-- **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
-- **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
+- **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet). Optionally set `max_connections` (default `100`) to adjust the HTTP JSON-RPC concurrency limit (at most `max_connections / 2` `getblocktemplate` long polls may park concurrently).
+- **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To adjust the connection limit, set `ZEBRA_RPC__MAX_CONNECTIONS=100`. To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
 
 **Cookie Authentication:**
 

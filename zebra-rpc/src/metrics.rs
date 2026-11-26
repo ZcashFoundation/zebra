@@ -36,6 +36,11 @@ pub fn describe() {
         Unit::Count,
         "JSON-RPC requests currently being handled."
     );
+    describe_gauge!(
+        "rpc.getblocktemplate.active_long_polls",
+        Unit::Count,
+        "Active getblocktemplate long-poll requests currently waiting for a new template."
+    );
     describe_histogram!(
         "rpc.getblocktemplate.build.duration_seconds",
         Unit::Seconds,

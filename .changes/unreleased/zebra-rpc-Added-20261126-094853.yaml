@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `config::rpc::Config::max_connections`, `config::rpc::DEFAULT_MAX_CONNECTIONS`, and `config::rpc::MaxConnectionsError`; bounded parked `getblocktemplate` long polls to half of `max_connections` (returning JSON-RPC error `-32009` when full) with a 10-minute maximum lifetime; and added the `rpc.getblocktemplate.active_long_polls` gauge.
+time: 2026-11-26T09:48:53.536908462Z

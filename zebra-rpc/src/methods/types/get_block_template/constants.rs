@@ -16,6 +16,15 @@ use zebra_chain::parameters::subsidy::FundingStreamReceiver::{self, *};
 /// <https://github.com/zcash/zcash/blob/420f8dfe38fd6b2465a665324366c2ae14aa98f4/src/rpc/mining.cpp#L626>
 pub const MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
 
+/// The maximum amount of time a `getblocktemplate` long poll waits before returning the
+/// current template, even if neither the chain tip nor the mempool changes.
+///
+/// Bounds permit retention when `max_time` is not armed (for polls started after `max_time`)
+/// or when an idle client connection goes half-open without TCP keepalive, while staying well
+/// above Zcash's 75-second block target and Testnet's 450-second minimum-difficulty window
+/// and below `zcash-cli`'s 15-minute client timeout.
+pub const MAX_LONG_POLL_DURATION: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// A range of valid block template nonces, that goes from `u32::MIN` to `u32::MAX` as a string.
 pub const NONCE_RANGE_FIELD: &str = "00000000ffffffff";
 

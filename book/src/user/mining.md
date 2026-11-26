@@ -101,7 +101,10 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 ```toml
 [rpc]
 listen_addr = "127.0.0.1:8232"
+# max_connections = 100
 ```
+
+`max_connections` limits concurrent in-flight HTTP JSON-RPC requests on `listen_addr` (default `100`, minimum `1`; requests past this limit receive HTTP `429`). At most `max_connections / 2` requests (`50` by default) may wait in `getblocktemplate` long polling at once, reserving the rest for `submitblock`, `getblockchaininfo`, and other RPCs. Excess long polls receive the retryable JSON-RPC error `-32009` (`Server is busy`), and parked long polls return the current template after 10 minutes if neither the chain tip nor the mempool changes.
 
 ## Running zebra
 

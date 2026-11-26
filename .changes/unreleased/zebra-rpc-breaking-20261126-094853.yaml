@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: 'Added `max_connections: u32` to `config::rpc::Config` (default `DEFAULT_MAX_CONNECTIONS = 100`). Update struct literals constructing `config::rpc::Config` to set `max_connections` or include `..Default::default()`.'
+time: 2026-11-26T09:48:53.530736378Z

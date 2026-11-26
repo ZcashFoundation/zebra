@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Bounded parked `getblocktemplate` long polls to half of `[rpc].max_connections` (default `100`, allowing `50` parked long polls) with a 10-minute maximum lifetime so long polls cannot starve `submitblock` or other RPCs. Excess long polls receive retryable JSON-RPC error `-32009`. Configure the HTTP JSON-RPC connection limit with `max_connections` in `[rpc]` (`ZEBRA_RPC__MAX_CONNECTIONS`).
+time: 2026-11-26T09:48:53.54197351Z

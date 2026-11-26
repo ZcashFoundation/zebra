@@ -4388,6 +4388,345 @@ async fn getblocktemplate_long_poll_expires_once() {
     }
 }
 
+/// Long polls are bounded separately from general template requests, reject excess waits with
+/// `ErrorCode::ServerIsBusy` (`-32009`), release permits when dropped or completed, and allow
+/// regular `getblocktemplate` calls while at capacity.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_respects_limit_and_releases_permits() {
+    let _init_guard = zebra_test::init();
+
+    for cached in [false, true] {
+        let net = Network::Mainnet;
+        let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+        let tip_hash = Hash([1; 32]);
+        let now = DateTime32::from(1_700_000_000);
+        let max_time = now.saturating_add(Duration32::from_seconds(120));
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            tip_height,
+            tip_hash,
+            cur_time: now,
+            min_time: now,
+            max_time,
+            chain_history_root: fake_history_tree(&net).hash(),
+            chain_value_pools: Default::default(),
+        };
+        let (chain_info_tx, chain_info_rx) = tokio::sync::watch::channel(chain_info.clone());
+        let mempool_tip = chain_info_rx.clone();
+        let read_state = tower::service_fn(move |request| {
+            let chain_info = chain_info_rx.borrow().clone();
+            async move {
+                Ok::<_, BoxError>(match request {
+                    ReadRequest::Tip => {
+                        ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
+                    }
+                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                    other => panic!("unexpected state request: {other:?}"),
+                })
+            }
+        });
+        let mempool = tower::service_fn(move |request| {
+            let tip_hash = mempool_tip.borrow().tip_hash;
+            async move {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                })
+            }
+        });
+        let (mock_tip, mock_tip_sender) = MockChainTip::new();
+        mock_tip_sender.send_best_tip_height(tip_height);
+        mock_tip_sender.send_best_tip_hash(tip_hash);
+        mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (mut rpc, queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                    NetworkType::Main,
+                    [0x7e; 20],
+                )),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "RPC test",
+            mempool,
+            MockService::build().for_unit_tests(),
+            read_state,
+            MockService::build().for_unit_tests(),
+            sync,
+            mock_tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        rpc = rpc.with_max_long_polls(2);
+        let clock = Arc::new(AtomicU32::new(now.timestamp()));
+        rpc.template_clock = Some(clock.clone());
+        let cache = rpc.gbt.template_cache().unwrap();
+        let make_template = |chain_info: &GetBlockTemplateChainInfo| {
+            BlockTemplateResponse::new_internal(
+                &net,
+                &rpc.gbt.coinbase_cache(),
+                rpc.gbt.miner_params().unwrap(),
+                chain_info,
+                LongPollInput::new(
+                    chain_info.tip_height,
+                    chain_info.tip_hash,
+                    chain_info.max_time,
+                    std::iter::empty(),
+                )
+                .generate_id(),
+                vec![],
+                None,
+            )
+        };
+        let template = make_template(&chain_info);
+        if cached {
+            cache.publish(template.clone());
+        }
+        let long_poll_params = |id| {
+            Some(GetBlockTemplateParameters {
+                long_poll_id: Some(id),
+                ..Default::default()
+            })
+        };
+
+        assert_eq!(rpc.gbt.active_long_polls(), 0);
+
+        let mut lp1 = Box::pin(rpc.get_block_template(long_poll_params(template.long_poll_id)));
+        assert!(futures::poll!(&mut lp1).is_pending(), "cached: {cached}");
+        assert_eq!(rpc.gbt.active_long_polls(), 1, "cached: {cached}");
+
+        let mut lp2 = Box::pin(rpc.get_block_template(long_poll_params(template.long_poll_id)));
+        assert!(futures::poll!(&mut lp2).is_pending(), "cached: {cached}");
+        assert_eq!(rpc.gbt.active_long_polls(), 2, "cached: {cached}");
+
+        // A third matching long poll is rejected with -32009 without consuming a slot.
+        let busy_err = rpc
+            .get_block_template(long_poll_params(template.long_poll_id))
+            .await
+            .expect_err("excess long poll should return ServerIsBusy");
+        assert_eq!(
+            busy_err.code(),
+            ErrorCode::ServerIsBusy.code(),
+            "cached: {cached}"
+        );
+        assert_eq!(rpc.gbt.active_long_polls(), 2, "cached: {cached}");
+
+        // Non-long-poll and stale-longpollid calls still succeed immediately while at capacity.
+        let immediate = rpc
+            .get_block_template(None)
+            .await
+            .expect("plain getblocktemplate must succeed while long polls are full")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(immediate.long_poll_id, template.long_poll_id);
+
+        let mut stale_id = template.long_poll_id;
+        stale_id.tip_hash_checksum ^= 1;
+        let stale = rpc
+            .get_block_template(long_poll_params(stale_id))
+            .await
+            .expect("stale longpollid must return immediately without acquiring a permit")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(stale.long_poll_id, template.long_poll_id);
+        assert_eq!(rpc.gbt.active_long_polls(), 2, "cached: {cached}");
+
+        // Cancelling a parked long poll frees its slot for a replacement.
+        drop(lp1);
+        assert_eq!(rpc.gbt.active_long_polls(), 1, "cached: {cached}");
+
+        let mut lp3 = Box::pin(rpc.get_block_template(long_poll_params(template.long_poll_id)));
+        assert!(futures::poll!(&mut lp3).is_pending(), "cached: {cached}");
+        assert_eq!(rpc.gbt.active_long_polls(), 2, "cached: {cached}");
+
+        let busy_again = rpc
+            .get_block_template(long_poll_params(template.long_poll_id))
+            .await
+            .expect_err("replacement should re-saturate the long-poll limit");
+        assert_eq!(busy_again.code(), ErrorCode::ServerIsBusy.code());
+
+        // Advance the tip: both parked long polls return and release their slots.
+        let mut replacement_info = chain_info;
+        replacement_info.tip_height = tip_height.next().unwrap();
+        replacement_info.tip_hash = Hash([2; 32]);
+        replacement_info.max_time = max_time.saturating_add(Duration32::from_seconds(30));
+        let replacement = make_template(&replacement_info);
+        mock_tip_sender.send_best_tip_height(replacement_info.tip_height);
+        mock_tip_sender.send_best_tip_hash(replacement_info.tip_hash);
+        chain_info_tx.send_replace(replacement_info);
+        if cached {
+            cache.publish(replacement.clone());
+        }
+
+        for lp in [lp2, lp3] {
+            let response = tokio::time::timeout(Duration::from_secs(1), lp)
+                .await
+                .expect("tip change must wake parked long polls")
+                .expect("parked long poll should return new template")
+                .try_into_template()
+                .expect("template-mode response");
+            assert_eq!(response.long_poll_id, replacement.long_poll_id);
+            assert_eq!(response.submit_old, Some(false));
+        }
+
+        assert_eq!(rpc.gbt.active_long_polls(), 0, "cached: {cached}");
+        queue.abort();
+    }
+}
+
+/// A parked long poll returns the current template once `MAX_LONG_POLL_DURATION` elapses even
+/// when neither the chain tip nor the mempool changes, including when `max_time` is not armed.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_returns_after_max_duration() {
+    use types::get_block_template::constants::MAX_LONG_POLL_DURATION;
+
+    let _init_guard = zebra_test::init();
+
+    for cached in [false, true] {
+        for already_expired in [false, true] {
+            let net = Network::Mainnet;
+            let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+            let tip_hash = Hash([1; 32]);
+            let now = DateTime32::from(1_700_000_000);
+            let max_time = if already_expired {
+                DateTime32::from(now.timestamp() - 10)
+            } else {
+                now.saturating_add(Duration32::from_seconds(
+                    u32::try_from(MAX_LONG_POLL_DURATION.as_secs()).unwrap() + 120,
+                ))
+            };
+            let chain_info = GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip_height,
+                tip_hash,
+                cur_time: now,
+                min_time: now,
+                max_time,
+                chain_history_root: fake_history_tree(&net).hash(),
+                chain_value_pools: Default::default(),
+            };
+            let chain_info_rx = tokio::sync::watch::channel(chain_info.clone()).1;
+            let mempool_tip = chain_info_rx.clone();
+            let read_state = tower::service_fn(move |request| {
+                let chain_info = chain_info_rx.borrow().clone();
+                async move {
+                    Ok::<_, BoxError>(match request {
+                        ReadRequest::Tip => {
+                            ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
+                        }
+                        ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            });
+            let mempool = tower::service_fn(move |request| {
+                let tip_hash = mempool_tip.borrow().tip_hash;
+                async move {
+                    assert!(matches!(request, mempool::Request::FullTransactions));
+                    Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                        transactions: vec![],
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: tip_hash,
+                    })
+                }
+            });
+            let (mock_tip, mock_tip_sender) = MockChainTip::new();
+            mock_tip_sender.send_best_tip_height(tip_height);
+            mock_tip_sender.send_best_tip_hash(tip_hash);
+            mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+            let mut sync = MockSyncStatus::default();
+            sync.set_is_close_to_tip(true);
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (mut rpc, queue) = RpcImpl::new(
+                net.clone(),
+                mining::Config {
+                    miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                        NetworkType::Main,
+                        [0x7e; 20],
+                    )),
+                    ..Default::default()
+                },
+                false,
+                "0.0.1",
+                "RPC test",
+                mempool,
+                MockService::build().for_unit_tests(),
+                read_state,
+                MockService::build().for_unit_tests(),
+                sync,
+                mock_tip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let clock = Arc::new(AtomicU32::new(now.timestamp()));
+            rpc.template_clock = Some(clock.clone());
+            let cache = rpc.gbt.template_cache().unwrap();
+            let template = BlockTemplateResponse::new_internal(
+                &net,
+                &rpc.gbt.coinbase_cache(),
+                rpc.gbt.miner_params().unwrap(),
+                &chain_info,
+                LongPollInput::new(
+                    chain_info.tip_height,
+                    chain_info.tip_hash,
+                    chain_info.max_time,
+                    std::iter::empty(),
+                )
+                .generate_id(),
+                vec![],
+                None,
+            );
+            if cached {
+                cache.publish(template.clone());
+            }
+
+            let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+                long_poll_id: Some(template.long_poll_id),
+                ..Default::default()
+            }));
+            tokio::pin!(waiting);
+            assert!(
+                futures::poll!(&mut waiting).is_pending(),
+                "cached: {cached}, already_expired: {already_expired}"
+            );
+            assert_eq!(rpc.gbt.active_long_polls(), 1);
+
+            tokio::time::advance(MAX_LONG_POLL_DURATION - Duration::from_secs(1)).await;
+            assert!(
+                futures::poll!(&mut waiting).is_pending(),
+                "long poll must stay parked until MAX_LONG_POLL_DURATION elapses"
+            );
+            assert_eq!(rpc.gbt.active_long_polls(), 1);
+
+            tokio::time::advance(Duration::from_secs(1)).await;
+            let response = tokio::time::timeout(Duration::from_secs(1), waiting)
+                .await
+                .expect("MAX_LONG_POLL_DURATION must end the long poll")
+                .expect("expired long poll returns current template")
+                .try_into_template()
+                .expect("template-mode response");
+
+            assert_eq!(response.long_poll_id, template.long_poll_id);
+            assert_eq!(
+                response.submit_old,
+                Some(!already_expired),
+                "cached: {cached}, already_expired: {already_expired}"
+            );
+            assert_eq!(rpc.gbt.active_long_polls(), 0);
+            queue.abort();
+        }
+    }
+}
+
 /// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
 /// already committed, even while the chain tip channel still names that block's parent.
 ///
