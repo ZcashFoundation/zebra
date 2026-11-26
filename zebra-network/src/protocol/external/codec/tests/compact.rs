@@ -273,3 +273,73 @@ async fn compact_recovery_ignores_unrelated_expired_and_canceled_bodies_before_h
         assert!(bytes.is_empty());
     }
 }
+
+/// A compact block message that the connection no longer negotiates, or a transaction recovery
+/// response after its deadline, is ignored without holding up the message behind it in the same
+/// read.
+#[tokio::test]
+async fn messages_after_unnegotiated_compact_messages_are_decoded() {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    use tokio_util::codec::FramedRead;
+
+    let _guard = zebra_test::init();
+    let ping = Message::Ping(Nonce(7));
+    let mut ping_bytes = BytesMut::new();
+    Codec::builder()
+        .finish()
+        .encode(ping.clone(), &mut ping_bytes)
+        .unwrap();
+
+    let hash = block::Hash([1; 32]);
+    for case in ["withdrawn", "expired"] {
+        let codec = || {
+            let mut codec = Codec::builder()
+                .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                .finish();
+            negotiate_compact(&mut codec);
+            // This node stopped receiving compact announcements, and its recovery deadline passed.
+            let recovery = track_compact_recovery(&mut codec, hash);
+            recovery.send_replace(Some((hash, tokio::time::Instant::now())));
+            codec
+                .encode(
+                    Message::SendCompact {
+                        high_bandwidth: false,
+                        version: 1,
+                    },
+                    &mut BytesMut::new(),
+                )
+                .unwrap();
+            (codec, recovery)
+        };
+        let mut bytes = match case {
+            "withdrawn" => frame(b"cmpctblock\0\0", &[0; 64]),
+            "expired" => frame(b"blocktxn\0\0\0\0", &hash.0),
+            _ => unreachable!(),
+        };
+        bytes.extend_from_slice(&ping_bytes);
+
+        // One call decodes the message behind the ignored one.
+        let (mut decoder, _recovery) = codec();
+        let mut buffered = bytes.clone();
+        assert_eq!(
+            decoder.decode(&mut buffered).unwrap(),
+            Some(ping.clone()),
+            "{case}"
+        );
+        assert!(buffered.is_empty(), "{case}");
+
+        // A reader delivers the message without waiting for more bytes from the peer.
+        let (decoder, _recovery) = codec();
+        let (mut writer, reader) = tokio::io::duplex(bytes.len());
+        writer.write_all(&bytes).await.unwrap();
+        let mut messages = FramedRead::new(reader, decoder);
+        let message = tokio::time::timeout(std::time::Duration::from_secs(5), messages.next())
+            .await
+            .expect("the message is decoded from the bytes already received")
+            .expect("the connection is open")
+            .unwrap();
+        assert_eq!(message, ping, "{case}");
+        drop(writer);
+    }
+}
