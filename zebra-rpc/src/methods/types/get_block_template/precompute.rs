@@ -568,7 +568,7 @@ async fn verified_transaction_added(
 /// A validation is dropped when a template is published on another block, because miners no
 /// longer work on the template it validates, and after [`TEMPLATE_VALIDATION_TIMEOUT`]. Dropping
 /// it also drops the block verifier's request, so the verifier stops waiting for it. A template
-/// that isn't validated is verified in full when a miner submits it.
+/// that isn't validated is verified like any other block when a miner submits it.
 ///
 /// Runs until the task is aborted.
 pub(crate) async fn validate_templates<BlockVerifierRouter>(

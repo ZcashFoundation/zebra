@@ -113,7 +113,7 @@ pub struct Config {
     /// Disabled by default. Peers that both set this option announce newly committed blocks to
     /// each other as a header and short transaction IDs, and rebuild the block from their
     /// mempools instead of downloading its transactions again. Every rebuilt block is still
-    /// fully verified, and relay to other peers is unchanged.
+    /// verified like any other block, and relay to other peers is unchanged.
     ///
     /// Nodes that set it advertise the service bit that the [draft Compact Block Relay ZIP]
     /// assigns. The option name, the service bit and the messages are the ones Zebra 7.2.0-beta.1
