@@ -20,7 +20,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block, MAX_BLOCK_BYTES},
     chain_tip::ChainTip,
-    serialization::{CompactSizeMessage, SerializationError, ZcashSerialize},
+    serialization::{CompactSizeMessage, FakeWriter, SerializationError, ZcashSerialize},
 };
 
 use super::{Connection, Handler, InventoryResponse, State};
@@ -264,10 +264,9 @@ where
         let permit = SENT_SLOTS.clone().try_acquire_owned().ok()?;
         let serving = self.compact_serving_block(hash).await?;
         let (serving, compact, permit) = tokio::task::spawn_blocking(move || {
-            let compact = CompactBlock::from_block(&serving.block, serving.nonce);
-            let compact = compact.ok().filter(|compact| {
-                compact.zcash_serialized_size() < serving.block.zcash_serialized_size()
-            });
+            let compact = CompactBlock::from_block(&serving.block, serving.nonce)
+                .ok()
+                .and_then(|compact| smaller_announcement(compact, &serving.block));
             (serving, compact, permit)
         })
         .await
@@ -555,6 +554,21 @@ where
             self.fail_with(error).await;
         }
     }
+}
+
+/// Returns `compact` if its encoding is smaller than `block`'s encoding.
+///
+/// An announcement that wouldn't save bytes, or whose encoding fails, isn't sent, so the block is
+/// relayed with an ordinary block inventory instead.
+pub(super) fn smaller_announcement(compact: CompactBlock, block: &Block) -> Option<CompactBlock> {
+    (encoded_size(&compact)? < encoded_size(block)?).then_some(compact)
+}
+
+/// Returns the number of bytes in `value`'s encoding, or `None` if its encoding fails.
+fn encoded_size(value: &impl ZcashSerialize) -> Option<usize> {
+    let mut writer = FakeWriter(0);
+    value.zcash_serialize(&mut writer).ok()?;
+    Some(writer.0)
 }
 
 /// Returns the timer for the response to `handler`.
