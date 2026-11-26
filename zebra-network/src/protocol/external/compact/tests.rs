@@ -109,6 +109,96 @@ fn compact_short_id_literal_vectors() {
     assert_ne!(compact.keys(), keys);
 }
 
+/// Every announcement that `from_block` builds passes `validate`, serializes, and decodes to the
+/// same announcement.
+#[test]
+fn compact_announcements_from_blocks_serialize() {
+    let vectors = zebra_test::vectors::MAINNET_BLOCKS
+        .iter()
+        .chain(zebra_test::vectors::TESTNET_BLOCKS.iter());
+    for (height, bytes) in vectors {
+        let block = Block::zcash_deserialize(*bytes).unwrap();
+        let compact = CompactBlock::from_block(&block, u64::from(*height))
+            .expect("test vector blocks start with a coinbase and fit in a block");
+        compact.validate().unwrap();
+        let encoded = compact.zcash_serialize_to_vec().unwrap();
+        assert_eq!(
+            CompactBlock::zcash_deserialize(encoded.as_slice()).unwrap(),
+            compact
+        );
+    }
+}
+
+/// Returns a block of exactly `MAX_BLOCK_BYTES` with a coinbase and 60-byte transactions, the
+/// smallest transparent transaction, which each spend a different output.
+pub(crate) fn full_block_of_the_smallest_transactions() -> Block {
+    let mut block =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+    let output = |script: usize| {
+        vec![transparent::Output {
+            value: 1.try_into().unwrap(),
+            lock_script: transparent::Script::new(&vec![0; script]),
+        }]
+    };
+    let smallest = |index: usize| {
+        Arc::new(Transaction::test_v1(
+            vec![transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: transaction::Hash([7; 32]),
+                    index: u32::try_from(index).unwrap(),
+                },
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            output(0),
+            LockTime::unlocked(),
+        ))
+    };
+    let size = smallest(0).zcash_serialized_size();
+    assert_eq!(size, 60, "the smallest transparent transaction is 60 bytes");
+
+    let coinbase = block.transactions[0].as_ref().clone();
+    let coinbase =
+        |script: usize| Arc::new(coinbase.clone().with_transparent_outputs(output(script)));
+    block.transactions = vec![coinbase(0)];
+    let max = usize::try_from(MAX_BLOCK_BYTES).unwrap();
+    // The transaction count takes 3 bytes once the block has 253 transactions or more.
+    let space = max - block.zcash_serialized_size() - 2;
+    // The coinbase's output script takes up the bytes that the transactions leave.
+    block.transactions[0] = coinbase(space % size);
+    block.transactions.extend((0..space / size).map(smallest));
+    Arc::make_mut(&mut block.header).merkle_root = block.transactions.iter().collect();
+    assert_eq!(block.zcash_serialized_size(), max, "the block is full");
+    block
+}
+
+/// A block of exactly `MAX_BLOCK_BYTES` that is filled with the smallest transparent transactions
+/// gets a compact announcement, which serializes and is smaller than the block.
+#[test]
+fn full_blocks_of_the_smallest_transactions_get_compact_announcements() {
+    let block = full_block_of_the_smallest_transactions();
+    let block_bytes = block.zcash_serialize_to_vec().unwrap();
+    // The block decodes from its own encoding.
+    let decoded = Block::zcash_deserialize(block_bytes.as_slice()).unwrap();
+    assert!(decoded == block, "the block decodes to the same block");
+
+    let compact = CompactBlock::from_block(&block, 17)
+        .expect("the block starts with a coinbase, and its transactions fit in a block");
+    assert_eq!(compact.short_ids.len(), block.transactions.len() - 1);
+    let encoded = compact.zcash_serialize_to_vec().unwrap();
+    assert!(
+        encoded.len() < block_bytes.len(),
+        "the announcement is {} bytes, and the block {} bytes",
+        encoded.len(),
+        block_bytes.len()
+    );
+    let decoded = CompactBlock::zcash_deserialize(encoded.as_slice()).unwrap();
+    assert!(
+        decoded == compact,
+        "the announcement decodes to the same announcement"
+    );
+}
+
 #[test]
 fn compact_short_id_identity_vectors() {
     let block = fixture();
