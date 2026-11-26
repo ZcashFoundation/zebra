@@ -29,9 +29,9 @@ use crate::{
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::tip,
+        read::{find, tip},
     },
-    BlockReadError, HashOrHeight,
+    BlockReadError, BoxError, HashOrHeight, ReadResponse,
 };
 
 #[cfg(feature = "indexer")]
@@ -143,6 +143,42 @@ where
         .and_then(|chain| chain.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.header.clone())
         .or_else(|| db.block_header(hash_or_height))
+}
+
+/// Returns the [`ReadResponse::BlockHeader`] for `hash_or_height` from `best_chain` or `db`.
+pub(crate) fn block_header_response<C>(
+    best_chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<ReadResponse, BoxError>
+where
+    C: AsRef<Chain> + Clone,
+{
+    let height = hash_or_height
+        .height_or_else(|hash| find::height_by_hash(best_chain.clone(), db, hash))
+        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+    let hash = hash_or_height
+        .hash_or_else(|height| find::hash_by_height(best_chain.clone(), db, height))
+        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+    let next_height = height.next()?;
+    let next_block_hash = find::hash_by_height(best_chain.clone(), db, next_height);
+
+    let header = block_header(best_chain, db, height.into()).ok_or_else(|| {
+        if db.is_read_only() {
+            BoxError::from("block hash or height not found")
+        } else {
+            BoxError::from(BlockReadError::CorruptBlock { height })
+        }
+    })?;
+
+    Ok(ReadResponse::BlockHeader {
+        header,
+        hash,
+        height,
+        next_block_hash,
+    })
 }
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the

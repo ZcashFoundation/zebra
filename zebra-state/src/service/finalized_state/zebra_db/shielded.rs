@@ -561,26 +561,26 @@ impl ZebraDb {
 
         // Search backwards for the tree.
         match self.db.zs_prev_key_value_back_from(&ironwood_trees, height) {
-            Some((first_duplicate_height, tree)) => {
-                if !self.secondary_tree_view_is_complete(*height, first_duplicate_height, |block| {
+            Some((first_duplicate_height, tree)) => self
+                .secondary_tree_view_is_complete(*height, first_duplicate_height, |block| {
                     block.ironwood_note_commitments().next().is_some()
-                }) {
-                    return None;
-                }
-                Some(Arc::new(tree))
-            }
-            None if !nu6_3_activated => {
-                if self.db.is_read_only() && !matches!(self.block((*height).into()), Ok(Some(_))) {
-                    return None;
-                }
-                Some(Default::default())
-            }
+                })
+                .then(|| Arc::new(tree)),
+            None if !nu6_3_activated => self
+                .secondary_block_is_present(*height)
+                .then(Default::default),
             None if self.db.is_read_only() => None,
             None => panic!(
                 "Ironwood note commitment tree must exist for all heights at or below the finalized \
                  tip from NU6.3 activation onward"
             ),
         }
+    }
+
+    /// Returns `true` on primary databases, or on secondary databases when the block at `height`
+    /// has a complete cross-column view.
+    fn secondary_block_is_present(&self, height: Height) -> bool {
+        !self.db.is_read_only() || matches!(self.block(height.into()), Ok(Some(_)))
     }
 
     /// On a read-only secondary database, verifies that the cross-column view at `height` is
