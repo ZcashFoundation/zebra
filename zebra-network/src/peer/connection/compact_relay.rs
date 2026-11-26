@@ -114,12 +114,15 @@ impl CompactRelay {
             .is_some_and(|(serving, until, _)| until.is_none() && serving.is_authorized())
     }
 
+    /// Starts the delivered announcement's serving deadline.
+    ///
+    /// The snapshot keeps its authorization, so transaction recovery can check whether its
+    /// publication was withdrawn.
     pub(super) fn mark_sent(&mut self) {
-        let (serving, until, _) = self
+        let (_, until, _) = self
             .sent
             .as_mut()
             .expect("a delivered compact announcement retains its serving snapshot");
-        serving.authorization = None;
         *until = Some(Instant::now() + RETENTION);
         self.recovery_bytes_left =
             usize::try_from(MAX_BLOCK_BYTES).expect("the block byte limit fits in memory");
@@ -626,6 +629,25 @@ where
         }
     }
 
+    /// Returns the block with `hash` if a block request for it is still served, by asking the
+    /// ordinary block service before `until`. That service serves committed blocks, but never
+    /// bodies from the early-relay cache.
+    async fn servable_block(&mut self, hash: block::Hash, until: Instant) -> Option<Arc<Block>> {
+        let response = timeout_at(
+            until,
+            self.compact_query(Request::BlocksByHash(HashSet::from([hash]))),
+        )
+        .await
+        .ok()??;
+        let Response::Blocks(blocks) = response else {
+            return None;
+        };
+        blocks.into_iter().find_map(|item| match item {
+            InventoryResponse::Available((block, _)) if block.hash() == hash => Some(block),
+            _ => None,
+        })
+    }
+
     pub(super) async fn serve_compact_transactions(&mut self, request: BlockTransactionsRequest) {
         if !self.connection_info.early_block_relay {
             return;
@@ -674,11 +696,33 @@ where
             return;
         };
         self.compact.recovery_bytes_left = remaining;
-        let transactions = request
-            .indexes
-            .into_iter()
-            .map(|index| serving.block.transactions[index].clone())
-            .collect();
+        let withdrawn = serving
+            .authorization
+            .as_ref()
+            .is_some_and(|authorization| !authorization.is_authorized(&serving.block));
+        let transactions = if withdrawn {
+            // Like a block request, serve the transactions of a block whose publication was
+            // withdrawn only if the ordinary block service still serves the block, for example
+            // because it was committed. Only the requested transactions are kept.
+            let servable = self.servable_block(request.block_hash, until).await;
+            let Some(transactions) = servable.and_then(|block| {
+                request
+                    .indexes
+                    .iter()
+                    .map(|index| block.transactions.get(*index).cloned())
+                    .collect()
+            }) else {
+                self.compact.clear_sent();
+                return;
+            };
+            transactions
+        } else {
+            request
+                .indexes
+                .into_iter()
+                .map(|index| serving.block.transactions[index].clone())
+                .collect()
+        };
         let response = BlockTransactions {
             block_hash: request.block_hash,
             transactions,

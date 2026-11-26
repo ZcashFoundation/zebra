@@ -1567,9 +1567,20 @@ async fn sent_compact_snapshot_survives_withdrawal_with_bounded_recovery() {
             "the byte budget permits more replies than the reply limit"
         );
         for _ in 0..max_replies {
+            // The publication was withdrawn, so each reply checks that a block request for it is
+            // still served.
             let (_, response) = tokio::join!(
                 connection.serve_compact_transactions(request.clone()),
-                outbound.next()
+                async {
+                    inbound
+                        .expect_request(Request::BlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::Blocks(vec![InventoryResponse::Available((
+                            block.clone(),
+                            None,
+                        ))]));
+                    outbound.next().await
+                }
             );
             assert_eq!(response, Some(Message::BlockTransactions(expected.clone())));
             assert_eq!(connection.compact.expiry(), until);
@@ -1584,6 +1595,98 @@ async fn sent_compact_snapshot_survives_withdrawal_with_bounded_recovery() {
     })
     .await
     .expect("sent snapshots permit repeated recovery within the reply limit");
+}
+
+/// After the publication of an announced block is withdrawn, its transactions are only served
+/// while a block request for it is still served, for example because the block was committed.
+#[tokio::test]
+async fn compact_snapshot_is_served_only_while_its_block_is_servable() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        for mode in ["live", "committed", "withdrawn"] {
+            let (mut connection, _client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            connection.compact.send = true;
+            let live = Arc::new(AtomicBool::new(true));
+            let authorized = live.clone();
+            let (result, delivered) = tokio::sync::oneshot::channel();
+            let (_, message) = tokio::join!(
+                connection.send_block_advert(crate::peer_set::BlockAdvert {
+                    hash: block.hash(),
+                    compact_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+                    result,
+                }),
+                async {
+                    inbound
+                        .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::AuthorizedBlocks {
+                            blocks: vec![InventoryResponse::Available((block.clone(), None))],
+                            authorization: crate::BlockAuthorization::new(move |_| {
+                                authorized.load(Ordering::SeqCst)
+                            }),
+                        });
+                    outbound.next().await.unwrap()
+                }
+            );
+            assert!(matches!(message, Message::CompactBlock(_)));
+            delivered.await.unwrap().unwrap();
+            if mode != "live" {
+                live.store(false, Ordering::SeqCst);
+            }
+
+            let request = BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes: vec![1],
+            };
+            let expected = Message::BlockTransactions(BlockTransactions {
+                block_hash: block.hash(),
+                transactions: vec![block.transactions[1].clone()],
+            });
+            let (_, response) = tokio::join!(
+                connection.serve_compact_transactions(request.clone()),
+                async {
+                    if mode != "live" {
+                        let committed = if mode == "committed" {
+                            InventoryResponse::Available((block.clone(), None))
+                        } else {
+                            InventoryResponse::Missing(block.hash())
+                        };
+                        inbound
+                            .expect_request(Request::BlocksByHash([block.hash()].into()))
+                            .await
+                            .respond(Response::Blocks(vec![committed]));
+                    }
+                    if mode == "withdrawn" {
+                        None
+                    } else {
+                        outbound.next().await
+                    }
+                }
+            );
+            if mode == "withdrawn" {
+                // The snapshot is released, so later requests get no reply.
+                assert!(outbound.try_recv().is_err());
+                assert!(!connection.compact.has_cached());
+                connection.serve_compact_transactions(request).await;
+                assert!(outbound.try_recv().is_err());
+            } else {
+                assert_eq!(response, Some(expected), "{mode}");
+                assert!(connection.compact.has_cached(), "{mode}");
+            }
+            inbound.expect_no_requests().await;
+            assert!(errors.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("recovery replies are written without timers");
 }
 
 /// Each delivered compact block announcement answers a few transaction recovery requests, within
