@@ -1,6 +1,6 @@
 //! Zebra Mempool queue checker.
 //!
-//! The queue checker sends a request to the mempool when a transaction finishes verifying, and
+//! The queue checker sends a request to the mempool when a transaction is verified, and
 //! periodically as a backstop, so that newly verified transactions are added to the mempool,
 //! and gossiped to peers.
 //!
@@ -21,7 +21,8 @@ use crate::components::mempool;
 
 /// The longest the queue checker waits between queue check events.
 ///
-/// The backstop also handles other mempool work, such as chain tip changes.
+/// The backstop also handles other mempool work, such as chain tip changes and transactions that
+/// fail to download or verify.
 ///
 /// This interval is chosen so that there are a significant number of
 /// queue checks in each target block interval.
@@ -37,7 +38,7 @@ pub struct QueueChecker<Mempool> {
     /// The mempool service that receives crawled transaction IDs.
     mempool: Mempool,
 
-    /// Notified when a transaction finishes verifying.
+    /// Notified when a transaction is verified.
     transaction_verified: Arc<Notify>,
 }
 
@@ -49,7 +50,7 @@ where
 {
     /// Spawn an asynchronous task to run the mempool queue checker.
     ///
-    /// The downloader signals `transaction_verified` after queuing each result.
+    /// The downloader signals `transaction_verified` after queuing each verified transaction.
     pub fn spawn(
         mempool: Mempool,
         transaction_verified: Arc<Notify>,
@@ -62,7 +63,7 @@ where
         tokio::spawn(queue_checker.run().in_current_span())
     }
 
-    /// Check if the mempool has newly verified transactions, when one finishes verifying and at
+    /// Check if the mempool has newly verified transactions, when a transaction is verified and at
     /// least every [`RATE_LIMIT_DELAY`].
     ///
     /// Runs until the mempool returns an error,

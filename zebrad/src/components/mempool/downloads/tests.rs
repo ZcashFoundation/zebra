@@ -172,7 +172,8 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
     );
 }
 
-/// A coalesced wake must drain a batch larger than Tokio's cooperative budget.
+/// One wake must drain a batch larger than Tokio's cooperative budget, even a batch of failures,
+/// which don't wake the queue checker themselves.
 #[tokio::test(start_paused = true)]
 async fn completed_batch_keeps_queue_checker_awake() {
     let notified = Arc::new(Notify::new());
@@ -204,6 +205,9 @@ async fn completed_batch_keeps_queue_checker_awake() {
     assert!(downloads.pending.iter().all(JoinHandle::is_finished));
 
     let before_backstop = super::super::queue_checker::RATE_LIMIT_DELAY / 2;
+    // Failed downloads don't wake the queue checker, so this stands in for the mempool request or
+    // backstop queue check that collects them.
+    notified.notify_one();
     tokio::time::timeout(before_backstop, async {
         let mut completed = 0;
         while completed < MAX_INBOUND_CONCURRENCY {
@@ -221,6 +225,53 @@ async fn completed_batch_keeps_queue_checker_awake() {
     })
     .await
     .expect("queued results must not wait for the five-second backstop");
+}
+
+/// A failed download doesn't wake the queue checker, because there is nothing to store or
+/// announce. The next mempool request or backstop queue check still collects the failure.
+#[tokio::test(start_paused = true)]
+async fn failed_download_does_not_wake_queue_checker() {
+    let notified = Arc::new(Notify::new());
+    let mut downloads = Downloads::new(
+        service_fn(|_| async { Ok(zn::Response::Transactions(Vec::new())) }),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|request| async move {
+            Ok(match request {
+                zs::Request::Transaction(_) => zs::Response::Transaction(None),
+                zs::Request::Tip => zs::Response::Tip(None),
+                _ => unreachable!("downloads only query transactions and the tip"),
+            })
+        }),
+        notified.clone(),
+    );
+    downloads
+        .download_if_needed_and_verify(
+            Gossip::Id(UnminedTxId::Legacy(transaction::Hash([1; 32]))),
+            None,
+            None,
+        )
+        .expect("an empty downloader has room for one transaction");
+    // Paused time advances only after the download has failed, because the peer set returned no
+    // transaction.
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    assert!(downloads.pending.iter().all(JoinHandle::is_finished));
+
+    // A stored wake would make this wait return immediately.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1), notified.notified())
+            .await
+            .is_err(),
+        "a failed download must not wake the queue checker",
+    );
+
+    let result = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .expect("the failed download's result is already queued")
+        .expect("the stream doesn't end while the downloader holds its results sender");
+    assert!(
+        matches!(result, Ok(Err(_))),
+        "the next poll must still collect the failed download, got {result:?}",
+    );
 }
 
 /// Consuming a result frees admission even if its task has not exited.

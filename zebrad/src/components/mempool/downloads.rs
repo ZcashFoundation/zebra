@@ -256,7 +256,7 @@ where
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<IpAddr, usize>,
 
-    /// Wakes the queue checker to store and announce completed transactions.
+    /// Wakes the queue checker to store and announce verified transactions.
     transaction_verified: Arc<Notify>,
 }
 
@@ -359,7 +359,7 @@ where
     /// `verifier` is used to verify transactions.
     /// `state` is used to check if transactions are already in the state.
     ///
-    /// The notification wakes the queue checker after each result is queued.
+    /// The notification wakes the queue checker after each verified transaction is queued.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
@@ -608,7 +608,12 @@ where
 
             // Queue before notifying: the woken mempool must see the result even if this task
             // has not exited yet. A dropped downloader needs no notification.
-            if results_sender.send(result).is_ok() {
+            //
+            // Only a verified transaction can be stored and announced. Failures wait for the next
+            // mempool request or the queue checker's backstop, so each one doesn't trigger its own
+            // queue check and mempool change.
+            let is_verified = matches!(result, Ok(Ok(_)));
+            if results_sender.send(result).is_ok() && is_verified {
                 transaction_verified.notify_one();
             }
         });
