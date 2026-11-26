@@ -1204,6 +1204,8 @@ where
             return Ok(None);
         };
 
+        self.acquire_long_poll_permit_for_cached_id(cache, client_long_poll_id, long_poll_permit)?;
+
         // Subscribe before the first read below. A template published between reading the cache
         // and waiting on it would otherwise be marked seen and skipped, and the only other wakes
         // are a chain tip change and `max_time`, neither of which fires when the mempool alone
@@ -1283,6 +1285,30 @@ where
         response
     }
 
+    /// Acquires a parked long-poll permit before awaiting a state tip read when `client_long_poll_id`
+    /// matches the currently cached template.
+    fn acquire_long_poll_permit_for_cached_id(
+        &self,
+        cache: &precompute::TemplateCache,
+        client_long_poll_id: Option<LongPollId>,
+        long_poll_permit: &mut Option<LongPollPermit>,
+    ) -> Result<()> {
+        if client_long_poll_id.is_some_and(|client_id| cache.holds_long_poll_id(client_id)) {
+            self.acquire_long_poll_permit(long_poll_permit)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the bounded deadline for validating a template against the committed state tip when
+    /// a parked long poll reaches `MAX_LONG_POLL_DURATION`.
+    fn expiry_validation_deadline(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now()
+            + self
+                .gbt
+                .miner_params()
+                .map_or(precompute::NEW_TIP_TIMEOUT, precompute::new_tip_timeout)
+    }
+
     /// Validates the cached template against the committed state tip when a parked precomputed
     /// long poll reaches `MAX_LONG_POLL_DURATION`.
     async fn precomputed_template_on_lifetime_expiry(
@@ -1290,12 +1316,10 @@ where
         cache: &precompute::TemplateCache,
         client_long_poll_id: Option<LongPollId>,
     ) -> Result<Option<BlockTemplateResponse>> {
-        let validation_deadline = tokio::time::Instant::now()
-            + self
-                .gbt
-                .miner_params()
-                .map_or(precompute::NEW_TIP_TIMEOUT, precompute::new_tip_timeout);
-        let Some(tip_hash) = self.read_state_tip_hash_before(validation_deadline).await else {
+        let Some(tip_hash) = self
+            .read_state_tip_hash_before(self.expiry_validation_deadline())
+            .await
+        else {
             return Err(Self::long_poll_timeout_error());
         };
         let now = self.template_clock_now();
@@ -1307,6 +1331,29 @@ where
             client_long_poll_id,
             now,
         )))
+    }
+
+    /// Validates the on-demand snapshot against the committed state tip when a parked long poll
+    /// reaches `MAX_LONG_POLL_DURATION`.
+    async fn on_demand_template_on_lifetime_expiry(
+        &self,
+        client_long_poll_id: Option<LongPollId>,
+        inputs: OnDemandTemplateInputs,
+    ) -> Result<OnDemandTemplatePoll> {
+        let Some(tip_hash) = self
+            .read_state_tip_hash_before(self.expiry_validation_deadline())
+            .await
+        else {
+            return Err(Self::long_poll_timeout_error());
+        };
+        if tip_hash != inputs.chain_info.tip_hash {
+            return Err(Self::long_poll_timeout_error());
+        }
+        Ok(Self::on_demand_snapshot(
+            client_long_poll_id,
+            inputs,
+            self.template_clock_now(),
+        ))
     }
 
     /// Returns `true` when a `getblocktemplate` poll should return immediately instead of waiting.
@@ -1729,11 +1776,9 @@ where
                     return Ok(OnDemandTemplatePoll::Precomputed(template));
                 }
                 OnDemandWake::LifetimeReached => {
-                    return Ok(Self::on_demand_snapshot(
-                        client_long_poll_id,
-                        inputs,
-                        self.template_clock_now(),
-                    ));
+                    return self
+                        .on_demand_template_on_lifetime_expiry(client_long_poll_id, inputs)
+                        .await;
                 }
                 OnDemandWake::Retry => {}
             }

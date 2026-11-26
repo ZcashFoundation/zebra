@@ -48,6 +48,7 @@ use crate::{
 struct TestReadState {
     chain_info_rx: watch::Receiver<GetBlockTemplateChainInfo>,
     stall_chain_info: Arc<AtomicBool>,
+    stall_tip: Arc<AtomicBool>,
     yield_tip: Arc<AtomicBool>,
 }
 
@@ -63,9 +64,11 @@ impl Service<ReadRequest> for TestReadState {
     fn call(&mut self, request: ReadRequest) -> Self::Future {
         let chain_info = self.chain_info_rx.borrow().clone();
         let stall = self.stall_chain_info.load(Ordering::SeqCst);
+        let stall_tip = self.stall_tip.load(Ordering::SeqCst);
         let yield_tip = self.yield_tip.load(Ordering::SeqCst);
         Box::pin(async move {
             match request {
+                ReadRequest::Tip if stall_tip => std::future::pending().await,
                 ReadRequest::Tip => {
                     if yield_tip {
                         tokio::task::yield_now().await;
@@ -143,6 +146,7 @@ struct LongPollHarness {
     mock_tip_sender: MockChainTipSender,
     stall_state_chain_info: Arc<AtomicBool>,
     stall_mempool: Arc<AtomicBool>,
+    stall_tip: Arc<AtomicBool>,
     yield_tip: Arc<AtomicBool>,
 }
 
@@ -172,11 +176,13 @@ impl LongPollHarness {
         let (mempool_tip_tx, mempool_tip_rx) = watch::channel(chain_info.tip_hash);
         let stall_state_chain_info = Arc::new(AtomicBool::new(false));
         let stall_mempool = Arc::new(AtomicBool::new(false));
+        let stall_tip = Arc::new(AtomicBool::new(false));
         let yield_tip = Arc::new(AtomicBool::new(false));
 
         let read_state = TestReadState {
             chain_info_rx,
             stall_chain_info: stall_state_chain_info.clone(),
+            stall_tip: stall_tip.clone(),
             yield_tip: yield_tip.clone(),
         };
         let mempool = TestMempool {
@@ -227,6 +233,7 @@ impl LongPollHarness {
             mock_tip_sender,
             stall_state_chain_info,
             stall_mempool,
+            stall_tip,
             yield_tip,
         }
     }
@@ -629,22 +636,80 @@ async fn getblocktemplate_excess_long_poll_fails_fast_when_initial_read_stalls()
     }
 }
 
-/// A parked precomputed long poll whose `ReadRequest::Tip` validation yields at deadline still
-/// returns the valid current template, while an uncached tip advance still returns `ServerIsBusy`.
+/// With a populated template cache and saturated long-poll capacity, an incoming matching long
+/// poll must fail fast with `ServerIsBusy` before awaiting `ReadRequest::Tip`, while stale
+/// long-poll IDs preserve committed-tip validation and return once the tip read responds.
 #[tokio::test(start_paused = true)]
-async fn getblocktemplate_cached_long_poll_handles_yielding_tip_read_at_deadline() {
+async fn getblocktemplate_cached_excess_long_poll_fails_fast_when_tip_read_stalls() {
     let _init_guard = zebra_test::init();
 
+    let harness = LongPollHarness::new(2, 120);
+    let template = harness.make_template(&harness.chain_info);
+    harness.publish_template(&template);
+
+    let mut lp1 = Box::pin(
+        harness
+            .rpc
+            .get_block_template(long_poll_params(template.long_poll_id)),
+    );
+    let mut lp2 = Box::pin(
+        harness
+            .rpc
+            .get_block_template(long_poll_params(template.long_poll_id)),
+    );
+    assert!(futures::poll!(&mut lp1).is_pending());
+    assert!(futures::poll!(&mut lp2).is_pending());
+    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+
+    harness.stall_tip.store(true, Ordering::SeqCst);
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(1),
+        harness
+            .rpc
+            .get_block_template(long_poll_params(template.long_poll_id)),
+    )
+    .await
+    .expect("excess cached long poll must fail fast without waiting on stalled tip read")
+    .expect_err("excess cached long poll at capacity must return ServerIsBusy");
+    assert_eq!(err.code(), ErrorCode::ServerIsBusy.code());
+    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+
+    let mut stale_id = template.long_poll_id;
+    stale_id.tip_hash_checksum ^= 1;
+    let mut stale = Box::pin(harness.rpc.get_block_template(long_poll_params(stale_id)));
+    assert!(
+        futures::poll!(&mut stale).is_pending(),
+        "stale cached long poll must preserve committed-tip validation"
+    );
+
+    harness.stall_tip.store(false, Ordering::SeqCst);
+    let stale_response = tokio::time::timeout(Duration::from_secs(1), stale)
+        .await
+        .expect("stale cached long poll must finish once tip read completes")
+        .expect("stale cached long poll returns current template")
+        .try_into_template()
+        .expect("template-mode response");
+    assert_eq!(stale_response.long_poll_id, template.long_poll_id);
+    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+}
+
+async fn assert_long_poll_handles_yielding_tip_read_at_deadline(cached: bool) {
     let offset = i64::try_from(MAX_LONG_POLL_DURATION.as_secs()).unwrap() + 120;
     let harness = LongPollHarness::new(2, offset);
     let template = harness.make_template(&harness.chain_info);
-    harness.publish_template(&template);
+    if cached {
+        harness.publish_template(&template);
+    }
 
     let waiting = harness
         .rpc
         .get_block_template(long_poll_params(template.long_poll_id));
     tokio::pin!(waiting);
-    assert!(futures::poll!(&mut waiting).is_pending());
+    assert!(
+        futures::poll!(&mut waiting).is_pending(),
+        "cached: {cached}"
+    );
     assert_eq!(harness.rpc.gbt.active_long_polls(), 1);
 
     harness.yield_tip.store(true, Ordering::SeqCst);
@@ -652,25 +717,30 @@ async fn getblocktemplate_cached_long_poll_handles_yielding_tip_read_at_deadline
 
     let response = tokio::time::timeout(Duration::from_secs(1), waiting)
         .await
-        .expect("cached long poll must complete after MAX_LONG_POLL_DURATION")
+        .expect("long poll must complete after MAX_LONG_POLL_DURATION")
         .expect("healthy yielding tip read at deadline must return current template")
         .try_into_template()
         .expect("template-mode response");
     assert_eq!(response.long_poll_id, template.long_poll_id);
-    assert_eq!(response.submit_old, Some(true));
+    assert_eq!(response.submit_old, Some(true), "cached: {cached}");
     assert_eq!(harness.rpc.gbt.active_long_polls(), 0);
 
-    // If the committed state tip advances right before deadline without cache catch-up, preserve
-    // tip validation by rejecting with `ServerIsBusy` instead of returning the stale template.
+    // If the committed state tip advances right before deadline without updating the long poll,
+    // preserve tip validation by rejecting with `ServerIsBusy` instead of returning stale work.
     let stale_harness = LongPollHarness::new(2, offset);
     let stale_template = stale_harness.make_template(&stale_harness.chain_info);
-    stale_harness.publish_template(&stale_template);
+    if cached {
+        stale_harness.publish_template(&stale_template);
+    }
 
     let stale_waiting = stale_harness
         .rpc
         .get_block_template(long_poll_params(stale_template.long_poll_id));
     tokio::pin!(stale_waiting);
-    assert!(futures::poll!(&mut stale_waiting).is_pending());
+    assert!(
+        futures::poll!(&mut stale_waiting).is_pending(),
+        "cached: {cached}"
+    );
 
     stale_harness
         .chain_info_tx
@@ -680,8 +750,20 @@ async fn getblocktemplate_cached_long_poll_handles_yielding_tip_read_at_deadline
 
     let err = tokio::time::timeout(Duration::from_secs(1), stale_waiting)
         .await
-        .expect("expired cached long poll must finish promptly")
-        .expect_err("stale cached template must not be returned after state tip advances");
+        .expect("expired long poll must finish promptly")
+        .expect_err("superseded template must not be returned after state tip advances");
     assert_eq!(err.code(), ErrorCode::ServerIsBusy.code());
     assert_eq!(stale_harness.rpc.gbt.active_long_polls(), 0);
+}
+
+/// Both cached and uncached parked long polls whose `ReadRequest::Tip` validation yields at
+/// deadline still return the valid current template, while a committed tip advance before deadline
+/// returns `ServerIsBusy`.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_handles_yielding_tip_read_at_deadline() {
+    let _init_guard = zebra_test::init();
+
+    for cached in [false, true] {
+        assert_long_poll_handles_yielding_tip_read_at_deadline(cached).await;
+    }
 }
