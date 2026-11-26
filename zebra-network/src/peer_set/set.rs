@@ -254,7 +254,7 @@ enum InvOutcome {
     Failed,
 
     /// The peer returned a block, after it was chosen because the block was advertised, or in a
-    /// repeat request for the block.
+    /// repeat request for the block, or a block it rebuilt from its own compact announcement.
     Served,
 }
 
@@ -319,8 +319,9 @@ where
     stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
     /// Receives completed block request errors, and blocks that peers returned after they were
-    /// chosen for an advertisement or in a repeat request, from response futures and records them
-    /// in the [`InventoryRegistry`]. Caller cancellation is not evidence of a peer failure.
+    /// chosen for an advertisement or in a repeat request, or rebuilt from their own compact
+    /// announcements, from response futures and records them in the [`InventoryRegistry`].
+    /// Caller cancellation is not evidence of a peer failure.
     ///
     /// Each routed block request sends at most one outcome, so the channel is limited by the
     /// number of block requests in flight.
@@ -1176,7 +1177,8 @@ where
     }
 
     /// Records block and transaction requests that peers failed to answer, and blocks that peers
-    /// returned after they were chosen for an advertisement or in a repeat request.
+    /// returned after they were chosen for an advertisement or in a repeat request, or rebuilt
+    /// from their own compact announcements.
     ///
     /// Request timeouts don't mark inventory as missing, so without this record a peer that
     /// falsely claims to serve inventory and withholds it could get every retry.
@@ -1629,9 +1631,10 @@ where
     /// Peers that recently failed to return a block are skipped for that block, unless no other
     /// peer might have it.
     ///
-    /// A block that a peer already returned because it was advertised is being asked for again,
-    /// so the peers that returned it are skipped like failed peers. The other peers that
-    /// advertised it take turns with the peers that didn't, starting with the peers that didn't.
+    /// A block that a peer already returned, because it was advertised or from its own compact
+    /// announcement, is being asked for again, so the peers that returned it are skipped like
+    /// failed peers. The other peers that advertised it take turns with the peers that didn't,
+    /// starting with the peers that didn't.
     /// If the group whose turn it is has no ready peer, the other group gets the request, and
     /// the next turn goes back to the group that missed out.
     ///
@@ -1913,8 +1916,9 @@ where
     /// response future.
     ///
     /// Completed failures are recorded for both blocks and transactions. If a block was returned
-    /// because it was advertised (or this is a repeat request), the peer is recorded as served.
-    /// Repeat block requests are counted when sent; see [`Self::select_inv_route()`].
+    /// because it was advertised (or this is a repeat request), or the connection rebuilt it from
+    /// the peer's compact announcement, the peer is recorded as served. Repeat block requests are
+    /// counted when sent; see [`Self::select_inv_route()`].
     fn call_inv_peer(
         &mut self,
         key: D::Key,
@@ -1961,6 +1965,11 @@ where
                 {
                     Some(InvOutcome::Served)
                 }
+                // A connection only rebuilds a block from its own peer's compact announcement, so
+                // that peer served a block it announced, even if the registry no longer has the
+                // announcement. These blocks are recent, so they don't fill the registry with
+                // historic downloads.
+                Ok(Response::ReconstructedBlock(..)) => Some(InvOutcome::Served),
                 Ok(Response::Transactions(txs))
                     if !txs.iter().any(|tx| tx.available().is_some()) =>
                 {

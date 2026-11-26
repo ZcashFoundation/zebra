@@ -153,7 +153,8 @@ pub struct InventoryRegistry {
     failed_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
 
     /// Map tracking the peers that returned a block they were asked for because the block was
-    /// advertised, in the current interval period.
+    /// advertised, or that they rebuilt from their own compact announcement, in the current
+    /// interval period.
     ///
     /// # Security
     ///
@@ -390,7 +391,8 @@ impl InventoryRegistry {
     }
 
     /// Returns an iterator over addrs of peers that recently returned `hash` when they were asked
-    /// for it because it was advertised, or in a repeat request.
+    /// for it because it was advertised, or in a repeat request, or as a block they rebuilt from
+    /// their own compact announcement.
     ///
     /// Can include the same peer twice, if it returned `hash` in the current and previous interval.
     ///
@@ -413,7 +415,7 @@ impl InventoryRegistry {
     }
 
     /// Records that `peer` returned `hash` when it was asked for it because it was advertised, or
-    /// in a repeat request.
+    /// in a repeat request, or as a block it rebuilt from its own compact announcement.
     ///
     /// These records expire after the registry rotates twice, like inventory statuses.
     pub fn register_served(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {

@@ -1099,8 +1099,8 @@ fn answer_request(
     })
 }
 
-/// A block from a peer that wasn't chosen for an advertisement isn't recorded, so historic block
-/// downloads don't fill the registry, and a later advertiser of the block is still preferred.
+/// A full block from a peer that wasn't chosen for an advertisement isn't recorded, so historic
+/// block downloads don't fill the registry, and a later advertiser of the block is still preferred.
 #[tokio::test(start_paused = true)]
 async fn served_block_without_advertisement_keeps_advertiser_preference() {
     let _init_guard = zebra_test::init();
@@ -1180,6 +1180,148 @@ async fn early_block_response_from_advertiser_is_recorded() {
             .collect::<Vec<_>>(),
         vec![&addrs[0]],
     );
+}
+
+/// A connection can answer a block download with a block it rebuilt from the peer's compact
+/// announcement. That block is recorded as served by the peer, so a repeat request asks a peer
+/// that didn't serve the block first.
+#[tokio::test(start_paused = true)]
+async fn reconstructed_block_response_from_advertiser_is_recorded() {
+    use zebra_chain::serialization::ZcashSerialize;
+
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let (InventoryHash::Block(hash), Response::Blocks(blocks)) = (inventory, response) else {
+        unreachable!("the helper constructs a block download");
+    };
+    let (block, _) = blocks[0]
+        .available()
+        .expect("the helper constructs an available block");
+    let size = block.zcash_serialized_size();
+    let reconstructed = zebra_node_services::compact::ReconstructedBlock::new(block, size)
+        .expect("the historical block's transactions match its header");
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    peer_set.ready().await.expect("the peers are ready");
+
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let first_peer = answer_request(
+        &mut handles,
+        Ok(Response::ReconstructedBlock(reconstructed, Some(addrs[0]))),
+    )
+    .expect("a peer received the request");
+    assert_eq!(first_peer, 0, "the request goes to the advertiser");
+    download.await.expect("the advertiser returned the block");
+    peer_set.ready().await.expect("the peers are ready");
+
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .served_peers(inventory)
+            .collect::<Vec<_>>(),
+        vec![&addrs[0]],
+    );
+
+    // If the block is requested again, the peer that didn't advertise it is asked first.
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request);
+    let second_peer = answer_request(&mut handles, Ok(Response::EarlyBlocks(blocks)))
+        .expect("a peer received the repeat request");
+    assert_eq!(
+        second_peer, 1,
+        "the peer that served the rebuilt block is asked last"
+    );
+    download.await.expect("the other peer returned the block");
+}
+
+/// A connection only rebuilds a block from its own peer's compact announcement. So a rebuilt block
+/// is recorded as served by that peer even if the registry has no record of the announcement, and
+/// the download didn't go to the peer because of it.
+#[tokio::test(start_paused = true)]
+async fn reconstructed_block_response_without_an_advertisement_record_is_recorded() {
+    use zebra_chain::serialization::ZcashSerialize;
+
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, _guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let (InventoryHash::Block(hash), Response::Blocks(blocks)) = (inventory, response) else {
+        unreachable!("the helper constructs a block download");
+    };
+    let (block, _) = blocks[0]
+        .available()
+        .expect("the helper constructs an available block");
+    let size = block.zcash_serialized_size();
+    let reconstructed = zebra_node_services::compact::ReconstructedBlock::new(block, size)
+        .expect("the historical block's transactions match its header");
+    peer_set.ready().await.expect("the peers are ready");
+
+    // No advertisement is recorded or carried, so either peer can get the download.
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let (serving_peer, client_request) = handles
+        .iter_mut()
+        .enumerate()
+        .find_map(|(index, handle)| {
+            Some((
+                index,
+                handle.try_to_receive_outbound_client_request().request()?,
+            ))
+        })
+        .expect("a peer received the request");
+    client_request
+        .tx
+        .send(Ok(Response::ReconstructedBlock(
+            reconstructed,
+            Some(addrs[serving_peer]),
+        )))
+        .expect("the download is still waiting for its response");
+    download.await.expect("the peer returned the block");
+    peer_set.ready().await.expect("the peers are ready");
+
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .served_peers(inventory)
+            .collect::<Vec<_>>(),
+        vec![&addrs[serving_peer]],
+    );
+
+    // If the block is requested again, the other peer is asked first.
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request);
+    let second_peer = answer_request(&mut handles, Ok(Response::EarlyBlocks(blocks)))
+        .expect("a peer received the repeat request");
+    assert_ne!(
+        second_peer, serving_peer,
+        "the peer that served the rebuilt block is asked last"
+    );
+    download.await.expect("the other peer returned the block");
 }
 
 /// Regression test for GHSA-g9rc-89v4-hhvf: repeat requests that are in flight at the same time
