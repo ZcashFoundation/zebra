@@ -67,8 +67,15 @@ where
     )
 }
 
-/// Like [`transparent_tx_ids`], but re-samples `latest_chain` on every retry attempt so retries
-/// after a concurrent finalization or fork switch observe the updated best chain.
+/// Returns the transaction IDs that sent or received funds from the supplied
+/// [`transparent::Address`]es, within `query_height_range`, in chain order, at most
+/// `max_entries` of them, along with the tip `(height, hash)` of the chain snapshot that
+/// produced them (or `None` if the state is empty).
+///
+/// Re-samples `latest_chain` on every retry attempt so retries after a concurrent finalization
+/// or fork switch observe the updated best chain. If the addresses do not exist in the
+/// non-finalized chain or finalized `db`, or `query_height_range` is outside both, returns an
+/// empty list with the snapshot tip.
 pub fn transparent_tx_ids_with<C>(
     mut latest_chain: impl FnMut() -> Option<C>,
     db: &ZebraDb,
