@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: Changed the block verifier from `router::init` to skip the transaction verifier for transactions that the mempool has already verified, when the mempool's tip is the block's parent, and to recheck their block-context consensus rules. The mempool service given to `router::init` must answer `VerifiedTransactionsForBlock` requests only with transactions that `transaction::MempoolTxVerifier` accepted, with the tip height that they were verified on, or with no transactions.
-time: 2026-10-23T09:18:47.748153694+02:00

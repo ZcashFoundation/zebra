@@ -283,6 +283,27 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
+///
+/// # Security
+///
+/// The block verifier trusts the `mempool` service's responses to
+/// [`mempool::Request::VerifiedTransactionsForBlock`]. For each transaction in a response, it
+/// skips [`transaction::BlockTxVerifier`], which looks up the transaction's spent outputs and
+/// verifies its scripts, proofs and signatures. It adds the response's miner fee and signature
+/// operation counts for the transaction to the block's totals, which the block's miner fee and
+/// signature operation limit checks use.
+///
+/// So the service must only return transactions when the block's parent is its last seen tip, and
+/// only [`VerifiedUnminedTx`]s that the mempool transaction verifier from this function returned,
+/// with every field unmodified, apart from the time and [`height`] that the mempool sets when it
+/// stores a transaction. `height` must be the tip height that the transaction was verified at. A
+/// response can leave out any transaction, or be empty. A later change to a transaction's fee,
+/// such as a fee delta that prioritises it, must be kept in a separate field, because `miner_fee`
+/// must stay the fee that the verifier computed. See
+/// [`mempool::Request::VerifiedTransactionsForBlock`] for details.
+///
+/// [`VerifiedUnminedTx`]: zebra_chain::transaction::VerifiedUnminedTx
+/// [`height`]: zebra_chain::transaction::VerifiedUnminedTx::height
 #[instrument(skip(state_service, mempool))]
 pub async fn init<S, Mempool>(
     config: Config,

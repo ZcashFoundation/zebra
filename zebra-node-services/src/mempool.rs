@@ -61,11 +61,25 @@ pub enum Request {
     ///
     /// # Correctness
     ///
-    /// The block verifier trusts the transactions in the response, apart from the rules that it
-    /// checks again for each block. So a mempool service must only return transactions that the
-    /// mempool transaction verifier in `zebra-consensus` accepted, with
-    /// [`VerifiedUnminedTx::height`] set to the tip height that they were verified on, or return
-    /// no transactions.
+    /// The block verifier in `zebra-consensus` trusts the transactions in the response, apart from
+    /// the rules that it checks again for each block. It doesn't look up their spent outputs or
+    /// verify their scripts, proofs and signatures, and it adds their
+    /// [`miner_fee`](VerifiedUnminedTx::miner_fee) and signature operation counts to the block's
+    /// totals, which the block's miner fee and signature operation limit checks use.
+    ///
+    /// So a mempool service must only return transactions when its last seen tip is
+    /// `parent_hash`. For each transaction, it must return the [`VerifiedUnminedTx`] that the
+    /// mempool transaction verifier in `zebra-consensus` returned for it, with every field
+    /// unmodified: the transaction, its miner fee, its signature operation counts, its spent
+    /// outputs, and the fields computed from them. The mempool only sets
+    /// [`VerifiedUnminedTx::time`] and [`VerifiedUnminedTx::height`] when it stores the
+    /// transaction, and `height` must be the tip height that the transaction was verified at, one
+    /// below the height of the next block that the verifier checked it for. A response can leave
+    /// out any transaction, or be empty.
+    ///
+    /// A later change to a transaction's fee, such as a fee delta that prioritises it in block
+    /// templates, must be kept in a separate field, never in `miner_fee`, which must stay the fee
+    /// that the verifier computed.
     VerifiedTransactionsForBlock {
         /// Mined hashes of the candidate block's transactions.
         transaction_hashes: Arc<[transaction::Hash]>,
@@ -170,9 +184,11 @@ pub enum Response {
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
-    /// Verified candidates for [`Request::VerifiedTransactionsForBlock`].
+    /// Verified candidates for [`Request::VerifiedTransactionsForBlock`], by mined hash.
     ///
-    /// Contains only requested mined hashes, with their original verification metadata.
+    /// Contains only requested mined hashes. Each transaction is the mempool transaction verifier's
+    /// unmodified output, with the tip height that it was verified at. See the request's
+    /// correctness rules.
     VerifiedTransactionsForBlock(HashMap<transaction::Hash, VerifiedUnminedTx>),
 
     /// Response to [`Request::AwaitOutput`] with the transparent output
