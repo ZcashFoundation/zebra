@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added `initial_block_download_complete` to `getblockchaininfo` and stopped wall-clock extrapolation of `estimatedheight` once initial block download completes, matching `zcashd` ([#12643](https://github.com/ZcashFoundation/zebra/issues/12643)).
+time: 2026-11-26T09:49:39.943049927Z

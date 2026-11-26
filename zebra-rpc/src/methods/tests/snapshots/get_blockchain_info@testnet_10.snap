@@ -5,6 +5,7 @@ expression: info
 {
   "chain": "test",
   "blocks": 10,
+  "initial_block_download_complete": false,
   "headers": 10,
   "difficulty": 1.0,
   "verificationprogress": "[f64]",

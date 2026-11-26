@@ -1,6 +1,7 @@
 {
     "chain": "main",
     "blocks": 2932117,
+    "initial_block_download_complete": true,
     "headers": 2932117,
     "difficulty": 81052645.47600047,
     "verificationprogress": 0.9999996589496057,

@@ -409,10 +409,9 @@ proptest! {
 
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
-            prop_assert_eq!(
-                response.unwrap().best_block_hash,
-                genesis_hash
-            );
+            let response = response.unwrap();
+            prop_assert_eq!(response.best_block_hash, genesis_hash);
+            prop_assert!(!response.initial_block_download_complete);
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -486,6 +485,7 @@ proptest! {
                 Ok(info) => {
                     prop_assert_eq!(info.chain, network.bip70_network_name());
                     prop_assert_eq!(info.blocks, block_height);
+                    prop_assert!(!info.initial_block_download_complete);
                     prop_assert_eq!(info.best_block_hash, block_hash);
                     prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
@@ -594,6 +594,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
+            prop_assert!(!response.initial_block_download_complete);
             prop_assert_eq!(response.value_pools, GetBlockchainInfoBalance::value_pools(ValueBalance::zero(), None));
             // The fallback tip has no balances, so the NSM value balance is not known.
             prop_assert_eq!(response.nsm_value_balance, None);
