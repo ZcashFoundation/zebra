@@ -1000,33 +1000,19 @@ impl InitialBlockDownloadLatch {
         let handle = tokio::spawn(
             async move {
                 while let Some(flag) = weak_complete.upgrade() {
-                    if flag.load(Ordering::Acquire) {
-                        break;
-                    }
-
-                    let latest_tip = latest_chain_tip.best_tip_height_and_block_time();
-                    if is_initial_block_download_complete(
-                        latest_tip,
-                        &network,
-                        debug_force_finished_sync,
-                        &sync_status,
-                        Utc::now(),
-                    ) {
-                        if !flag.swap(true, Ordering::AcqRel) {
-                            tracing::info!("initial block download complete");
-                        }
-                        break;
-                    }
-
+                    let is_complete = Self::latch_flag(&flag, || {
+                        is_initial_block_download_complete(
+                            latest_chain_tip.best_tip_height_and_block_time(),
+                            &network,
+                            debug_force_finished_sync,
+                            &sync_status,
+                            Utc::now(),
+                        )
+                    });
                     drop(flag);
 
-                    tokio::select! {
-                        changed = latest_chain_tip.best_tip_changed() => {
-                            if changed.is_err() {
-                                break;
-                            }
-                        }
-                        _ = tokio::time::sleep(IBD_OBSERVER_POLL_INTERVAL) => {}
+                    if is_complete || !Self::wait_for_next_ibd_check(&mut latest_chain_tip).await {
+                        break;
                     }
                 }
             }
@@ -1039,21 +1025,34 @@ impl InitialBlockDownloadLatch {
         }
     }
 
+    /// Waits for either a chain tip update or the poll interval, returning `false` if the tip
+    /// channel has closed.
+    async fn wait_for_next_ibd_check<Tip: ChainTip>(latest_chain_tip: &mut Tip) -> bool {
+        tokio::select! {
+            changed = latest_chain_tip.best_tip_changed() => changed.is_ok(),
+            _ = tokio::time::sleep(IBD_OBSERVER_POLL_INTERVAL) => true,
+        }
+    }
+
+    /// Returns `true` if `flag` is already set, or evaluates `is_complete` and latches `flag`
+    /// to `true` when it succeeds.
+    fn latch_flag(flag: &AtomicBool, is_complete: impl FnOnce() -> bool) -> bool {
+        if flag.load(Ordering::Acquire) {
+            return true;
+        }
+        if !is_complete() {
+            return false;
+        }
+        if !flag.swap(true, Ordering::AcqRel) {
+            tracing::info!("initial block download complete");
+        }
+        true
+    }
+
     /// Returns `true` if initial block download has already completed, or evaluates
     /// `is_complete` and latches to `true` when it succeeds.
     fn is_complete_or_latch(&self, is_complete: impl FnOnce() -> bool) -> bool {
-        if self.complete.load(Ordering::Acquire) {
-            return true;
-        }
-
-        if is_complete() {
-            if !self.complete.swap(true, Ordering::AcqRel) {
-                tracing::info!("initial block download complete");
-            }
-            return true;
-        }
-
-        false
+        Self::latch_flag(&self.complete, is_complete)
     }
 
     /// Returns whether the latch has already transitioned to `true`.

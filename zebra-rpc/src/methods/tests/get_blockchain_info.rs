@@ -32,8 +32,8 @@ type TestRpcImpl = RpcImpl<
 
 /// Invokes `getblockchaininfo` against a mock `read_state` handling `UsageInfo`,
 /// `TipPoolValues`, and `BestChainNextDifficulty` in any order.
-async fn drive_get_blockchain_info<E: std::fmt::Debug>(
-    fut: impl std::future::Future<Output = std::result::Result<GetBlockchainInfoResponse, E>>,
+async fn fetch_blockchain_info(
+    rpc: &TestRpcImpl,
     read_state: &mut TestMockService<ReadRequest, ReadResponse>,
     network: &Network,
     tip: Option<(Height, Hash)>,
@@ -60,45 +60,71 @@ async fn drive_get_blockchain_info<E: std::fmt::Debug>(
         }
     };
 
-    let (response, ()) = tokio::join!(fut, state_handler);
+    let (response, ()) = tokio::join!(rpc.get_blockchain_info(), state_handler);
     response.expect("getblockchaininfo should succeed")
 }
 
-/// Creates an `RpcImpl` wired with mock services for `getblockchaininfo` tests.
-fn test_get_blockchain_info_rpc(
+/// Mock `RpcImpl` harness for `getblockchaininfo` IBD tests.
+struct IbdTestHarness {
     network: Network,
-    debug_force_finished_sync: bool,
-) -> (
-    TestRpcImpl,
-    TestMockService<ReadRequest, ReadResponse>,
-    MockSyncStatus,
-    MockChainTipSender,
-) {
-    let mempool: TestMockService<_, _> = MockService::build().for_unit_tests();
-    let state: TestMockService<_, _> = MockService::build().for_unit_tests();
-    let read_state: TestMockService<_, _> = MockService::build().for_unit_tests();
-    let sync_status = MockSyncStatus::default();
-    let (mock_tip, mock_tip_sender) = MockChainTip::new();
-    let (_tx, rx) = tokio::sync::watch::channel(None);
+    rpc: TestRpcImpl,
+    read_state: TestMockService<ReadRequest, ReadResponse>,
+    sync_status: MockSyncStatus,
+    tip_sender: MockChainTipSender,
+}
 
-    let (rpc, _) = RpcImpl::new(
-        network,
-        Default::default(),
-        debug_force_finished_sync,
-        "0.0.1",
-        "RPC test",
-        mempool,
-        Buffer::new(state, 1),
-        read_state.clone(),
-        MockService::build().for_unit_tests(),
-        sync_status.clone(),
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
+impl IbdTestHarness {
+    fn new(network: Network, debug_force_finished_sync: bool) -> Self {
+        let mempool: TestMockService<_, _> = MockService::build().for_unit_tests();
+        let state: TestMockService<_, _> = MockService::build().for_unit_tests();
+        let read_state: TestMockService<_, _> = MockService::build().for_unit_tests();
+        let sync_status = MockSyncStatus::default();
+        let (mock_tip, tip_sender) = MockChainTip::new();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
 
-    (rpc, read_state, sync_status, mock_tip_sender)
+        let (rpc, _) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            debug_force_finished_sync,
+            "0.0.1",
+            "RPC test",
+            mempool,
+            Buffer::new(state, 1),
+            read_state.clone(),
+            MockService::build().for_unit_tests(),
+            sync_status.clone(),
+            mock_tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        Self {
+            network,
+            rpc,
+            read_state,
+            sync_status,
+            tip_sender,
+        }
+    }
+
+    fn send_tip(&self, height: Height, hash: Hash, block_time: chrono::DateTime<chrono::Utc>) {
+        self.tip_sender.send_best_tip_height(height);
+        self.tip_sender.send_best_tip_hash(hash);
+        self.tip_sender.send_best_tip_block_time(block_time);
+    }
+
+    async fn fetch_info(&mut self, tip: Option<(Height, Hash)>) -> GetBlockchainInfoResponse {
+        fetch_blockchain_info(&self.rpc, &mut self.read_state, &self.network, tip).await
+    }
+
+    async fn fetch_info_with(
+        &mut self,
+        rpc: &TestRpcImpl,
+        tip: Option<(Height, Hash)>,
+    ) -> GetBlockchainInfoResponse {
+        fetch_blockchain_info(rpc, &mut self.read_state, &self.network, tip).await
+    }
 }
 
 fn assert_ibd_incomplete(info: &GetBlockchainInfoResponse, tip_height: Height) {
@@ -118,103 +144,71 @@ fn assert_ibd_complete(info: &GetBlockchainInfoResponse, tip_height: Height) {
 async fn rpc_getblockchaininfo_mainnet_ibd_transition_and_latching() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let max_checkpoint = network.checkpoint_list().max_height();
+    let max_checkpoint = Mainnet.checkpoint_list().max_height();
     let tip_hash = Hash([0x11; 32]);
-    let (rpc, mut read_state, mut sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), false);
-    let rpc_clone = rpc.clone();
+    let mut harness = IbdTestHarness::new(Mainnet, false);
+    let rpc_clone = harness.rpc.clone();
+    let recent_tip = chrono::Utc::now() - chrono::Duration::minutes(10);
 
     // Below the highest checkpoint: IBD stays incomplete even when close to tip and recent.
-    sync_status.set_is_close_to_tip(true);
+    harness.sync_status.set_is_close_to_tip(true);
     let below_checkpoint = Height(10);
-    tip_sender.send_best_tip_height(below_checkpoint);
-    tip_sender.send_best_tip_hash(tip_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(10));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((below_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.send_tip(below_checkpoint, tip_hash, recent_tip);
+    let info = harness.fetch_info(Some((below_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, below_checkpoint);
 
     // At the highest checkpoint, but syncer is not close to tip yet.
-    sync_status.set_is_close_to_tip(false);
-    tip_sender.send_best_tip_height(max_checkpoint);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(10));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((max_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.sync_status.set_is_close_to_tip(false);
+    harness.send_tip(max_checkpoint, tip_hash, recent_tip);
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, max_checkpoint);
 
     // Close to tip and at checkpoint, but Mainnet tip is older than 125 minutes.
-    sync_status.set_is_close_to_tip(true);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(126));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((max_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.sync_status.set_is_close_to_tip(true);
+    let stale_tip = chrono::Utc::now() - chrono::Duration::minutes(126);
+    harness.send_tip(max_checkpoint, tip_hash, stale_tip);
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, max_checkpoint);
 
     // Synced: at checkpoint, close to tip, and recent tip (10 min old -> would extrapolate >0 blocks).
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(10));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((max_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.send_tip(max_checkpoint, tip_hash, recent_tip);
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_complete(&info, max_checkpoint);
 
     // Once latched, later syncer stalls or old tips do not revert IBD on `rpc` or clones.
-    sync_status.set_is_close_to_tip(false);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
+    harness.sync_status.set_is_close_to_tip(false);
+    harness
+        .tip_sender
+        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
 
-    for client in [&rpc, &rpc_clone] {
-        let info = drive_get_blockchain_info(
-            client.get_blockchain_info(),
-            &mut read_state,
-            &network,
-            Some((max_checkpoint, tip_hash)),
-        )
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
+    assert_ibd_complete(&info, max_checkpoint);
+
+    let clone_info = harness
+        .fetch_info_with(&rpc_clone, Some((max_checkpoint, tip_hash)))
         .await;
-        assert_ibd_complete(&info, max_checkpoint);
-    }
+    assert_ibd_complete(&clone_info, max_checkpoint);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockchaininfo_mainnet_ibd_latches_from_sync_without_prior_rpc_call() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let max_checkpoint = network.checkpoint_list().max_height();
+    let max_checkpoint = Mainnet.checkpoint_list().max_height();
     let tip_hash = Hash([0x44; 32]);
-    let (rpc, mut read_state, mut sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), false);
+    let mut harness = IbdTestHarness::new(Mainnet, false);
 
     // Mainnet finishes syncing without any `getblockchaininfo` RPC call.
-    sync_status.set_is_close_to_tip(true);
-    tip_sender.send_best_tip_height(max_checkpoint);
-    tip_sender.send_best_tip_hash(tip_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(10));
+    harness.sync_status.set_is_close_to_tip(true);
+    harness.send_tip(
+        max_checkpoint,
+        tip_hash,
+        chrono::Utc::now() - chrono::Duration::minutes(10),
+    );
 
     // Wait for the background observer to latch IBD completion on its own.
     tokio::time::timeout(Duration::from_secs(2), async {
-        while !rpc.is_ibd_latched() {
+        while !harness.rpc.is_ibd_latched() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -222,18 +216,14 @@ async fn rpc_getblockchaininfo_mainnet_ibd_latches_from_sync_without_prior_rpc_c
     .expect("IBD observer should latch once Mainnet sync completes");
 
     // Tip then ages past 125 minutes and syncer falls behind before the first RPC call.
-    sync_status.set_is_close_to_tip(false);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
-    assert!(!sync_status.is_close_to_tip());
+    harness.sync_status.set_is_close_to_tip(false);
+    harness
+        .tip_sender
+        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
+    assert!(!harness.sync_status.is_close_to_tip());
 
     // The very first `getblockchaininfo` call still reports IBD complete without extrapolating.
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((max_checkpoint, tip_hash)),
-    )
-    .await;
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_complete(&info, max_checkpoint);
 }
 
@@ -244,36 +234,26 @@ async fn rpc_getblockchaininfo_testnet_ibd_respects_checkpoint_floor_without_tip
     let network = Network::new_default_testnet();
     let max_checkpoint = network.checkpoint_list().max_height();
     let tip_hash = Hash([0x22; 32]);
-    let (rpc, mut read_state, mut sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), false);
+    let mut harness = IbdTestHarness::new(network, false);
 
     // Below the highest checkpoint on Testnet: stays in IBD even if close to tip.
-    sync_status.set_is_close_to_tip(true);
+    harness.sync_status.set_is_close_to_tip(true);
     let below_checkpoint = Height(10);
-    tip_sender.send_best_tip_height(below_checkpoint);
-    tip_sender.send_best_tip_hash(tip_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::minutes(10));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((below_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.send_tip(
+        below_checkpoint,
+        tip_hash,
+        chrono::Utc::now() - chrono::Duration::minutes(10),
+    );
+    let info = harness.fetch_info(Some((below_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, below_checkpoint);
 
     // At the highest checkpoint on Testnet: completes IBD even with a multi-day stale tip.
-    tip_sender.send_best_tip_height(max_checkpoint);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(3));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((max_checkpoint, tip_hash)),
-    )
-    .await;
+    harness.send_tip(
+        max_checkpoint,
+        tip_hash,
+        chrono::Utc::now() - chrono::Duration::days(3),
+    );
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_complete(&info, max_checkpoint);
 }
 
@@ -282,27 +262,18 @@ async fn rpc_getblockchaininfo_debug_force_empty_state_then_tip() {
     let _init_guard = zebra_test::init();
 
     // Empty state must not report IBD complete or latch, even with `debug_force_finished_sync`.
-    let network = Mainnet;
-    let (rpc, mut read_state, _sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), true);
-
-    let info =
-        drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None).await;
+    let mut harness = IbdTestHarness::new(Mainnet, true);
+    let info = harness.fetch_info(None).await;
     assert!(!info.initial_block_download_complete());
 
     let tip_height = Height(10);
     let tip_hash = Hash([0x33; 32]);
-    tip_sender.send_best_tip_height(tip_height);
-    tip_sender.send_best_tip_hash(tip_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(10));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((tip_height, tip_hash)),
-    )
-    .await;
+    harness.send_tip(
+        tip_height,
+        tip_hash,
+        chrono::Utc::now() - chrono::Duration::days(10),
+    );
+    let info = harness.fetch_info(Some((tip_height, tip_hash))).await;
     assert_ibd_complete(&info, tip_height);
 }
 
@@ -313,25 +284,18 @@ async fn rpc_getblockchaininfo_regtest_empty_state_then_genesis() {
     // Regtest requires a committed tip, then completes IBD even when `MockSyncStatus` is false.
     let network = Network::new_regtest(Default::default());
     let genesis_hash = network.genesis_hash();
-    let (rpc, mut read_state, _sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), false);
+    let mut harness = IbdTestHarness::new(network, false);
 
-    let info =
-        drive_get_blockchain_info(rpc.get_blockchain_info(), &mut read_state, &network, None).await;
+    let info = harness.fetch_info(None).await;
     assert!(!info.initial_block_download_complete());
     assert_eq!(info.verification_progress(), 1.0);
 
-    tip_sender.send_best_tip_height(Height(0));
-    tip_sender.send_best_tip_hash(genesis_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(100));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((Height(0), genesis_hash)),
-    )
-    .await;
+    harness.send_tip(
+        Height(0),
+        genesis_hash,
+        chrono::Utc::now() - chrono::Duration::days(100),
+    );
+    let info = harness.fetch_info(Some((Height(0), genesis_hash))).await;
     assert_ibd_complete(&info, Height(0));
 }
 
@@ -340,22 +304,15 @@ async fn rpc_getblockchaininfo_mainnet_genesis_future_timestamp_is_not_nan() {
     let _init_guard = zebra_test::init();
 
     // Mainnet at genesis with a future timestamp during IBD must report `0.0` (not `NaN`).
-    let network = Mainnet;
-    let genesis_hash = network.genesis_hash();
-    let (rpc, mut read_state, _sync_status, tip_sender) =
-        test_get_blockchain_info_rpc(network.clone(), false);
+    let genesis_hash = Mainnet.genesis_hash();
+    let mut harness = IbdTestHarness::new(Mainnet, false);
 
-    tip_sender.send_best_tip_height(Height(0));
-    tip_sender.send_best_tip_hash(genesis_hash);
-    tip_sender.send_best_tip_block_time(chrono::Utc::now() + chrono::Duration::minutes(5));
-
-    let info = drive_get_blockchain_info(
-        rpc.get_blockchain_info(),
-        &mut read_state,
-        &network,
-        Some((Height(0), genesis_hash)),
-    )
-    .await;
+    harness.send_tip(
+        Height(0),
+        genesis_hash,
+        chrono::Utc::now() + chrono::Duration::minutes(5),
+    );
+    let info = harness.fetch_info(Some((Height(0), genesis_hash))).await;
     assert!(!info.initial_block_download_complete());
     assert_eq!(info.estimated_height(), Height(0));
     assert_eq!(info.verification_progress(), 0.0);
