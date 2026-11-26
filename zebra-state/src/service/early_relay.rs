@@ -536,7 +536,7 @@ impl ReadStateService {
             .map(|history| {
                 history.map(|_| {
                     (
-                        publish.then(|| {
+                        (publish && transactions_have_inputs_and_outputs(&candidate)).then(|| {
                             crate::request::block_wire_and_retained_bytes(&candidate, &[])
                         }),
                         context,
@@ -572,4 +572,16 @@ impl ReadStateService {
         }
         Ok(Some(guard))
     }
+}
+
+/// Returns `true` if every transaction in `block` has an input and an output.
+///
+/// Transaction verification rejects a block with any other transaction (see
+/// `zebra_consensus::transaction::check::has_inputs_and_outputs`), so early relay authenticates
+/// its body but doesn't publish it.
+fn transactions_have_inputs_and_outputs(block: &Block) -> bool {
+    block.transactions.iter().all(|transaction| {
+        transaction.has_transparent_or_shielded_inputs()
+            && transaction.has_transparent_or_shielded_outputs()
+    })
 }
