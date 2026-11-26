@@ -363,64 +363,59 @@ where
         hash: block::Hash,
         deadline: Instant,
     ) -> Result<Option<Handler>, PeerError> {
-        if self
+        let Some((compact, _, permit)) = self
             .compact
             .received
-            .as_ref()
-            .is_some_and(|(block, _, _)| block.header.hash() == hash)
-        {
-            let (compact, _, permit) = self
-                .compact
-                .received
-                .take()
-                .expect("the matching cached compact block exists");
-            if let Some(Response::CompactBlockTransactions(candidates)) = self
-                .compact_query_until(Request::CompactBlockTransactions(compact.clone()), deadline)
-                .await
-            {
-                let result =
-                    tokio::task::spawn_blocking(move || (compact.reconstruct(candidates), permit))
-                        .await;
-                if let Ok((Ok(reconstruction), permit)) = result {
-                    let indexes = reconstruction.missing_indexes();
-                    if indexes.is_empty() {
-                        if let Some(block) = self
-                            .finish_compact(
-                                reconstruction,
-                                BlockTransactions {
-                                    block_hash: hash,
-                                    transactions: Vec::new(),
-                                },
-                                permit,
-                                deadline,
-                            )
-                            .await
-                        {
-                            return Ok(Some(self.compact_response(block)));
-                        }
-                    } else if indexes.len() < reconstruction.transaction_count().div_ceil(2) {
-                        // Recovering most of a block costs about as much as downloading it, and
-                        // a recovery that misses its short timeout is downloaded again in full.
-                        // So when at least half the transactions are missing, this downloads
-                        // the full block straight away.
-                        self.send_compact_request(
-                            Message::GetBlockTransactions(BlockTransactionsRequest {
-                                block_hash: hash,
-                                indexes,
-                            }),
-                            deadline,
-                        )
-                        .await?;
-                        return Ok(Some(Handler::CompactBlock {
-                            reconstruction,
-                            permit,
-                            deadline,
-                        }));
-                    }
-                }
-            }
+            .take_if(|(block, _, _)| block.header.hash() == hash)
+        else {
+            return Ok(None);
+        };
+        let Some(Response::CompactBlockTransactions(candidates)) = self
+            .compact_query_until(Request::CompactBlockTransactions(compact.clone()), deadline)
+            .await
+        else {
+            return Ok(None);
+        };
+        let result =
+            tokio::task::spawn_blocking(move || (compact.reconstruct(candidates), permit)).await;
+        let Ok((Ok(reconstruction), permit)) = result else {
+            return Ok(None);
+        };
+        let indexes = reconstruction.missing_indexes();
+        if indexes.is_empty() {
+            let block = self
+                .finish_compact(
+                    reconstruction,
+                    BlockTransactions {
+                        block_hash: hash,
+                        transactions: Vec::new(),
+                    },
+                    permit,
+                    deadline,
+                )
+                .await;
+            return Ok(block.map(|block| self.compact_response(block)));
         }
-        Ok(None)
+        // Recovering most of a block costs about as much as downloading it, and
+        // a recovery that misses its short timeout is downloaded again in full.
+        // So when at least half the transactions are missing, the full block is
+        // downloaded straight away.
+        if indexes.len() >= reconstruction.transaction_count().div_ceil(2) {
+            return Ok(None);
+        }
+        self.send_compact_request(
+            Message::GetBlockTransactions(BlockTransactionsRequest {
+                block_hash: hash,
+                indexes,
+            }),
+            deadline,
+        )
+        .await?;
+        Ok(Some(Handler::CompactBlock {
+            reconstruction,
+            permit,
+            deadline,
+        }))
     }
 
     fn compact_response(&self, block: Arc<Block>) -> Handler {
