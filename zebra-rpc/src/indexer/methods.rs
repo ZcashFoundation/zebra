@@ -4,12 +4,13 @@ use std::{
     collections::HashSet,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use futures::Stream;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, OwnedSemaphorePermit};
 use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
@@ -38,6 +39,23 @@ const RESPONSE_BUFFER_SIZE: usize = 64;
 /// block the listener task indefinitely.
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
+impl<ReadStateService, Tip> IndexerRPC<ReadStateService, Tip>
+where
+    ReadStateService: ReadState,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    /// Acquires a server-wide permit for an active streaming subscription.
+    fn acquire_subscription_permit(&self) -> Result<Arc<OwnedSemaphorePermit>, Status> {
+        self.subscription_permits
+            .clone()
+            .try_acquire_owned()
+            .map(Arc::new)
+            .map_err(|_| {
+                Status::resource_exhausted("too many active indexer streaming subscriptions")
+            })
+    }
+}
+
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
 where
@@ -55,8 +73,9 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
+        let subscription_permit = self.acquire_subscription_permit()?;
         let span = Span::current();
-        let (mut response_sender, response_stream) = indexer_stream_channel();
+        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
         let mut chain_tip_change = self.chain_tip_change.clone();
 
         tokio::spawn(async move {
@@ -110,13 +129,14 @@ where
         &self,
         request: tonic::Request<NonFinalizedStateChangeRequest>,
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
-        let span = Span::current();
-        let read_state = self.read_state.clone();
-        let (mut response_sender, response_stream) = indexer_stream_channel();
-
         // The caller may provide the hashes of the chain tips it already has so the server only
         // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
         let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
+        let subscription_permit = self.acquire_subscription_permit()?;
+
+        let span = Span::current();
+        let read_state = self.read_state.clone();
+        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
 
         tokio::spawn(async move {
             let subscribe_result = tokio::select! {
@@ -198,8 +218,9 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
+        let subscription_permit = self.acquire_subscription_permit()?;
         let span = Span::current();
-        let (mut response_sender, response_stream) = indexer_stream_channel();
+        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
         let mut mempool_change = self.mempool_change.subscribe();
 
         tokio::spawn(async move {
@@ -314,6 +335,7 @@ where
 struct StreamSender<T> {
     items: mpsc::Sender<T>,
     terminal_status: Option<oneshot::Sender<Status>>,
+    _subscription_permit: Arc<OwnedSemaphorePermit>,
 }
 
 /// Consumer half of an indexer server stream that drains buffered items before yielding any
@@ -321,20 +343,26 @@ struct StreamSender<T> {
 struct IndexerStream<T> {
     items: mpsc::Receiver<T>,
     terminal_status: Option<oneshot::Receiver<Status>>,
+    _subscription_permit: Arc<OwnedSemaphorePermit>,
 }
 
-/// Creates a paired [`StreamSender`] and [`IndexerStream`] with a bounded item buffer.
-fn indexer_stream_channel<T>() -> (StreamSender<T>, IndexerStream<T>) {
+/// Creates a paired [`StreamSender`] and [`IndexerStream`] with a bounded item buffer, retaining
+/// `subscription_permit` until both halves release their resources.
+fn indexer_stream_channel<T>(
+    subscription_permit: Arc<OwnedSemaphorePermit>,
+) -> (StreamSender<T>, IndexerStream<T>) {
     let (items_tx, items_rx) = mpsc::channel(RESPONSE_BUFFER_SIZE);
     let (status_tx, status_rx) = oneshot::channel();
     (
         StreamSender {
             items: items_tx,
             terminal_status: Some(status_tx),
+            _subscription_permit: subscription_permit.clone(),
         },
         IndexerStream {
             items: items_rx,
             terminal_status: Some(status_rx),
+            _subscription_permit: subscription_permit,
         },
     )
 }
@@ -669,11 +697,7 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(4);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
-                read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx),
-            };
+            let rpc = IndexerRPC::new(read_state, tip, MempoolTxSubscriber::new(mempool_tx));
 
             let stream = rpc
                 .chain_tip_change(tonic::Request::new(Empty {}))
@@ -703,11 +727,11 @@ mod tests {
                 .with_max_request_delay(Duration::from_secs(2))
                 .for_unit_tests();
 
-            let rpc = IndexerRPC {
-                read_state: read_state.clone(),
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx),
-            };
+            let rpc = IndexerRPC::new(
+                read_state.clone(),
+                tip,
+                MempoolTxSubscriber::new(mempool_tx),
+            );
 
             let (blocks_tx, blocks_rx) = mpsc::channel(4);
             let stream = rpc
@@ -750,11 +774,7 @@ mod tests {
                 dropped: Arc::new(std::sync::Mutex::new(Some(dropped_tx))),
             };
 
-            let rpc = IndexerRPC {
-                read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx),
-            };
+            let rpc = IndexerRPC::new(read_state, tip, MempoolTxSubscriber::new(mempool_tx));
 
             let stream = rpc
                 .non_finalized_state_change(tonic::Request::new(NonFinalizedStateChangeRequest {
@@ -781,11 +801,11 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(4);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
+            let rpc = IndexerRPC::new(
                 read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
-            };
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
 
             let stream = rpc
                 .mempool_change(tonic::Request::new(Empty {}))
@@ -809,11 +829,11 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(1);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
+            let rpc = IndexerRPC::new(
                 read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
-            };
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
 
             let mut stream = rpc
                 .mempool_change(tonic::Request::new(Empty {}))
@@ -852,11 +872,11 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(1);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
+            let rpc = IndexerRPC::new(
                 read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
-            };
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
 
             let mut stream = rpc
                 .mempool_change(tonic::Request::new(Empty {}))
@@ -889,11 +909,11 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(1);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
+            let rpc = IndexerRPC::new(
                 read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
-            };
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
 
             let mut stream = rpc
                 .mempool_change(tonic::Request::new(Empty {}))
@@ -962,11 +982,11 @@ mod tests {
             let (mempool_tx, _) = broadcast::channel(1);
             let read_state = MockService::build().for_unit_tests();
 
-            let rpc = IndexerRPC {
+            let rpc = IndexerRPC::new(
                 read_state,
-                chain_tip_change: tip,
-                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
-            };
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
 
             let mut stream = rpc
                 .mempool_change(tonic::Request::new(Empty {}))
@@ -1014,6 +1034,86 @@ mod tests {
                 stream.next().await.is_none(),
                 "stream must end after status"
             );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn timed_out_buffered_stream_retains_subscription_permit_until_dropped() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC::new(
+                read_state,
+                tip,
+                MempoolTxSubscriber::new(mempool_tx.clone()),
+            );
+
+            let mut other_streams =
+                Vec::with_capacity(super::super::server::MAX_ACTIVE_SUBSCRIPTIONS - 1);
+            for _ in 0..super::super::server::MAX_ACTIVE_SUBSCRIPTIONS - 1 {
+                other_streams.push(
+                    rpc.chain_tip_change(tonic::Request::new(Empty {}))
+                        .await
+                        .expect("stream within subscription cap should succeed")
+                        .into_inner(),
+                );
+            }
+
+            let mut slow_stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("final slot mempool_change should succeed")
+                .into_inner();
+
+            let overflow_batch: HashSet<UnminedTxId> = (0..=RESPONSE_BUFFER_SIZE)
+                .map(|idx| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(
+                        &u64::try_from(idx)
+                            .expect("buffer index fits in u64")
+                            .to_le_bytes(),
+                    );
+                    UnminedTxId::Legacy(transaction::Hash::from(bytes))
+                })
+                .collect();
+            mempool_tx
+                .send(MempoolChange::added(overflow_batch))
+                .expect("mempool_change task should be subscribed");
+
+            // Advance past SEND_TIMEOUT so the producer times out and exits while `slow_stream`
+            // still holds buffered items.
+            tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
+            assert!(
+                wait_until(|| mempool_tx.receiver_count() == 0).await,
+                "timed-out mempool_change producer task should have exited"
+            );
+
+            let err = match rpc.chain_tip_change(tonic::Request::new(Empty {})).await {
+                Ok(_) => {
+                    panic!("timed-out buffered stream must still occupy its subscription permit")
+                }
+                Err(err) => err,
+            };
+            assert_eq!(err.code(), Code::ResourceExhausted);
+
+            for _ in 0..RESPONSE_BUFFER_SIZE {
+                assert!(slow_stream.next().await.expect("buffered item").is_ok());
+            }
+            let status = slow_stream
+                .next()
+                .await
+                .expect("timed-out stream must yield terminal status")
+                .expect_err("timed-out stream must return DEADLINE_EXCEEDED");
+            assert_eq!(status.code(), Code::DeadlineExceeded);
+            drop(slow_stream);
+
+            let replacement = rpc
+                .chain_tip_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("dropping buffered stream must release its subscription permit")
+                .into_inner();
+            drop(replacement);
+            drop(other_streams);
         }
     }
 }

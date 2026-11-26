@@ -1,8 +1,8 @@
 //! A tonic RPC server for Zebra's indexer API.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
 use zebra_chain::chain_tip::ChainTip;
@@ -19,6 +19,14 @@ use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_
 /// receive memory is bounded at `200 * 16 KiB = 3.125 MiB` (down from
 /// `20 * 4 MiB = 80 MiB` under tonic's default 4 MiB decode cap).
 pub(super) const MAX_CONCURRENT_STREAMS: u32 = 200;
+
+/// Maximum active streaming subscriptions (`ChainTipChange`, `NonFinalizedStateChange`,
+/// and `MempoolChange`) across the entire indexer gRPC server.
+///
+/// Kept separate from [`MAX_CONCURRENT_STREAMS`] so raising HTTP/2 stream concurrency
+/// for unary `GetBlock` pipelining does not multiply long-lived subscription tasks and
+/// their replay/response buffers.
+pub(super) const MAX_ACTIVE_SUBSCRIPTIONS: usize = 20;
 
 /// Maximum encoded size of an incoming indexer or reflection gRPC request, in bytes.
 ///
@@ -46,6 +54,27 @@ where
     pub(super) read_state: ReadStateService,
     pub(super) chain_tip_change: Tip,
     pub(super) mempool_change: MempoolTxSubscriber,
+    pub(super) subscription_permits: Arc<Semaphore>,
+}
+
+impl<ReadStateService, Tip> IndexerRPC<ReadStateService, Tip>
+where
+    ReadStateService: ReadState,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    /// Creates a new [`IndexerRPC`] with server-wide streaming subscription limits.
+    pub(super) fn new(
+        read_state: ReadStateService,
+        chain_tip_change: Tip,
+        mempool_change: MempoolTxSubscriber,
+    ) -> Self {
+        Self {
+            read_state,
+            chain_tip_change,
+            mempool_change,
+            subscription_permits: Arc::new(Semaphore::new(MAX_ACTIVE_SUBSCRIPTIONS)),
+        }
+    }
 }
 
 /// Initializes the indexer RPC server
@@ -60,11 +89,7 @@ where
     ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    let indexer_service = IndexerRPC {
-        read_state,
-        chain_tip_change,
-        mempool_change,
-    };
+    let indexer_service = IndexerRPC::new(read_state, chain_tip_change, mempool_change);
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::indexer::FILE_DESCRIPTOR_SET)
