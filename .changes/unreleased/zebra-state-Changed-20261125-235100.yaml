@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Kept a block''s early mining work for its commit when other blocks are committed first.'
+time: 2026-11-25T23:51:00.000000000-05:00

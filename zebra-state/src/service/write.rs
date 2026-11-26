@@ -265,9 +265,11 @@ pub enum NonFinalizedWriteMessage {
     /// A block whose proof of work is valid, but which is still being verified.
     ///
     /// The block write task computes the chain info for mining on top of it, and keeps the
-    /// block's note commitment trees and chain history for its commit. Computing them here, in
-    /// order with the commits, means the work is always based on the latest committed tip, and
-    /// the commit of the same block never computes its trees at the same time.
+    /// block's note commitment trees and chain history until that block's commit, unless a later
+    /// mining candidate's work replaces them. Computing them here, in order with the commits,
+    /// means the work starts from the best tip committed when the candidate arrives, and the
+    /// commit of the same block never computes its trees at the same time. That commit only
+    /// reuses the work if its parent trees and history root are the ones the work started from.
     MiningCandidate {
         block: Arc<block::Block>,
         rsp_tx: oneshot::Sender<Option<GetBlockTemplateChainInfo>>,
@@ -488,8 +490,7 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
-        // The note commitment trees and chain history of the latest mining candidate, for its
-        // commit to reuse.
+        // The latest mining candidate's work, kept for its own block's commit.
         let mut candidate_trees: Option<PrecomputedTrees> = None;
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
@@ -502,22 +503,23 @@ impl WriteBlockWorkerTask {
                         &block,
                     );
 
-                    let chain_info = match candidate {
+                    let (chain_info, replaced_trees) = match candidate {
                         Ok((chain_info, trees)) => {
                             #[cfg(any(test, feature = "proptest-impl"))]
                             crate::service::precomputed_trees::MINING_CANDIDATES
                                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-                            candidate_trees = Some(trees);
-                            Some(chain_info)
+                            (Some(chain_info), candidate_trees.replace(trees))
                         }
                         Err(error) => {
                             tracing::debug!(?error, "block can't be used for early mining work");
-                            None
+                            (None, None)
                         }
                     };
 
                     let _ = rsp_tx.send(chain_info);
+                    // Freeing the replaced work takes time, so it waits for the answer.
+                    drop(replaced_trees);
                     continue;
                 }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
@@ -557,6 +559,7 @@ impl WriteBlockWorkerTask {
             let replaced_snapshot = non_finalized_state_sender.borrow().clone();
             let replaced_chain = non_finalized_state.best_chain().cloned();
             let mut replaced_proposal = None;
+            let mut spent_candidate_trees = None;
 
             // If the parent block was marked as rejected, also reject all its children.
             //
@@ -571,21 +574,22 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.for_descendant(parent_hash))
             } else if let Some(contextual) = contextual {
                 // The block was validated as a proposal, so only apply it to its parent chain.
-                candidate_trees = None;
                 non_finalized_state
                     .commit_prevalidated_contextual(*contextual, &finalized_state.db)
                     .map(|replaced| replaced_proposal = replaced)
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
-                // A commit is the only use for a candidate's trees: they are for its own block,
-                // and any other block's commit changes the tip they were computed from.
-                non_finalized_state.precomputed_trees = candidate_trees.take();
+                // A candidate's work is only for its own block object, so only that block's
+                // validation uses it. The validation takes it whatever the result, and it is freed
+                // after the commit is answered.
+                non_finalized_state.precomputed_trees =
+                    candidate_trees.take_if(|trees| trees.is_for(&queued_child.block));
                 let result = validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
                     queued_child,
                 );
-                non_finalized_state.precomputed_trees = None;
+                spent_candidate_trees = non_finalized_state.precomputed_trees.take();
                 result
             };
 
@@ -650,7 +654,12 @@ impl WriteBlockWorkerTask {
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
-            drop((replaced_snapshot, replaced_chain, replaced_proposal));
+            drop((
+                replaced_snapshot,
+                replaced_chain,
+                replaced_proposal,
+                spent_candidate_trees,
+            ));
 
             // A prepared chain that the best chain has passed can't be used any more.
             non_finalized_state.drop_passed_prepared_chain();

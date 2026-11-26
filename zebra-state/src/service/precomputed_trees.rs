@@ -111,6 +111,11 @@ impl PrecomputedTrees {
         &self.output
     }
 
+    /// Returns `true` if the trees were computed from the same body as `block`.
+    pub(crate) fn is_for(&self, block: &Arc<Block>) -> bool {
+        Arc::ptr_eq(&self.block, block)
+    }
+
     /// Returns `true` if the trees were computed from the same body as `block`, and from `input`.
     fn computed_from(&self, block: &Arc<Block>, input: &NoteCommitmentTrees) -> bool {
         Arc::ptr_eq(&self.block, block) && &self.input == input
