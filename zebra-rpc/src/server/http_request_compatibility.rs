@@ -344,20 +344,11 @@ fn scalar_len(head: &[u8]) -> Option<usize> {
     }
 }
 
-/// Returns true if `value` looks like one JSON value from its first and last bytes.
-/// Scalars are short, so they are parsed; containers and strings are trusted to `jsonrpsee`.
+/// Returns true if `value` is a single complete JSON value with no leading or trailing whitespace.
 fn is_one_value(value: &[u8]) -> bool {
-    match (value.first(), value.last()) {
-        (Some(b'{'), Some(b'}')) | (Some(b'['), Some(b']')) => true,
-        (Some(b'"'), Some(b'"')) => value.len() >= 2,
-        (Some(b'{' | b'[' | b'"'), _) => false,
-        (Some(first), Some(last)) => {
-            !first.is_ascii_whitespace()
-                && !last.is_ascii_whitespace()
-                && serde_json::from_slice::<serde::de::IgnoredAny>(value).is_ok()
-        }
-        _ => false,
-    }
+    value.first().is_some_and(|b| !b.is_ascii_whitespace())
+        && value.last().is_some_and(|b| !b.is_ascii_whitespace())
+        && serde_json::from_slice::<&RawValue>(value).is_ok()
 }
 
 /// Wraps `bytes` in a body without copying them.
