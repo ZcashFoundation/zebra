@@ -249,6 +249,26 @@ async fn resident_hit_skips_transaction_dispatch_and_utxo_lookup() {
     assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
 }
 
+/// A version 4 spend of the output `[8; 32]:0`, which pays 1 zatoshi to `OP_1`.
+fn v4_spend() -> Arc<Transaction> {
+    Arc::new(Transaction::test_v4(
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: [8; 32].into(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[0x51]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            1.try_into().unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(0),
+    ))
+}
+
 #[tokio::test]
 async fn misses_and_ineligible_metadata_use_ordinary_verification() {
     let _init_guard = zebra_test::init();
@@ -268,6 +288,26 @@ async fn misses_and_ineligible_metadata_use_ordinary_verification() {
         assert_eq!(result.unwrap(), block.hash());
         assert_dispatches(&calls, 1);
     }
+
+    // A version 4 transaction doesn't contain the consensus branch ID that its signatures commit
+    // to, so the block context rules accept it in both network upgrades, and only the height the
+    // mempool verified it for keeps the block verifier from reusing that verification.
+    let v4_spend = v4_spend();
+    let block = candidate(&network, Height(3), v4_spend.clone());
+    for height in [Height(1), Height(3)] {
+        let context = tx::BlockContext {
+            height,
+            time: block.header.time,
+            network_upgrade: NetworkUpgrade::current(&network, height),
+        };
+        assert!(tx::check_block_context_rules(&v4_spend, &context, &network).is_ok());
+    }
+    let mut old_epoch = entry(v4_spend);
+    old_epoch.height = Some(Height(0));
+    let pool = mempool(&block, vec![old_epoch]);
+    let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_dispatches(&calls, 1);
 }
 
 #[tokio::test]

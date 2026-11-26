@@ -184,12 +184,13 @@ The mempool interacts with several other Zebra components:
    - Rejected transactions must be properly tracked to prevent DoS attacks
    - The block verifier skips the transaction verifier for a block's transactions that are in the
      mempool, when the block's parent is the mempool's tip. So the mempool must only store
-     transactions that the transaction verifier would accept in a block in the network upgrade
-     that the mempool verified them in, except for the rules that the block verifier checks again
-     for each block. The mempool keeps transactions that it verified at older tips only within one
-     network upgrade, because it resets when the next block would activate a network upgrade, and
-     the block verifier only reuses a transaction that the mempool verified in the network upgrade
-     of the block's height
+     transactions that the transaction verifier would accept in a block in the verification rules
+     epoch that the mempool verified them in, except for the rules that the block verifier checks
+     again for each block. The mempool keeps transactions that it verified at older tips only within
+     one network upgrade, because it resets when the next block would activate a network upgrade,
+     and the block verifier only reuses a transaction that the mempool verified in the block's
+     verification rules epoch: the network upgrade of the block's height, on the same side of the
+     activation of the soft fork that temporarily disables Orchard actions
 
 2. **Performance**:
    - Transaction processing should be asynchronous

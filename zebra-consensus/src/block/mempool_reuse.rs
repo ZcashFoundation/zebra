@@ -2,11 +2,12 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use chrono::{DateTime, Utc};
 use tower::{util::BoxCloneService, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     transaction::{self, UnminedTxId, VerifiedUnminedTx, WtxId},
 };
 use zebra_node_services::mempool;
@@ -41,6 +42,32 @@ pub(super) async fn lookup(
     }
 }
 
+/// The rules that the block verifier checks again for each transaction it takes from the mempool.
+pub(super) struct ReuseRules {
+    /// The heights in which the mempool's verification is valid for the block.
+    pub(super) epoch: tx::VerificationRulesEpoch,
+    /// The block the transactions are in.
+    pub(super) block: tx::BlockContext,
+    /// The network the block is on.
+    pub(super) network: Network,
+}
+
+impl ReuseRules {
+    /// Returns the rules for a block at `height` with the header time `time` on `network`.
+    pub(super) fn new(network: &Network, height: block::Height, time: DateTime<Utc>) -> Self {
+        let epoch = tx::VerificationRulesEpoch::containing(network, height);
+        Self {
+            block: tx::BlockContext {
+                height,
+                time,
+                network_upgrade: epoch.network_upgrade(),
+            },
+            epoch,
+            network: network.clone(),
+        }
+    }
+}
+
 /// Removes the `candidates` that the block can't reuse, and checks the block context rules of the
 /// others, which the mempool's verification doesn't cover.
 ///
@@ -52,26 +79,13 @@ pub(super) fn recheck_candidates(
     mut candidates: HashMap<transaction::Hash, VerifiedUnminedTx>,
     block: &Block,
     transaction_hashes: &[transaction::Hash],
-    height: block::Height,
-    network: &Network,
+    rules: &ReuseRules,
 ) -> Result<HashMap<transaction::Hash, VerifiedUnminedTx>, TransactionError> {
-    let upgrade = NetworkUpgrade::current(network, height);
-    let block_context = tx::BlockContext {
-        height,
-        time: block.header.time,
-        network_upgrade: upgrade,
-    };
     for (&hash, transaction) in transaction_hashes.iter().zip(&block.transactions) {
         let Some(candidate) = candidates.get(&hash) else {
             continue;
         };
-        // Admission records the tip height only after confirming it still matches
-        // the verification request. Older entries are safe only within that epoch.
-        let same_epoch = candidate
-            .height
-            .and_then(|tip| tip + 1)
-            .is_some_and(|height| NetworkUpgrade::current(network, height) == upgrade);
-        if transaction.is_coinbase() || !same_epoch {
+        if transaction.is_coinbase() || !verified_in(candidate, &rules.epoch) {
             candidates.remove(&hash);
             continue;
         }
@@ -87,7 +101,23 @@ pub(super) fn recheck_candidates(
             continue;
         }
         // Cached proofs and scripts do not establish expiry or block lock time.
-        tx::check_block_context_rules(transaction, &block_context, network)?;
+        tx::check_block_context_rules(transaction, &rules.block, &rules.network)?;
     }
     Ok::<_, TransactionError>(candidates)
+}
+
+/// Returns `true` if the mempool verified `candidate` for a height in `epoch`.
+///
+/// The mempool records the tip height it verified a transaction on, so it verified the
+/// transaction for the height after it (see [`VerifiedUnminedTx::height`]). That height can be
+/// below the block's, because the mempool keeps its verifications while its tip grows. It can
+/// also be above the block's, because the mempool can add a transaction that it verified on the
+/// state's best tip before it processes that tip, and that tip can be a sibling of the block. Both
+/// are reusable in the same epoch: the block context rules are checked again at the block's
+/// height, and the state checks the transaction's spends when it validates the block.
+fn verified_in(candidate: &VerifiedUnminedTx, epoch: &tx::VerificationRulesEpoch) -> bool {
+    candidate
+        .height
+        .and_then(|tip| tip + 1)
+        .is_some_and(|height| epoch.contains(height))
 }

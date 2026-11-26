@@ -336,6 +336,71 @@ proptest! {
             );
         }
     }
+
+    /// Test that the block transaction verifier gives the same result for a transaction at the
+    /// first and last heights of a verification rules epoch, if the transaction passes the block
+    /// context rules at both.
+    ///
+    /// # Correctness
+    ///
+    /// The block verifier reuses the mempool's verification of a transaction in a block at any
+    /// height in the epoch that the mempool verified it in, and only checks
+    /// `check_block_context_rules` again at the block's height. So the rest of the transaction
+    /// verifier must give the same result at every height in an epoch. A rule that activates
+    /// inside an epoch activates after its first height and by its last height, so this fails if
+    /// such a rule is added outside `check_block_context_rules`, for the transactions this
+    /// generates. Such a rule belongs in `check_block_context_rules`, or its activation height
+    /// must start an epoch in `VerificationRulesEpoch`.
+    ///
+    /// The transactions are transparent transfers, so this can't see a rule that only changes how
+    /// shielded proofs or signatures are verified.
+    #[test]
+    fn block_verification_only_depends_on_the_height_through_the_block_context_rules(
+        (network, first, last) in epoch_heights_strategy(),
+        block_time in datetime_u32(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        sigops in mock_sigops_strategy(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        // It expires at the epoch's last height, so it hasn't expired at either height.
+        let (transaction, known_utxos) = mock_funded_transparent_transaction(
+            &network,
+            last,
+            relative_source_fund_heights,
+            transaction_version,
+            LockTime::unlocked(),
+        );
+        let (transaction, known_utxos) = sigops.apply(transaction, known_utxos);
+
+        let network_upgrade = NetworkUpgrade::current(&network, first);
+        for height in [first, last] {
+            let block = transaction::BlockContext {
+                height,
+                time: block_time,
+                network_upgrade,
+            };
+            prop_assert!(
+                transaction::check_block_context_rules(&transaction, &block, &network).is_ok(),
+                "the transaction passes the block context rules at {height:?}",
+            );
+        }
+
+        let verify_at = |height| {
+            validate_with_state(
+                transaction.clone(),
+                height,
+                block_time,
+                block_time,
+                known_utxos.clone(),
+                network.clone(),
+            )
+            .map(|response| (response.tx_id, response.miner_fee, response.sigops))
+            .map_err(|error| error.to_string())
+        };
+        prop_assert_eq!(verify_at(first), verify_at(last));
+    }
 }
 
 /// Generates a [`LockTime`], weighted so that a substantial share of the generated
@@ -371,6 +436,119 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
         (start_height_value..=end_height_value)
             .prop_map(move |height_value| (network.clone(), block::Height(height_value)))
     })
+}
+
+/// Generates a network, and the first and last heights of one of its verification rules epochs
+/// from the Sapling activation height onward. The last epoch has no last height, so this uses a
+/// height far after its first height.
+fn epoch_heights_strategy() -> impl Strategy<Value = (Network, block::Height, block::Height)> {
+    any::<Network>()
+        .prop_flat_map(|network| {
+            let mut start = NetworkUpgrade::Sapling
+                .activation_height(&network)
+                .expect("Sapling has an activation height");
+            let mut starts = vec![start];
+            while let Some(last) =
+                transaction::VerificationRulesEpoch::containing(&network, start).last()
+            {
+                start = last
+                    .next()
+                    .expect("epochs end far below the maximum height");
+                starts.push(start);
+            }
+            (Just(network), proptest::sample::select(starts))
+        })
+        .prop_map(|(network, start)| {
+            let epoch = transaction::VerificationRulesEpoch::containing(&network, start);
+            let last = epoch.last().unwrap_or_else(|| {
+                block::Height(
+                    epoch
+                        .start()
+                        .0
+                        .saturating_add(1_000_000)
+                        .min(block::Height::MAX_EXPIRY_HEIGHT.0),
+                )
+            });
+            (network, epoch.start(), last)
+        })
+}
+
+/// Signature operations added to a mock transaction's transparent transfers.
+#[derive(Clone, Copy, Debug)]
+struct MockSigops {
+    /// The number of `OP_CHECKSIG`s after `OP_FALSE` in each output script.
+    output: u8,
+    /// Whether each input's redeem script is `OP_0 OP_IF OP_CHECKSIG OP_ENDIF OP_1`, which has one
+    /// signature operation that never runs, instead of `OP_TRUE`.
+    redeem: bool,
+}
+
+/// Generates the signature operations to add to a mock transaction.
+fn mock_sigops_strategy() -> impl Strategy<Value = MockSigops> {
+    (0_u8..=3, any::<bool>()).prop_map(|(output, redeem)| MockSigops { output, redeem })
+}
+
+impl MockSigops {
+    /// Returns `transaction`, a mock transaction with transparent transfers, and its spent
+    /// outputs `known_utxos`, with these signature operations.
+    ///
+    /// The output scripts of the mock transfers are `OP_FALSE`, and their inputs push the redeem
+    /// script `OP_TRUE` of the P2SH outputs they spend.
+    fn apply(
+        self,
+        transaction: Transaction,
+        mut known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> (
+        Transaction,
+        HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
+        let mut output_script = vec![0x00];
+        output_script.resize(1 + usize::from(self.output), 0xac);
+        let output_script = transparent::Script::new(&output_script);
+        let outputs = transaction
+            .outputs()
+            .into_iter()
+            .map(|mut output| {
+                output.lock_script = output_script.clone();
+                output
+            })
+            .collect();
+        let mut transaction = transaction.with_transparent_outputs(outputs);
+
+        if self.redeem {
+            // An unlock script that pushes the redeem script, and the P2SH output script with the
+            // redeem script's hash.
+            let unlock_script = transparent::Script::new(&[0x05, 0x00, 0x63, 0xac, 0x68, 0x51]);
+            let mut lock_script = vec![0xa9, 0x14];
+            lock_script.extend(
+                hex::decode("2c93496b19af9ee138c38a1ac362a8de4a91e356")
+                    .expect("the redeem script hash is valid hex"),
+            );
+            lock_script.push(0x87);
+            let lock_script = transparent::Script::new(&lock_script);
+
+            let inputs = transaction
+                .inputs()
+                .into_iter()
+                .map(|mut input| {
+                    if let transparent::Input::PrevOut {
+                        unlock_script: script,
+                        ..
+                    } = &mut input
+                    {
+                        *script = unlock_script.clone();
+                    }
+                    input
+                })
+                .collect();
+            transaction = transaction.with_transparent_inputs(inputs);
+            for spent in known_utxos.values_mut() {
+                spent.utxo.output.lock_script = lock_script.clone();
+            }
+        }
+
+        (transaction, known_utxos)
+    }
 }
 
 /// Create a mock transaction that only transfers transparent amounts.

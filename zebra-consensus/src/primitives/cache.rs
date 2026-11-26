@@ -35,10 +35,10 @@
 //!
 //! The block verifier skips the transaction verifier, and this cache, for a block transaction that
 //! the mempool has verified, but only when the mempool's tip is the block's parent, and the mempool
-//! verified the same authorizing data in the block's network upgrade. Unlike the removed bypass, it
-//! checks the rules that depend on the block's height and time again, and the state checks the
-//! transaction's spends. The block's other transactions go through the transaction verifier and
-//! this cache.
+//! verified the same authorizing data in the block's verification rules epoch. Unlike the removed
+//! bypass, it checks the rules that depend on the block's height and time again, and the state
+//! checks the transaction's spends. The block's other transactions go through the transaction
+//! verifier and this cache.
 
 use std::{
     collections::{HashSet, VecDeque},

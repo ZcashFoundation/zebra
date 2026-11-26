@@ -332,10 +332,12 @@ pub struct VerifiedUnminedTx {
     /// # Correctness
     ///
     /// The block verifier in `zebra-consensus` reuses the mempool's verification of this
-    /// transaction in blocks in the same network upgrade as `height + 1`, the height the mempool
-    /// verified it for. So a mempool must only set this to the tip height it verified the
-    /// transaction on. Otherwise the block verifier can accept a version 4 transaction whose
-    /// signatures commit to another network upgrade's consensus branch ID.
+    /// transaction in blocks in the same verification rules epoch as `height + 1`, the height the
+    /// mempool verified it for: the same network upgrade, on the same side of the activation of
+    /// the soft fork that temporarily disables Orchard actions. So a mempool must only set this to
+    /// the tip height it verified the transaction on. Otherwise the block verifier can accept a
+    /// version 4 transaction whose signatures commit to another network upgrade's consensus branch
+    /// ID.
     pub height: Option<Height>,
 
     /// The spent outputs for this transaction's transparent inputs.

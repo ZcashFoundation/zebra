@@ -43,8 +43,11 @@ use zebra_state as zs;
 use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
+mod epoch;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use epoch::VerificationRulesEpoch;
 
 /// A timeout applied to UTXO lookup requests.
 ///
@@ -806,16 +809,18 @@ pub(crate) struct BlockContext {
 /// The block transaction verifier starts with these checks. The block verifier runs only these
 /// checks on a transaction that it takes from the mempool, and skips the rest of the block
 /// transaction verifier for it, because the mempool has verified that transaction in the same
-/// network upgrade.
+/// [`VerificationRulesEpoch`].
 ///
 /// # Correctness
 ///
-/// A rule that depends on the block's height or time, other than through its network upgrade,
-/// must be checked here, or the block verifier won't check it for transactions from the mempool.
-/// That includes a soft fork that activates at a height inside a network upgrade. The block
-/// verifier only checks that the mempool verified a transaction in the block's network upgrade,
-/// so a soft fork that changes how scripts, proofs or signatures are verified must also stop it
-/// from reusing verifications from before the soft fork's activation height.
+/// A rule that depends on the block's height or time, other than through its verification rules
+/// epoch, must be checked here, or the block verifier won't check it for transactions it takes
+/// from the mempool. A rule that activates inside a network upgrade and changes how scripts,
+/// proofs or signatures are verified must instead start an epoch in [`VerificationRulesEpoch`],
+/// so that the block verifier doesn't reuse verifications from before it activated.
+/// `block_verification_only_depends_on_the_height_through_the_block_context_rules` in
+/// `tests::prop` checks the rest of the block transaction verifier for the transactions it
+/// generates.
 pub(crate) fn check_block_context_rules(
     tx: &Transaction,
     block: &BlockContext,

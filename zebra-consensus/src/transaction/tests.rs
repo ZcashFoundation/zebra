@@ -44,6 +44,8 @@ use crate::error::TransactionError;
 use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerifier};
 
 #[cfg(test)]
+mod epoch;
+#[cfg(test)]
 mod prop;
 #[cfg(test)]
 mod sigops;

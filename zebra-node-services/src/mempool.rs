@@ -56,8 +56,8 @@ pub enum Request {
     ///
     /// Returns no candidates if the mempool is disabled, its last seen tip differs from
     /// the parent, or the request exceeds the block transaction allocation limit.
-    /// Callers must check full [`UnminedTxId`]s, the verification epoch, and block-specific
-    /// consensus rules before reuse. Missing verification heights are not reusable.
+    /// Callers must check full [`UnminedTxId`]s, the verification rules epoch, and
+    /// block-specific consensus rules before reuse. Missing verification heights are not reusable.
     ///
     /// # Correctness
     ///

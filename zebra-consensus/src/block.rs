@@ -691,14 +691,13 @@ where
             } else {
                 let block = block.clone();
                 let transaction_hashes = transaction_hashes.clone();
-                let network = network.clone();
+                let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
                 tokio::task::spawn_blocking(move || {
                     mempool_reuse::recheck_candidates(
                         candidates,
                         &block,
                         &transaction_hashes,
-                        height,
-                        &network,
+                        &rules,
                     )
                 })
                 .wait_for_panics()
