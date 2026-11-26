@@ -1049,8 +1049,8 @@ mod tests {
             );
 
             let mut other_streams =
-                Vec::with_capacity(super::super::server::MAX_ACTIVE_SUBSCRIPTIONS - 1);
-            for _ in 0..super::super::server::MAX_ACTIVE_SUBSCRIPTIONS - 1 {
+                Vec::with_capacity(crate::indexer::server::MAX_ACTIVE_SUBSCRIPTIONS - 1);
+            for _ in 0..crate::indexer::server::MAX_ACTIVE_SUBSCRIPTIONS - 1 {
                 other_streams.push(
                     rpc.chain_tip_change(tonic::Request::new(Empty {}))
                         .await
@@ -1080,8 +1080,9 @@ mod tests {
                 .send(MempoolChange::added(overflow_batch))
                 .expect("mempool_change task should be subscribed");
 
-            // Advance past SEND_TIMEOUT so the producer times out and exits while `slow_stream`
-            // still holds buffered items.
+            // Let the spawned producer fill all RESPONSE_BUFFER_SIZE slots and arm SEND_TIMEOUT
+            // on the overflowing item before advancing virtual time past the timeout.
+            tokio::task::yield_now().await;
             tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
             assert!(
                 wait_until(|| mempool_tx.receiver_count() == 0).await,
