@@ -4,8 +4,9 @@
 
 use std::{fmt, future::Future, pin::Pin};
 
+use bytes::Bytes;
 use futures::{future, FutureExt};
-use http_body_util::{BodyExt, Limited};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::header;
 use jsonrpsee::{
     core::BoxError,
@@ -13,6 +14,7 @@ use jsonrpsee::{
 };
 use jsonrpsee_types::ErrorObject;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tower::Service;
@@ -31,6 +33,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 /// because the "jsonrpc" field was only added in JSON-RPC 2.0.
 ///
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
+///
+/// Requests that are already canonical JSON-RPC 2.0, and their responses, are forwarded unchanged.
+/// Responses to 1.0 requests are converted by rewriting only their head and tail, keeping `result` as is.
 ///
 /// ### Add missing `content-type` HTTP header
 ///
@@ -212,6 +217,15 @@ impl<S> HttpRequestMiddleware<S> {
             .collect()
             .await?
             .to_bytes();
+
+        // Re-encoding these requests would produce the same JSON-RPC 2.0 call, so skip it.
+        if is_canonical_json_rpc_2_request(&bytes) {
+            return Ok((
+                JsonRpcVersion::TwoPointZero,
+                HttpRequest::from_parts(parts, bytes_body(bytes)),
+            ));
+        }
+
         let (version, bytes) =
             if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
                 let version = request.version();
@@ -226,32 +240,200 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 (JsonRpcVersion::Unknown, bytes)
             };
-        Ok((
-            version,
-            // `Vec::from` reuses the buffer without copying when it is uniquely owned.
-            HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
-        ))
+        Ok((version, HttpRequest::from_parts(parts, bytes_body(bytes))))
     }
+
     /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
     async fn response_from_json_rpc_2(
         version: JsonRpcVersion,
         response: HttpResponse<HttpBody>,
     ) -> Result<HttpResponse<HttpBody>, BoxError> {
+        // 2.0 clients get the server's response as is, and unparsed requests have nothing to map.
+        if matches!(
+            version,
+            JsonRpcVersion::TwoPointZero | JsonRpcVersion::Unknown
+        ) {
+            return Ok(response);
+        }
+
         let (parts, body) = response.into_parts();
         let bytes = body.collect().await?.to_bytes();
-        let bytes =
-            if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
-                serde_json::to_vec(&response.into_version(version))
-                    .expect("valid")
-                    .into()
-            } else {
-                bytes
-            };
         Ok(HttpResponse::from_parts(
             parts,
-            HttpBody::from(bytes.as_ref().to_vec()),
+            bytes_body(response_to_version(bytes, version)),
         ))
     }
+}
+
+/// Converts a JSON-RPC 2.0 response body to `version`, splicing it when it has the
+/// `jsonrpsee` layout and parsing it otherwise.
+pub(super) fn response_to_version(bytes: Bytes, version: JsonRpcVersion) -> Bytes {
+    splice_response(&bytes, version).unwrap_or_else(|| reencode_response(bytes, version))
+}
+
+/// Parses a response body and re-encodes it as `version`, or returns it unchanged if it doesn't parse.
+pub(super) fn reencode_response(bytes: Bytes, version: JsonRpcVersion) -> Bytes {
+    match serde_json::from_slice::<JsonRpcResponse>(&bytes) {
+        Ok(response) => serde_json::to_vec(&response.into_version(version))
+            .expect("valid")
+            .into(),
+        Err(_) => bytes,
+    }
+}
+
+/// Returns the JSON-RPC 1.0 response prefix for `version`, or `None` if `version` is not spliced.
+fn splice_head(version: JsonRpcVersion) -> Option<&'static [u8]> {
+    match version {
+        JsonRpcVersion::Lightwalletd => Some(br#"{"jsonrpc":"1.0","id":"#),
+        JsonRpcVersion::Bitcoind => Some(br#"{"id":"#),
+        JsonRpcVersion::TwoPointZero | JsonRpcVersion::Unknown => None,
+    }
+}
+
+/// Re-encodes a small JSON value (such as `id` or `error`) to match the parsing path.
+fn reencode_json_value(value: &[u8]) -> Option<Vec<u8>> {
+    serde_json::from_slice::<serde_json::Value>(value)
+        .ok()
+        .and_then(|value| serde_json::to_vec(&value).ok())
+}
+
+/// Converts a `jsonrpsee` response, `{"jsonrpc":"2.0","id":…,"result":…}` or `…"error":…}`,
+/// to a 1.0 `version` by rewriting its head and tail. Returns `None` for any other layout.
+pub(super) fn splice_response(body: &[u8], version: JsonRpcVersion) -> Option<Bytes> {
+    let head = splice_head(version)?;
+    let rest = body.strip_prefix(br#"{"jsonrpc":"2.0","id":"#)?;
+    let (id, rest) = rest.split_at(scalar_len(rest)?);
+    let rest = rest.strip_suffix(b"}")?;
+
+    // The id and error are small next to the result, so re-encode them as the parsing path does.
+    let id = reencode_json_value(id)?;
+    if let Some(result) = rest.strip_prefix(br#","result":"#) {
+        return is_one_value(result).then(|| splice(head, &id, result, b"null"));
+    }
+    let error = reencode_json_value(rest.strip_prefix(br#","error":"#)?)?;
+    Some(splice(head, &id, b"null", &error))
+}
+
+/// Joins the parts of a 1.0 response, which has both `result` and `error`, as zcashd sends.
+fn splice(head: &[u8], id: &[u8], result: &[u8], error: &[u8]) -> Bytes {
+    let parts: [&[u8]; 7] = [
+        head,
+        id,
+        br#","result":"#,
+        result,
+        br#","error":"#,
+        error,
+        b"}",
+    ];
+    parts.concat().into()
+}
+
+/// Returns the length of the string, number or `null` at the start of `head`, if it is followed
+/// by a comma in `head`. Strings end at their closing quote, other values at the comma.
+fn scalar_len(head: &[u8]) -> Option<usize> {
+    if head.first() != Some(&b'"') {
+        return memchr::memchr(b',', head);
+    }
+    let mut end = 1;
+    loop {
+        end += memchr::memchr2(b'"', b'\\', head.get(end..)?)?;
+        if head[end] == b'"' {
+            return Some(end + 1);
+        }
+        end += 2;
+    }
+}
+
+/// Returns true if `value` looks like one JSON value from its first and last bytes.
+/// Scalars are short, so they are parsed; containers and strings are trusted to `jsonrpsee`.
+fn is_one_value(value: &[u8]) -> bool {
+    match (value.first(), value.last()) {
+        (Some(b'{'), Some(b'}')) | (Some(b'['), Some(b']')) => true,
+        (Some(b'"'), Some(b'"')) => value.len() >= 2,
+        (Some(b'{' | b'[' | b'"'), _) => false,
+        (Some(first), Some(last)) => {
+            !first.is_ascii_whitespace()
+                && !last.is_ascii_whitespace()
+                && serde_json::from_slice::<serde::de::IgnoredAny>(value).is_ok()
+        }
+        _ => false,
+    }
+}
+
+/// Wraps `bytes` in a body without copying them.
+fn bytes_body(bytes: Bytes) -> HttpBody {
+    HttpBody::new(Full::new(bytes))
+}
+
+/// Returns true if `body` is a single JSON-RPC 2.0 call that `jsonrpsee` reads the same way
+/// before and after re-encoding: only known fields, no escapes, canonical positional params.
+pub(super) fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
+    // `jsonrpsee` only skips 128 bytes of leading whitespace, and re-encoding removes it.
+    if body.first() != Some(&b'{') {
+        return false;
+    }
+    let Ok(request) = serde_json::from_slice::<RawJsonRpcRequest>(body) else {
+        return false;
+    };
+
+    request.jsonrpc.get() == r#""2.0""#
+        && is_unescaped_string(request.method)
+        && request
+            .id
+            .is_none_or(|id| is_unescaped_string(id) || id.get().parse::<u64>().is_ok())
+        && request.params.is_none_or(is_canonical_params)
+}
+
+/// Returns the byte length of one canonical array element at the start of `rest`, or `None`.
+fn canonical_param_len(rest: &[u8]) -> Option<usize> {
+    if let Some(string) = rest.strip_prefix(b"\"") {
+        let end = memchr::memchr2(b'"', b'\\', string)?;
+        return (string[end] == b'"').then_some(end + 2);
+    }
+    let end = memchr::memchr2(b',', b']', rest).unwrap_or(rest.len());
+    is_canonical_scalar(&rest[..end]).then_some(end)
+}
+
+/// Returns true if `params` is an unspaced array of unescaped strings, integers, booleans or nulls.
+/// Re-encoding changes floats, objects and escapes, and `jsonrpsee` rejects `[ ]` but not `[]`.
+fn is_canonical_params(params: &RawValue) -> bool {
+    // `params` is valid JSON, so splitting it at the top level only needs to find string ends.
+    let Some(mut rest) = params.get().as_bytes().strip_prefix(b"[") else {
+        return false;
+    };
+    if rest == b"]" {
+        return true;
+    }
+    loop {
+        let Some(end) = canonical_param_len(rest) else {
+            return false;
+        };
+        match rest.get(end..) {
+            Some(b"]") => return true,
+            Some([b',', next @ ..]) => rest = next,
+            _ => return false,
+        }
+    }
+}
+
+/// Returns true if `value` is `true`, `false`, `null` or an integer that re-encodes to itself.
+fn is_canonical_scalar(value: &[u8]) -> bool {
+    let Ok(value) = std::str::from_utf8(value) else {
+        return false;
+    };
+    match value {
+        "true" | "false" | "null" => true,
+        // serde_json reads `-0` as a float.
+        "-0" => false,
+        _ if value.starts_with('-') => value.parse::<i64>().is_ok(),
+        _ => value.parse::<u64>().is_ok(),
+    }
+}
+
+/// Returns true if `value` is a JSON string without escapes.
+fn is_unescaped_string(value: &RawValue) -> bool {
+    let value = value.get().as_bytes();
+    value.first() == Some(&b'"') && memchr::memchr(b'\\', value).is_none()
 }
 
 /// Implement the Layer for HttpRequestMiddleware to allow injecting the credentials
@@ -325,7 +507,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-enum JsonRpcVersion {
+pub(super) enum JsonRpcVersion {
     /// bitcoind used a mishmash of 1.0, 1.1, and 2.0 for its JSON-RPC.
     Bitcoind,
     /// lightwalletd uses the above mishmash, but also breaks spec to include a
@@ -351,6 +533,20 @@ pub(super) struct JsonRpcRequest {
         skip_serializing_if = "Option::is_none"
     )]
     id: Option<serde_json::Value>,
+}
+
+/// A JSON-RPC request borrowed from the body, with its values left undecoded.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawJsonRpcRequest<'a> {
+    #[serde(borrow)]
+    jsonrpc: &'a RawValue,
+    #[serde(borrow)]
+    method: &'a RawValue,
+    #[serde(default, borrow)]
+    params: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    id: Option<&'a RawValue>,
 }
 
 fn deserialize_present_id<'de, D: serde::Deserializer<'de>>(
@@ -390,7 +586,7 @@ struct JsonRpcResponse {
     jsonrpc: Option<String>,
     id: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Box<serde_json::value::RawValue>>,
+    result: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<serde_json::Value>,
 }
@@ -490,6 +686,37 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["code"], 401);
         assert_eq!(body["error"]["message"], "unauthenticated method");
+    }
+
+    #[test]
+    fn canonical_params_are_only_those_re_encoding_keeps() {
+        let canonical = |params: &str| {
+            is_canonical_params(&RawValue::from_string(params.into()).expect("valid json"))
+        };
+        for params in [
+            r#"[]"#,
+            r#"["ab"]"#,
+            r#"["",0,-1,true,false,null]"#,
+            r#"["a,]",1]"#,
+        ] {
+            assert!(canonical(params), "{params}");
+        }
+        for params in [
+            r#"[ ]"#,
+            r#"[1 ]"#,
+            r#"["a", 1]"#,
+            r#"["\n"]"#,
+            r#"[-0]"#,
+            r#"[1.0]"#,
+            r#"[1e2]"#,
+            r#"[18446744073709551616]"#,
+            r#"[[1]]"#,
+            r#"[{"a":1}]"#,
+            r#"{"a":1}"#,
+            r#"null"#,
+        ] {
+            assert!(!canonical(params), "{params}");
+        }
     }
 
     #[test]
