@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, MAX_MONEY},
+    amount::{Amount, DeferredPoolBalanceChange, MAX_MONEY},
     block::{
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,

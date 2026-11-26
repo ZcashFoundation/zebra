@@ -17,7 +17,6 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
@@ -25,7 +24,6 @@ use tower::{util::BoxCloneService, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    amount::Amount,
     block,
     diagnostic::task::WaitForPanics,
     parameters::{subsidy::SubsidyError, Network},
@@ -40,6 +38,7 @@ use crate::{error::*, transaction as tx, BoxError};
 pub mod check;
 mod mempool_reuse;
 pub mod request;
+mod transactions;
 
 pub use request::Request;
 
@@ -507,7 +506,7 @@ where
         let validated_proposals = self.validated_proposals.clone();
 
         let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
         let block = request.block();
@@ -706,59 +705,21 @@ where
                 .await?
             };
 
-            // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesUnordered::new();
-            // Saturating: the counts of reused transactions come from the mempool, and a wrong
-            // count must not wrap the total below the limit.
-            let mut sigops: u32 = 0;
-            let mut block_miner_fees = Ok(Amount::zero());
-
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
                 &transaction_hashes,
             ));
 
-            for (&transaction_hash, transaction) in
-                transaction_hashes.iter().zip(block.transactions.iter())
-            {
-                if let Some(cached) = verified.get(&transaction_hash) {
-                    sigops = sigops.saturating_add(cached.block_sigop_count());
-                    block_miner_fees += cached.miner_fee;
-                    continue;
-                }
-                let rsp = transaction_verifier
-                    .ready()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::BlockRequest {
-                        transaction_hash,
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        height,
-                        time: block.header.time,
-                    });
-                async_checks.push(rsp);
+            let (sigops, block_miner_fees) = transactions::BlockTransactions {
+                transaction_verifier,
+                block: &block,
+                transaction_hashes: &transaction_hashes,
+                known_utxos: &known_utxos,
+                height,
+                verified: &verified,
             }
-            tracing::trace!(len = async_checks.len(), "built async tx checks");
-
-            // Get the transaction results back from the transaction verifier.
-
-            // Sum up some block totals from the transaction responses.
-            use futures::StreamExt;
-            while let Some(result) = async_checks.next().await {
-                tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
-                    .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
-
-                sigops = sigops.saturating_add(response.sigops);
-
-                // Coinbase transactions consume the miner fee,
-                // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee {
-                    block_miner_fees += miner_fee;
-                }
-            }
+            .verify()
+            .await?;
 
             // Check the summed block totals
 
