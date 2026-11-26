@@ -57,6 +57,11 @@ mod peer_tx;
 #[cfg(test)]
 mod tests;
 
+// Keep reading recovery replies without letting unrelated service calls or writes hide
+// the deadline. Both limits include every deferred message, in peer order.
+const MAX_DEFERRED_MESSAGES: usize = 64;
+const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
@@ -775,10 +780,6 @@ where
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
 
-        // Keep reading recovery replies without letting unrelated service calls or writes hide
-        // the deadline. Both limits include every deferred message, in peer order.
-        const MAX_DEFERRED_MESSAGES: usize = 64;
-        const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
         let sizing_codec = Codec::builder()
             .for_version(self.connection_info.negotiated_version)
             .finish();
