@@ -1335,6 +1335,38 @@ impl ReadStateService {
     }
 }
 
+/// Splits a commit of a solved block proposal into a commit of its semantically verified block
+/// and the proposal's contextual validation result. Returns other requests unchanged.
+fn split_contextually_verified_commit(
+    req: Request,
+) -> (Request, Option<Box<crate::ContextuallyVerifiedBlock>>) {
+    match req {
+        Request::CommitContextuallyVerifiedBlock(contextual) => {
+            let semantically_verified = SemanticallyVerifiedBlock {
+                block: contextual.block.clone(),
+                hash: contextual.hash,
+                height: contextual.height,
+                // The queue makes the new outputs available to other blocks' verifiers. The
+                // result shares its outputs with the chain that validating the proposal
+                // built, so the queue gets a copy.
+                new_outputs: contextual
+                    .new_outputs
+                    .iter()
+                    .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+                    .collect(),
+                transaction_hashes: contextual.transaction_hashes.clone(),
+                received_time: contextual.received_time,
+            };
+
+            (
+                Request::CommitSemanticallyVerifiedBlock(semantically_verified),
+                Some(contextual),
+            )
+        }
+        req => (req, None),
+    }
+}
+
 impl Service<Request> for StateService {
     type Response = Response;
     type Error = BoxError;
@@ -1382,31 +1414,7 @@ impl Service<Request> for StateService {
 
         // A validated proposal is queued and committed like any other non-finalized block, but
         // it keeps its contextual validation result.
-        let (req, contextual) = match req {
-            Request::CommitContextuallyVerifiedBlock(contextual) => {
-                let semantically_verified = SemanticallyVerifiedBlock {
-                    block: contextual.block.clone(),
-                    hash: contextual.hash,
-                    height: contextual.height,
-                    // The queue makes the new outputs available to other blocks' verifiers. The
-                    // result shares its outputs with the chain that validating the proposal
-                    // built, so the queue gets a copy.
-                    new_outputs: contextual
-                        .new_outputs
-                        .iter()
-                        .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
-                        .collect(),
-                    transaction_hashes: contextual.transaction_hashes.clone(),
-                    received_time: contextual.received_time,
-                };
-
-                (
-                    Request::CommitSemanticallyVerifiedBlock(semantically_verified),
-                    Some(contextual),
-                )
-            }
-            req => (req, None),
-        };
+        let (req, contextual) = split_contextually_verified_commit(req);
 
         match req {
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
