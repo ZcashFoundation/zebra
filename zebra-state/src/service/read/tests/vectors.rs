@@ -917,3 +917,135 @@ fn address_tx_ids_limit_spans_finalized_and_non_finalized_blocks() -> Result<()>
 
     Ok(())
 }
+
+/// `AnyChainUtxos` returns the UTXOs of the known outpoints in one response, and leaves out the
+/// unknown ones, whether it reads them on one thread or on several.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_utxos_returns_the_known_utxos() -> Result<()> {
+    use zebra_chain::transparent::{OutPoint, Utxo};
+
+    use crate::{Request, Response};
+
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let (state, read_state, _latest_chain_tip, _chain_tip_change) =
+        populated_state(blocks.clone(), &Mainnet).await;
+
+    // The genesis block's outputs can't be spent, so the state doesn't keep them.
+    let expected: std::collections::HashMap<OutPoint, Utxo> = blocks
+        .iter()
+        .skip(1)
+        .flat_map(|block| {
+            let height = block.coinbase_height().expect("valid blocks have a height");
+            block.transactions.iter().flat_map(move |transaction| {
+                let hash = transaction.hash();
+                transaction
+                    .outputs()
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(index, output)| {
+                        (
+                            OutPoint::from_usize(hash, index),
+                            Utxo::new(output, height, true),
+                        )
+                    })
+            })
+        })
+        .collect();
+    assert!(expected.len() > 1, "the test blocks create outputs");
+
+    let unknown = OutPoint {
+        hash: transaction::Hash([0xff; 32]),
+        index: 0,
+    };
+    let mut outpoints: Vec<OutPoint> = expected.keys().copied().collect();
+    outpoints.push(unknown);
+
+    // Few enough outpoints to read on the calling thread.
+    assert!(outpoints.len() < super::super::block::MIN_UTXO_LOOKUPS_PER_THREAD);
+    let ReadResponse::AnyChainUtxos(utxos) = read_state
+        .clone()
+        .oneshot(ReadRequest::AnyChainUtxos(outpoints.clone()))
+        .await
+        .expect("the state answers AnyChainUtxos")
+    else {
+        panic!("unexpected response to AnyChainUtxos");
+    };
+    assert_eq!(utxos, expected);
+
+    // Repeated outpoints are read on several threads, and returned once.
+    let repeated: Vec<OutPoint> = outpoints
+        .iter()
+        .copied()
+        .cycle()
+        .take(8 * super::super::block::MIN_UTXO_LOOKUPS_PER_THREAD)
+        .collect();
+    let ReadResponse::AnyChainUtxos(utxos) = read_state
+        .oneshot(ReadRequest::AnyChainUtxos(repeated))
+        .await
+        .expect("the state answers AnyChainUtxos")
+    else {
+        panic!("unexpected response to AnyChainUtxos");
+    };
+    assert_eq!(utxos, expected);
+
+    // The state service answers the same request from the read state service.
+    let Response::AnyChainUtxos(utxos) = state
+        .oneshot(Request::AnyChainUtxos(outpoints))
+        .await
+        .expect("the state answers AnyChainUtxos")
+    else {
+        panic!("unexpected response to AnyChainUtxos");
+    };
+    assert_eq!(utxos, expected);
+
+    Ok(())
+}
+
+/// `any_utxos` finds the same UTXOs as `any_utxo` in the non-finalized state.
+#[test]
+fn any_utxos_matches_any_utxo_in_the_non_finalized_state() -> Result<()> {
+    use zebra_chain::transparent::OutPoint;
+
+    use crate::service::read::block::{any_utxo, any_utxos};
+
+    let _init_guard = zebra_test::init();
+
+    let SideChainFixture {
+        non_finalized_state,
+        finalized_state,
+        ..
+    } = side_chain_fixture()?;
+
+    // The fixture's blocks have the transactions of this block.
+    let block: Arc<Block> = Arc::new(Mainnet.test_block(653599, 583999).unwrap());
+    let mut outpoints: Vec<OutPoint> = block
+        .transactions
+        .iter()
+        .flat_map(|transaction| {
+            let hash = transaction.hash();
+            (0..transaction.outputs().len()).map(move |index| OutPoint::from_usize(hash, index))
+        })
+        .collect();
+    outpoints.push(OutPoint {
+        hash: transaction::Hash([0xff; 32]),
+        index: 0,
+    });
+
+    let utxos = any_utxos(&non_finalized_state, &finalized_state.db, outpoints.clone());
+    assert!(!utxos.is_empty(), "the fixture's blocks create outputs");
+
+    for outpoint in outpoints {
+        assert_eq!(
+            utxos.get(&outpoint).cloned(),
+            any_utxo(non_finalized_state.clone(), &finalized_state.db, outpoint),
+        );
+    }
+
+    Ok(())
+}

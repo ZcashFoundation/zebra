@@ -170,6 +170,10 @@ pub enum Response {
     /// Response to [`Request::UnspentBestChainUtxo`] with the UTXO
     UnspentBestChainUtxo(Option<transparent::Utxo>),
 
+    /// Response to [`Request::AnyChainUtxos`] with the UTXOs that were found, from verified
+    /// blocks in _any_ non-finalized chain, or the finalized chain.
+    AnyChainUtxos(HashMap<transparent::OutPoint, transparent::Utxo>),
+
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
@@ -579,6 +583,13 @@ pub enum ReadResponse {
     /// the UTXO remains unspent in the best chain.
     AnyChainUtxo(Option<transparent::Utxo>),
 
+    /// The response to an `AnyChainUtxos` request, with the UTXOs that were found, from verified
+    /// blocks in _any_ non-finalized chain, or the finalized chain.
+    ///
+    /// This response is purely informational, there is no guarantee that
+    /// the UTXOs remain unspent in the best chain.
+    AnyChainUtxos(HashMap<transparent::OutPoint, transparent::Utxo>),
+
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
@@ -746,6 +757,7 @@ impl TryFrom<ReadResponse> for Response {
             }
             ReadResponse::AnyChainTransaction(tx) => Ok(Response::AnyChainTransaction(tx)),
             ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
+            ReadResponse::AnyChainUtxos(utxos) => Ok(Response::AnyChainUtxos(utxos)),
 
 
             ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `Request::AnyChainUtxos` and `ReadRequest::AnyChainUtxos`, which look up the UTXOs of several outpoints in one request, and the `Response::AnyChainUtxos` and `ReadResponse::AnyChainUtxos` responses with the UTXOs that were found; exhaustive matches must handle them.'
+time: 2026-11-26T16:00:00.000000000Z

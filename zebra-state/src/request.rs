@@ -1029,6 +1029,20 @@ pub enum Request {
     /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
     UnspentBestChainUtxo(transparent::OutPoint),
 
+    /// Looks up the UTXOs identified by the given [`OutPoint`](transparent::OutPoint)s in one
+    /// request, without waiting for the ones that are unknown.
+    ///
+    /// Checks verified blocks in the finalized chain and _all_ non-finalized chains, like
+    /// [`Request::AwaitUtxo`], but not the blocks that are queued for verification. So a caller
+    /// that needs an output of a queued block uses [`Request::AwaitUtxo`] for the outpoints that
+    /// this request doesn't return.
+    ///
+    /// Returns [`Response::AnyChainUtxos`] with the UTXOs that were found.
+    ///
+    /// This request is purely informational, there is no guarantee that
+    /// the UTXOs remain unspent in the best chain.
+    AnyChainUtxos(Vec<transparent::OutPoint>),
+
     /// Looks up a block by hash or height in the current best chain.
     ///
     /// Returns
@@ -1249,6 +1263,7 @@ impl Request {
             Request::Transaction(_) => "transaction",
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
+            Request::AnyChainUtxos(_) => "any_chain_utxos",
             Request::Block(_) => "block",
             Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
@@ -1437,6 +1452,17 @@ pub enum ReadRequest {
     /// This request is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
     AnyChainUtxo(transparent::OutPoint),
+
+    /// Looks up the UTXOs identified by the given [`OutPoint`](transparent::OutPoint)s in one
+    /// request, leaving out the ones that are unknown.
+    ///
+    /// Checks verified blocks in the finalized chain and _all_ non-finalized chains.
+    ///
+    /// Returns [`ReadResponse::AnyChainUtxos`] with the UTXOs that were found.
+    ///
+    /// This request is purely informational, there is no guarantee that
+    /// the UTXOs remain unspent in the best chain.
+    AnyChainUtxos(Vec<transparent::OutPoint>),
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -1812,6 +1838,7 @@ impl ReadRequest {
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
+            ReadRequest::AnyChainUtxos(_) => "any_chain_utxos",
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
@@ -1883,6 +1910,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
             }
+            Request::AnyChainUtxos(outpoints) => Ok(ReadRequest::AnyChainUtxos(outpoints)),
 
             Request::BlockLocator => Ok(ReadRequest::BlockLocator),
             Request::FindBlockHashes { known_blocks, stop } => {

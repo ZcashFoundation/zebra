@@ -451,6 +451,42 @@ pub fn any_utxo(
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
 }
 
+/// The fewest outpoints that [`any_utxos`] gives to each thread it reads them on.
+///
+/// A lookup costs much less than starting a rayon job for it, so a few outpoints are read on
+/// the calling thread.
+pub(crate) const MIN_UTXO_LOOKUPS_PER_THREAD: usize = 64;
+
+/// Returns the [`Utxo`]s for the `outpoints` that are in any chain in the
+/// `non_finalized_state`, or in the finalized `db`. Unknown outpoints are left out.
+///
+/// Non-finalized UTXOs are returned regardless of whether they have been spent.
+/// Finalized UTXOs are only returned if they are unspent in the finalized chain,
+/// but they may have been spent in one or more non-finalized chains.
+///
+/// All the outpoints are looked up in the same `non_finalized_state`, and on several threads
+/// when there are enough of them.
+pub fn any_utxos(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    outpoints: Vec<transparent::OutPoint>,
+) -> HashMap<transparent::OutPoint, Utxo> {
+    use rayon::prelude::*;
+
+    outpoints
+        .into_par_iter()
+        .with_min_len(MIN_UTXO_LOOKUPS_PER_THREAD)
+        .filter_map(|outpoint| {
+            // The same order as `any_utxo()`: the non-finalized state is always in memory.
+            let utxo = non_finalized_state
+                .any_utxo(&outpoint)
+                .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))?;
+
+            Some((outpoint, utxo))
+        })
+        .collect()
+}
+
 /// Returns the [`BlockInfo`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_info<C>(
