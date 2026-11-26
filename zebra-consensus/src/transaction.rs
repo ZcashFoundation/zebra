@@ -282,19 +282,7 @@ where
         let state = self.state.clone();
 
         let tx = req.transaction.clone();
-        // Reuse the caller's precomputed hash instead of calling `Transaction::unmined_id()`,
-        // which would re-serialize and re-hash the whole transaction.
-        // `Transaction::auth_digest()` returns `None` for exactly the versions that
-        // `UnminedTxId::from(&Transaction)` maps to `Legacy` (v1-v4), and `Some` for those it
-        // maps to `Witnessed` (v5 onward), so deriving the variant from it stays correct if a
-        // later transaction version is added.
-        let tx_id = match tx.auth_digest() {
-            None => UnminedTxId::Legacy(req.transaction_hash),
-            Some(auth_digest) => UnminedTxId::Witnessed(transaction::WtxId {
-                id: req.transaction_hash,
-                auth_digest,
-            }),
-        };
+        let tx_id = unmined_id(&tx, req.transaction_hash);
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
@@ -773,6 +761,23 @@ where
             .collect();
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
+    }
+}
+
+/// Returns the unmined ID of `tx`, whose mined ID is `hash`.
+pub(crate) fn unmined_id(tx: &Transaction, hash: transaction::Hash) -> UnminedTxId {
+    // Reuse the caller's precomputed hash instead of calling `Transaction::unmined_id()`,
+    // which would re-serialize and re-hash the whole transaction.
+    // `Transaction::auth_digest()` returns `None` for exactly the versions that
+    // `UnminedTxId::from(&Transaction)` maps to `Legacy` (v1-v4), and `Some` for those it
+    // maps to `Witnessed` (v5 onward), so deriving the variant from it stays correct if a
+    // later transaction version is added.
+    match tx.auth_digest() {
+        None => UnminedTxId::Legacy(hash),
+        Some(auth_digest) => UnminedTxId::Witnessed(transaction::WtxId {
+            id: hash,
+            auth_digest,
+        }),
     }
 }
 
