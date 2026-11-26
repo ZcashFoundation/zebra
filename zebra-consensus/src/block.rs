@@ -13,7 +13,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use chrono::Utc;
@@ -28,8 +28,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     diagnostic::task::WaitForPanics,
-    parameters::{subsidy::SubsidyError, Network, NetworkUpgrade},
-    transaction::{UnminedTxId, WtxId},
+    parameters::{subsidy::SubsidyError, Network},
     transparent,
     work::equihash,
 };
@@ -39,6 +38,7 @@ use zebra_state as zs;
 use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
+mod mempool_reuse;
 pub mod request;
 
 pub use request::Request;
@@ -59,9 +59,6 @@ pub struct SemanticBlockVerifier<S, V> {
     /// The block proposals that this verifier has validated, shared by all its requests.
     validated_proposals: Arc<watch::Sender<ValidatedProposals>>,
 }
-
-/// Cache availability must not hold up block verification.
-const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
 
 /// Block proposals that passed validation, with the state's validation results, newest first.
 ///
@@ -689,25 +686,7 @@ where
                 record_phase("block_checks", &mut phase_start);
             }
 
-            // Query only this block's candidates, against the mempool's processed tip.
-            let candidates = if let Some(mempool) = mempool {
-                match tokio::time::timeout(
-                    MEMPOOL_REUSE_TIMEOUT,
-                    mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {
-                        transaction_hashes: transaction_hashes.clone(),
-                        parent_hash: block.header.previous_block_hash,
-                    }),
-                )
-                .await
-                {
-                    Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(transactions))) => {
-                        transactions
-                    }
-                    _ => HashMap::new(),
-                }
-            } else {
-                HashMap::new()
-            };
+            let candidates = mempool_reuse::lookup(mempool, &block, &transaction_hashes).await;
             let verified = if candidates.is_empty() {
                 HashMap::new()
             } else {
@@ -715,45 +694,13 @@ where
                 let transaction_hashes = transaction_hashes.clone();
                 let network = network.clone();
                 tokio::task::spawn_blocking(move || {
-                    let mut candidates = candidates;
-                    let upgrade = NetworkUpgrade::current(&network, height);
-                    for (&hash, transaction) in transaction_hashes.iter().zip(&block.transactions) {
-                        let Some(candidate) = candidates.get(&hash) else {
-                            continue;
-                        };
-                        // Admission records the tip height only after confirming it still matches
-                        // the verification request. Older entries are safe only within that epoch.
-                        let same_epoch =
-                            candidate
-                                .height
-                                .and_then(|tip| tip + 1)
-                                .is_some_and(|height| {
-                                    NetworkUpgrade::current(&network, height) == upgrade
-                                });
-                        if transaction.is_coinbase() || !same_epoch {
-                            candidates.remove(&hash);
-                            continue;
-                        }
-                        let id = match transaction.auth_digest() {
-                            None => UnminedTxId::Legacy(hash),
-                            Some(auth_digest) => UnminedTxId::Witnessed(WtxId {
-                                id: hash,
-                                auth_digest,
-                            }),
-                        };
-                        if id != candidate.transaction.id {
-                            candidates.remove(&hash);
-                            continue;
-                        }
-                        // Cached proofs and scripts do not establish expiry or block lock time.
-                        tx::check_block_context_rules(
-                            transaction,
-                            height,
-                            block.header.time,
-                            &network,
-                        )?;
-                    }
-                    Ok::<_, TransactionError>(candidates)
+                    mempool_reuse::recheck_candidates(
+                        candidates,
+                        &block,
+                        &transaction_hashes,
+                        height,
+                        &network,
+                    )
                 })
                 .wait_for_panics()
                 .await?
