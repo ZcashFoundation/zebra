@@ -1,10 +1,15 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::{collections::HashSet, pin::Pin, time::Duration};
+use std::{
+    collections::HashSet,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures::Stream;
-use tokio::sync::{broadcast, mpsc};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
@@ -51,8 +56,7 @@ where
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
         let span = Span::current();
-        let (response_sender, response_receiver) = mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
         let mut chain_tip_change = self.chain_tip_change.clone();
 
         tokio::spawn(async move {
@@ -79,13 +83,13 @@ where
                     continue;
                 };
 
-                if !send_stream_item(
-                    &response_sender,
-                    BlockHashAndHeight::new(tip_hash, tip_height),
-                    "chain_tip_change",
-                    &span,
-                )
-                .await
+                if !response_sender
+                    .send_item(
+                        BlockHashAndHeight::new(tip_hash, tip_height),
+                        "chain_tip_change",
+                        &span,
+                    )
+                    .await
                 {
                     return;
                 }
@@ -95,11 +99,8 @@ where
                 tracing::warn!("chain_tip_change channel has closed");
             });
 
-            send_terminal_status(
-                &response_sender,
-                Status::unavailable("chain_tip_change channel has closed"),
-            )
-            .await;
+            response_sender
+                .finish_with_status(Status::unavailable("chain_tip_change channel has closed"));
         });
 
         Ok(Response::new(Box::pin(response_stream)))
@@ -111,8 +112,7 @@ where
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
         let span = Span::current();
         let read_state = self.read_state.clone();
-        let (response_sender, response_receiver) = mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
 
         // The caller may provide the hashes of the chain tips it already has so the server only
         // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
@@ -145,11 +145,9 @@ where
                         );
                     });
 
-                    send_terminal_status(
-                        &response_sender,
-                        Status::unavailable("failed to subscribe to non-finalized state changes"),
-                    )
-                    .await;
+                    response_sender.finish_with_status(Status::unavailable(
+                        "failed to subscribe to non-finalized state changes",
+                    ));
                     return;
                 }
             };
@@ -172,13 +170,13 @@ where
                     break;
                 };
 
-                if !send_stream_item(
-                    &response_sender,
-                    BlockAndHash::new(hash, block),
-                    "non_finalized_state_change",
-                    &span,
-                )
-                .await
+                if !response_sender
+                    .send_item(
+                        BlockAndHash::new(hash, block),
+                        "non_finalized_state_change",
+                        &span,
+                    )
+                    .await
                 {
                     return;
                 }
@@ -188,11 +186,9 @@ where
                 tracing::warn!("non-finalized state change channel has closed");
             });
 
-            send_terminal_status(
-                &response_sender,
-                Status::unavailable("non-finalized state change channel has closed"),
-            )
-            .await;
+            response_sender.finish_with_status(Status::unavailable(
+                "non-finalized state change channel has closed",
+            ));
         });
 
         Ok(Response::new(Box::pin(response_stream)))
@@ -203,8 +199,7 @@ where
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
         let span = Span::current();
-        let (response_sender, response_receiver) = mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
         let mut mempool_change = self.mempool_change.subscribe();
 
         tokio::spawn(async move {
@@ -230,7 +225,8 @@ where
                             });
 
                             let msg = mempool_change_message(change.kind(), tx_id);
-                            if !send_stream_item(&response_sender, msg, "mempool_change", &span)
+                            if !response_sender
+                                .send_item(msg, "mempool_change", &span)
                                 .await
                             {
                                 return;
@@ -245,14 +241,10 @@ where
                             );
                         });
 
-                        send_terminal_status(
-                            &response_sender,
-                            Status::aborted(format!(
-                                "mempool_change stream lagged by {skipped} updates; \
-                                 resubscribe and resync"
-                            )),
-                        )
-                        .await;
+                        response_sender.finish_with_status(Status::aborted(format!(
+                            "mempool_change stream lagged by {skipped} updates; \
+                             resubscribe and resync"
+                        )));
                         return;
                     }
                     Err(broadcast::error::RecvError::Closed) => {
@@ -260,11 +252,9 @@ where
                             tracing::warn!("mempool_change channel has closed");
                         });
 
-                        send_terminal_status(
-                            &response_sender,
-                            Status::unavailable("mempool_change channel has closed"),
-                        )
-                        .await;
+                        response_sender.finish_with_status(Status::unavailable(
+                            "mempool_change channel has closed",
+                        ));
                         return;
                     }
                 }
@@ -319,38 +309,101 @@ where
     }
 }
 
-/// Sends a stream item to the client with [`SEND_TIMEOUT`] backpressure, returning `false` if the
-/// client disconnected or timed out.
-async fn send_stream_item<T>(
-    response_sender: &mpsc::Sender<Result<T, Status>>,
-    item: T,
-    stream_name: &'static str,
-    span: &Span,
-) -> bool {
-    match tokio::time::timeout(SEND_TIMEOUT, response_sender.send(Ok(item))).await {
-        Ok(Ok(())) => true,
-        Ok(Err(_)) => {
-            span.in_scope(|| {
-                tracing::info!("client disconnected, dropping {stream_name} task");
-            });
-            false
+/// Producer half of an indexer server stream, pairing a bounded item queue with a side channel
+/// for its terminal gRPC status so status delivery never blocks on or loses to a full item queue.
+struct StreamSender<T> {
+    items: mpsc::Sender<T>,
+    terminal_status: Option<oneshot::Sender<Status>>,
+}
+
+/// Consumer half of an indexer server stream that drains buffered items before yielding any
+/// terminal error status.
+struct IndexerStream<T> {
+    items: mpsc::Receiver<T>,
+    terminal_status: Option<oneshot::Receiver<Status>>,
+}
+
+/// Creates a paired [`StreamSender`] and [`IndexerStream`] with a bounded item buffer.
+fn indexer_stream_channel<T>() -> (StreamSender<T>, IndexerStream<T>) {
+    let (items_tx, items_rx) = mpsc::channel(RESPONSE_BUFFER_SIZE);
+    let (status_tx, status_rx) = oneshot::channel();
+    (
+        StreamSender {
+            items: items_tx,
+            terminal_status: Some(status_tx),
+        },
+        IndexerStream {
+            items: items_rx,
+            terminal_status: Some(status_rx),
+        },
+    )
+}
+
+impl<T> StreamSender<T> {
+    async fn closed(&self) {
+        self.items.closed().await;
+    }
+
+    /// Sends a stream item to the client with [`SEND_TIMEOUT`] backpressure, returning `false` if
+    /// the client disconnected or timed out.
+    async fn send_item(&mut self, item: T, stream_name: &'static str, span: &Span) -> bool {
+        match tokio::time::timeout(SEND_TIMEOUT, self.items.send(item)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => {
+                span.in_scope(|| {
+                    tracing::info!("client disconnected, dropping {stream_name} task");
+                });
+                false
+            }
+            Err(_) => {
+                span.in_scope(|| {
+                    tracing::warn!(
+                        "slow consumer, dropping {stream_name} stream after send timed out"
+                    );
+                });
+                if let Some(status_tx) = self.terminal_status.take() {
+                    let _ = status_tx.send(Status::deadline_exceeded(format!(
+                        "{stream_name} stream timed out sending to slow consumer"
+                    )));
+                }
+                false
+            }
         }
-        Err(_) => {
-            span.in_scope(|| {
-                tracing::warn!("slow consumer, dropping {stream_name} stream after send timed out");
-            });
-            false
+    }
+
+    /// Records a terminal gRPC error status independently of the item queue and closes the stream.
+    fn finish_with_status(mut self, status: Status) {
+        if let Some(status_tx) = self.terminal_status.take() {
+            let _ = status_tx.send(status);
         }
     }
 }
 
-/// Sends a terminal gRPC error status to the client, bounded by [`SEND_TIMEOUT`] so a stalled
-/// receiver cannot hang task shutdown.
-async fn send_terminal_status<T>(
-    response_sender: &mpsc::Sender<Result<T, Status>>,
-    status: Status,
-) {
-    let _ = tokio::time::timeout(SEND_TIMEOUT, response_sender.send(Err(status))).await;
+impl<T> Stream for IndexerStream<T> {
+    type Item = Result<T, Status>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.items.poll_recv(cx) {
+            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => {
+                let Some(status_rx) = this.terminal_status.as_mut() else {
+                    return Poll::Ready(None);
+                };
+                match Pin::new(status_rx).poll(cx) {
+                    Poll::Ready(result) => {
+                        this.terminal_status = None;
+                        match result {
+                            Ok(status) => Poll::Ready(Some(Err(status))),
+                            Err(_) => Poll::Ready(None),
+                        }
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
 }
 
 /// Converts a mempool change kind and transaction ID into a [`MempoolChangeMessage`].
@@ -827,6 +880,139 @@ mod tests {
                 status.message().contains("closed"),
                 "expected closed message, got: {}",
                 status.message()
+            );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn mempool_change_preserves_aborted_status_when_response_queue_is_full() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            // Fill every slot of the bounded response queue via a single broadcast message.
+            let full_batch: HashSet<UnminedTxId> = (0..RESPONSE_BUFFER_SIZE)
+                .map(|idx| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(
+                        &u64::try_from(idx)
+                            .expect("buffer index fits in u64")
+                            .to_le_bytes(),
+                    );
+                    UnminedTxId::Legacy(transaction::Hash::from(bytes))
+                })
+                .collect();
+            mempool_tx
+                .send(MempoolChange::added(full_batch))
+                .expect("mempool_change task should be subscribed");
+            tokio::task::yield_now().await;
+
+            // Overflow the capacity-1 broadcast channel to force `RecvError::Lagged(1)` while the
+            // response queue is completely full.
+            for byte in [0xfeu8, 0xff] {
+                let tx_ids = [UnminedTxId::Legacy(transaction::Hash::from([byte; 32]))]
+                    .into_iter()
+                    .collect();
+                mempool_tx
+                    .send(MempoolChange::added(tx_ids))
+                    .expect("mempool_change task should still be subscribed");
+            }
+
+            // Advance past `SEND_TIMEOUT` so task exit cannot depend on waiting longer.
+            tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
+            assert!(
+                wait_until(|| mempool_tx.receiver_count() == 0).await,
+                "lagged mempool_change task should exit promptly even with a full response queue"
+            );
+
+            for idx in 0..RESPONSE_BUFFER_SIZE {
+                let item = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                    .await
+                    .expect("buffered item should be readable")
+                    .unwrap_or_else(|| panic!("missing buffered item {idx}"));
+                assert!(item.is_ok(), "buffered item {idx} should succeed");
+            }
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("terminal lag status should follow buffered items")
+                .expect("stream must yield terminal ABORTED status instead of EOF")
+                .expect_err("terminal item must be an error status");
+            assert_eq!(status.code(), Code::Aborted);
+            assert!(
+                stream.next().await.is_none(),
+                "stream must end after status"
+            );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn mempool_change_preserves_unavailable_status_when_response_queue_is_full() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            let full_batch: HashSet<UnminedTxId> = (0..RESPONSE_BUFFER_SIZE)
+                .map(|idx| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(
+                        &u64::try_from(idx)
+                            .expect("buffer index fits in u64")
+                            .to_le_bytes(),
+                    );
+                    UnminedTxId::Legacy(transaction::Hash::from(bytes))
+                })
+                .collect();
+            mempool_tx
+                .send(MempoolChange::added(full_batch))
+                .expect("mempool_change task should be subscribed");
+            tokio::task::yield_now().await;
+
+            // Drop upstream senders while the response queue is completely full.
+            drop(rpc);
+            drop(mempool_tx);
+
+            tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
+
+            for idx in 0..RESPONSE_BUFFER_SIZE {
+                let item = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                    .await
+                    .expect("buffered item should be readable")
+                    .unwrap_or_else(|| panic!("missing buffered item {idx}"));
+                assert!(item.is_ok(), "buffered item {idx} should succeed");
+            }
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("terminal unavailable status should follow buffered items")
+                .expect("stream must yield terminal UNAVAILABLE status instead of EOF")
+                .expect_err("terminal item must be an error status");
+            assert_eq!(status.code(), Code::Unavailable);
+            assert!(
+                stream.next().await.is_none(),
+                "stream must end after status"
             );
         }
     }
