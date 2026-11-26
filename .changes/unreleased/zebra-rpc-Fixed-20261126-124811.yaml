@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Fixed indexer gRPC stream tasks leaking on client disconnect before an upstream event arrives, bounded terminal error status sends, and reported lagged `MempoolChange` subscriptions with gRPC `ABORTED` instead of `UNAVAILABLE`.
+time: 2026-11-26T12:48:11.553022424Z

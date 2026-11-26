@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed indexer gRPC stream tasks and non-finalized block listeners leaking when clients disconnect before an upstream event arrives, and reported lagged `MempoolChange` subscriptions with gRPC `ABORTED` instead of falsely reporting a closed channel.
+time: 2026-11-26T12:48:11.557419518Z
