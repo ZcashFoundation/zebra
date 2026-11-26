@@ -660,6 +660,8 @@ where
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
+            let mut sigops = 0;
+            let mut block_miner_fees = Ok(Amount::zero());
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
@@ -687,9 +689,6 @@ where
             // Get the transaction results back from the transaction verifier.
 
             // Sum up some block totals from the transaction responses.
-            let mut sigops = 0;
-            let mut block_miner_fees = Ok(Amount::zero());
-
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());

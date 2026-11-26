@@ -305,12 +305,9 @@ where
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do quick checks first
-            check_common_consensus_rules(tx.as_ref(), height, &network)?;
+            check_block_context_rules(tx.as_ref(), height, time, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
-
-            // Block transactions are checked against the block's own time directly.
-            check::lock_time_has_passed(&tx, height, time)?;
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
@@ -776,6 +773,20 @@ where
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
+}
+
+/// Checks the rules for `tx` that depend on the block it is in, at `height` with the header
+/// time `time`, without its scripts, proofs or signatures.
+pub(crate) fn check_block_context_rules(
+    tx: &Transaction,
+    height: block::Height,
+    time: DateTime<Utc>,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    check_common_consensus_rules(tx, height, network)?;
+    // Block transactions are checked against the block's own time directly.
+    check::lock_time_has_passed(tx, height, time)?;
+    Ok(())
 }
 
 /// Applies every consensus rule that a transaction must satisfy in both block and mempool
