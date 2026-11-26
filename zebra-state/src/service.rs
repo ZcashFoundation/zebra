@@ -535,13 +535,22 @@ impl StateService {
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
 
+        state.metrics_exporter = Some(Self::spawn_metrics_exporter(state.read_service.db.clone()));
+
+        (state, read_service, latest_chain_tip, chain_tip_change)
+    }
+
+    /// Spawns a dedicated thread that periodically exports RocksDB metrics to Prometheus
+    /// until the returned shutdown sender is dropped.
+    fn spawn_metrics_exporter(
+        db: ZebraDb,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
         // RocksDB property reads are blocking, so export metrics on a dedicated thread.
         let (shutdown_sender, shutdown_receiver) = std::sync::mpsc::channel();
-        let db_for_metrics = state.read_service.db.clone();
         let span = Span::current();
         let metrics_thread = std::thread::spawn(move || {
             span.in_scope(|| loop {
-                db_for_metrics.export_metrics();
+                db.export_metrics();
                 if !matches!(
                     shutdown_receiver.recv_timeout(Duration::from_secs(30)),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout)
@@ -550,9 +559,7 @@ impl StateService {
                 }
             });
         });
-        state.metrics_exporter = Some((shutdown_sender, metrics_thread));
-
-        (state, read_service, latest_chain_tip, chain_tip_change)
+        (shutdown_sender, metrics_thread)
     }
 
     /// Call read only state service to log rocksdb database metrics.
@@ -1196,6 +1203,24 @@ impl ReadStateService {
             .borrow_mapped(|non_finalized_state| non_finalized_state.best_chain().cloned())
     }
 
+    /// Serves non-blocking read requests inline without spawning a blocking task.
+    fn try_call_inline(&self, req: &ReadRequest) -> Option<ReadResponse> {
+        match req {
+            // Used by the `getblockchaininfo` RPC.
+            // Reading the cached atomic size is lock-free and never blocks.
+            ReadRequest::UsageInfo => Some(ReadResponse::UsageInfo(self.db.cached_size())),
+            // Used by `getblockchaininfo`, `getinfo`, and `getdifficulty` RPCs.
+            // Compute inline from the in-memory best chain when it holds the full averaging window.
+            ReadRequest::BestChainNextDifficulty => self
+                .latest_best_chain()
+                .and_then(|chain| {
+                    read::difficulty::next_difficulty_from_chain(&chain, &self.network)
+                })
+                .map(|difficulty| ReadResponse::BestChainNextDifficulty(Some(difficulty))),
+            _ => None,
+        }
+    }
+
     /// Test-only access to the inner database.
     /// Can be used to modify the database without doing any consensus checks.
     #[cfg(any(test, feature = "proptest-impl"))]
@@ -1591,26 +1616,8 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", level = "debug", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
-        match &req {
-            // Used by the `getblockchaininfo` RPC.
-            // Reading the cached atomic size is lock-free and never blocks.
-            ReadRequest::UsageInfo => {
-                return std::future::ready(Ok(ReadResponse::UsageInfo(self.db.cached_size())))
-                    .boxed();
-            }
-            // Used by `getblockchaininfo`, `getinfo`, and `getdifficulty` RPCs.
-            // Compute inline from the in-memory best chain when it holds the full averaging window.
-            ReadRequest::BestChainNextDifficulty => {
-                if let Some(difficulty) = self.latest_best_chain().and_then(|chain| {
-                    read::difficulty::next_difficulty_from_chain(&chain, &self.network)
-                }) {
-                    return std::future::ready(Ok(ReadResponse::BestChainNextDifficulty(Some(
-                        difficulty,
-                    ))))
-                    .boxed();
-                }
-            }
-            _ => {}
+        if let Some(response) = self.try_call_inline(&req) {
+            return std::future::ready(Ok(response)).boxed();
         }
 
         let timer = CodeTimer::start_desc(req.variant_name());
