@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `SerializedBlock::into_bytes` and `SerializedTransaction::into_bytes` to unwrap serialized bytes without copying.
+time: 2026-11-26T10:31:59.832017091Z

@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block,
-    serialization::{BytesInDisplayOrder, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        BytesInDisplayOrder, SerializationError, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
+    },
 };
 
 #[cfg(test)]
@@ -55,6 +58,31 @@ impl BlockAndHash {
                 .zcash_serialize_to_vec()
                 .expect("block serialization should not fail"),
         }
+    }
+
+    /// Creates a new [`BlockAndHash`] from a consensus-serialized [`block::SerializedBlock`],
+    /// returning the message together with the parsed [`block::Hash`].
+    ///
+    /// Only the block header prefix is deserialized to derive the hash; the transaction bytes are
+    /// forwarded without deserializing or copying them.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SerializationError`] if the leading header bytes cannot be deserialized.
+    pub(crate) fn try_from_serialized(
+        block: block::SerializedBlock,
+    ) -> Result<(Self, block::Hash), SerializationError> {
+        let mut cursor = std::io::Cursor::new(block.as_ref());
+        let header = block::Header::zcash_deserialize(&mut cursor)?;
+        let hash = block::Hash::from(&header);
+
+        Ok((
+            BlockAndHash {
+                hash: hash.bytes_in_display_order().to_vec(),
+                data: block.into_bytes(),
+            },
+            hash,
+        ))
     }
 
     /// Try to convert a [`BlockAndHash`] into a tuple of a decoded block and hash.

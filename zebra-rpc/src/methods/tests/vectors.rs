@@ -408,7 +408,9 @@ async fn rpc_getblock_rejects_incomplete_stored_bodies() {
         );
         read_state.db().write_batch(batch).unwrap();
 
-        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mempool = tower::service_fn(|_req: mempool::Request| async {
+            Ok::<_, BoxError>(mempool::Response::Transactions(vec![]))
+        });
         let (_tx, rx) = tokio::sync::watch::channel(None);
         let (rpc, rpc_tx_queue) = RpcImpl::new(
             Mainnet,
@@ -430,8 +432,23 @@ async fn rpc_getblock_rejects_incomplete_stored_bodies() {
         for verbosity in [0, 2, 3] {
             for query in [height.0.to_string(), block.hash().to_string()] {
                 let error = rpc.get_block(query, Some(verbosity)).await.unwrap_err();
+                assert_eq!(error.code(), -1);
                 assert_eq!(error.message(), expected);
             }
+        }
+        let raw_tx_queries = block.transactions.iter().flat_map(|tx| {
+            let tx_hash = tx.hash().to_string();
+            [None, Some(block.hash().to_string())]
+                .into_iter()
+                .map(move |block_hash| (tx_hash.clone(), block_hash))
+        });
+        for (tx_hash, block_hash) in raw_tx_queries {
+            let error = rpc
+                .get_raw_transaction(tx_hash, Some(0), block_hash)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), -1);
+            assert_eq!(error.message(), expected);
         }
         let error = rpc
             .get_block(unknown_height.0.to_string(), Some(0))
@@ -1132,9 +1149,9 @@ async fn rpc_getblock_missing_error() {
 
     // Make the mock service respond with no block
     let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .expect_request(zebra_state::ReadRequest::RawBlock(Height(0).into()))
         .await;
-    response_handler.respond(zebra_state::ReadResponse::Block(None));
+    response_handler.respond(zebra_state::ReadResponse::RawBlock(None));
 
     let block_response = block_future.await.expect("block future should not panic");
     let block_response =

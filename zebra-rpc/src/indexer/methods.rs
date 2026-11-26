@@ -270,13 +270,29 @@ where
         match self
             .read_state
             .clone()
-            .oneshot(ReadRequest::Block(hash_or_height))
+            .oneshot(ReadRequest::RawBlock(hash_or_height))
             .await
         {
-            Ok(ReadResponse::Block(Some(block))) => {
-                Ok(Response::new(BlockAndHash::new(block.hash(), block)))
+            Ok(ReadResponse::RawBlock(Some(block))) => {
+                let (response, hash) =
+                    BlockAndHash::try_from_serialized(block).map_err(|error| {
+                        Status::internal(format!(
+                            "failed to deserialize stored block header: {error}"
+                        ))
+                    })?;
+
+                if let zebra_state::HashOrHeight::Hash(expected) = hash_or_height {
+                    if hash != expected {
+                        return Err(Status::internal(format!(
+                            "stored block header hash {hash} does not match requested hash \
+                             {expected}"
+                        )));
+                    }
+                }
+
+                Ok(Response::new(response))
             }
-            Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
+            Ok(ReadResponse::RawBlock(None)) => Err(Status::not_found("block not found")),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => Err(Status::unavailable(format!(
                 "failed to read block: {error}"

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`z_gettreestate` (and lightwalletd `GetTreeState`/`GetLatestTreeState`) now reads only the block header instead of the full block, changing its `state.requests` metric label from `block` to `block_header`, and returns "the requested block is not in the main chain" instead of empty trees if an active pool tree vanishes between lookups.'
+time: 2026-11-26T10:32:00.845419037Z

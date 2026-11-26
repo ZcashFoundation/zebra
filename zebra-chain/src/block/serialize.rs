@@ -205,6 +205,13 @@ pub struct SerializedBlock {
     bytes: Vec<u8>,
 }
 
+impl SerializedBlock {
+    /// Consumes the serialized block, returning the underlying bytes without copying.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
 /// Build a [`SerializedBlock`] by serializing a block.
 impl<B: Borrow<Block>> From<B> for SerializedBlock {
     fn from(block: B) -> Self {

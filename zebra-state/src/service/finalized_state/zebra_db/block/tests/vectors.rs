@@ -180,6 +180,31 @@ fn test_block_db_round_trip_with(
         }
 
         assert_eq!(stored_block, original_block);
+
+        // The stored bytes must be identical to serializing the block and its transactions.
+        let serialized_block = state
+            .serialized_block(finalized.height.into())
+            .expect("stored block is complete")
+            .expect("block was stored at height");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+        let serialized_block = state
+            .serialized_block(original_block.hash().into())
+            .expect("stored block is complete")
+            .expect("block was stored with its hash");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+
+        for tx in &original_block.transactions {
+            let serialized_tx = state
+                .serialized_transaction(tx.hash())
+                .expect("unpruned db reads")
+                .expect("transaction was stored");
+            assert_eq!(
+                serialized_tx.as_ref(),
+                tx.zcash_serialize_to_vec()
+                    .expect("serialization to vec never fails")
+                    .as_slice(),
+            );
+        }
     }
 }
 
@@ -227,6 +252,11 @@ fn complete_body_test_db(config: &Config) -> (ZebraDb, Arc<Block>) {
             location,
             tx.hash(),
         );
+        batch.zs_insert(
+            &db.cf_handle("tx_loc_by_hash").unwrap(),
+            tx.hash(),
+            location,
+        );
     }
     db.write_batch(batch).unwrap();
     (db, block)
@@ -248,8 +278,13 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     ] {
         assert!(db.block(query).unwrap().is_none());
         assert!(db.raw_block(query).unwrap().is_none());
+        assert!(db.serialized_block(query).unwrap().is_none());
         assert!(db.block_and_size(query).unwrap().is_none());
     }
+    assert!(db
+        .serialized_transaction(zebra_chain::transaction::Hash([0xff; 32]))
+        .unwrap()
+        .is_none());
 
     // Include a missing tail: checking only that the remaining rows are contiguous is insufficient.
     for missing in [None, Some(0), Some(1), Some(block.transactions.len() - 1)] {
@@ -268,8 +303,16 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
         ] {
             assert_eq!(db.block(query).unwrap_err(), expected);
             assert_eq!(db.raw_block(query).unwrap_err(), expected);
+            assert_eq!(db.serialized_block(query).unwrap_err(), expected);
             assert_eq!(db.block_and_size(query).unwrap_err(), expected);
             assert!(db.block_header(query).is_some());
+        }
+        if missing.is_none_or(|missing| missing == 0) {
+            assert_eq!(
+                db.serialized_transaction(block.transactions[0].hash())
+                    .unwrap_err(),
+                expected
+            );
         }
     }
 
@@ -284,7 +327,16 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
             db.block(query).unwrap_err(),
             BlockReadError::CorruptBlock { height }
         );
+        assert_eq!(
+            db.serialized_block(query).unwrap_err(),
+            BlockReadError::CorruptBlock { height }
+        );
     }
+    assert_eq!(
+        db.serialized_transaction(block.transactions[0].hash())
+            .unwrap_err(),
+        BlockReadError::CorruptBlock { height }
+    );
 }
 
 #[test]
@@ -381,6 +433,14 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
     .unwrap();
     assert_eq!(secondary.block(height.into()).unwrap(), Some(block.clone()));
     assert_eq!(
+        secondary
+            .serialized_block(height.into())
+            .unwrap()
+            .unwrap()
+            .into_bytes(),
+        block.zcash_serialize_to_vec().unwrap()
+    );
+    assert_eq!(
         secondary.block_and_size(height.into()).unwrap(),
         Some((block.clone(), block.zcash_serialized_size()))
     );
@@ -433,7 +493,26 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
         for query in [height.into(), block.hash().into()] {
             assert!(secondary.block(query).unwrap().is_none());
             assert!(secondary.raw_block(query).unwrap().is_none());
+            assert!(secondary.serialized_block(query).unwrap().is_none());
             assert!(secondary.block_and_size(query).unwrap().is_none());
+        }
+        if lagging_column == 0 {
+            assert_eq!(
+                primary
+                    .serialized_transaction(block.transactions[0].hash())
+                    .unwrap_err(),
+                crate::BlockReadError::CorruptBlock { height }
+            );
+            assert!(secondary
+                .serialized_transaction(block.transactions[0].hash())
+                .unwrap()
+                .is_none());
+        }
+        if lagging_column == 1 {
+            assert!(secondary
+                .serialized_transaction(block.transactions[0].hash())
+                .unwrap()
+                .is_none());
         }
     }
     primary.write_batch(complete_batch()).unwrap();

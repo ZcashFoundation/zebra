@@ -1651,6 +1651,13 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height)?,
             )),
 
+            // Used by the get_block (verbosity 0) and indexer::GetBlock RPCs.
+            ReadRequest::RawBlock(hash_or_height) => Ok(ReadResponse::RawBlock(read::raw_block(
+                state.latest_best_chain(),
+                &state.db,
+                hash_or_height,
+            )?)),
+
             // Used by the get_block (verbosity 3) RPC.
             ReadRequest::SpentOutputs(hash_or_height) => {
                 Ok(ReadResponse::SpentOutputs(read::spent_outputs_for_block(
@@ -1661,35 +1668,11 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by the get_block (verbose) RPC and the StateService.
-            ReadRequest::BlockHeader(hash_or_height) => {
-                let best_chain = state.latest_best_chain();
-
-                let height = hash_or_height
-                    .height_or_else(|hash| {
-                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                let hash = hash_or_height
-                    .hash_or_else(|height| {
-                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                let next_height = height.next()?;
-                let next_block_hash =
-                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
-
-                let header = read::block_header(best_chain, &state.db, height.into())
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                Ok(ReadResponse::BlockHeader {
-                    header,
-                    hash,
-                    height,
-                    next_block_hash,
-                })
-            }
+            ReadRequest::BlockHeader(hash_or_height) => read::block::block_header_response(
+                state.latest_best_chain(),
+                &state.db,
+                hash_or_height,
+            ),
 
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
@@ -1702,6 +1685,15 @@ impl Service<ReadRequest> for ReadStateService {
                     &state.db,
                     hash,
                 )))
+            }
+
+            // Used by the get_raw_transaction (verbosity 0) RPC.
+            ReadRequest::AnyChainRawTransaction(hash) => {
+                Ok(ReadResponse::RawTransaction(read::any_raw_transaction(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )?))
             }
 
             // Used by the getblock (verbose) RPC.

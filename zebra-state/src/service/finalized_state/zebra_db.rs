@@ -445,6 +445,11 @@ impl ZebraDb {
     pub fn size(&self) -> u64 {
         self.db.size()
     }
+
+    /// Returns true for a secondary instance following a primary database.
+    pub(in crate::service) fn is_read_only(&self) -> bool {
+        self.db.is_read_only()
+    }
 }
 
 impl Drop for ZebraDb {
