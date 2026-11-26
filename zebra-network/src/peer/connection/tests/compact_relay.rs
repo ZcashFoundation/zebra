@@ -526,11 +526,7 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                         "compact header does not extend the committed best tip".into(),
                     );
                     inbound
-                        .expect_request(Request::AdvertiseCompactBlock(
-                            block.hash(),
-                            advertiser.clone(),
-                            block.header.previous_block_hash,
-                        ))
+                        .expect_request(Request::AdvertiseBlock(block.hash(), advertiser.clone()))
                         .await
                         .respond(Response::Nil);
                 } else {
@@ -841,6 +837,57 @@ async fn compact_negotiation_never_overrides_early_relay_consent() {
     .expect("a non-opted-in connection retains ordinary block gossip");
 }
 
+/// A compact block announcement only supplies its parent, which gives the block's download a
+/// height, if its header passed screening. Otherwise the block is advertised like a block
+/// inventory.
+#[tokio::test(start_paused = true)]
+async fn unscreened_compact_is_advertised_without_its_parent() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        for screened in [false, true] {
+            let (mut connection, _client, mut inbound, _outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            let info = Arc::make_mut(&mut connection.connection_info);
+            info.early_block_relay = true;
+            info.connected_addr =
+                crate::ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
+            let advertiser = Some(connection.connection_info.clone());
+            let receive = connection.receive_compact(compact.clone());
+            let screen = async {
+                let check = inbound
+                    .expect_request(Request::CheckCompactHeader(compact.clone()))
+                    .await;
+                if screened {
+                    check.respond(Response::Nil);
+                    inbound
+                        .expect_request(Request::AdvertiseCompactBlock(
+                            block.hash(),
+                            advertiser.clone(),
+                            block.header.previous_block_hash,
+                        ))
+                        .await
+                        .respond(Response::Nil);
+                } else {
+                    check.respond_error("compact header does not extend the best tip".into());
+                    inbound
+                        .expect_request(Request::AdvertiseBlock(block.hash(), advertiser.clone()))
+                        .await
+                        .respond(Response::Nil);
+                }
+            };
+            tokio::join!(receive, screen);
+            assert!(errors.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("compact announcements are screened and advertised without timers");
+}
+
 #[tokio::test(start_paused = true)]
 async fn unadmitted_compacts_are_throttled_without_retaining_slots() {
     let _init_guard = zebra_test::init();
@@ -884,12 +931,9 @@ async fn unadmitted_compacts_are_throttled_without_retaining_slots() {
                         }
                         check.respond_error("known header does not extend the best tip".into());
                     }
+                    // Compacts that weren't screened are advertised without their parent.
                     let request = inbound
-                        .expect_request(Request::AdvertiseCompactBlock(
-                            block.hash(),
-                            advertiser.clone(),
-                            block.header.previous_block_hash,
-                        ))
+                        .expect_request(Request::AdvertiseBlock(block.hash(), advertiser.clone()))
                         .await;
                     if attempt == 1 {
                         request.respond_error("duplicate compact announcement".into());

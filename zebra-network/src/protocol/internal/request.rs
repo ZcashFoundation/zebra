@@ -122,10 +122,10 @@ pub enum Request {
 
     /// Admits a compact advertisement to the ordinary bounded gossip downloader.
     ///
-    /// The second field identifies the advertising connection. The third is the compact
-    /// header's parent hash; throttled compact announcements have not passed the best-tip
-    /// screening check. The downloader resolves parent height from validated local state,
-    /// never from the untrusted announcement.
+    /// The second field identifies the advertising connection. The third is the parent hash of
+    /// a compact header that passed the best-tip screening check; other compact announcements
+    /// are sent as [`Request::AdvertiseBlock`]. The downloader resolves parent height from
+    /// validated local state, never from the untrusted announcement.
     ///
     /// Returns [`super::Response::Nil`] only when a new download was queued. Duplicate hashes,
     /// exhausted global capacity, and the per-IP cap return errors; no compact body may be retained.

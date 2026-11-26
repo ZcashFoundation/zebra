@@ -1717,8 +1717,9 @@ where
         let is_block = matches!(hash, InventoryHash::Block(_));
         // A validated parent gives us the requested block's height. Limited peers are eligible
         // only when that height is inside our window and the exact announcing connection is
-        // still current, near the estimated network tip. Parent recovery and untrusted `inv`
-        // hashes carry no height and never gain limited-peer eligibility.
+        // still current, near the estimated network tip. Parent recovery, untrusted `inv` hashes,
+        // and compact announcements whose header wasn't screened carry no height and never gain
+        // limited-peer eligibility.
         let limited_allowed = matches!(
             request,
             Request::BlockDownloadAtHeight { height, .. }
