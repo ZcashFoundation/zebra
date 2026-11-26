@@ -14,32 +14,65 @@ use zebra_node_services::mempool;
 
 use crate::{error::TransactionError, transaction as tx, BoxError};
 
-/// Cache availability must not hold up block verification.
+/// The mempool service that the block verifier asks for its verified transactions.
+pub(super) type Mempool = BoxCloneService<mempool::Request, mempool::Response, BoxError>;
+
+/// How long the block verifier waits for the mempool's verified transactions for a block.
+///
+/// Without an answer in time, or with an error, the block verifier verifies all the block's
+/// transactions itself, so a slow or busy mempool delays a block's verification by about this
+/// long.
 const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
 
-/// Asks `mempool` for its verified transactions in `block`, and returns them by mined ID.
+/// Asks `mempool` for its verifications of `block`'s transactions, and returns them by mined ID.
+/// `block_hash` is the block's hash, for logs.
+///
+/// It waits for the answer for at most [`MEMPOOL_REUSE_TIMEOUT`]. Without an answer, or with an
+/// error, it returns no transactions, so the block's transactions are verified like any other
+/// block's.
 pub(super) async fn lookup(
-    mempool: Option<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    mempool: Option<Mempool>,
     block: &Block,
     transaction_hashes: &Arc<[transaction::Hash]>,
+    block_hash: block::Hash,
 ) -> HashMap<transaction::Hash, VerifiedUnminedTx> {
-    // Query only this block's candidates, against the mempool's processed tip. The mempool never
-    // has a coinbase transaction, so a block with only a coinbase has nothing to reuse.
-    if let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) {
-        match tokio::time::timeout(
-            MEMPOOL_REUSE_TIMEOUT,
-            mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {
-                transaction_hashes: transaction_hashes.clone(),
-                parent_hash: block.header.previous_block_hash,
-            }),
-        )
-        .await
-        {
-            Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(transactions))) => transactions,
-            _ => HashMap::new(),
+    // The mempool never has a coinbase transaction, so a block with only a coinbase has nothing
+    // to reuse.
+    let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) else {
+        return HashMap::new();
+    };
+
+    // Query only this block's candidates, against the mempool's processed tip.
+    match tokio::time::timeout(
+        MEMPOOL_REUSE_TIMEOUT,
+        mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {
+            transaction_hashes: transaction_hashes.clone(),
+            parent_hash: block.header.previous_block_hash,
+        }),
+    )
+    .await
+    {
+        Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(verified))) => verified,
+        Ok(Ok(_)) => unreachable!(
+            "the mempool answers VerifiedTransactionsForBlock with VerifiedTransactionsForBlock"
+        ),
+        Ok(Err(error)) => {
+            tracing::debug!(
+                ?error,
+                %block_hash,
+                "the mempool lookup for a block failed, so the transaction verifier verifies all \
+                 its transactions",
+            );
+            HashMap::new()
         }
-    } else {
-        HashMap::new()
+        Err(_elapsed) => {
+            tracing::debug!(
+                %block_hash,
+                "the mempool didn't answer a block's lookup in time, so the transaction verifier \
+                 verifies all its transactions",
+            );
+            HashMap::new()
+        }
     }
 }
 

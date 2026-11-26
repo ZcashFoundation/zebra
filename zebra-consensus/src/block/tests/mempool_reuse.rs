@@ -741,6 +741,24 @@ async fn mempool_errors_and_response_or_readiness_timeouts_fall_back() {
     assert_dispatches(&calls, 1);
 }
 
+/// A mempool answer of the wrong kind is a bug in the mempool service, so the block verifier panics
+/// instead of verifying every transaction without a trace.
+#[tokio::test]
+#[should_panic(
+    expected = "the mempool answers VerifiedTransactionsForBlock with VerifiedTransactionsForBlock"
+)]
+async fn mempool_answer_of_the_wrong_kind_is_a_bug() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    let pool = BoxCloneService::new(service_fn(|_| {
+        ready(Ok::<_, BoxError>(
+            mempool::Response::CheckedForVerifiedTransactions,
+        ))
+    }));
+    let _ = verify(&network, block, pool, mock_state()).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn resident_hit_still_rejects_a_missing_contextual_spend() {
     let _init_guard = zebra_test::init();

@@ -685,7 +685,7 @@ where
             }
 
             let candidates = mempool_reuse::Candidates::new(
-                mempool_reuse::lookup(mempool, &block, &transaction_hashes).await,
+                mempool_reuse::lookup(mempool, &block, &transaction_hashes, hash).await,
             );
             let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
 
