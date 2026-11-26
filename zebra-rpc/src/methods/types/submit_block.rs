@@ -16,8 +16,7 @@ use crate::methods::GetBlockTemplateHandler;
 /// A block is verified and committed in well under a second. But the block verifier waits for a
 /// block's parent, and for the transparent outputs it spends. So a block whose parent never
 /// arrives isn't answered until the state drops it from its queue, which takes about a hundred
-/// blocks. A miner can find a block like that on early work, if the block it builds on is then
-/// rejected.
+/// blocks. A miner can find a block like that on work from another node.
 pub(crate) const SUBMIT_BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long the verification of a submitted block carries on in the background, after

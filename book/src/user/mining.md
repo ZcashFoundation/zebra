@@ -228,10 +228,11 @@ Zebra keeps a block template ready, so `getblocktemplate` answers without buildi
 replaces that template when the chain tip changes, and when the mempool verifies a new transaction,
 at most once a second.
 
-When a block arrives from a peer, Zebra serves a coinbase-only template on top of it as soon as its
+When a block arrives from a peer, Zebra builds a coinbase-only template on top of it as soon as its
 proof of work, difficulty and header commitments are checked, while its transactions are still
-being verified. If the block turns out to be invalid, Zebra goes back to a template on the
-previous tip. Miners that long poll `getblocktemplate` see both changes.
+being verified. Zebra serves that template as soon as the block is committed, so miners get work on
+the new block without waiting for a template build, and never work on a block that Zebra hasn't
+fully verified. If the block turns out to be invalid, miners keep working on the previous tip.
 
 Zebra validates each template as a block proposal in the background. When a miner submits that
 template with only a nonce and an Equihash solution added, Zebra checks the proof of work and
