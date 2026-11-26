@@ -45,8 +45,8 @@ Official Zebra release binaries and published Docker images do not enable the
 ### JSON-RPC authentication
 
 JSON-RPC cookie authentication (`enable_cookie_auth = true`) is enabled by
-default on `listen_addr`. Zebra writes a random cookie to `<cache_dir>/.cookie`
-at startup.
+default on `listen_addr`. Zebra writes a random cookie to `<cookie_dir>/.cookie`
+at startup (`[rpc] cookie_dir`, which defaults to Zebra's cache directory).
 
 If your indexer cannot read the cookie file or connects over a private network,
 configure [static credentials](./docker.md#static-credentials) with `rpc_user`
