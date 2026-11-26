@@ -684,9 +684,8 @@ where
                 record_phase("block_checks", &mut phase_start);
             }
 
-            let candidates = mempool_reuse::Candidates::new(
-                mempool_reuse::lookup(mempool, &block, &transaction_hashes, hash).await,
-            );
+            let mut candidates =
+                mempool_reuse::lookup(mempool, &block, &transaction_hashes, hash).await;
             let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
@@ -700,11 +699,14 @@ where
                 transaction_hashes: &transaction_hashes,
                 known_utxos: &known_utxos,
                 height,
-                candidates: &candidates,
+                candidates: &mut candidates,
                 rules: &rules,
             }
             .verify()
             .await?;
+            if record_phases {
+                candidates.record(block.transactions.len().saturating_sub(1));
+            }
 
             // Check the summed block totals
 

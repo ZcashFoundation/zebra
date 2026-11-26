@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: 'Verify new blocks on the best chain tip faster when their transactions are already in the mempool, so Zebra commits and relays them, and answers `submitblock`, with less delay. Zebra reuses the mempool''s verification of those transactions, and only checks the rules that depend on the block for them, such as expiry heights and lock times.'
+body: 'Verify new blocks on the best chain tip faster when their transactions are already in the mempool, so Zebra commits and relays them, and answers `submitblock`, with less delay. Zebra reuses the mempool''s verification of those transactions, and only checks the rules that depend on the block for them, such as expiry heights and lock times. The `zebra.consensus.block.mempool_reuse.hit` and `miss` metrics count the transactions in new blocks that Zebra takes from the mempool''s verification or verifies itself, and the `timeout` and `error` metrics count the mempool lookups that time out or fail.'
 time: 2026-10-23T09:18:47.744046156+02:00

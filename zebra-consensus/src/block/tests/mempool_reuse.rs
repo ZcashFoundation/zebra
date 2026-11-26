@@ -2,11 +2,12 @@
 
 use std::{
     future::{pending, ready},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::Duration,
 };
 
 use chrono::{DateTime, Utc};
+use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use tokio::sync::oneshot;
 use tower::{service_fn, util::BoxCloneService};
 use zebra_chain::{
@@ -274,6 +275,69 @@ async fn verify(
     let mut harness = Harness::new(network, state).with_mempool(mempool);
     let result = harness.verify(block).await;
     (result, harness.calls)
+}
+
+/// The counter of transactions that the block verifier takes from the mempool.
+const HIT: &str = "zebra.consensus.block.mempool_reuse.hit";
+/// The counter of transactions that the block verifier verifies while it has a mempool.
+const MISS: &str = "zebra.consensus.block.mempool_reuse.miss";
+/// The counter of mempool lookups that the block verifier stopped waiting for.
+const TIMEOUT: &str = "zebra.consensus.block.mempool_reuse.timeout";
+/// The counter of mempool lookups that failed.
+const ERROR: &str = "zebra.consensus.block.mempool_reuse.error";
+
+/// The counters the block verifier records for its reuse of the mempool's verification, with
+/// their `result` labels.
+const REUSE_COUNTERS: [(&str, Option<&str>); 4] =
+    [(HIT, None), (MISS, None), (TIMEOUT, None), (ERROR, None)];
+
+/// Records the counters in [`REUSE_COUNTERS`], and ignores every other metric.
+#[derive(Default)]
+struct ReuseRecorder {
+    counts: [Arc<AtomicU64>; REUSE_COUNTERS.len()],
+}
+
+impl ReuseRecorder {
+    /// Returns the count of the counter `name` with the `result` label `result`.
+    fn count(&self, name: &str, result: Option<&str>) -> u64 {
+        let index = REUSE_COUNTERS
+            .iter()
+            .position(|&counter| counter == (name, result))
+            .expect("the tests only read counters in REUSE_COUNTERS");
+        self.counts[index].load(Ordering::SeqCst)
+    }
+
+    /// Returns the counts of `hit` and `miss`.
+    fn hits_and_misses(&self) -> (u64, u64) {
+        (self.count(HIT, None), self.count(MISS, None))
+    }
+}
+
+impl Recorder for ReuseRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+        let result = key
+            .labels()
+            .find(|label| label.key() == "result")
+            .map(|label| label.value());
+        REUSE_COUNTERS
+            .iter()
+            .position(|&(name, label)| name == key.name() && label == result)
+            .map_or_else(Counter::noop, |index| {
+                Counter::from_arc(self.counts[index].clone())
+            })
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
+        Histogram::noop()
+    }
 }
 
 fn assert_dispatches(calls: &Calls, non_coinbase: usize) {
@@ -746,11 +810,16 @@ async fn dispatched_transaction_can_spend_a_reused_transactions_output() {
     assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
 }
 
+/// A mempool lookup that fails, or that the mempool doesn't answer in time, makes the block
+/// verifier verify every transaction, and it counts the lookup and the misses.
 #[tokio::test]
 async fn mempool_errors_and_response_or_readiness_timeouts_fall_back() {
     let _init_guard = zebra_test::init();
+    let recorder = ReuseRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
     let network = network();
     let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    // The mempool never becomes ready, or never answers the request.
     for permits in [0, 1] {
         let requests = Arc::new(AtomicUsize::new(0));
         let pool = service_fn({
@@ -766,6 +835,10 @@ async fn mempool_errors_and_response_or_readiness_timeouts_fall_back() {
         assert_dispatches(&calls, 1);
         assert_eq!(requests.load(Ordering::SeqCst), permits);
     }
+    // A readiness wait counts as a timeout, like a request that isn't answered in time.
+    assert_eq!(recorder.count(TIMEOUT, None), 2);
+    assert_eq!(recorder.hits_and_misses(), (0, 2));
+
     let pool = BoxCloneService::new(service_fn(|_| {
         ready(Err::<mempool::Response, BoxError>(
             "mempool unavailable".into(),
@@ -774,6 +847,172 @@ async fn mempool_errors_and_response_or_readiness_timeouts_fall_back() {
     let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
     assert_eq!(result.unwrap(), block.hash());
     assert_dispatches(&calls, 1);
+    assert_eq!(recorder.count(ERROR, None), 1);
+    assert_eq!(recorder.count(TIMEOUT, None), 2);
+    assert_eq!(recorder.hits_and_misses(), (0, 3));
+}
+
+/// The block verifier waits for the mempool's answer for at most the reuse timeout: it reuses an
+/// answer that arrives just before the timeout, and counts a timeout and verifies the block's
+/// transactions itself when the answer arrives just after it.
+#[tokio::test(start_paused = true)]
+async fn mempool_lookup_waits_for_the_answer_until_the_reuse_timeout() {
+    let _init_guard = zebra_test::init();
+    let recorder = ReuseRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
+    let network = network();
+    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    let timeout = crate::block::mempool_reuse::MEMPOOL_REUSE_TIMEOUT;
+    // A slow mempool delays a block's verification by this long, so it stays short.
+    assert_eq!(timeout, Duration::from_millis(10));
+    let millisecond = Duration::from_millis(1);
+
+    // A transaction verifier that answers at once, because paused time skips ahead while a task
+    // waits for a thread outside the runtime, as script verification does.
+    let dispatched = Arc::new(AtomicUsize::new(0));
+    let transaction_verifier: TxVerifier = BoxCloneService::new(service_fn({
+        let dispatched = dispatched.clone();
+        move |request: tx::BlockRequest| {
+            let coinbase = request.transaction.is_coinbase();
+            if !coinbase {
+                dispatched.fetch_add(1, Ordering::SeqCst);
+            }
+            ready(Ok::<_, BoxError>(tx::BlockResponse {
+                tx_id: request.transaction.unmined_id(),
+                miner_fee: (!coinbase).then(|| FEE.try_into().unwrap()),
+                sigops: 0,
+            }))
+        }
+    }));
+
+    // The answer after the timeout comes too late, so the block verifier verifies the spend.
+    for (delay, dispatches) in [(timeout - millisecond, 0), (timeout + millisecond, 1)] {
+        // A mempool that has verified the block's spend, and answers after `delay`.
+        let answer = mempool(&block, vec![entry(block.transactions[1].clone())]);
+        let pool = BoxCloneService::new(service_fn(move |request| {
+            let answer = answer.clone();
+            async move {
+                tokio::time::sleep(delay).await;
+                answer.oneshot(request).await
+            }
+        }));
+        let (sender, receiver) = oneshot::channel();
+        sender.send(pool).unwrap();
+        let verifier =
+            SemanticBlockVerifier::new(&network, mock_state(), transaction_verifier.clone())
+                .with_mempool(receiver);
+        let result = verifier.oneshot(Request::Commit(block.clone())).await;
+        assert_eq!(result.unwrap(), block.hash(), "{delay:?}");
+        assert_eq!(dispatched.load(Ordering::SeqCst), dispatches, "{delay:?}");
+    }
+    assert_eq!(recorder.count(TIMEOUT, None), 1);
+    assert_eq!(recorder.hits_and_misses(), (1, 1));
+}
+
+/// The block verifier counts the transactions it takes from the mempool once the mempool arrives,
+/// even if the mempool arrives after the verifier has started verifying blocks.
+#[tokio::test]
+async fn mempool_that_arrives_after_a_block_is_used_for_later_blocks() {
+    let _init_guard = zebra_test::init();
+    let recorder = ReuseRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
+    let network = network();
+    // Two blocks on the same parent, which spend different outputs.
+    let unlocked = LockTime::unlocked();
+    let first = candidate(
+        &network,
+        Height(3),
+        spend_output(0, &[0x51], unlocked, Height(0)),
+    );
+    let second = candidate(
+        &network,
+        Height(3),
+        spend_output(1, &[0x51], unlocked, Height(0)),
+    );
+    let (sender, receiver) = oneshot::channel();
+    let mut harness = Harness::new(&network, mock_state()).with_mempool_receiver(receiver);
+
+    assert_eq!(harness.verify(first.clone()).await.unwrap(), first.hash());
+    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 1);
+    // Nothing is counted while the verifier has no mempool.
+    assert_eq!(recorder.hits_and_misses(), (0, 0));
+
+    sender
+        .send(mempool(
+            &second,
+            vec![entry(second.transactions[1].clone())],
+        ))
+        .unwrap();
+    assert_eq!(harness.verify(second.clone()).await.unwrap(), second.hash());
+    // The second block's spend was taken from the mempool, so it wasn't verified.
+    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 1);
+    assert_eq!(recorder.hits_and_misses(), (1, 0));
+}
+
+/// The block verifier router gives the block verifier the mempool that its caller sends after
+/// the first block, and the block verifier then reuses the mempool's verification.
+#[tokio::test]
+async fn router_reuses_mempool_verification_from_a_mempool_sent_after_the_first_block() {
+    let _init_guard = zebra_test::init();
+    let recorder = ReuseRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
+    let network = network();
+    let unlocked = LockTime::unlocked();
+    let first = candidate(
+        &network,
+        Height(3),
+        spend_output(0, &[0x51], unlocked, Height(0)),
+    );
+    let second = candidate(
+        &network,
+        Height(3),
+        spend_output(1, &[0x51], unlocked, Height(0)),
+    );
+
+    // The router and its checkpoint task also ask the state for its tip and its checkpoints.
+    let state: State = BoxCloneService::new(service_fn(|request| match request {
+        zs::Request::Tip => ready(Ok(zs::Response::Tip(None))).boxed(),
+        zs::Request::BestChainBlockHash(_) => ready(Ok(zs::Response::BlockHash(None))).boxed(),
+        request => mock_state().oneshot(request).boxed(),
+    }));
+    let calls = Arc::new(Calls::default());
+    let state = counting_state(state, &calls);
+    let (sender, receiver) = oneshot::channel::<Mempool>();
+    // Regtest's only checkpoint is its genesis block, so the semantic block verifier verifies
+    // these blocks.
+    let (router, _mempool_verifier, _handles, _) =
+        crate::router::init(crate::Config::default(), &network, state, receiver).await;
+
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(Request::Commit(first.clone()))
+            .await
+            .unwrap(),
+        first.hash()
+    );
+    assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 1);
+    assert_eq!(recorder.hits_and_misses(), (0, 0));
+
+    sender
+        .send(mempool(
+            &second,
+            vec![entry(second.transactions[1].clone())],
+        ))
+        .unwrap();
+    // Let the router's task give the mempool to the verifiers.
+    tokio::task::yield_now().await;
+
+    assert_eq!(
+        router
+            .oneshot(Request::Commit(second.clone()))
+            .await
+            .unwrap(),
+        second.hash()
+    );
+    assert_eq!(recorder.hits_and_misses(), (1, 0));
+    // The second block's spend wasn't verified, so it didn't look up its spent output.
+    assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 1);
 }
 
 /// A mempool answer of the wrong kind is a bug in the mempool service, so the block verifier panics

@@ -32,7 +32,7 @@ pub(super) struct BlockTransactions<'a, V> {
     /// The block's height.
     pub(super) height: block::Height,
     /// The mempool's verifications of the block's transactions.
-    pub(super) candidates: &'a Candidates,
+    pub(super) candidates: &'a mut Candidates,
     /// The rules that the block verifier checks again for each transaction it takes from the
     /// mempool.
     pub(super) rules: &'a ReuseRules,

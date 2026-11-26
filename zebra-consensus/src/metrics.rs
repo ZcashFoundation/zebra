@@ -107,6 +107,42 @@ pub fn describe() {
          wait for the parent block."
     );
 
+    // Mempool reuse in the block verifier
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.hit",
+        Unit::Count,
+        "Transactions in fully verified blocks that the block verifier took from the mempool's \
+         verification, instead of verifying them. Recorded once the block's transactions pass \
+         verification, even if a later check or the commit rejects the block. Not recorded for \
+         block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.miss",
+        Unit::Count,
+        "Transactions other than coinbase transactions in fully verified blocks that the block \
+         verifier verified while it had a mempool: the mempool didn't have them or its tip wasn't \
+         the block's parent, it verified them for another verification rules epoch or with other \
+         authorizing data, or the lookup failed or timed out. Recorded once the block's \
+         transactions pass verification, even if a later check or the commit rejects the block. \
+         Not recorded for block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.timeout",
+        Unit::Count,
+        "Mempool lookups for fully verified blocks that the block verifier stopped waiting for, \
+         so it verified all the block's transactions. Recorded once the block's transactions pass \
+         verification, even if a later check or the commit rejects the block. Not recorded for \
+         block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.error",
+        Unit::Count,
+        "Mempool lookups for fully verified blocks that failed with a mempool service error, so \
+         the block verifier verified all the block's transactions. Recorded once the block's \
+         transactions pass verification, even if a later check or the commit rejects the block. \
+         Not recorded for block proposals."
+    );
+
     // Batch verifiers
     describe_histogram!(
         "zebra.consensus.batch.duration_seconds",

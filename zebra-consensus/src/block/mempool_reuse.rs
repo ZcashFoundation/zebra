@@ -22,24 +22,37 @@ pub(super) type Mempool = BoxCloneService<mempool::Request, mempool::Response, B
 /// Without an answer in time, or with an error, the block verifier verifies all the block's
 /// transactions itself, so a slow or busy mempool delays a block's verification by about this
 /// long.
-const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
+pub(super) const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
 
-/// Asks `mempool` for its verifications of `block`'s transactions, and returns them by mined ID.
-/// `block_hash` is the block's hash, for logs.
+/// How a block's mempool lookup ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lookup {
+    /// The block verifier has no mempool, or the block has only a coinbase transaction.
+    NotSent,
+    /// The mempool answered.
+    Answered,
+    /// The mempool returned an error.
+    Failed,
+    /// The mempool didn't answer within [`MEMPOOL_REUSE_TIMEOUT`].
+    TimedOut,
+}
+
+/// Asks `mempool` for its verifications of `block`'s transactions, and returns them as the
+/// block's candidates. `block_hash` is the block's hash, for logs.
 ///
 /// It waits for the answer for at most [`MEMPOOL_REUSE_TIMEOUT`]. Without an answer, or with an
-/// error, it returns no transactions, so the block's transactions are verified like any other
+/// error, the candidates are empty, so the block's transactions are verified like any other
 /// block's.
 pub(super) async fn lookup(
     mempool: Option<Mempool>,
     block: &Block,
     transaction_hashes: &Arc<[transaction::Hash]>,
     block_hash: block::Hash,
-) -> HashMap<transaction::Hash, VerifiedUnminedTx> {
+) -> Candidates {
     // The mempool never has a coinbase transaction, so a block with only a coinbase has nothing
     // to reuse.
     let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) else {
-        return HashMap::new();
+        return Candidates::new(Lookup::NotSent, HashMap::new());
     };
 
     // Query only this block's candidates, against the mempool's processed tip.
@@ -52,7 +65,9 @@ pub(super) async fn lookup(
     )
     .await
     {
-        Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(verified))) => verified,
+        Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(verified))) => {
+            Candidates::new(Lookup::Answered, verified)
+        }
         Ok(Ok(_)) => unreachable!(
             "the mempool answers VerifiedTransactionsForBlock with VerifiedTransactionsForBlock"
         ),
@@ -63,7 +78,7 @@ pub(super) async fn lookup(
                 "the mempool lookup for a block failed, so the transaction verifier verifies all \
                  its transactions",
             );
-            HashMap::new()
+            Candidates::new(Lookup::Failed, HashMap::new())
         }
         Err(_elapsed) => {
             tracing::debug!(
@@ -71,7 +86,7 @@ pub(super) async fn lookup(
                 "the mempool didn't answer a block's lookup in time, so the transaction verifier \
                  verifies all its transactions",
             );
-            HashMap::new()
+            Candidates::new(Lookup::TimedOut, HashMap::new())
         }
     }
 }
@@ -105,14 +120,22 @@ impl ReuseRules {
 /// The mempool's verifications of a block's transactions, which the block verifier takes instead
 /// of verifying those transactions when it can.
 pub(super) struct Candidates {
+    /// How the lookup ended.
+    lookup: Lookup,
     /// The mempool's verified transactions, by mined ID. Empty without an answer.
     verified: HashMap<transaction::Hash, VerifiedUnminedTx>,
+    /// The number of transactions that the block verifier took from the mempool.
+    reused: usize,
 }
 
 impl Candidates {
-    /// Returns the candidates in `verified`, the mempool's answer to a block's lookup.
-    pub(super) fn new(verified: HashMap<transaction::Hash, VerifiedUnminedTx>) -> Self {
-        Self { verified }
+    /// Returns the candidates in `verified`, from a lookup that ended as `lookup`.
+    fn new(lookup: Lookup, verified: HashMap<transaction::Hash, VerifiedUnminedTx>) -> Self {
+        Self {
+            lookup,
+            verified,
+            reused: 0,
+        }
     }
 
     /// Returns the mempool's verification of the block's `transaction`, whose mined ID is
@@ -123,7 +146,7 @@ impl Candidates {
     /// Returns the error of a rule that depends on the block, which the mempool's verification
     /// doesn't cover. The transaction verifier returns the same error for the transaction.
     pub(super) fn take(
-        &self,
+        &mut self,
         transaction: &Arc<Transaction>,
         transaction_hash: transaction::Hash,
         rules: &ReuseRules,
@@ -134,7 +157,29 @@ impl Candidates {
         if !check_candidate(candidate, transaction, transaction_hash, rules)? {
             return Ok(None);
         }
+        self.reused += 1;
         Ok(Some(candidate))
+    }
+
+    /// Records how the lookup ended, and how many of the block's `non_coinbase` transactions the
+    /// block verifier took from the mempool.
+    ///
+    /// It records nothing if the lookup wasn't sent.
+    pub(super) fn record(&self, non_coinbase: usize) {
+        match self.lookup {
+            Lookup::NotSent => return,
+            Lookup::Answered => {}
+            Lookup::Failed => {
+                metrics::counter!("zebra.consensus.block.mempool_reuse.error").increment(1)
+            }
+            Lookup::TimedOut => {
+                metrics::counter!("zebra.consensus.block.mempool_reuse.timeout").increment(1)
+            }
+        }
+        let count = |n: usize| u64::try_from(n).expect("a block's transaction count fits in a u64");
+        metrics::counter!("zebra.consensus.block.mempool_reuse.hit").increment(count(self.reused));
+        metrics::counter!("zebra.consensus.block.mempool_reuse.miss")
+            .increment(count(non_coinbase.saturating_sub(self.reused)));
     }
 }
 
