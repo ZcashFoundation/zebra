@@ -18,7 +18,7 @@ use std::{
 };
 
 use zebra_chain::{
-    block::Height,
+    block::{Block, Height},
     ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::NetworkUpgrade,
@@ -254,12 +254,20 @@ impl ZebraDb {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
-        let (_first_duplicate_height, tree) = self
-            .db
-            .zs_prev_key_value_back_from(&sapling_trees, height)
-            .expect(
-                "Sapling note commitment trees must exist for all heights below the finalized tip",
-            );
+        let (first_duplicate_height, tree) =
+            match self.db.zs_prev_key_value_back_from(&sapling_trees, height) {
+                Some(entry) => entry,
+                None if self.db.is_read_only() => return None,
+                None => panic!(
+                "Sapling note commitment trees must exist for all heights below the finalized tip"
+            ),
+            };
+
+        if !self.secondary_tree_view_is_complete(*height, first_duplicate_height, |block| {
+            block.sapling_note_commitments().next().is_some()
+        }) {
+            return None;
+        }
 
         Some(Arc::new(tree))
     }
@@ -380,12 +388,20 @@ impl ZebraDb {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
-        let (_first_duplicate_height, tree) = self
-            .db
-            .zs_prev_key_value_back_from(&orchard_trees, height)
-            .expect(
-                "Orchard note commitment trees must exist for all heights below the finalized tip",
-            );
+        let (first_duplicate_height, tree) =
+            match self.db.zs_prev_key_value_back_from(&orchard_trees, height) {
+                Some(entry) => entry,
+                None if self.db.is_read_only() => return None,
+                None => panic!(
+                "Orchard note commitment trees must exist for all heights below the finalized tip"
+            ),
+            };
+
+        if !self.secondary_tree_view_is_complete(*height, first_duplicate_height, |block| {
+            block.orchard_note_commitments().next().is_some()
+        }) {
+            return None;
+        }
 
         Some(Arc::new(tree))
     }
@@ -545,13 +561,44 @@ impl ZebraDb {
 
         // Search backwards for the tree.
         match self.db.zs_prev_key_value_back_from(&ironwood_trees, height) {
-            Some((_first_duplicate_height, tree)) => Some(Arc::new(tree)),
-            None if !nu6_3_activated => Some(Default::default()),
+            Some((first_duplicate_height, tree)) => {
+                if !self.secondary_tree_view_is_complete(*height, first_duplicate_height, |block| {
+                    block.ironwood_note_commitments().next().is_some()
+                }) {
+                    return None;
+                }
+                Some(Arc::new(tree))
+            }
+            None if !nu6_3_activated => {
+                if self.db.is_read_only() && !matches!(self.block((*height).into()), Ok(Some(_))) {
+                    return None;
+                }
+                Some(Default::default())
+            }
+            None if self.db.is_read_only() => None,
             None => panic!(
                 "Ironwood note commitment tree must exist for all heights at or below the finalized \
                  tip from NU6.3 activation onward"
             ),
         }
+    }
+
+    /// On a read-only secondary database, verifies that the cross-column view at `height` is
+    /// complete and that a tree found at `tree_height < height` is not stale because `height`
+    /// itself added note commitments to that pool.
+    fn secondary_tree_view_is_complete(
+        &self,
+        height: Height,
+        tree_height: Height,
+        block_updates_tree: impl FnOnce(&Block) -> bool,
+    ) -> bool {
+        if !self.db.is_read_only() {
+            return true;
+        }
+        let Ok(Some(block)) = self.block(height.into()) else {
+            return false;
+        };
+        tree_height == height || !block_updates_tree(&block)
     }
 
     /// Returns the Ironwood note commitment trees in the supplied range, in increasing height order.

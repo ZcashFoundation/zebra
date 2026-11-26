@@ -1687,14 +1687,8 @@ impl Service<ReadRequest> for ReadStateService {
                 let next_block_hash =
                     read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
 
-                let header =
-                    read::block_header(best_chain, &state.db, height.into()).ok_or_else(|| {
-                        if state.db.is_read_only() {
-                            BoxError::from("block hash or height not found")
-                        } else {
-                            BoxError::from(crate::BlockReadError::CorruptBlock { height })
-                        }
-                    })?;
+                let header = read::block_header(best_chain, &state.db, height.into())
+                    .ok_or_else(|| missing_block_header_error(state.db.is_read_only(), height))?;
 
                 Ok(ReadResponse::BlockHeader {
                     header,
@@ -2236,4 +2230,13 @@ pub async fn init_test_services(
         latest_chain_tip,
         chain_tip_change,
     )
+}
+
+/// Returns the error for a missing block header after its height/hash index was found.
+fn missing_block_header_error(is_read_only: bool, height: block::Height) -> BoxError {
+    if is_read_only {
+        BoxError::from("block hash or height not found")
+    } else {
+        BoxError::from(crate::BlockReadError::CorruptBlock { height })
+    }
 }

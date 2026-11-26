@@ -1290,6 +1290,90 @@ where
         self.max_address_query_results = max_address_query_results;
         self
     }
+
+    async fn get_raw_transaction_bytes(
+        &self,
+        txid: transaction::Hash,
+    ) -> Result<GetRawTransactionResponse> {
+        match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AnyChainRawTransaction(txid))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::RawTransaction(Some(hex)) => {
+                Ok(GetRawTransactionResponse::Raw(hex))
+            }
+            zebra_state::ReadResponse::RawTransaction(None) => {
+                Err("Transaction not found in mempool or best chain")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+            }
+            _ => unreachable!("unmatched response to an `AnyChainRawTransaction` request"),
+        }
+    }
+
+    async fn fetch_treestate_header(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<(Arc<block::Header>, block::Hash, Height)> {
+        let header_response = match self
+            .read_state
+            .clone()
+            .ready()
+            .and_then(|service| service.call(zebra_state::ReadRequest::BlockHeader(hash_or_height)))
+            .await
+        {
+            Ok(response) => response,
+            // `ReadStateService` signals an unknown header with this message rather than an
+            // `Option`; preserve operational and corruption errors as `LegacyCode::Misc` (-1).
+            Err(error) if error.to_string() == "block hash or height not found" => {
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                return Err(BLOCK_NOT_IN_MAIN_CHAIN)
+                    .map_error(server::error::LegacyCode::InvalidParameter);
+            }
+            Err(error) => return Err(error).map_misc_error(),
+        };
+        let zebra_state::ReadResponse::BlockHeader {
+            header,
+            hash,
+            height,
+            ..
+        } = header_response
+        else {
+            unreachable!("unmatched response to a BlockHeader request");
+        };
+
+        Ok((header, hash, height))
+    }
+
+    async fn fetch_active_pool_treestate(
+        &self,
+        upgrade: consensus::NetworkUpgrade,
+        height: Height,
+        request: zebra_state::ReadRequest,
+        extract: fn(zebra_state::ReadResponse) -> Option<(Vec<u8>, Vec<u8>)>,
+    ) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        if !self.network.is_nu_active(upgrade, height.into()) {
+            return Ok(None);
+        }
+
+        let response = self
+            .read_state
+            .clone()
+            .ready()
+            .and_then(|service| service.call(request))
+            .await
+            .map_misc_error()?;
+
+        let Some(treestate) = extract(response) else {
+            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        };
+
+        Ok(Some(treestate))
+    }
 }
 
 #[async_trait]
@@ -2248,22 +2332,7 @@ where
 
         // Serve raw transactions from the state's stored bytes, without deserializing them.
         if !verbose {
-            return match self
-                .read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::AnyChainRawTransaction(txid))
-                .await
-                .map_misc_error()?
-            {
-                zebra_state::ReadResponse::RawTransaction(Some(hex)) => {
-                    Ok(GetRawTransactionResponse::Raw(hex))
-                }
-                zebra_state::ReadResponse::RawTransaction(None) => {
-                    Err("Transaction not found in mempool or best chain")
-                        .map_error(server::error::LegacyCode::InvalidAddressOrKey)
-                }
-                _ => unreachable!("unmatched response to an `AnyChainRawTransaction` request"),
-            };
+            return self.get_raw_transaction_bytes(txid).await;
         }
 
         // If the tx wasn't in the mempool, check the state.
@@ -2362,9 +2431,6 @@ where
     }
 
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse> {
-        let mut read_state = self.read_state.clone();
-        let network = self.network.clone();
-
         let hash_or_height =
             HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
                 // Reference for the legacy error code:
@@ -2381,108 +2447,56 @@ where
         // block is invalidated, or reorged away and pruned, before the tree lookups, they find
         // nothing, and the request fails as if the block were missing.
         //
-        let header_response = match read_state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::BlockHeader(hash_or_height)))
-            .await
-        {
-            Ok(response) => response,
-            // `ReadStateService` signals an unknown header with this message rather than an
-            // `Option`; preserve operational and corruption errors as `LegacyCode::Misc` (-1).
-            Err(error) if error.to_string() == "block hash or height not found" => {
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                return Err(BLOCK_NOT_IN_MAIN_CHAIN)
-                    .map_error(server::error::LegacyCode::InvalidParameter);
-            }
-            Err(error) => return Err(error).map_misc_error(),
-        };
-        let zebra_state::ReadResponse::BlockHeader {
-            header,
-            hash,
-            height,
-            ..
-        } = header_response
-        else {
-            unreachable!("unmatched response to a BlockHeader request");
-        };
+        let (header, hash, height) = self.fetch_treestate_header(hash_or_height).await?;
 
         let time = u32::try_from(header.time.timestamp())
             .expect("timestamps of valid blocks always fit into u32");
 
-        let sapling_active =
-            network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into());
-        let sapling = if sapling_active {
-            match read_state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::AnyChainSaplingTree(hash))
-                })
-                .await
-                .map_misc_error()?
-            {
-                zebra_state::ReadResponse::SaplingTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
-                _ => unreachable!("unmatched response to a Sapling tree request"),
-            }
-        } else {
-            None
-        };
-        if sapling_active && sapling.is_none() {
-            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
-                .map_error(server::error::LegacyCode::InvalidParameter);
-        }
+        let sapling = self
+            .fetch_active_pool_treestate(
+                consensus::NetworkUpgrade::Sapling,
+                height,
+                zebra_state::ReadRequest::AnyChainSaplingTree(hash),
+                |response| match response {
+                    zebra_state::ReadResponse::SaplingTree(tree) => {
+                        tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
+                    }
+                    _ => unreachable!("unmatched response to a Sapling tree request"),
+                },
+            )
+            .await?;
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let orchard_active = network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into());
-        let orchard = if orchard_active {
-            match read_state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::AnyChainOrchardTree(hash))
-                })
-                .await
-                .map_misc_error()?
-            {
-                zebra_state::ReadResponse::OrchardTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
-                _ => unreachable!("unmatched response to an Orchard tree request"),
-            }
-        } else {
-            None
-        };
-        if orchard_active && orchard.is_none() {
-            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
-                .map_error(server::error::LegacyCode::InvalidParameter);
-        }
+        let orchard = self
+            .fetch_active_pool_treestate(
+                consensus::NetworkUpgrade::Nu5,
+                height,
+                zebra_state::ReadRequest::AnyChainOrchardTree(hash),
+                |response| match response {
+                    zebra_state::ReadResponse::OrchardTree(tree) => {
+                        tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
+                    }
+                    _ => unreachable!("unmatched response to an Orchard tree request"),
+                },
+            )
+            .await?;
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let ironwood_active = network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into());
-        let ironwood = if ironwood_active {
-            match read_state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::AnyChainIronwoodTree(hash))
-                })
-                .await
-                .map_misc_error()?
-            {
-                zebra_state::ReadResponse::IronwoodTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
-                _ => unreachable!("unmatched response to an Ironwood tree request"),
-            }
-        } else {
-            None
-        };
-        if ironwood_active && ironwood.is_none() {
-            return Err(BLOCK_NOT_IN_MAIN_CHAIN)
-                .map_error(server::error::LegacyCode::InvalidParameter);
-        }
+        let ironwood = self
+            .fetch_active_pool_treestate(
+                consensus::NetworkUpgrade::Nu6_3,
+                height,
+                zebra_state::ReadRequest::AnyChainIronwoodTree(hash),
+                |response| match response {
+                    zebra_state::ReadResponse::IronwoodTree(tree) => {
+                        tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
+                    }
+                    _ => unreachable!("unmatched response to an Ironwood tree request"),
+                },
+            )
+            .await?;
         // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
         let ironwood = ironwood
             .map(|(tree, root)| Treestate::new(trees::Commitments::new(Some(root), Some(tree))));

@@ -443,6 +443,19 @@ impl ZebraDb {
         let Some(location) = self.transaction_location(hash) else {
             return Ok(None);
         };
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
+        if !self
+            .db
+            .zs_contains(&block_header_by_height, &location.height)
+        {
+            return if self.db.is_read_only() {
+                Ok(None)
+            } else {
+                Err(BlockReadError::CorruptBlock {
+                    height: location.height,
+                })
+            };
+        }
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
         let Some(raw_tx) = self.db.zs_get::<_, _, RawBytes>(&tx_by_loc, &location) else {
             // Secondary WAL replay is not atomic across columns, so an incomplete view is not yet

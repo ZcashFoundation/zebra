@@ -332,6 +332,11 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
             BlockReadError::CorruptBlock { height }
         );
     }
+    assert_eq!(
+        db.serialized_transaction(block.transactions[0].hash())
+            .unwrap_err(),
+        BlockReadError::CorruptBlock { height }
+    );
 }
 
 #[test]
@@ -491,6 +496,18 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
             assert!(secondary.serialized_block(query).unwrap().is_none());
             assert!(secondary.block_and_size(query).unwrap().is_none());
         }
+        if lagging_column == 0 {
+            assert_eq!(
+                primary
+                    .serialized_transaction(block.transactions[0].hash())
+                    .unwrap_err(),
+                crate::BlockReadError::CorruptBlock { height }
+            );
+            assert!(secondary
+                .serialized_transaction(block.transactions[0].hash())
+                .unwrap()
+                .is_none());
+        }
         if lagging_column == 1 {
             assert!(secondary
                 .serialized_transaction(block.transactions[0].hash())
@@ -612,5 +629,148 @@ fn block_read_stops_at_height_boundary() {
     assert_eq!(
         adjacent_block_reads, isolated_block_reads,
         "a block read must not advance into the next height"
+    );
+}
+
+#[test]
+fn secondary_tree_reads_do_not_expose_stale_trees_during_catch_up() {
+    use zebra_chain::{orchard, sapling};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let primary = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &Mainnet,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+
+    let sapling_block: Arc<Block> = MAINNET_BLOCKS
+        .values()
+        .map(|bytes| bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+        .find(|block| block.sapling_note_commitments().next().is_some())
+        .expect("mainnet test vectors contain a block with Sapling note commitments");
+    let orchard_block: Arc<Block> = MAINNET_BLOCKS
+        .values()
+        .map(|bytes| bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+        .find(|block| block.orchard_note_commitments().next().is_some())
+        .expect("mainnet test vectors contain a block with Orchard note commitments");
+
+    let write_block_columns = |db: &ZebraDb, block: &Block| {
+        let height = block.coinbase_height().unwrap();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_insert(
+            &db.cf_handle("hash_by_height").unwrap(),
+            height,
+            block.hash(),
+        );
+        batch.zs_insert(
+            &db.cf_handle("height_by_hash").unwrap(),
+            block.hash(),
+            height,
+        );
+        batch.zs_insert(
+            &db.cf_handle("block_header_by_height").unwrap(),
+            height,
+            &block.header,
+        );
+        for (index, tx) in block.transactions.iter().enumerate() {
+            let location = TransactionLocation::from_usize(height, index);
+            batch.zs_insert(&db.cf_handle("tx_by_loc").unwrap(), location, tx);
+            batch.zs_insert(
+                &db.cf_handle("hash_by_tx_loc").unwrap(),
+                location,
+                tx.hash(),
+            );
+            batch.zs_insert(
+                &db.cf_handle("tx_loc_by_hash").unwrap(),
+                tx.hash(),
+                location,
+            );
+        }
+        db.write_batch(batch).unwrap();
+    };
+
+    // Seed older empty trees at Height(0), then expose both blocks' header/tx columns without
+    // writing their updated commitment trees yet.
+    let mut seed_batch = DiskWriteBatch::new();
+    seed_batch.create_sapling_tree(
+        &primary,
+        &Height(0),
+        &sapling::tree::NoteCommitmentTree::default(),
+    );
+    seed_batch.create_orchard_tree(
+        &primary,
+        &Height(0),
+        &orchard::tree::NoteCommitmentTree::default(),
+    );
+    primary.write_batch(seed_batch).unwrap();
+    write_block_columns(&primary, &sapling_block);
+    write_block_columns(&primary, &orchard_block);
+    primary.db.flush().unwrap();
+
+    let secondary = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &Mainnet,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        true,
+    )
+    .unwrap();
+
+    let sapling_height = sapling_block.coinbase_height().unwrap();
+    let orchard_height = orchard_block.coinbase_height().unwrap();
+
+    // Missing new-block tree entries must return None on secondary, not the stale Height(0) tree.
+    assert!(secondary
+        .sapling_tree_by_hash_or_height(sapling_block.hash().into())
+        .is_none());
+    assert!(secondary
+        .sapling_tree_by_hash_or_height(sapling_height.into())
+        .is_none());
+    assert!(secondary
+        .orchard_tree_by_hash_or_height(orchard_block.hash().into())
+        .is_none());
+    assert!(secondary
+        .orchard_tree_by_hash_or_height(orchard_height.into())
+        .is_none());
+
+    // Once the updated trees are written and caught up, secondary serves them normally.
+    let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
+    for cm in sapling_block.sapling_note_commitments() {
+        sapling_tree.append(cm).unwrap();
+    }
+    let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
+    for cm in orchard_block.orchard_note_commitments() {
+        orchard_tree.append(cm).unwrap();
+    }
+    let mut tree_batch = DiskWriteBatch::new();
+    tree_batch.create_sapling_tree(&primary, &sapling_height, &sapling_tree);
+    tree_batch.create_orchard_tree(&primary, &orchard_height, &orchard_tree);
+    primary.write_batch(tree_batch).unwrap();
+    primary.db.flush().unwrap();
+    secondary.try_catch_up_with_primary().unwrap();
+
+    assert_eq!(
+        secondary.sapling_tree_by_hash_or_height(sapling_block.hash().into()),
+        Some(Arc::new(sapling_tree))
+    );
+    assert_eq!(
+        secondary.orchard_tree_by_hash_or_height(orchard_block.hash().into()),
+        Some(Arc::new(orchard_tree))
     );
 }
