@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use chrono::{DateTime, Utc};
 use tokio::sync::oneshot;
 use tower::{service_fn, util::BoxCloneService};
 use zebra_chain::{
@@ -13,6 +14,8 @@ use zebra_chain::{
     parameters::testnet::ConfiguredActivationHeights, transaction::VerifiedUnminedTx,
 };
 use zebra_node_services::mempool;
+
+use crate::block::mempool_reuse::{check_candidate, ReuseRules};
 
 use super::*;
 
@@ -837,103 +840,126 @@ fn checksig_hash() -> [u8; 20] {
 /// An unlock script that pushes the redeem script `OP_0 OP_IF OP_CHECKSIG OP_ENDIF OP_1`.
 const PUSH_CHECKSIG: &[u8] = &[0x05, 0x00, 0x63, 0xac, 0x68, 0x51];
 
-/// A spend for the differential test: the transaction, the output it spends, and whether that
-/// output is a coinbase output.
+/// A spend for the differential tests: the transaction, the output it spends, whether that output
+/// is a coinbase output, and whether the block verifier reuses the mempool's verification of it.
 struct Variant {
     name: &'static str,
     transaction: Arc<Transaction>,
     spent: transparent::Output,
     spent_from_coinbase: bool,
+    /// Whether the block verifier reuses the mempool's verification from [`Reuse::older_tip`].
+    older: Result<(), NotReused>,
+    /// Whether the block verifier reuses the mempool's verification from [`Reuse::newer_tip`].
+    newer: Result<(), NotReused>,
 }
 
-/// Verifies `variant` the way the mempool does when the next block is at `admission_height`,
-/// followed by the checks that block verification still does for a transaction it reuses in a
-/// block at `height`. Returns the reusable mempool entry if both pass.
-async fn verify_for_reuse(
-    network: &Network,
-    admission_height: Height,
-    height: Height,
-    time: chrono::DateTime<chrono::Utc>,
-    variant: &Variant,
-) -> Option<VerifiedUnminedTx> {
-    let utxo = transparent::Utxo::new(
-        variant.spent.clone(),
-        Height(1),
-        variant.spent_from_coinbase,
-    );
-    let state = service_fn(move |request| {
-        ready(Ok::<_, BoxError>(match request {
-            zs::Request::UnspentBestChainUtxo(_) => {
-                zs::Response::UnspentBestChainUtxo(Some(utxo.clone()))
-            }
-            zs::Request::BestChainNextMedianTimePast => zs::Response::BestChainNextMedianTimePast(
-                zebra_chain::serialization::DateTime32::try_from(time).expect("the test time fits"),
-            ),
-            zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
-                zs::Response::ValidBestChainTipNullifiersAndAnchors
-            }
-            _ => panic!("unexpected mempool verification state request: {request:?}"),
-        }))
-    });
-    let verifier = transaction::MempoolTxVerifier::new_for_tests(network, state);
-    let verified = verifier
-        .oneshot(transaction::MempoolRequest {
-            transaction: variant.transaction.clone().into(),
-            height: admission_height,
-        })
-        .await
-        .ok()?
-        .transaction;
-
-    let block = tx::BlockContext {
-        height,
-        time,
-        network_upgrade: NetworkUpgrade::current(network, height),
-    };
-    tx::check_block_context_rules(&variant.transaction, &block, network).ok()?;
-
-    Some(verified)
+/// Why the block verifier doesn't reuse the mempool's verification of a [`Variant`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NotReused {
+    /// The mempool rejects the transaction.
+    RejectedByMempool,
+    /// The mempool accepts the transaction, but the block verifier's check of the block context
+    /// rules at the block's height and time rejects it.
+    RejectedByRecheck,
+    /// The block verifier verifies the transaction instead of taking the mempool's verification.
+    Ineligible,
 }
 
-/// Verifies `variant` the way block verification does when it doesn't reuse the mempool.
-async fn verify_in_block(
-    network: &Network,
-    height: Height,
-    time: chrono::DateTime<chrono::Utc>,
-    variant: &Variant,
-) -> Result<tx::BlockResponse, TransactionError> {
-    let utxo = transparent::Utxo::new(
-        variant.spent.clone(),
-        Height(1),
-        variant.spent_from_coinbase,
-    );
-    let state = service_fn(move |request| {
-        ready(Ok::<_, BoxError>(match request {
-            zs::Request::AwaitUtxo(_) => zs::Response::Utxo(utxo.clone()),
-            _ => panic!("unexpected block verification state request: {request:?}"),
-        }))
-    });
-    transaction::BlockTxVerifier::new(network, state)
-        .oneshot(tx::BlockRequest {
-            transaction_hash: variant.transaction.hash(),
-            transaction: variant.transaction.clone(),
-            known_utxos: Arc::new(std::collections::HashMap::new()),
-            height,
-            time,
-        })
-        .await
+/// The block verifier reuses the mempool's verification of a [`Variant`].
+const REUSED: Result<(), NotReused> = Ok(());
+/// The mempool rejects a [`Variant`].
+const MEMPOOL_REJECTS: Result<(), NotReused> = Err(NotReused::RejectedByMempool);
+/// The block verifier's check of the block context rules rejects a [`Variant`].
+const RECHECK_REJECTS: Result<(), NotReused> = Err(NotReused::RejectedByRecheck);
+
+impl Variant {
+    /// A variant named `name`, whose `transaction` spends a P2SH output with the redeem script
+    /// `OP_1`, and whose mempool verification from the older and newer tips the block verifier
+    /// uses as `older` and `newer` say.
+    fn new(
+        name: &'static str,
+        transaction: Arc<Transaction>,
+        older: Result<(), NotReused>,
+        newer: Result<(), NotReused>,
+    ) -> Self {
+        Self {
+            name,
+            transaction,
+            spent: p2sh(op_1_hash()),
+            spent_from_coinbase: false,
+            older,
+            newer,
+        }
+    }
 }
 
-/// Block verification reuses what the mempool verified, so the mempool path followed by the
-/// reuse checks must never accept a transaction that block verification rejects, and the fee and
-/// signature operations it records must be the ones block verification computes.
-///
-/// Each variant breaks one rule. A rule that only one of the two paths checks makes this fail.
-#[tokio::test]
-async fn mempool_path_never_accepts_what_block_verification_rejects() {
-    let _init_guard = zebra_test::init();
+/// A spend of the output `[8; 32]:0` that pays 1 zatoshi, for the differential tests.
+#[derive(Clone, Copy)]
+struct Spend {
+    upgrade: NetworkUpgrade,
+    unlock_script: &'static [u8],
+    output_script: &'static [u8],
+    lock_time: LockTime,
+    expiry_height: Height,
+}
 
-    let network = Network::new_regtest(
+impl Default for Spend {
+    /// A valid NU6 spend of a P2SH output with the redeem script `OP_1`, which never expires.
+    fn default() -> Self {
+        Self {
+            upgrade: NetworkUpgrade::Nu6,
+            unlock_script: PUSH_OP_1,
+            output_script: &[0x51],
+            lock_time: LockTime::unlocked(),
+            expiry_height: Height(0),
+        }
+    }
+}
+
+impl Spend {
+    /// Returns this spend as a version 5 transaction.
+    fn v5(self) -> Arc<Transaction> {
+        Arc::new(Transaction::test_v5(
+            self.upgrade,
+            self.inputs(),
+            self.outputs(),
+            self.lock_time,
+            self.expiry_height,
+        ))
+    }
+
+    /// Returns this spend as a version 4 transaction, which doesn't contain its network upgrade.
+    fn v4(self) -> Arc<Transaction> {
+        Arc::new(Transaction::test_v4(
+            self.inputs(),
+            self.outputs(),
+            self.lock_time,
+            self.expiry_height,
+        ))
+    }
+
+    fn inputs(&self) -> Vec<transparent::Input> {
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: [8; 32].into(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(self.unlock_script),
+            sequence: 0,
+        }]
+    }
+
+    fn outputs(&self) -> Vec<transparent::Output> {
+        vec![transparent::Output::new(
+            1.try_into().unwrap(),
+            transparent::Script::new(self.output_script),
+        )]
+    }
+}
+
+/// The network of the differential tests: Canopy at 1, NU5 at 2, and NU6 at 4.
+fn differential_network() -> Network {
+    Network::new_regtest(
         ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),
@@ -941,164 +967,358 @@ async fn mempool_path_never_accepts_what_block_verification_rejects() {
             ..Default::default()
         }
         .into(),
-    );
-    // The mempool verified the transactions for the block before this one, in the same network
-    // upgrade, which block verification requires for reuse.
-    let admission_height = Height(4);
-    let height = Height(5);
-    let time = block::genesis::regtest_genesis_block().header.time + chrono::Duration::hours(1);
-    // A P2SH output whose redeem script is `OP_1` is standard, and an input that pushes that
-    // redeem script spends it.
-    let spendable = p2sh(op_1_hash());
+    )
+}
 
-    let v5 = |upgrade, script: &[u8], output_script: &[u8], lock_time, expiry_height| {
-        Arc::new(Transaction::test_v5(
-            upgrade,
-            vec![transparent::Input::PrevOut {
-                outpoint: transparent::OutPoint {
-                    hash: [8; 32].into(),
-                    index: 0,
-                },
-                unlock_script: transparent::Script::new(script),
-                sequence: 0,
-            }],
-            vec![transparent::Output::new(
-                1.try_into().unwrap(),
-                transparent::Script::new(output_script),
-            )],
-            lock_time,
-            expiry_height,
-        ))
-    };
-    let valid = |transaction| Variant {
-        name: "",
-        transaction,
-        spent: spendable.clone(),
-        spent_from_coinbase: false,
-    };
-    let named = |name, variant: Variant| Variant { name, ..variant };
+/// The time of the blocks in the differential tests.
+fn differential_block_time() -> DateTime<Utc> {
+    block::genesis::regtest_genesis_block().header.time + chrono::Duration::hours(1)
+}
 
-    let nu6 = NetworkUpgrade::Nu6;
-    let unlocked = LockTime::unlocked();
-    let variants = [
-        named(
-            "valid",
-            valid(v5(nu6, PUSH_OP_1, &[0x51], unlocked, Height(0))),
-        ),
-        named(
-            "signature operation in a redeem script",
-            Variant {
-                spent: p2sh(checksig_hash()),
-                ..valid(v5(nu6, PUSH_CHECKSIG, &[0x51], unlocked, Height(0)))
-            },
-        ),
-        named(
-            "signature operations in an output",
-            valid(v5(nu6, PUSH_OP_1, &[0x51, 0xac, 0xac], unlocked, Height(0))),
-        ),
-        named(
-            "expires after the block",
-            valid(v5(nu6, PUSH_OP_1, &[0x51], unlocked, Height(6))),
-        ),
-        named(
-            "expired",
-            valid(v5(nu6, PUSH_OP_1, &[0x51], unlocked, Height(4))),
-        ),
-        named(
-            "locked until an earlier height",
-            valid(v5(
-                nu6,
-                PUSH_OP_1,
-                &[0x51],
-                LockTime::Height(Height(3)),
-                Height(0),
-            )),
-        ),
-        named(
-            "locked until the block height",
-            valid(v5(
-                nu6,
-                PUSH_OP_1,
-                &[0x51],
-                LockTime::Height(height),
-                Height(0),
-            )),
-        ),
-        named(
-            "locked until the block time",
-            valid(v5(nu6, PUSH_OP_1, &[0x51], LockTime::Time(time), Height(0))),
-        ),
-        named(
-            "earlier network upgrade",
-            valid(v5(
-                NetworkUpgrade::Nu5,
-                PUSH_OP_1,
-                &[0x51],
-                unlocked,
-                Height(0),
-            )),
-        ),
-        named(
-            "failing script",
-            Variant {
-                spent: p2sh([0; 20]),
-                ..valid(v5(nu6, PUSH_OP_1, &[0x51], unlocked, Height(0)))
-            },
-        ),
-        named(
-            "immature coinbase output",
-            Variant {
-                spent_from_coinbase: true,
-                ..valid(v5(nu6, PUSH_OP_1, &[0x51], unlocked, Height(0)))
-            },
-        ),
-        named(
-            "v4",
-            valid(Arc::new(Transaction::test_v4(
-                vec![transparent::Input::PrevOut {
-                    outpoint: transparent::OutPoint {
-                        hash: [8; 32].into(),
-                        index: 0,
-                    },
-                    unlock_script: transparent::Script::new(PUSH_OP_1),
-                    sequence: 0,
-                }],
-                vec![transparent::Output::new(
-                    1.try_into().unwrap(),
-                    transparent::Script::new(&[0x51]),
-                )],
-                unlocked,
-                Height(0),
-            ))),
-        ),
-    ];
+/// Where the mempool verified a [`Variant`], and the block that reuses that verification.
+struct Reuse {
+    network: Network,
+    /// The height of the next block when the mempool verified the transaction.
+    mempool_height: Height,
+    /// The next block's median time past when the mempool verified the transaction.
+    mempool_time: DateTime<Utc>,
+    /// The block that contains the transaction.
+    block: tx::BlockContext,
+}
 
-    let mut reused = 0;
-    for variant in &variants {
-        let name = variant.name;
-        let block = verify_in_block(&network, height, time, variant).await;
-        let Some(cached) =
-            verify_for_reuse(&network, admission_height, height, time, variant).await
-        else {
-            continue;
+impl Reuse {
+    /// A block at height 5 on the [`differential_network`], at the [`differential_block_time`],
+    /// and the mempool's verification for the next block at `mempool_height` with the median time
+    /// past `mempool_time`.
+    fn block_at_5(mempool_height: Height, mempool_time: DateTime<Utc>) -> Self {
+        let network = differential_network();
+        let height = Height(5);
+        let block = tx::BlockContext {
+            height,
+            time: differential_block_time(),
+            network_upgrade: NetworkUpgrade::current(&network, height),
         };
-        reused += 1;
-
-        let block = block.unwrap_or_else(|error| {
-            panic!("{name}: block verification rejects a reusable transaction: {error:?}")
-        });
-        assert_eq!(block.miner_fee, Some(cached.miner_fee), "{name}: miner fee");
-        assert_eq!(block.sigops, cached.block_sigop_count(), "{name}: sigops");
-        if name == "signature operation in a redeem script" {
-            assert_eq!(
-                block.sigops, 1,
-                "{name}: the redeem script's operation is counted"
-            );
+        Self {
+            network,
+            mempool_height,
+            mempool_time,
+            block,
         }
     }
 
-    // The valid variants must exercise the comparison above.
-    assert_eq!(reused, 6, "the valid variants are reusable");
+    /// The mempool verified the transaction for height 4, on an older tip, before the block's
+    /// time.
+    fn older_tip() -> Self {
+        Self::block_at_5(
+            Height(4),
+            differential_block_time() - chrono::Duration::minutes(10),
+        )
+    }
+
+    /// The mempool verified the transaction for height 6, on a tip that it hadn't processed yet,
+    /// after the block's time.
+    fn newer_tip() -> Self {
+        Self::block_at_5(
+            Height(6),
+            differential_block_time() + chrono::Duration::minutes(10),
+        )
+    }
+
+    /// Verifies `variant` the way the mempool does, then decides whether the block verifier
+    /// reuses that verification in [`Self::block`], with the block verifier's own check.
+    async fn verify_for_reuse(&self, variant: &Variant) -> Result<VerifiedUnminedTx, NotReused> {
+        let utxo = transparent::Utxo::new(
+            variant.spent.clone(),
+            Height(1),
+            variant.spent_from_coinbase,
+        );
+        let next_median_time_past =
+            zebra_chain::serialization::DateTime32::try_from(self.mempool_time)
+                .expect("the test time fits");
+        let state = service_fn(move |request| {
+            ready(Ok::<_, BoxError>(match request {
+                zs::Request::UnspentBestChainUtxo(_) => {
+                    zs::Response::UnspentBestChainUtxo(Some(utxo.clone()))
+                }
+                zs::Request::BestChainNextMedianTimePast => {
+                    zs::Response::BestChainNextMedianTimePast(next_median_time_past)
+                }
+                zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                    zs::Response::ValidBestChainTipNullifiersAndAnchors
+                }
+                _ => panic!("unexpected mempool verification state request: {request:?}"),
+            }))
+        });
+        let mut verified = transaction::MempoolTxVerifier::new_for_tests(&self.network, state)
+            .oneshot(transaction::MempoolRequest {
+                transaction: variant.transaction.clone().into(),
+                height: self.mempool_height,
+            })
+            .await
+            .map_err(|_| NotReused::RejectedByMempool)?
+            .transaction;
+        // The mempool records the tip height before the height it verified the transaction for.
+        verified.height = self.mempool_height.previous().ok();
+
+        let rules = ReuseRules::new(&self.network, self.block.height, self.block.time);
+        match check_candidate(
+            &verified,
+            &variant.transaction,
+            variant.transaction.hash(),
+            &rules,
+        ) {
+            Ok(true) => Ok(verified),
+            Ok(false) => Err(NotReused::Ineligible),
+            Err(_) => Err(NotReused::RejectedByRecheck),
+        }
+    }
+
+    /// Verifies `variant` in [`Self::block`] with the block transaction verifier.
+    async fn verify_in_block(
+        &self,
+        variant: &Variant,
+    ) -> Result<tx::BlockResponse, TransactionError> {
+        let utxo = transparent::Utxo::new(
+            variant.spent.clone(),
+            Height(1),
+            variant.spent_from_coinbase,
+        );
+        let state = service_fn(move |request| {
+            ready(Ok::<_, BoxError>(match request {
+                zs::Request::AwaitUtxo(_) => zs::Response::Utxo(utxo.clone()),
+                _ => panic!("unexpected block verification state request: {request:?}"),
+            }))
+        });
+        transaction::BlockTxVerifier::new(&self.network, state)
+            .oneshot(tx::BlockRequest {
+                transaction_hash: variant.transaction.hash(),
+                transaction: variant.transaction.clone(),
+                known_utxos: Arc::new(std::collections::HashMap::new()),
+                height: self.block.height,
+                time: self.block.time,
+            })
+            .await
+    }
+
+    /// Checks that the block verifier reuses the mempool's verification of `variant` as
+    /// `expected` says, and that block verification agrees with each reuse, and with each
+    /// rejection by the block verifier's check. `tip` names the mempool's tip in the messages.
+    async fn assert_agrees_with_block_verification(
+        &self,
+        tip: &str,
+        variant: &Variant,
+        expected: Result<(), NotReused>,
+    ) {
+        let name = format!("{}, {tip}", variant.name);
+        let in_block = self.verify_in_block(variant).await;
+        let reused = self.verify_for_reuse(variant).await;
+
+        // The property reuse relies on, whatever the variant.
+        if let Ok(cached) = &reused {
+            let in_block = in_block.as_ref().unwrap_or_else(|error| {
+                panic!("{name}: block verification rejects a reused transaction: {error:?}")
+            });
+            assert_eq!(
+                in_block.miner_fee,
+                Some(cached.miner_fee),
+                "{name}: miner fee"
+            );
+            assert_eq!(
+                in_block.sigops,
+                cached.block_sigop_count(),
+                "{name}: sigops"
+            );
+            if variant.name == "signature operation in a redeem script" {
+                assert_eq!(
+                    in_block.sigops, 1,
+                    "{name}: the redeem script's operation is counted"
+                );
+            }
+        }
+        assert_eq!(
+            reused
+                .as_ref()
+                .map(|_| ())
+                .map_err(|not_reused| *not_reused),
+            expected,
+            "{name}"
+        );
+        if expected == Err(NotReused::RejectedByRecheck) {
+            assert!(
+                in_block.is_err(),
+                "{name}: the check rejects what block verification accepts"
+            );
+        }
+    }
+}
+
+/// The variants of [`reuse_agrees_with_block_verification`] that break no rule, so the block
+/// verifier reuses the mempool's verification of them from either tip.
+fn reused_variants() -> Vec<Variant> {
+    let spend = Spend::default();
+    vec![
+        Variant::new("valid", spend.v5(), REUSED, REUSED),
+        Variant {
+            spent: p2sh(checksig_hash()),
+            ..Variant::new(
+                "signature operation in a redeem script",
+                Spend {
+                    unlock_script: PUSH_CHECKSIG,
+                    ..spend
+                }
+                .v5(),
+                REUSED,
+                REUSED,
+            )
+        },
+        Variant::new(
+            "signature operations in an output",
+            Spend {
+                output_script: &[0x51, 0xac, 0xac],
+                ..spend
+            }
+            .v5(),
+            REUSED,
+            REUSED,
+        ),
+        Variant::new(
+            "expires after the block",
+            Spend {
+                expiry_height: Height(6),
+                ..spend
+            }
+            .v5(),
+            REUSED,
+            REUSED,
+        ),
+        Variant::new(
+            "locked until an earlier height",
+            Spend {
+                lock_time: LockTime::Height(Height(3)),
+                ..spend
+            }
+            .v5(),
+            REUSED,
+            REUSED,
+        ),
+        Variant::new("v4", spend.v4(), REUSED, REUSED),
+    ]
+}
+
+/// The variants of [`reuse_agrees_with_block_verification`] for a block at `time` that each break
+/// one rule, in the block or in the mempool.
+fn rejected_variants(time: DateTime<Utc>) -> Vec<Variant> {
+    let spend = Spend::default();
+    let locked_until = |lock_time| Spend { lock_time, ..spend }.v5();
+    vec![
+        Variant::new(
+            "expired",
+            Spend {
+                expiry_height: Height(4),
+                ..spend
+            }
+            .v5(),
+            RECHECK_REJECTS,
+            MEMPOOL_REJECTS,
+        ),
+        Variant::new(
+            "locked until the block height",
+            locked_until(LockTime::Height(Height(5))),
+            MEMPOOL_REJECTS,
+            RECHECK_REJECTS,
+        ),
+        Variant::new(
+            "locked until the block time",
+            locked_until(LockTime::Time(time)),
+            MEMPOOL_REJECTS,
+            RECHECK_REJECTS,
+        ),
+        Variant::new(
+            "earlier network upgrade",
+            Spend {
+                upgrade: NetworkUpgrade::Nu5,
+                ..spend
+            }
+            .v5(),
+            MEMPOOL_REJECTS,
+            MEMPOOL_REJECTS,
+        ),
+        Variant {
+            spent: p2sh([0; 20]),
+            ..Variant::new(
+                "failing script",
+                spend.v5(),
+                MEMPOOL_REJECTS,
+                MEMPOOL_REJECTS,
+            )
+        },
+        Variant {
+            spent_from_coinbase: true,
+            ..Variant::new(
+                "immature coinbase output",
+                spend.v5(),
+                MEMPOOL_REJECTS,
+                MEMPOOL_REJECTS,
+            )
+        },
+    ]
+}
+
+/// The block verifier reuses the mempool's verification of a transaction only if block
+/// verification accepts that transaction, with the same miner fee and signature operation count.
+///
+/// Each variant is verified by the mempool for a block before this one, and for a block after it,
+/// because the mempool keeps verifications from older tips, and can add ones from a tip it hasn't
+/// processed yet. Each variant states whether the block verifier reuses it, and if not, whether
+/// the mempool or the check at this block's height and time rejects it. A reused variant must be
+/// accepted by block verification with the same fee and signature operations. A variant that the
+/// check rejects must also be rejected by block verification. So this fails if a rule that block
+/// verification checks is skipped for reused transactions, or if a rule that the check checks
+/// stops being checked.
+///
+/// The variants that the mempool rejects only show that they aren't reused: the mempool also
+/// checks policy rules, and rules such as coinbase maturity, that the state checks for blocks.
+#[tokio::test]
+async fn reuse_agrees_with_block_verification() {
+    let _init_guard = zebra_test::init();
+    let (older, newer) = (Reuse::older_tip(), Reuse::newer_tip());
+    let variants = reused_variants()
+        .into_iter()
+        .chain(rejected_variants(differential_block_time()));
+    for variant in variants {
+        older
+            .assert_agrees_with_block_verification("older tip", &variant, variant.older)
+            .await;
+        newer
+            .assert_agrees_with_block_verification("newer tip", &variant, variant.newer)
+            .await;
+    }
+}
+
+/// The block verifier doesn't reuse a transaction that the mempool verified for a height in a
+/// later verification rules epoch than the block's, even if the block context rules accept the
+/// transaction at the block's height. A version 4 transaction doesn't contain the consensus
+/// branch ID that its signatures commit to, so only the epoch check keeps the mempool's
+/// verification for the next network upgrade out of a block in the current one.
+#[test]
+fn transaction_verified_for_a_later_epoch_is_not_reused() {
+    let _init_guard = zebra_test::init();
+    let network = differential_network();
+    let rules = ReuseRules::new(&network, Height(3), differential_block_time());
+    let v4_spend = v4_spend();
+    assert_eq!(rules.block.network_upgrade, NetworkUpgrade::Nu5);
+    assert_eq!(
+        NetworkUpgrade::current(&network, Height(4)),
+        NetworkUpgrade::Nu6
+    );
+    assert!(tx::check_block_context_rules(&v4_spend, &rules.block, &network).is_ok());
+
+    // The mempool verified the spend on the tip at height 3, for height 4, in the next network
+    // upgrade.
+    let mut later_epoch = entry(v4_spend.clone());
+    later_epoch.height = Some(Height(3));
+    let result = check_candidate(&later_epoch, &v4_spend, v4_spend.hash(), &rules);
+    assert_eq!(result, Ok(false));
 }
 
 /// The same comparison for a shielded transaction with real proofs and signatures: the mempool
@@ -1109,20 +1329,22 @@ async fn mempool_path_never_accepts_what_block_verification_rejects() {
 async fn mempool_path_and_block_verification_agree_on_shielded_transactions() {
     let _init_guard = zebra_test::init();
 
-    // A network where the heights below are in NU5, like the Mainnet blocks the transaction
-    // comes from. Its proofs and signatures don't depend on the network.
-    let network = Network::new_regtest(
-        ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(4),
-            ..Default::default()
-        }
-        .into(),
-    );
-    let admission_height = Height(2);
+    // The mempool verified the transaction for height 2, and the block is at height 3. Both are in
+    // NU5, like the Mainnet blocks the transaction comes from. Its proofs and signatures don't
+    // depend on the network.
+    let network = differential_network();
+    let time = differential_block_time();
     let height = Height(3);
-    let time = block::genesis::regtest_genesis_block().header.time + chrono::Duration::hours(1);
+    let reuse = Reuse {
+        block: tx::BlockContext {
+            height,
+            time,
+            network_upgrade: NetworkUpgrade::current(&network, height),
+        },
+        network,
+        mempool_height: Height(2),
+        mempool_time: time,
+    };
 
     // The first Mainnet test transaction that only has Orchard actions.
     let transaction = zebra_test::vectors::MAINNET_BLOCKS
@@ -1150,33 +1372,21 @@ async fn mempool_path_and_block_verification_agree_on_shielded_transactions() {
     assert_eq!(changed.hash(), transaction.hash());
     assert_ne!(changed.unmined_id(), transaction.unmined_id());
 
-    let variant = |name, transaction| Variant {
-        name,
-        transaction,
-        // Unused: the transaction has no transparent inputs.
-        spent: transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&[0x51])),
-        spent_from_coinbase: false,
-    };
-
-    let valid = variant("shielded", transaction);
-    let block = verify_in_block(&network, height, time, &valid)
-        .await
-        .expect("block verification accepts the transaction");
-    let cached = verify_for_reuse(&network, admission_height, height, time, &valid)
-        .await
-        .expect("the mempool path accepts the transaction");
-    assert_eq!(block.miner_fee, Some(cached.miner_fee));
-    assert_eq!(block.sigops, cached.block_sigop_count());
-
-    let changed = variant("shielded with a changed binding signature", changed);
-    assert!(verify_in_block(&network, height, time, &changed)
-        .await
-        .is_err());
-    assert!(
-        verify_for_reuse(&network, admission_height, height, time, &changed)
-            .await
-            .is_none()
+    // The transactions have no transparent inputs, so they don't use the variants' spent outputs.
+    let valid = Variant::new("shielded", transaction, REUSED, REUSED);
+    let changed = Variant::new(
+        "shielded with a changed binding signature",
+        changed,
+        MEMPOOL_REJECTS,
+        MEMPOOL_REJECTS,
     );
+    // The mempool verified the transactions on an older tip than the block's parent.
+    for variant in [&valid, &changed] {
+        reuse
+            .assert_agrees_with_block_verification("older tip", variant, variant.older)
+            .await;
+    }
+    assert!(reuse.verify_in_block(&changed).await.is_err());
 }
 
 /// An output of a transaction in the mempool, and its outpoint.

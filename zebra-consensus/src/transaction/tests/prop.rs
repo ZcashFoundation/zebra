@@ -260,17 +260,19 @@ proptest! {
         prop_assert_eq!(result.unwrap().tx_id, transaction_id);
     }
 
-    /// Test that any transaction accepted by the mempool verifier is also accepted by the
-    /// block verifier, given the same transaction, height and spent UTXOs.
+    /// Test that a transaction the mempool verifier accepts, for a height in the same verification
+    /// rules epoch as a later or equal block height, is accepted by the block transaction verifier
+    /// at that height, with the same unmined ID, miner fee and signature operation count, whenever
+    /// it passes the block context rules there. The block verifier reuses the mempool's
+    /// verification of a transaction like this in a block on the mempool's tip, and takes its fee
+    /// and signature operations from the mempool, so a transaction that breaks this would let the
+    /// block verifier accept blocks that nodes which verify the transaction in full reject.
     ///
-    /// # Correctness
-    ///
-    /// This is the invariant that keeps the blocks Zebra accepts valid. If the mempool
-    /// accepts a transaction that block verification would reject, that transaction is
-    /// selected into a block template. The block verifier takes the mempool's verification of
-    /// a transaction in a block on the mempool's tip, so the node that produced the template
-    /// would accept a block mined from it, while nodes that verify the transaction in full
-    /// reject it.
+    /// The transactions are transparent transfers with standard P2SH inputs, some with signature
+    /// operations in their redeem scripts or outputs, against a mock state that has every spent
+    /// output and accepts every nullifier and anchor. `block::tests::mempool_reuse` covers mempool
+    /// verifications for later heights than the block's, and a shielded transaction with real
+    /// proofs.
     ///
     /// [`BlockTxVerifier`](transaction::BlockTxVerifier) and
     /// [`MempoolTxVerifier`](transaction::MempoolTxVerifier) are separate services, so
@@ -282,11 +284,12 @@ proptest! {
     /// mempool transaction can have.
     #[test]
     fn mempool_acceptance_implies_block_acceptance(
-        (network, block_height) in sapling_onwards_strategy(),
+        (network, block_height, mempool_height) in same_epoch_heights_strategy(),
         next_median_time_past in datetime_u32(),
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
         transaction_version in 4_u8..=5,
         lock_time in lock_time_strategy(),
+        sigops in mock_sigops_strategy(),
     ) {
         let _init_guard = zebra_test::init();
 
@@ -295,6 +298,7 @@ proptest! {
         prop_assume!(next_median_time_past < DateTime::<Utc>::MAX_UTC);
         let block_time = next_median_time_past + Duration::seconds(1);
 
+        // It expires at the block's height, so it hasn't expired at the mempool's height either.
         let (transaction, known_utxos) = mock_funded_transparent_transaction(
             &network,
             block_height,
@@ -302,39 +306,53 @@ proptest! {
             transaction_version,
             lock_time,
         );
+        let (transaction, known_utxos) = sigops.apply(transaction, known_utxos);
 
         let mempool_result = validate_mempool(
             transaction.clone(),
-            block_height,
+            mempool_height,
             next_median_time_past,
             known_utxos.clone(),
             network.clone(),
         );
 
         // Transactions the mempool rejects say nothing about block verification: the mempool
-        // applies policy rules (ZIP-317, input standardness) that blocks do not.
-        if let Ok(mempool_response) = mempool_result {
-            let block_result = validate_with_state(
-                transaction,
-                block_height,
-                block_time,
-                next_median_time_past,
-                known_utxos,
-                network,
-            );
+        // applies policy rules (ZIP-317, input standardness) that blocks do not. These cases are
+        // rejected, so a change that makes the mempool reject most transactions fails the test.
+        let Ok(mempool_response) = mempool_result else {
+            return Err(TestCaseError::reject("the mempool rejects the transaction"));
+        };
+        // The block verifier only reuses the mempool's verification of a transaction that passes
+        // the block context rules at the block.
+        let block = transaction::BlockContext {
+            height: block_height,
+            time: block_time,
+            network_upgrade: NetworkUpgrade::current(&network, block_height),
+        };
+        prop_assume!(
+            transaction::check_block_context_rules(&transaction, &block, &network).is_ok(),
+            "the block context rules reject the transaction at the block"
+        );
+        let verified = mempool_response.transaction;
 
-            prop_assert!(
-                block_result.is_ok(),
+        let block_result = validate_with_state(
+            transaction,
+            block_height,
+            block_time,
+            next_median_time_past,
+            known_utxos,
+            network,
+        );
+        let block_response = block_result.map_err(|error| {
+            TestCaseError::fail(format!(
                 "the mempool accepted a transaction that block verification rejected, \
-                 so the block verifier would accept it from the mempool: {}",
-                block_result.unwrap_err()
-            );
+                 so the block verifier would accept it from the mempool: {error}"
+            ))
+        })?;
 
-            prop_assert_eq!(
-                block_result.unwrap().tx_id.mined_id(),
-                mempool_response.transaction.transaction.id.mined_id()
-            );
-        }
+        prop_assert_eq!(block_response.tx_id, verified.transaction.id);
+        prop_assert_eq!(block_response.miner_fee, Some(verified.miner_fee));
+        prop_assert_eq!(block_response.sigops, verified.block_sigop_count());
     }
 
     /// Test that the block transaction verifier gives the same result for a transaction at the
@@ -435,6 +453,25 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
 
         (start_height_value..=end_height_value)
             .prop_map(move |height_value| (network.clone(), block::Height(height_value)))
+    })
+}
+
+/// Generates a network, a block height from the Sapling activation height onward, and a height at
+/// or below it in the same verification rules epoch, which the mempool verified the block's
+/// transaction for.
+///
+/// A quarter of the cases use the block's height. That is the usual case: the mempool verifies its
+/// transactions for the height after its tip, which is the height of a block on that tip.
+fn same_epoch_heights_strategy() -> impl Strategy<Value = (Network, block::Height, block::Height)> {
+    sapling_onwards_strategy().prop_flat_map(|(network, block_height)| {
+        let start = transaction::VerificationRulesEpoch::containing(&network, block_height).start();
+        prop_oneof![
+            1 => Just(block_height.0),
+            3 => start.0..=block_height.0,
+        ]
+        .prop_map(move |mempool_height| {
+            (network.clone(), block_height, block::Height(mempool_height))
+        })
     })
 }
 
