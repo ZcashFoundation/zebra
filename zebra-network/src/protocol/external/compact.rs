@@ -329,6 +329,32 @@ impl Reconstruction {
             .try_fold(bytes, |bytes, tx| {
                 add_bytes(bytes, tx.zcash_serialized_size())
             })?;
+        self.fill_missing(response)?;
+        let block = Arc::new(Block {
+            header: self.compact.header.clone(),
+            transactions: self
+                .transactions
+                .into_iter()
+                .map(|tx| tx.expect("every missing slot was filled by the exact response count"))
+                .collect(),
+        });
+        let mut seen = HashSet::with_capacity(block.transactions.len());
+        if block.transactions.iter().any(|tx| !seen.insert(tx.hash()))
+            || block.transactions.iter().collect::<block::merkle::Root>()
+                != block.header.merkle_root
+        {
+            return Err(SerializationError::Parse(
+                "compact block duplicate transaction or Merkle mismatch",
+            ));
+        }
+        Ok(block)
+    }
+
+    /// Places the transactions of `response` in the missing slots, in block order, checking each
+    /// against its slot's short ID. `finish` has already checked that `response` has one
+    /// transaction for each missing slot.
+    #[allow(clippy::unwrap_in_result)]
+    fn fill_missing(&mut self, response: BlockTransactions) -> Result<(), SerializationError> {
         let keys = self.compact.keys();
         let mut recovered = response.transactions.into_iter();
         let mut prefilled = self.compact.prefilled.iter().peekable();
@@ -356,24 +382,7 @@ impl Reconstruction {
                 *slot = Some(tx);
             }
         }
-        let block = Arc::new(Block {
-            header: self.compact.header.clone(),
-            transactions: self
-                .transactions
-                .into_iter()
-                .map(|tx| tx.expect("every missing slot was filled by the exact response count"))
-                .collect(),
-        });
-        let mut seen = HashSet::with_capacity(block.transactions.len());
-        if block.transactions.iter().any(|tx| !seen.insert(tx.hash()))
-            || block.transactions.iter().collect::<block::merkle::Root>()
-                != block.header.merkle_root
-        {
-            return Err(SerializationError::Parse(
-                "compact block duplicate transaction or Merkle mismatch",
-            ));
-        }
-        Ok(block)
+        Ok(())
     }
 }
 
