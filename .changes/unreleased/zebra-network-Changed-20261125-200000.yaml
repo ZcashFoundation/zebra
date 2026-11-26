@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Restructured internal compact block relay code, with no change in behavior.
+time: 2026-11-25T20:00:00.000000000Z
