@@ -529,6 +529,15 @@ pub enum ValidateContextError {
     },
 
     #[error(
+        "error calculating a transparent address balance change: {amount_error:?}, {height:?}"
+    )]
+    #[non_exhaustive]
+    ChangeAddressBalance {
+        amount_error: amount::Error,
+        height: block::Height,
+    },
+
+    #[error(
         "invalid block subsidy, funding stream, or miner fee payment in block {block_hash:?} at \
          {height:?}: {subsidy_error}"
     )]
