@@ -19,14 +19,14 @@ use siphasher::sip::SipHasher24;
 use zebra_chain::{
     block::{self, Block, MAX_BLOCK_BYTES},
     serialization::{
-        CompactSizeMessage, SerializationError, TrustedPreallocate, ZcashDeserialize,
+        CompactSizeMessage, FakeWriter, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::{Transaction, UnminedTx, UnminedTxId, MIN_TRANSPARENT_TX_SIZE},
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// A full Zcash header and ordered compact transaction identities.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,10 +79,14 @@ impl fmt::Debug for Reconstruction {
 impl CompactBlock {
     /// Builds an announcement with only the coinbase prefilled.
     ///
-    /// The caller must use ordinary block relay if this encoding would not save bytes.
+    /// Returns an error if the block doesn't encode, or if the announcement would fail
+    /// [`Self::validate`], so every announcement this returns can be serialized. The caller must
+    /// use ordinary block relay if this returns an error, or if this encoding would not save bytes.
     pub fn from_block(block: &Block, nonce: u64) -> Result<Self, SerializationError> {
         check_count(block.transactions.len())?;
-        check_bytes(block.zcash_serialized_size())?;
+        let mut block_bytes = FakeWriter(0);
+        block.zcash_serialize(&mut block_bytes)?;
+        check_bytes(block_bytes.0)?;
         let coinbase = block
             .transactions
             .first()
@@ -102,6 +106,7 @@ impl CompactBlock {
                 .skip(1)
                 .map(|tx| short_id(keys, tx.as_ref().into())),
         );
+        compact.validate()?;
         Ok(compact)
     }
 
