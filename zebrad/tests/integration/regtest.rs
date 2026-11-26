@@ -25,6 +25,7 @@ use crate::common::{
     regtest::MiningRpcMethods,
 };
 
+mod commit_reuse;
 mod compact_relay;
 mod nu7;
 mod script_cache;

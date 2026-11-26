@@ -298,7 +298,7 @@ pub fn check_best_tip_block_commitments(
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for mining on top of `block`, and the note commitment
-/// trees after `block`, without committing it.
+/// trees and chain history after `block`, without committing it.
 ///
 /// `block` must have a valid proof of work and transaction Merkle root, and its shielded data
 /// must be within the block limits. This checks the contextual rules for its header, which don't
@@ -344,6 +344,8 @@ pub(crate) fn mining_candidate_chain_info(
         }
     }
 
+    // The root of the history tree that the header commitment was checked against above.
+    let parent_root = history_tree.hash();
     Arc::make_mut(&mut history_tree).push(
         network,
         block.clone(),
@@ -353,6 +355,9 @@ pub(crate) fn mining_candidate_chain_info(
             ironwood: &trees.output().ironwood.root(),
         },
     )?;
+    // The commit of `block` reuses this history, and skips the commitment check, if the history
+    // tree of its parent has the same root.
+    let trees = trees.with_history(parent_root, history_tree.clone());
 
     // The difficulty adjustment for the next block uses `block` and its ancestors.
     let relevant_data = std::iter::once((block.header.difficulty_threshold, block.header.time))

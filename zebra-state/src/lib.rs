@@ -89,7 +89,10 @@ pub use service::{
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
-    arbitrary::{populated_state, populated_state_with_debug, CHAIN_TIP_UPDATE_WAIT_LIMIT},
+    arbitrary::{
+        early_mining_work_counts, populated_state, populated_state_with_debug,
+        EarlyMiningWorkCounts, CHAIN_TIP_UPDATE_WAIT_LIMIT,
+    },
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };
