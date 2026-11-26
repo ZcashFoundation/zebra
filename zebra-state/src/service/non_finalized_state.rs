@@ -7,6 +7,7 @@ use std::{
     mem,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use indexmap::IndexMap;
@@ -61,6 +62,13 @@ pub(crate) struct ValidatedChain {
 
     /// The block's hash.
     hash: block::Hash,
+}
+
+impl ValidatedChain {
+    /// Sets the time the block verifier received the block.
+    pub(crate) fn set_received_time(&mut self, received_time: Option<Instant>) {
+        Arc::make_mut(&mut self.chain).set_tip_received_time(received_time);
+    }
 }
 
 /// The state of the chains in memory, including queued blocks.
@@ -327,6 +335,21 @@ impl NonFinalizedState {
     // TODO: replace chain_set.iter().rev() with this method
     pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
         self.chain_set.iter().rev()
+    }
+
+    /// Returns the root and tip hash of each chain, best first.
+    ///
+    /// A chain from [`Self::validate_block`] or [`Self::validate_new_chain`] can only be inserted
+    /// while this is what it was when the chain was validated.
+    pub(crate) fn chain_ends(&self) -> Vec<(block::Hash, block::Hash)> {
+        self.chain_iter()
+            .map(|chain| {
+                (
+                    chain.non_finalized_root_hash(),
+                    chain.non_finalized_tip_hash(),
+                )
+            })
+            .collect()
     }
 
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,

@@ -1,5 +1,5 @@
-//! Block commits that reuse the early mining work the state computed for the same block, on a
-//! replayed Regtest chain.
+//! Block commits that reuse the early mining work the state computed for the same block, and a
+//! block that fails verification after it got that work, on a replayed Regtest chain.
 
 use std::{sync::Arc, time::Duration};
 
@@ -7,8 +7,10 @@ use color_eyre::eyre::{eyre, Result};
 use tower::{buffer::Buffer, util::BoxService, ServiceExt};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, genesis::regtest_genesis_block, Block, Height},
     parameters::{testnet::ConfiguredActivationHeights, Network},
+    transaction::Transaction,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
@@ -145,6 +147,20 @@ impl Replay {
             _ => unreachable!("wrong response for Request::Tip"),
         }
     }
+
+    /// Returns where the state has the block with `hash`, if it has it.
+    async fn known_block(&self, hash: block::Hash) -> Result<Option<zebra_state::KnownBlock>> {
+        match self
+            .state
+            .clone()
+            .oneshot(zebra_state::Request::KnownBlock(hash))
+            .await
+            .map_err(|error| eyre!(error))?
+        {
+            zebra_state::Response::KnownBlock(known) => Ok(known),
+            _ => unreachable!("wrong response for Request::KnownBlock"),
+        }
+    }
 }
 
 /// The commit of each replayed Regtest block that got early mining work reuses that work.
@@ -205,6 +221,89 @@ async fn commits_reuse_early_mining_work() -> Result<()> {
     assert_eq!(
         skipped_commitment_checks, candidates,
         "each candidate's commit skips the header commitment check the candidate did"
+    );
+
+    Ok(())
+}
+
+/// A block that gets early mining work, and then fails verification, isn't committed.
+///
+/// The forged block pays its miner 1 zatoshi more than the block subsidy and fees allow. The block
+/// verifier rejects it when it checks the miner fees, after the block's transactions are verified.
+/// Its proof of work, header commitments and funding streams are valid, so it gets early work
+/// first, and the state doesn't check the miner fees before the block's commit.
+///
+/// The forged block's only transaction is its coinbase, so the verifier can be done with it
+/// before the block write task gets to validating its chain context, which the task then skips.
+/// So this checks the outcome only, whether or not that validation ran. The state's own tests
+/// check that a chain validated this way is never committed without its block's commit.
+// The in-process state service commits blocks with `block_in_place`, which requires a
+// multi-threaded runtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_that_fails_verification_after_early_work_is_not_committed() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = network();
+    let blocks = mine_blocks(&network, 4).await?;
+    let replay = Replay::new(&network).await?;
+
+    for block in std::iter::once(regtest_genesis_block()).chain(blocks[..2].iter().cloned()) {
+        let hash = block.hash();
+        assert_eq!(replay.commit(block).await?, hash);
+    }
+
+    // The block template's coinbase transaction pays the miner in its first output, before any
+    // funding stream outputs.
+    let honest = &blocks[2];
+    let mut outputs = honest.transactions[0].outputs();
+    let miner_output = outputs
+        .first_mut()
+        .expect("the coinbase transaction pays the miner");
+    miner_output.value = (miner_output.value + Amount::try_from(1)?)?;
+
+    let mut forged = Block::clone(honest);
+    forged.transactions[0] =
+        Arc::new(Transaction::clone(&honest.transactions[0]).with_transparent_outputs(outputs));
+    Arc::make_mut(&mut forged.header).merkle_root = forged.transactions.iter().collect();
+    // NU5 blocks commit to their transactions' authorizing data separately from the Merkle root,
+    // and the coinbase transaction's authorizing data hasn't changed.
+    assert_eq!(forged.auth_data_root(), honest.auth_data_root());
+    let forged = Arc::new(forged);
+    assert_ne!(forged.hash(), honest.hash());
+
+    // The state turns down a block's request for early work while the previous mining candidate's
+    // task is still running, and the verifier can reject the forged block before the block write
+    // task has counted its work. So this tries a few times.
+    let before = zebra_state::early_mining_work_counts();
+    for attempt in 1.. {
+        assert!(
+            replay.commit(forged.clone()).await.is_err(),
+            "the forged block pays its miner too much",
+        );
+        if zebra_state::early_mining_work_counts().candidates > before.candidates {
+            break;
+        }
+
+        assert!(attempt < 20, "the forged block gets early mining work");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    assert_eq!(replay.known_block(forged.hash()).await?, None);
+    assert_eq!(replay.tip().await?, Some((Height(2), blocks[1].hash())));
+
+    for block in &blocks[2..] {
+        assert_eq!(replay.commit(block.clone()).await?, block.hash());
+    }
+    assert_eq!(
+        replay.tip().await?,
+        blocks.last().map(|block| (Height(4), block.hash())),
+    );
+    // The state publishes its chains after each commit, so this also checks the chains that the
+    // block write task held while it handled the forged block.
+    assert_eq!(
+        replay.known_block(forged.hash()).await?,
+        None,
+        "the forged block isn't in any chain",
     );
 
     Ok(())

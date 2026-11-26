@@ -17,8 +17,8 @@ use crate::{
 use super::proposals::{block, network, MockState, MockTransactionVerifier};
 
 /// The verifier asks the state for early mining work before the block's transactions are
-/// verified, and keeps the work until the block is committed. It sends the same block object
-/// with both requests, so the commit can reuse the work.
+/// verified, and keeps the work until the block is committed. It sends the same block and hash
+/// list objects with both requests, so the commit can reuse the work.
 #[tokio::test]
 async fn mining_candidate_is_published_before_transaction_verification() {
     let _init_guard = zebra_test::init();
@@ -41,12 +41,19 @@ async fn mining_candidate_is_published_before_transaction_verification() {
     // The state gets the request before any transaction is sent for verification.
     let (guard, mut verification) = zs::MiningCandidateGuard::new_for_tests();
     let candidate = state
-        .expect_request(zs::Request::MiningCandidate(block.clone()))
+        .expect_request(zs::Request::MiningCandidate {
+            block: block.clone(),
+            transaction_hashes: block.transactions.iter().map(|tx| tx.hash()).collect(),
+        })
         .await;
-    let zs::Request::MiningCandidate(candidate_block) = candidate.request() else {
+    let zs::Request::MiningCandidate {
+        block: candidate_block,
+        transaction_hashes: candidate_hashes,
+    } = candidate.request()
+    else {
         unreachable!("the request was matched above");
     };
-    let candidate_block = candidate_block.clone();
+    let (candidate_block, candidate_hashes) = (candidate_block.clone(), candidate_hashes.clone());
     candidate.respond(zs::Response::MiningCandidate(Some(guard)));
 
     let transaction_request = transaction_verifier.expect_request_that(|_| true).await;
@@ -73,10 +80,14 @@ async fn mining_candidate_is_published_before_transaction_verification() {
     let zs::Request::CommitSemanticallyVerifiedBlock(committed) = commit.request() else {
         unreachable!("the request was matched above");
     };
-    // The state only reuses early work for the block object it was computed for.
+    // The state only reuses early work for the block and hash list objects it was computed for.
     assert!(
         Arc::ptr_eq(&candidate_block, &committed.block),
         "the commit has the same block object as the mining candidate"
+    );
+    assert!(
+        Arc::ptr_eq(&candidate_hashes, &committed.transaction_hashes),
+        "the commit has the same hash list object as the mining candidate"
     );
     commit.respond(zs::Response::Committed(hash));
 
@@ -108,7 +119,10 @@ async fn mining_candidate_is_withdrawn_when_its_block_is_rejected() {
 
     let (guard, mut verification) = zs::MiningCandidateGuard::new_for_tests();
     state
-        .expect_request(zs::Request::MiningCandidate(block.clone()))
+        .expect_request(zs::Request::MiningCandidate {
+            block: block.clone(),
+            transaction_hashes: block.transactions.iter().map(|tx| tx.hash()).collect(),
+        })
         .await
         .respond(zs::Response::MiningCandidate(Some(guard)));
 

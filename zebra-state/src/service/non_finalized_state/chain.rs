@@ -1639,6 +1639,15 @@ impl Chain {
         self.blocks.values().next_back().map(Arc::as_ref)
     }
 
+    /// Sets the time the block verifier received this chain's tip block.
+    ///
+    /// The chain must not be in a chain set: [`Chain::cmp`] uses the tip block's received time.
+    pub(crate) fn set_tip_received_time(&mut self, received_time: Option<std::time::Instant>) {
+        if let Some(tip) = self.blocks.values_mut().next_back() {
+            Arc::make_mut(tip).received_time = received_time;
+        }
+    }
+
     /// Returns true if the non-finalized part of this chain is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
@@ -2672,8 +2681,9 @@ impl Ord for Chain {
     /// # Correctness
     ///
     /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
-    /// interior mutability. The tip block's `received_time` is set by the block verifier
-    /// before the block is pushed onto a chain, and is never modified afterwards.
+    /// interior mutability. The tip block's `received_time` is set before the chain is in a
+    /// chain set, when the block is pushed or by `set_tip_received_time`, and is never modified
+    /// afterwards.
     ///
     /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
     /// the tip hash match. Two chains with the same tip hash share the stored tip

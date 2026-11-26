@@ -1227,12 +1227,33 @@ pub enum Request {
     ///
     /// The caller must have checked the block's proof of work and transaction Merkle root, and
     /// that its shielded data is within the block limits. The state checks the block's header
-    /// against the best tip.
+    /// against the best tip. `transaction_hashes` are the hashes of the block's transactions, in
+    /// order, as in [`SemanticallyVerifiedBlock::transaction_hashes`].
     ///
     /// Returns [`Response::MiningCandidate`] straight away. The work is published once it is
     /// computed. It is withdrawn when the guard is dropped, which the caller does when the block
     /// is committed or rejected, and after a timeout.
-    MiningCandidate(Arc<Block>),
+    ///
+    /// Once the block write task has answered, it also validates the block's chain context,
+    /// without changing the state, unless it already has another commit, invalidation,
+    /// reconsideration or mining candidate waiting, or the guard was dropped. It keeps the result
+    /// for the next of those requests: a [`Request::CommitSemanticallyVerifiedBlock`] of the same
+    /// block object with the same `transaction_hashes` object then adds the validated chain
+    /// instead of validating the block again. It checks the block for what that validation relies
+    /// on. A block that fails verification is never committed, because only its commit request
+    /// adds it.
+    ///
+    /// Blocks from peers get early work too. The state handles one candidate at a time, so each
+    /// candidate costs the block write task at most one validation. Other requests that reach the
+    /// block write task during that validation wait for it. On test networks the proof of work can
+    /// be cheap: Regtest doesn't check it, and Testnet allows minimum-difficulty blocks.
+    MiningCandidate {
+        /// The block.
+        block: Arc<Block>,
+
+        /// The hashes of the block's transactions, in order.
+        transaction_hashes: Arc<[transaction::Hash]>,
+    },
 }
 
 impl Request {
@@ -1264,7 +1285,7 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
-            Request::MiningCandidate(_) => "mining_candidate",
+            Request::MiningCandidate { .. } => "mining_candidate",
         }
     }
 
@@ -1901,7 +1922,7 @@ impl TryFrom<Request> for ReadRequest {
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_)
-            | Request::MiningCandidate(_) => Err("ReadService does not write blocks"),
+            | Request::MiningCandidate { .. } => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \

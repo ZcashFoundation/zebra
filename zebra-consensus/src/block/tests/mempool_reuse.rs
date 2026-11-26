@@ -210,7 +210,7 @@ fn mock_state() -> State {
     BoxCloneService::new(service_fn(|request| {
         ready(Ok(match request {
             zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
-            zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
+            zs::Request::MiningCandidate { .. } => zs::Response::MiningCandidate(None),
             zs::Request::AwaitUtxo(_) => zs::Response::Utxo(transparent::Utxo::new(
                 transparent::Output::new(
                     (FEE + 1).try_into().unwrap(),

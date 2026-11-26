@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`Request::MiningCandidate` has `block` and `transaction_hashes` fields, and callers pass the hashes of the block''s transactions, in order. After answering it, the state can validate the block''s chain context. A `Request::CommitSemanticallyVerifiedBlock` with the same block and hash list objects then adds that chain instead of validating the block again, unless the state handled another commit, invalidation, reconsideration or mining candidate in between.'
+time: 2026-11-26T00:40:48.000000000-05:00
