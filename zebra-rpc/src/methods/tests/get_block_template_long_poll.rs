@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use jsonrpsee_types::ErrorCode;
+use jsonrpsee_types::{ErrorCode, ErrorObjectOwned};
 use tokio::sync::watch;
 use tower::Service;
 use zcash_address::{ToAddress, ZcashAddress};
@@ -36,7 +36,7 @@ use crate::{
         types::{
             get_block_template::{
                 constants::{MAX_LONG_POLL_DURATION, MEMPOOL_LONG_POLL_INTERVAL},
-                BlockTemplateResponse, GetBlockTemplateParameters,
+                BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateResponse,
             },
             long_poll::{LongPollId, LongPollInput},
         },
@@ -47,8 +47,9 @@ use crate::{
 #[derive(Clone)]
 struct TestReadState {
     chain_info_rx: watch::Receiver<GetBlockTemplateChainInfo>,
+    chain_info_calls: Arc<AtomicU32>,
     stall_chain_info: Arc<AtomicBool>,
-    stall_tip: Arc<AtomicBool>,
+    stall_tip_rx: watch::Receiver<bool>,
     yield_tip: Arc<AtomicBool>,
 }
 
@@ -62,24 +63,32 @@ impl Service<ReadRequest> for TestReadState {
     }
 
     fn call(&mut self, request: ReadRequest) -> Self::Future {
-        let chain_info = self.chain_info_rx.borrow().clone();
+        let chain_info_rx = self.chain_info_rx.clone();
+        let chain_info_calls = self.chain_info_calls.clone();
         let stall = self.stall_chain_info.load(Ordering::SeqCst);
-        let stall_tip = self.stall_tip.load(Ordering::SeqCst);
+        let mut stall_tip_rx = self.stall_tip_rx.clone();
         let yield_tip = self.yield_tip.load(Ordering::SeqCst);
         Box::pin(async move {
             match request {
-                ReadRequest::Tip if stall_tip => std::future::pending().await,
                 ReadRequest::Tip => {
+                    let _ = stall_tip_rx.wait_for(|stalled| !*stalled).await;
                     if yield_tip {
                         tokio::task::yield_now().await;
                     }
+                    let chain_info = chain_info_rx.borrow().clone();
                     Ok(ReadResponse::Tip(Some((
                         chain_info.tip_height,
                         chain_info.tip_hash,
                     ))))
                 }
-                ReadRequest::ChainInfo if stall => std::future::pending().await,
-                ReadRequest::ChainInfo => Ok(ReadResponse::ChainInfo(chain_info)),
+                ReadRequest::ChainInfo => {
+                    chain_info_calls.fetch_add(1, Ordering::SeqCst);
+                    if stall {
+                        std::future::pending().await
+                    } else {
+                        Ok(ReadResponse::ChainInfo(chain_info_rx.borrow().clone()))
+                    }
+                }
                 other => panic!("unexpected state request: {other:?}"),
             }
         })
@@ -144,9 +153,10 @@ struct LongPollHarness {
     chain_info_tx: watch::Sender<GetBlockTemplateChainInfo>,
     mempool_tip_tx: watch::Sender<Hash>,
     mock_tip_sender: MockChainTipSender,
+    chain_info_calls: Arc<AtomicU32>,
     stall_state_chain_info: Arc<AtomicBool>,
     stall_mempool: Arc<AtomicBool>,
-    stall_tip: Arc<AtomicBool>,
+    stall_tip_tx: watch::Sender<bool>,
     yield_tip: Arc<AtomicBool>,
 }
 
@@ -174,15 +184,17 @@ impl LongPollHarness {
         let chain_info = test_chain_info(&net, max_time_offset_secs);
         let (chain_info_tx, chain_info_rx) = watch::channel(chain_info.clone());
         let (mempool_tip_tx, mempool_tip_rx) = watch::channel(chain_info.tip_hash);
+        let chain_info_calls = Arc::new(AtomicU32::new(0));
         let stall_state_chain_info = Arc::new(AtomicBool::new(false));
         let stall_mempool = Arc::new(AtomicBool::new(false));
-        let stall_tip = Arc::new(AtomicBool::new(false));
+        let (stall_tip_tx, stall_tip_rx) = watch::channel(false);
         let yield_tip = Arc::new(AtomicBool::new(false));
 
         let read_state = TestReadState {
             chain_info_rx,
+            chain_info_calls: chain_info_calls.clone(),
             stall_chain_info: stall_state_chain_info.clone(),
-            stall_tip: stall_tip.clone(),
+            stall_tip_rx,
             yield_tip: yield_tip.clone(),
         };
         let mempool = TestMempool {
@@ -231,9 +243,10 @@ impl LongPollHarness {
             chain_info_tx,
             mempool_tip_tx,
             mock_tip_sender,
+            chain_info_calls,
             stall_state_chain_info,
             stall_mempool,
-            stall_tip,
+            stall_tip_tx,
             yield_tip,
         }
     }
@@ -286,6 +299,9 @@ impl Drop for LongPollHarness {
     }
 }
 
+type ParkedLongPollFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<GetBlockTemplateResponse, ErrorObjectOwned>> + 'a>>;
+
 fn long_poll_params(id: LongPollId) -> Option<GetBlockTemplateParameters> {
     Some(GetBlockTemplateParameters {
         long_poll_id: Some(id),
@@ -293,17 +309,42 @@ fn long_poll_params(id: LongPollId) -> Option<GetBlockTemplateParameters> {
     })
 }
 
+async fn park_two_long_polls(
+    harness: &LongPollHarness,
+    id: LongPollId,
+) -> (ParkedLongPollFuture<'_>, ParkedLongPollFuture<'_>) {
+    let mut lp1: ParkedLongPollFuture<'_> =
+        Box::pin(harness.rpc.get_block_template(long_poll_params(id)));
+    let mut lp2: ParkedLongPollFuture<'_> =
+        Box::pin(harness.rpc.get_block_template(long_poll_params(id)));
+    assert!(futures::poll!(&mut lp1).is_pending());
+    assert!(futures::poll!(&mut lp2).is_pending());
+    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    (lp1, lp2)
+}
+
+async fn assert_excess_long_poll_rejected_immediately(
+    harness: &LongPollHarness,
+    id: LongPollId,
+    expected_active: usize,
+) {
+    let err = tokio::time::timeout(
+        Duration::from_millis(100),
+        harness.rpc.get_block_template(long_poll_params(id)),
+    )
+    .await
+    .expect("excess long poll at capacity must fail fast")
+    .expect_err("excess long poll at capacity must return ServerIsBusy");
+    assert_eq!(err.code(), ErrorCode::ServerIsBusy.code());
+    assert_eq!(harness.rpc.gbt.active_long_polls(), expected_active);
+}
+
 async fn assert_non_parking_calls_succeed_at_capacity(
     harness: &LongPollHarness,
     template: &BlockTemplateResponse,
     cached: bool,
 ) {
-    let busy_err = harness
-        .rpc
-        .get_block_template(long_poll_params(template.long_poll_id))
-        .await
-        .expect_err("excess long poll should return ServerIsBusy");
-    assert_eq!(busy_err.code(), ErrorCode::ServerIsBusy.code());
+    assert_excess_long_poll_rejected_immediately(harness, template.long_poll_id, 2).await;
 
     let immediate = harness
         .rpc
@@ -335,26 +376,14 @@ async fn assert_long_poll_limit_and_release(cached: bool) {
     }
 
     assert_eq!(harness.rpc.gbt.active_long_polls(), 0);
-    let mut lp1 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    let mut lp2 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    assert!(futures::poll!(&mut lp1).is_pending(), "cached: {cached}");
-    assert!(futures::poll!(&mut lp2).is_pending(), "cached: {cached}");
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2, "cached: {cached}");
+    let (lp1, lp2) = park_two_long_polls(&harness, template.long_poll_id).await;
 
     assert_non_parking_calls_succeed_at_capacity(&harness, &template, cached).await;
 
     drop(lp1);
     assert_eq!(harness.rpc.gbt.active_long_polls(), 1, "cached: {cached}");
 
-    let mut lp3 = Box::pin(
+    let mut lp3: ParkedLongPollFuture<'_> = Box::pin(
         harness
             .rpc
             .get_block_template(long_poll_params(template.long_poll_id)),
@@ -470,31 +499,13 @@ async fn getblocktemplate_long_poll_cache_catchup_respects_limit() {
     let next_template = harness.make_template(&next_info);
     harness.advance_tip(&next_info);
 
-    let mut lp1 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(old_template.long_poll_id)),
-    );
-    let mut lp2 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(old_template.long_poll_id)),
-    );
-    assert!(futures::poll!(&mut lp1).is_pending());
-    assert!(futures::poll!(&mut lp2).is_pending());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    let (lp1, lp2) = park_two_long_polls(&harness, old_template.long_poll_id).await;
 
     // A third long poll during cache catch-up must fail fast with ServerIsBusy (-32009).
-    let busy_err = harness
-        .rpc
-        .get_block_template(long_poll_params(old_template.long_poll_id))
-        .await
-        .expect_err("excess long poll during cache catch-up must fail fast");
-    assert_eq!(busy_err.code(), ErrorCode::ServerIsBusy.code());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    assert_excess_long_poll_rejected_immediately(&harness, old_template.long_poll_id, 2).await;
 
     // Non-long-poll calls still wait on cache catch-up without being blocked by the long-poll cap.
-    let mut plain = Box::pin(harness.rpc.get_block_template(None));
+    let mut plain: ParkedLongPollFuture<'_> = Box::pin(harness.rpc.get_block_template(None));
     assert!(futures::poll!(&mut plain).is_pending());
     assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
 
@@ -592,19 +603,7 @@ async fn assert_excess_long_poll_fails_fast_when_stalled(stall_mempool: bool) {
     let harness = LongPollHarness::new(2, 120);
     let template = harness.make_template(&harness.chain_info);
 
-    let mut lp1 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    let mut lp2 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    assert!(futures::poll!(&mut lp1).is_pending());
-    assert!(futures::poll!(&mut lp2).is_pending());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    let (_lp1, _lp2) = park_two_long_polls(&harness, template.long_poll_id).await;
 
     if stall_mempool {
         harness.stall_mempool.store(true, Ordering::SeqCst);
@@ -612,17 +611,7 @@ async fn assert_excess_long_poll_fails_fast_when_stalled(stall_mempool: bool) {
         harness.stall_state_chain_info.store(true, Ordering::SeqCst);
     }
 
-    let err = tokio::time::timeout(
-        Duration::from_secs(1),
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    )
-    .await
-    .expect("excess long poll must fail fast without waiting on stalled initial read")
-    .expect_err("excess long poll at capacity must return ServerIsBusy");
-    assert_eq!(err.code(), ErrorCode::ServerIsBusy.code());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    assert_excess_long_poll_rejected_immediately(&harness, template.long_poll_id, 2).await;
 }
 
 /// When long-poll capacity is already exhausted, an incoming on-demand long poll whose ID
@@ -638,7 +627,7 @@ async fn getblocktemplate_excess_long_poll_fails_fast_when_initial_read_stalls()
 
 /// With a populated template cache and saturated long-poll capacity, an incoming matching long
 /// poll must fail fast with `ServerIsBusy` before awaiting `ReadRequest::Tip`, while stale
-/// long-poll IDs preserve committed-tip validation and return once the tip read responds.
+/// long-poll IDs preserve committed-tip validation and return from cache once the tip read releases.
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_cached_excess_long_poll_fails_fast_when_tip_read_stalls() {
     let _init_guard = zebra_test::init();
@@ -647,33 +636,11 @@ async fn getblocktemplate_cached_excess_long_poll_fails_fast_when_tip_read_stall
     let template = harness.make_template(&harness.chain_info);
     harness.publish_template(&template);
 
-    let mut lp1 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    let mut lp2 = Box::pin(
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    );
-    assert!(futures::poll!(&mut lp1).is_pending());
-    assert!(futures::poll!(&mut lp2).is_pending());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    let (_lp1, _lp2) = park_two_long_polls(&harness, template.long_poll_id).await;
 
-    harness.stall_tip.store(true, Ordering::SeqCst);
+    harness.stall_tip_tx.send_replace(true);
 
-    let err = tokio::time::timeout(
-        Duration::from_secs(1),
-        harness
-            .rpc
-            .get_block_template(long_poll_params(template.long_poll_id)),
-    )
-    .await
-    .expect("excess cached long poll must fail fast without waiting on stalled tip read")
-    .expect_err("excess cached long poll at capacity must return ServerIsBusy");
-    assert_eq!(err.code(), ErrorCode::ServerIsBusy.code());
-    assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
+    assert_excess_long_poll_rejected_immediately(&harness, template.long_poll_id, 2).await;
 
     let mut stale_id = template.long_poll_id;
     stale_id.tip_hash_checksum ^= 1;
@@ -683,14 +650,19 @@ async fn getblocktemplate_cached_excess_long_poll_fails_fast_when_tip_read_stall
         "stale cached long poll must preserve committed-tip validation"
     );
 
-    harness.stall_tip.store(false, Ordering::SeqCst);
-    let stale_response = tokio::time::timeout(Duration::from_secs(1), stale)
+    harness.stall_tip_tx.send_replace(false);
+    let stale_response = tokio::time::timeout(Duration::from_millis(100), stale)
         .await
-        .expect("stale cached long poll must finish once tip read completes")
+        .expect("stale cached long poll must complete before NEW_TIP_TIMEOUT once tip releases")
         .expect("stale cached long poll returns current template")
         .try_into_template()
         .expect("template-mode response");
     assert_eq!(stale_response.long_poll_id, template.long_poll_id);
+    assert_eq!(
+        harness.chain_info_calls.load(Ordering::SeqCst),
+        0,
+        "stale cached long poll should serve from cache without on-demand ChainInfo fallback"
+    );
     assert_eq!(harness.rpc.gbt.active_long_polls(), 2);
 }
 
