@@ -56,6 +56,11 @@ pub(super) fn recheck_candidates(
     network: &Network,
 ) -> Result<HashMap<transaction::Hash, VerifiedUnminedTx>, TransactionError> {
     let upgrade = NetworkUpgrade::current(network, height);
+    let block_context = tx::BlockContext {
+        height,
+        time: block.header.time,
+        network_upgrade: upgrade,
+    };
     for (&hash, transaction) in transaction_hashes.iter().zip(&block.transactions) {
         let Some(candidate) = candidates.get(&hash) else {
             continue;
@@ -82,7 +87,7 @@ pub(super) fn recheck_candidates(
             continue;
         }
         // Cached proofs and scripts do not establish expiry or block lock time.
-        tx::check_block_context_rules(transaction, height, block.header.time, network)?;
+        tx::check_block_context_rules(transaction, &block_context, network)?;
     }
     Ok::<_, TransactionError>(candidates)
 }

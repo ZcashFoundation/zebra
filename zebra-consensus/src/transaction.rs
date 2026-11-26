@@ -296,7 +296,15 @@ where
             // that it takes from the mempool, and skips the rest of this verifier for it, so a
             // rule that depends on the block's height or time must be checked in
             // `check_block_context_rules`.
-            check_block_context_rules(tx.as_ref(), height, time, &network)?;
+            check_block_context_rules(
+                tx.as_ref(),
+                &BlockContext {
+                    height,
+                    time,
+                    network_upgrade: nu,
+                },
+                &network,
+            )?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -485,7 +493,7 @@ where
             }
 
             // Do quick checks first
-            check_common_consensus_rules(tx.as_ref(), height, &network)?;
+            check_common_consensus_rules(tx.as_ref(), height, nu, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -781,8 +789,19 @@ pub(crate) fn unmined_id(tx: &Transaction, hash: transaction::Hash) -> UnminedTx
     }
 }
 
-/// Checks the rules for `tx` that depend on the block it is in, at `height` with the header
-/// time `time`, without its scripts, proofs or signatures.
+/// A block that a transaction is verified in.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BlockContext {
+    /// The block's height.
+    pub(crate) height: block::Height,
+    /// The time in the block's header.
+    pub(crate) time: DateTime<Utc>,
+    /// The network upgrade at `height`, which callers have already looked up.
+    pub(crate) network_upgrade: NetworkUpgrade,
+}
+
+/// Checks the rules for `tx` that depend on `block`, the block it is in, without its scripts,
+/// proofs or signatures.
 ///
 /// The block transaction verifier starts with these checks. The block verifier runs only these
 /// checks on a transaction that it takes from the mempool, and skips the rest of the block
@@ -799,18 +818,20 @@ pub(crate) fn unmined_id(tx: &Transaction, hash: transaction::Hash) -> UnminedTx
 /// from reusing verifications from before the soft fork's activation height.
 pub(crate) fn check_block_context_rules(
     tx: &Transaction,
-    height: block::Height,
-    time: DateTime<Utc>,
+    block: &BlockContext,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    check_common_consensus_rules(tx, height, network)?;
+    check_common_consensus_rules(tx, block.height, block.network_upgrade, network)?;
     // Block transactions are checked against the block's own time directly.
-    check::lock_time_has_passed(tx, height, time)?;
-    let upgrade = NetworkUpgrade::current(network, height);
+    check::lock_time_has_passed(tx, block.height, block.time)?;
+    // `dispatch_version_verification()` repeats this check for the transactions it verifies,
+    // because the mempool transaction verifier, which doesn't call this function, relies on it.
+    // The block verifier needs the check here too, for the transactions it takes from the mempool
+    // without verifying them. Both checks use the network upgrade that the caller already has.
     match tx.tx_version() {
-        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, upgrade),
-        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, upgrade),
-        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, block.network_upgrade),
+        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, block.network_upgrade),
+        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, block.network_upgrade),
         _ => Err(TransactionError::WrongVersion),
     }
 }
@@ -839,9 +860,10 @@ pub(crate) fn check_block_context_rules(
 fn check_common_consensus_rules(
     tx: &Transaction,
     height: block::Height,
+    network_upgrade: NetworkUpgrade,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    check_structure_and_network_rules(tx, height, network)?;
+    check_structure_and_network_rules(tx, height, network_upgrade, network)?;
 
     if tx.is_coinbase() {
         check::coinbase_tx_no_prevout_joinsplit_spend(tx)?;
@@ -867,12 +889,16 @@ fn check_common_consensus_rules(
 fn check_structure_and_network_rules(
     tx: &Transaction,
     height: block::Height,
+    network_upgrade: NetworkUpgrade,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    // The network upgrade active at this height is used by several of the checks below;
-    // `NetworkUpgrade::current` rebuilds the activation-height map on each call, so compute it
-    // once and share it rather than recomputing it per check.
-    let network_upgrade = NetworkUpgrade::current(network, height);
+    // Callers pass the network upgrade at `height`, which they already have, because
+    // `NetworkUpgrade::current` rebuilds the activation height map on each call.
+    debug_assert_eq!(
+        network_upgrade,
+        NetworkUpgrade::current(network, height),
+        "callers pass the network upgrade at the transaction's verification height"
+    );
 
     check::has_inputs_and_outputs(tx)?;
     check::has_enough_orchard_flags(tx)?;
@@ -989,6 +1015,10 @@ fn check_maturity_height(
 ///
 /// `nu` is the network upgrade active at the transaction's verification height,
 /// pre-computed by the caller using [`NetworkUpgrade::current`].
+///
+/// The version-specific functions check that `nu` supports the transaction's version. Block
+/// transactions have already passed the same check in `check_block_context_rules`, but mempool
+/// transactions haven't, so the check stays here for every caller.
 ///
 /// `tx_id` must be the unmined ID of `tx`: the shielded verifiers key their caches on it, so an
 /// ID that does not identify `tx` would let one transaction's bundle be answered from another's

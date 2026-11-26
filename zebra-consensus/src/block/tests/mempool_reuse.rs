@@ -728,7 +728,12 @@ async fn verify_for_reuse(
         .ok()?
         .transaction;
 
-    tx::check_block_context_rules(&variant.transaction, height, time, network).ok()?;
+    let block = tx::BlockContext {
+        height,
+        time,
+        network_upgrade: NetworkUpgrade::current(network, height),
+    };
+    tx::check_block_context_rules(&variant.transaction, &block, network).ok()?;
 
     Some(verified)
 }
