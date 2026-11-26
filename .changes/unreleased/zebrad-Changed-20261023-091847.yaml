@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Reuse verified mempool transactions when validating blocks on the same chain tip, while rechecking block-context consensus rules.
+body: 'Verify new blocks on the best chain tip faster when their transactions are already in the mempool, so Zebra commits and relays them, and answers `submitblock`, with less delay. Zebra reuses the mempool''s verification of those transactions, and only checks the rules that depend on the block for them, such as expiry heights and lock times.'
 time: 2026-10-23T09:18:47.744046156+02:00
