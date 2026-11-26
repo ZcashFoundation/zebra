@@ -504,13 +504,19 @@ async fn mempool_verified_transactions_for_block_returns_requested_subset() {
             .iter()
             .map(|transaction| transaction.transaction.id.mined_id())
             .collect();
-        let expected = [hashes[2], hashes[0]]
+        // The answer has the entries that the test stored, unmodified apart from the time and
+        // height that the mempool sets when it stores a transaction.
+        let expected = [2, 0]
             .into_iter()
-            .map(|hash| {
-                (
-                    hash,
-                    mempool.service.storage().transactions()[&hash].clone(),
-                )
+            .map(|index| {
+                let hash = hashes[index];
+                let stored = &mempool.service.storage().transactions()[&hash];
+                let inserted = VerifiedUnminedTx {
+                    time: stored.time,
+                    height: stored.height,
+                    ..transactions[index].clone()
+                };
+                (hash, inserted)
             })
             .collect();
         let parent_hash = mempool.tip_hash();
@@ -594,6 +600,13 @@ async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
         let hash = mempool.insert_block_1_transaction();
         let parent_hash = mempool.tip_hash();
         let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
+
+        // The largest batch still gets an answer, with one entry, because its hashes are equal.
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash; max_transactions], parent_hash)
+            .await;
+        assert_eq!(candidates.len(), 1);
+
         let candidates = mempool
             .verified_transactions_for_block(vec![hash; max_transactions + 1], parent_hash)
             .await;
