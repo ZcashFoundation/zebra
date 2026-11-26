@@ -287,11 +287,11 @@ where
 /// # Security
 ///
 /// The block verifier trusts the `mempool` service's responses to
-/// [`mempool::Request::VerifiedTransactionsForBlock`]. For each transaction in a response, it
-/// skips [`transaction::BlockTxVerifier`], which looks up the transaction's spent outputs and
-/// verifies its scripts, proofs and signatures. It adds the response's miner fee and signature
-/// operation counts for the transaction to the block's totals, which the block's miner fee and
-/// signature operation limit checks use.
+/// [`mempool::Request::VerifiedTransactionsForBlock`]. For each transaction in a response that it
+/// reuses, it skips [`transaction::BlockTxVerifier`], which looks up the transaction's spent
+/// outputs and verifies its scripts, proofs and signatures. It adds the response's miner fee and
+/// signature operation counts for the transaction to the block's totals, which the block's miner
+/// fee and signature operation limit checks use.
 ///
 /// So the service must only return transactions when the block's parent is its last seen tip, and
 /// only [`VerifiedUnminedTx`]s that the mempool transaction verifier from this function returned,

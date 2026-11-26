@@ -70,12 +70,12 @@ pub enum Request {
     /// So a mempool service must only return transactions when its last seen tip is
     /// `parent_hash`. For each transaction, it must return the [`VerifiedUnminedTx`] that the
     /// mempool transaction verifier in `zebra-consensus` returned for it, with every field
-    /// unmodified: the transaction, its miner fee, its signature operation counts, its spent
-    /// outputs, and the fields computed from them. The mempool only sets
-    /// [`VerifiedUnminedTx::time`] and [`VerifiedUnminedTx::height`] when it stores the
-    /// transaction, and `height` must be the tip height that the transaction was verified at, one
-    /// below the height of the next block that the verifier checked it for. A response can leave
-    /// out any transaction, or be empty.
+    /// unmodified, apart from [`VerifiedUnminedTx::time`] and [`VerifiedUnminedTx::height`], which
+    /// the mempool sets when it stores the transaction. The unmodified fields are the transaction,
+    /// its miner fee, its signature operation counts, its spent outputs, and the fields computed
+    /// from them. `height` must be the tip height that the transaction was verified at, one below
+    /// the height of the next block that the verifier checked it for. A response can leave out any
+    /// transaction, or be empty.
     ///
     /// A later change to a transaction's fee, such as a fee delta that prioritises it in block
     /// templates, must be kept in a separate field, never in `miner_fee`, which must stay the fee

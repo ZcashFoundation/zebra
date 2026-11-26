@@ -2,14 +2,13 @@
 //! succeeded.
 //!
 //! Zebra verifies a transaction's shielded proofs and signatures and its transparent input scripts
-//! when the transaction arrives over mempool gossip. The block verifier takes some of a block's
-//! transactions from the mempool without verifying them again (see "Reuse of the mempool's
-//! verification" below), and sends the others to the transaction verifier. For those, this service
-//! skips the proofs, signatures and scripts that have already been verified for the same
-//! transaction, for example in the mempool. The Halo2 Orchard and Ironwood verifiers
-//! ([`super::halo2`]) and the Sapling verifier ([`super::sapling`]) share it, and key their
-//! entries the same way. The transparent script verifier ([`crate::script`]) has its own cache and
-//! key.
+//! when the transaction arrives over mempool gossip. The block verifier reuses the mempool's
+//! verification of some of a block's transactions (see "Reuse of the mempool's verification"
+//! below), and sends the others to the transaction verifier. For those, this service skips the
+//! proofs, signatures and scripts that have already been verified for the same transaction, for
+//! example in the mempool. The Halo2 Orchard and Ironwood verifiers ([`super::halo2`]) and the
+//! Sapling verifier ([`super::sapling`]) share it, and key their entries the same way. The
+//! transparent script verifier ([`crate::script`]) has its own cache and key.
 //!
 //! # Why this is not the removed mempool bypass
 //!

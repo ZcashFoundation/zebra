@@ -579,9 +579,9 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            // `mempool_spent_utxos()` fills the spent outputs in input order, including outputs from the
-            // mempool, so each input is paired with its own spent output. Block verification
-            // reuses this result, so that pairing is a consensus rule here.
+            // `mempool_spent_utxos()` fills the spent outputs in input order, including outputs
+            // from the mempool, so each input is paired with its own spent output. Block
+            // verification reuses this result, so that pairing is a consensus rule here.
             let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
 
             let transaction = VerifiedUnminedTx::new(
