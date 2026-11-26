@@ -173,7 +173,7 @@ async fn rpc_getblockchaininfo_mainnet_ibd_transition_and_latching() {
     harness.sync_status.set_is_close_to_tip(false);
     harness
         .tip_sender
-        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
+        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(25));
 
     let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_complete(&info, max_checkpoint);
@@ -192,12 +192,19 @@ async fn rpc_getblockchaininfo_mainnet_ibd_stays_incomplete_for_stale_tip() {
     let tip_hash = Hash([0x11; 32]);
     let mut harness = IbdTestHarness::new(Mainnet, false);
 
-    // Close to tip and at checkpoint, but Mainnet tip is older than 125 minutes.
+    // Close to tip and at checkpoint, but Mainnet tip is older than 24 hours.
     harness.sync_status.set_is_close_to_tip(true);
-    let stale_tip = chrono::Utc::now() - chrono::Duration::minutes(126);
+    let stale_tip = chrono::Utc::now() - chrono::Duration::hours(25);
     harness.send_tip(max_checkpoint, tip_hash, stale_tip);
     let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, max_checkpoint);
+
+    // A 3-hour-old Mainnet tip exceeds the mining RPC's 125-minute limit but is within the
+    // 24-hour IBD limit, so IBD completes once close to tip at checkpoint height.
+    let within_ibd_limit = chrono::Utc::now() - chrono::Duration::hours(3);
+    harness.send_tip(max_checkpoint, tip_hash, within_ibd_limit);
+    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
+    assert_ibd_complete(&info, max_checkpoint);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -225,11 +232,11 @@ async fn rpc_getblockchaininfo_mainnet_ibd_latches_from_sync_without_prior_rpc_c
     .await
     .expect("IBD observer should latch once Mainnet sync completes");
 
-    // Tip then ages past 125 minutes and syncer falls behind before the first RPC call.
+    // Tip then ages past 24 hours and syncer falls behind before the first RPC call.
     harness.sync_status.set_is_close_to_tip(false);
     harness
         .tip_sender
-        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(5));
+        .send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(25));
     assert!(!harness.sync_status.is_close_to_tip());
 
     // The very first `getblockchaininfo` call still reports IBD complete without extrapolating.
@@ -238,13 +245,13 @@ async fn rpc_getblockchaininfo_mainnet_ibd_latches_from_sync_without_prior_rpc_c
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblockchaininfo_testnet_ibd_respects_checkpoint_floor_without_tip_age_limit() {
+async fn rpc_getblockchaininfo_testnet_ibd_respects_checkpoint_floor_and_tip_age_limit() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_default_testnet();
     let max_checkpoint = network.checkpoint_list().max_height();
     let tip_hash = Hash([0x22; 32]);
-    let mut harness = IbdTestHarness::new(network, false);
+    let mut harness = IbdTestHarness::new(network.clone(), false);
 
     // Below the highest checkpoint on Testnet: stays in IBD even if close to tip.
     harness.sync_status.set_is_close_to_tip(true);
@@ -257,13 +264,29 @@ async fn rpc_getblockchaininfo_testnet_ibd_respects_checkpoint_floor_without_tip
     let info = harness.fetch_info(Some((below_checkpoint, tip_hash))).await;
     assert_ibd_incomplete(&info, below_checkpoint);
 
-    // At the highest checkpoint on Testnet: completes IBD even with a multi-day stale tip.
-    harness.send_tip(
+    // Use a separate harness for the stale tip so raising height cannot race with the
+    // recent timestamp in the below-checkpoint check above.
+    let mut stale_harness = IbdTestHarness::new(network, false);
+    stale_harness.sync_status.set_is_close_to_tip(true);
+    stale_harness.send_tip(
         max_checkpoint,
         tip_hash,
         chrono::Utc::now() - chrono::Duration::days(3),
     );
-    let info = harness.fetch_info(Some((max_checkpoint, tip_hash))).await;
+    let info = stale_harness
+        .fetch_info(Some((max_checkpoint, tip_hash)))
+        .await;
+    assert_ibd_incomplete(&info, max_checkpoint);
+
+    // Within the 24-hour IBD limit on Testnet: completes IBD at checkpoint height.
+    stale_harness.send_tip(
+        max_checkpoint,
+        tip_hash,
+        chrono::Utc::now() - chrono::Duration::hours(23),
+    );
+    let info = stale_harness
+        .fetch_info(Some((max_checkpoint, tip_hash)))
+        .await;
     assert_ibd_complete(&info, max_checkpoint);
 }
 

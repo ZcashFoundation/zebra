@@ -117,8 +117,8 @@ use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
     get_block_template::{
         constants::{
-            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MAX_TIME_SINCE_CHAIN_TIP,
-            MEMPOOL_LONG_POLL_INTERVAL, ZCASHD_FUNDING_STREAM_ORDER,
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
+            ZCASHD_FUNDING_STREAM_ORDER,
         },
         precompute,
         proposal::proposal_block_from_template,
@@ -956,6 +956,11 @@ where
 /// for a new tip notification. Once IBD latches to `true`, the observer task exits.
 const IBD_OBSERVER_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Maximum age of the chain tip for initial block download completion on PoW networks.
+///
+/// Matches `zcashd`'s `DEFAULT_MAX_TIP_AGE` (`24 * 60 * 60` seconds in `src/main.h`).
+const MAX_IBD_TIP_AGE: chrono::Duration = chrono::Duration::hours(24);
+
 /// Drop guard that aborts a spawned background task when the last owning handle is dropped.
 #[derive(Debug)]
 struct AbortOnDrop(JoinHandle<()>);
@@ -1083,9 +1088,7 @@ fn is_initial_block_download_complete(
     if network.disable_pow() {
         return true;
     }
-    sync_status.is_close_to_tip()
-        && (!matches!(network, Network::Mainnet)
-            || now - tip_block_time <= MAX_TIME_SINCE_CHAIN_TIP)
+    sync_status.is_close_to_tip() && now - tip_block_time <= MAX_IBD_TIP_AGE
 }
 
 /// Computes `(estimated_height, verification_progress)` for `getblockchaininfo`.
