@@ -154,7 +154,7 @@ serde-big-array = "0.5"
 serde_json = "1.0.140"
 serde_with = "3.12"
 sha2 = "0.10"
-sinsemilla = "0.2"
+sinsemilla = "0.2.1"
 siphasher = "1.0"
 schemars = "1"
 spandoc = "0.2"
@@ -411,6 +411,5 @@ orchard = { git = "https://github.com/upbqdn/orchard", rev = "de4537bfc59b8fc204
 pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "67d1040a18798101541c66f8a012b57e770e3d44" }
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "9d272a0f08def464067673cf92edbe1a0d01986e" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
-sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "3e175751a626e99a449b7ffe44631a44e6875dd4" }
 # Await the asm hex rendering in https://github.com/ZcashFoundation/zcash_script/pull/311.
 zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", rev = "08556638dfd1a517d887b27acbff46bb24273f1e" }
