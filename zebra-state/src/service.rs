@@ -1791,6 +1791,11 @@ impl Service<ReadRequest> for ReadStateService {
                 )))
             }
 
+            ReadRequest::ChainTips => Ok(ReadResponse::ChainTips(read::chain_tips(
+                &state.latest_non_finalized_state(),
+                &state.db,
+            ))),
+
             ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
                 read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),

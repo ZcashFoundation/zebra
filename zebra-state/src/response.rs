@@ -27,8 +27,9 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 use crate::{ReadRequest, Request};
 
 use crate::{
-    service::read::AddressUtxos, ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation,
-    WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
+    service::read::{AddressUtxos, ChainTipInfo},
+    ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation, WatchReceiver,
+    MAX_BLOCK_REORG_HEIGHT,
 };
 
 #[cfg(test)]
@@ -468,6 +469,10 @@ pub enum ReadResponse {
     /// on the best chain.
     ForkPoint(Option<(block::Height, block::Hash)>),
 
+    /// Response to [`ReadRequest::ChainTips`] with the best chain tip first,
+    /// then the side chain tips from most to least work.
+    ChainTips(Vec<ChainTipInfo>),
+
     /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
     /// _best_ non-finalized chain, or the finalized chain.
     UnspentBestChainUtxo(Option<transparent::Utxo>),
@@ -647,6 +652,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | ReadResponse::ChainTips(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::IronwoodTree(_)

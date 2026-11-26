@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain a `ChainTips` variant. Consumers that match on them exhaustively must handle it.'
+time: 2026-11-26T16:41:03.881934732Z
