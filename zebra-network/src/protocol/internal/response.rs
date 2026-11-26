@@ -74,6 +74,17 @@ pub enum Response {
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
     Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// Blocks downloaded from a connection where both peers set the compact block relay service
+    /// bit, and missing block hashes, as in [`Self::Blocks`].
+    ///
+    /// The [draft Compact Block Relay ZIP] lets these peers send a block before they have
+    /// validated it, so this isn't evidence that a block is valid. Every block download from these
+    /// connections returns this variant, whether the block was rebuilt from a compact block or
+    /// downloaded in full. The inbound service never returns it.
+    ///
+    /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+    EarlyBlocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
+
     /// Verified mempool candidates matching unique compact short IDs by exact witnessed identity.
     ///
     /// Local-only response to [`super::Request::CompactBlockTransactions`], never sent on the wire.
@@ -107,7 +118,7 @@ impl fmt::Display for Response {
             }
 
             // Display heights for single-block responses (which Zebra requests and expects)
-            Response::Blocks(blocks) if blocks.len() == 1 => {
+            Response::Blocks(blocks) | Response::EarlyBlocks(blocks) if blocks.len() == 1 => {
                 match blocks.first().expect("len is 1") {
                     Available((block, _)) => format!(
                         "Block {{ height: {}, hash: {} }}",
@@ -121,7 +132,7 @@ impl fmt::Display for Response {
                     Missing(hash) => format!("Block {{ missing: {hash} }}"),
                 }
             }
-            Response::Blocks(blocks) => format!(
+            Response::Blocks(blocks) | Response::EarlyBlocks(blocks) => format!(
                 "Blocks {{ blocks: {}, missing: {} }}",
                 blocks.iter().filter(|r| r.is_available()).count(),
                 blocks.iter().filter(|r| r.is_missing()).count()
@@ -151,6 +162,7 @@ impl Response {
             Response::TransactionIds(_) => "TransactionIds",
 
             Response::Blocks(_) => "Blocks",
+            Response::EarlyBlocks(_) => "EarlyBlocks",
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
         }
@@ -158,7 +170,10 @@ impl Response {
 
     /// Returns true if the response is a block or transaction inventory download.
     pub fn is_inventory_download(&self) -> bool {
-        matches!(self, Response::Blocks(_) | Response::Transactions(_))
+        matches!(
+            self,
+            Response::Blocks(_) | Response::EarlyBlocks(_) | Response::Transactions(_)
+        )
     }
 
     /// Returns true if self is the [`Response::Nil`] variant.

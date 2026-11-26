@@ -266,6 +266,12 @@ fn describe_gossip() {
         "Gossiped block hashes ignored because they were already queued."
     );
     describe_counter!(
+        "gossip.already.rejected.dropped.block.hash.count",
+        Unit::Count,
+        "Gossiped block hashes ignored because a compact relay peer already sent that block, \
+         and it failed validation after its early relay checks."
+    );
+    describe_counter!(
         "gossip.full.queue.dropped.block.hash.count",
         Unit::Count,
         "Gossiped block hashes ignored because the download queue was full."

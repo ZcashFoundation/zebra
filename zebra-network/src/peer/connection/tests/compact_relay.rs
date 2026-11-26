@@ -139,9 +139,11 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 assert!(active_recovery.borrow().is_none());
                 peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
             }
+            // Downloads from a connection that negotiated compact block relay are marked, whether
+            // the block was rebuilt or downloaded in full.
             assert_eq!(
                 rx.await.unwrap().unwrap(),
-                Response::Blocks(vec![InventoryResponse::Available((
+                Response::EarlyBlocks(vec![InventoryResponse::Available((
                     block.clone(),
                     Some(source)
                 ))])
@@ -159,7 +161,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                     .unwrap();
                 assert_eq!(
                     rx.await.unwrap().unwrap(),
-                    Response::Blocks(vec![InventoryResponse::Available((
+                    Response::EarlyBlocks(vec![InventoryResponse::Available((
                         block.clone(),
                         Some(source)
                     )),])
@@ -1001,7 +1003,7 @@ async fn compact_blocks_missing_most_transactions_are_downloaded_in_full() {
         peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
         assert_eq!(
             rx.await.unwrap().unwrap(),
-            Response::Blocks(vec![InventoryResponse::Available((
+            Response::EarlyBlocks(vec![InventoryResponse::Available((
                 block.clone(),
                 Some(source)
             ))])

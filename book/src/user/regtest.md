@@ -126,6 +126,27 @@ byte budget, and the number of retained blocks is bounded across all peers.
 Every rebuilt block is fully verified. Coinbase-only blocks are announced as
 ordinary inventory, because the compact encoding would not save any bytes.
 
+The ZIP lets a peer that advertises the service bit relay a block before it has
+validated it, once the block passes the ZIP's early relay checks. Zebra only
+announces blocks that it has committed, but it accepts these blocks from its
+peers, rebuilt or in full. When a block from a peer that negotiated compact
+block relay passes the early relay checks as a child of Zebra's best tip, and
+then fails later validation, such as a transaction, signature operation, miner
+fee or contextual check, Zebra rejects the block without penalising the peer,
+as the ZIP's peer misbehaviour rules require. Zebra checks the block while it
+verifies it, if the block's parent is the best tip. If the block fails before
+its parent is the best tip, Zebra waits up to 30 seconds for the parent. Zebra
+then ignores later announcements of the rejected block, instead of verifying it
+again.
+
+Zebra still penalises the peer for a block that fails the early relay checks,
+or whose parent doesn't become Zebra's best tip in that time, because Zebra
+only checks these blocks against its best tip. The ZIP says that a node must
+not penalise the peer when it doesn't have the parent's chain history. But
+without it, a node can't check the block's difficulty, so a peer could send
+blocks that pass the other checks with much less proof of work. Blocks from
+peers that didn't negotiate compact block relay are penalised as before.
+
 Only the connection that received an announcement can rebuild its block. So
 when a peer that negotiated compact block relay announces a block, that peer is
 asked for the block first, if it is ready. If it is busy, or the download is a

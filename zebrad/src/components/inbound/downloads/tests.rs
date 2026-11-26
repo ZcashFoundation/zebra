@@ -887,3 +887,100 @@ async fn verified_block_records_download_and_verify_durations() {
     assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
     assert_eq!(recorder.verify_commit.get(), (1, VERIFY.as_secs_f64()));
 }
+
+/// Only failures that score the peer, and that the block verifier returns after its part of the
+/// checks that authenticate a block for early relay, can be exempt from scoring for a peer that
+/// negotiated compact block relay.
+///
+/// Failures of those checks keep their score, including subsidy failures with the same shape as
+/// the miner fee failures. So do bodies that don't match their authorizing data commitment, and
+/// all the checkpoint verifier's failures.
+#[test]
+fn only_scored_failures_after_the_early_relay_checks_are_later_validation_failures() {
+    use zebra_chain::{
+        block::{merkle, CommitmentError},
+        parameters::subsidy::SubsidyError,
+    };
+    use zebra_consensus::{
+        error::TransactionError, router::RouterError, BlockError, VerifyBlockError,
+        VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    };
+
+    use super::is_later_validation_failure;
+
+    let _init_guard = zebra_test::init();
+
+    let hash = block_1().hash();
+    let height = Height(1);
+    let subsidy = |error| VerifyBlockError::Block {
+        source: BlockError::Transaction(TransactionError::Subsidy(error)),
+    };
+
+    let later_failures = [
+        VerifyBlockError::Transaction(TransactionError::BadBalance),
+        VerifyBlockError::Block {
+            source: BlockError::TooManyTransparentSignatureOperations {
+                height,
+                hash,
+                sigops: MAX_BLOCK_SIGOPS + 1,
+            },
+        },
+        subsidy(SubsidyError::InvalidMinerFees),
+        subsidy(SubsidyError::Overflow),
+    ];
+    for error in later_failures {
+        assert_ne!(error.misbehavior_score(), 0, "{error:?}");
+        assert!(is_later_validation_failure(&error), "{error:?}");
+        let error = RouterError::from(error);
+        assert!(is_later_validation_failure(&error), "{error:?}");
+    }
+
+    let auth_commitment_mismatch =
+        VerifyBlockError::Commit(zs::CommitBlockError::ValidateContextError(Box::new(
+            zs::ValidateContextError::InvalidBlockCommitment(
+                CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                    expected: [1; 32],
+                    actual: [2; 32],
+                },
+            ),
+        )));
+    let early_relay_check_failures = [
+        VerifyBlockError::Block {
+            source: BlockError::BadMerkleRoot {
+                actual: merkle::Root([1; 32]),
+                expected: merkle::Root([2; 32]),
+            },
+        },
+        VerifyBlockError::Block {
+            source: BlockError::InvalidDifficulty(height, hash),
+        },
+        VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::CoinbasePosition),
+        },
+        subsidy(SubsidyError::FundingStreamNotFound),
+        VerifyBlockError::Subsidy(SubsidyError::NoCoinbase),
+        auth_commitment_mismatch,
+    ];
+    for error in early_relay_check_failures {
+        assert_ne!(error.misbehavior_score(), 0, "{error:?}");
+        assert!(!is_later_validation_failure(&error), "{error:?}");
+        let error = RouterError::from(error);
+        assert!(!is_later_validation_failure(&error), "{error:?}");
+    }
+
+    let checkpoint = RouterError::from(VerifyCheckpointError::CoinbaseHeight { hash });
+    assert_ne!(checkpoint.misbehavior_score(), 0);
+    assert!(!is_later_validation_failure(&checkpoint));
+
+    // A failure that doesn't score the peer has nothing to exempt.
+    let duplicate = VerifyBlockError::Commit(zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::BestChain,
+    });
+    assert_eq!(duplicate.misbehavior_score(), 0);
+    assert!(!is_later_validation_failure(&duplicate));
+
+    // Other errors, like verification timeouts, aren't block verifier failures.
+    let local_error = zn::BoxError::from("block verification timed out");
+    assert!(!is_later_validation_failure(&*local_error));
+}
