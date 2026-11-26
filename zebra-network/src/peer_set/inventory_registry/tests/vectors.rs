@@ -691,3 +691,99 @@ async fn arbitrary_inventory_cannot_replace_compact_sources() {
         );
     }
 }
+
+/// One peer's block announcements don't displace another peer's first-announcer record, so the
+/// peer that announced a block first is still promoted when the block commits.
+#[tokio::test]
+async fn first_announcer_record_survives_another_peers_announcements() {
+    let (mut registry, _sender) = new_inv_registry();
+    let peers: Vec<PeerSocketAddr> = (1..=6)
+        .map(|ip| SocketAddr::from(([127, 0, 0, ip], 8233)).into())
+        .collect();
+    let mut preferences = Vec::new();
+    for peer in &peers {
+        let (sender, receiver) = tokio::sync::watch::channel(None);
+        registry.add_compact_source(*peer, sender);
+        preferences.push(receiver);
+    }
+    registry.select_compact_sources(None, |_| true);
+    let (first, other) = (3, 4);
+    assert!(preferences[first].borrow().is_none());
+    assert!(preferences[other].borrow().is_none());
+
+    let hash = block::Hash([7; 32]);
+    registry.register(InventoryStatus::new_available(
+        InventoryHash::Block(hash),
+        peers[first],
+    ));
+    // Another peer announces more blocks than the registry keeps, then the same block.
+    for index in 0..=MAX_INV_PER_MAP {
+        let mut other_hash = [0xff; 32];
+        other_hash[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        registry.register(InventoryStatus::new_available(
+            InventoryHash::Block(block::Hash(other_hash)),
+            peers[other],
+        ));
+    }
+    registry.register(InventoryStatus::new_available(
+        InventoryHash::Block(hash),
+        peers[other],
+    ));
+    assert_eq!(registry.announced_current.len(), MAX_INV_PER_MAP);
+    assert_eq!(registry.announced_current.get(&hash), Some(&peers[first]));
+
+    registry.select_compact_sources(Some(hash), |_| true);
+    assert!(
+        preferences[first].borrow().is_some(),
+        "the peer that announced the block first is promoted"
+    );
+    assert!(preferences[other].borrow().is_none());
+}
+
+/// When the first-announcer records are full, a new record removes the oldest record of the IP
+/// address with the most records, whichever peer adds it. An address's ports share its records.
+#[tokio::test]
+async fn first_announcer_records_are_removed_from_the_largest_share() {
+    let (mut registry, _sender) = new_inv_registry();
+    let hash = |index: usize| {
+        let mut bytes = [0; 32];
+        bytes[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        block::Hash(bytes)
+    };
+    let available =
+        |index, peer| InventoryStatus::new_available(InventoryHash::Block(hash(index)), peer);
+    let one: PeerSocketAddr = "1.1.1.1:1".parse().unwrap();
+    let one_other_port: PeerSocketAddr = "1.1.1.1:2".parse().unwrap();
+    let two: PeerSocketAddr = "2.2.2.2:2".parse().unwrap();
+    let three: PeerSocketAddr = "3.3.3.3:3".parse().unwrap();
+
+    // `three` has one record, `two` has two, and `one`'s address has the others, from two ports.
+    registry.register(available(0, three));
+    registry.register(available(1, two));
+    registry.register(available(2, two));
+    for index in 3..MAX_INV_PER_MAP {
+        let port = if index % 2 == 0 { one } else { one_other_port };
+        registry.register(available(index, port));
+    }
+    assert_eq!(registry.announced_current.len(), MAX_INV_PER_MAP);
+
+    for (removed, (index, peer)) in [
+        (MAX_INV_PER_MAP, two),
+        (MAX_INV_PER_MAP + 1, three),
+        (MAX_INV_PER_MAP + 2, one_other_port),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        registry.register(available(index, peer));
+        assert_eq!(registry.announced_current.len(), MAX_INV_PER_MAP);
+        assert_eq!(registry.announced_current.get(&hash(index)), Some(&peer));
+        assert!(
+            !registry.announced_current.contains_key(&hash(3 + removed)),
+            "the oldest record of the address with the most records is removed",
+        );
+    }
+    assert_eq!(registry.announced_current.get(&hash(0)), Some(&three));
+    assert_eq!(registry.announced_current.get(&hash(1)), Some(&two));
+    assert_eq!(registry.announced_current.get(&hash(2)), Some(&two));
+}

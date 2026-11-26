@@ -3,6 +3,8 @@
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
 
 use std::{
+    collections::VecDeque,
+    net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -34,7 +36,7 @@ pub mod update;
 #[cfg(test)]
 mod tests;
 
-/// The maximum number of inventory hashes we will track from a single peer.
+/// The maximum number of inventory hashes each registry map tracks, across all peers.
 ///
 /// # Security
 ///
@@ -112,7 +114,20 @@ pub struct InventoryRegistry {
 
     /// First block announcers in the current interval, capped by [`MAX_INV_PER_MAP`].
     /// Missing statuses must not erase first-announcer history.
+    ///
+    /// # Security
+    ///
+    /// At the cap, the oldest record of the IP address with the most records is removed. So a
+    /// peer that announces more blocks than the other peers, even from several ports, loses its
+    /// own records first, and doesn't displace their first-announcer records.
     announced_current: IndexMap<block::Hash, PeerSocketAddr>,
+
+    /// The hashes in `announced_current`, listed under their first announcer's IP address, oldest
+    /// first.
+    ///
+    /// Each hash in `announced_current` is in exactly one list, so the lists hold at most
+    /// [`MAX_INV_PER_MAP`] hashes in total, and there are no empty lists.
+    announced_current_by_ip: IndexMap<IpAddr, VecDeque<block::Hash>>,
 
     /// First block announcers in the previous interval, with the same cap.
     announced_prev: IndexMap<block::Hash, PeerSocketAddr>,
@@ -282,6 +297,7 @@ impl InventoryRegistry {
             current: Default::default(),
             prev: Default::default(),
             announced_current: IndexMap::new(),
+            announced_current_by_ip: IndexMap::new(),
             announced_prev: IndexMap::new(),
             compact_tip: None,
             failed_current: Default::default(),
@@ -633,11 +649,15 @@ impl InventoryRegistry {
             );
 
             if let Block(hash) = inv {
-                if new_status.is_available() {
+                if new_status.is_available() && !self.announced_current.contains_key(&hash) {
                     let first = self.announced_prev.get(&hash).copied().unwrap_or(addr);
-                    self.announced_current.entry(hash).or_insert(first);
+                    self.announced_current.insert(hash, first);
+                    self.announced_current_by_ip
+                        .entry(first.ip())
+                        .or_default()
+                        .push_back(hash);
                     if self.announced_current.len() > MAX_INV_PER_MAP {
-                        self.announced_current.shift_remove_index(0);
+                        self.remove_oldest_announcement_of_largest_share();
                     }
                 }
             }
@@ -697,11 +717,39 @@ impl InventoryRegistry {
         }
     }
 
+    /// Removes the oldest first-announcer record of the IP address with the most records.
+    ///
+    /// Must only be called while `announced_current` has a record.
+    fn remove_oldest_announcement_of_largest_share(&mut self) {
+        // Performance: there are at most `MAX_INV_PER_MAP` addresses, so O(n) performance is
+        // acceptable, like the other `MAX_INV_PER_MAP` limits.
+        let index = self
+            .announced_current_by_ip
+            .values()
+            .enumerate()
+            .max_by_key(|(_, hashes)| hashes.len())
+            .map(|(index, _)| index)
+            .expect("each record is listed under its first announcer's address");
+        let (_, hashes) = self
+            .announced_current_by_ip
+            .get_index_mut(index)
+            .expect("the index was just found in this map");
+        let oldest = hashes
+            .pop_front()
+            .expect("an address is only listed while it has records");
+        if hashes.is_empty() {
+            self.announced_current_by_ip.swap_remove_index(index);
+        }
+        // Nothing depends on the order of the records.
+        self.announced_current.swap_remove(&oldest);
+    }
+
     /// Replace the prev HashMap with current's and replace current with an empty
     /// HashMap
     fn rotate(&mut self) {
         self.prev = std::mem::take(&mut self.current);
         self.announced_prev = std::mem::take(&mut self.announced_current);
+        self.announced_current_by_ip.clear();
         self.failed_prev = std::mem::take(&mut self.failed_current);
         self.served_prev = std::mem::take(&mut self.served_current);
         self.repeat_prev = std::mem::take(&mut self.repeat_current);
