@@ -6,7 +6,7 @@
 //! reconstruction are synchronous and must run on a blocking worker.
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt,
     hash::Hasher,
     io::{self, Read, Write},
@@ -196,22 +196,19 @@ impl CompactBlock {
         }
         let mut matches = HashMap::with_capacity(self.short_ids.len());
         for id in &self.short_ids {
-            match matches.entry(*id) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Match::Missing);
-                }
-                Entry::Occupied(mut entry) => {
-                    entry.insert(Match::Ambiguous);
-                }
-            }
+            matches
+                .entry(*id)
+                .and_modify(|matched| *matched = Match::Ambiguous)
+                .or_insert(Match::Missing);
         }
         for (short, id) in ids {
-            if let Some(matched) = matches.get_mut(&short) {
-                match matched {
-                    Match::Missing => *matched = Match::Unique(id),
-                    Match::Unique(previous) if *previous != id => *matched = Match::Ambiguous,
-                    _ => {}
-                }
+            let Some(matched) = matches.get_mut(&short) else {
+                continue;
+            };
+            match matched {
+                Match::Missing => *matched = Match::Unique(id),
+                Match::Unique(previous) if *previous != id => *matched = Match::Ambiguous,
+                _ => {}
             }
         }
         matches
