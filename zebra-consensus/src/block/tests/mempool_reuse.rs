@@ -345,6 +345,8 @@ async fn reused_signature_operations_count_toward_the_block_limit() {
         (0, MAX),
         (MAX / 2, MAX / 2 - 1),
         (MAX / 2, MAX / 2),
+        // A count that would wrap the block's total back below the limit.
+        (u32::MAX, 0),
     ] {
         let mut cached = entry(block.transactions[1].clone());
         cached.legacy_sigop_count = legacy;
@@ -369,6 +371,33 @@ async fn reused_signature_operations_count_toward_the_block_limit() {
         }
         assert_dispatches(&calls, 0);
     }
+
+    // Two reused transactions whose counts would wrap the total when they are added together.
+    let spends = vec![
+        spend_output(0, &[0x51], LockTime::unlocked(), Height(0)),
+        spend_output(1, &[0x51], LockTime::unlocked(), Height(0)),
+    ];
+    let block = block_with(&network, Height(3), spends.clone(), 2 * FEE);
+    let entries = spends
+        .into_iter()
+        .map(|spend| {
+            let mut cached = entry(spend);
+            cached.legacy_sigop_count = u32::MAX / 2 + 1;
+            cached
+        })
+        .collect();
+    let pool = mempool(&block, entries);
+    let (result, calls) = verify(&network, block, pool, mock_state()).await;
+    assert!(
+        matches!(
+            result,
+            Err(VerifyBlockError::Block {
+                source: BlockError::TooManyTransparentSignatureOperations { sigops, .. }
+            }) if sigops == u32::MAX
+        ),
+        "two reused transactions: {result:?}"
+    );
+    assert_dispatches(&calls, 0);
 }
 
 /// A block in which the block verifier drops a candidate that it can't reuse, the mempool's

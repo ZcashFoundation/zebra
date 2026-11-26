@@ -761,7 +761,9 @@ where
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
-            let mut sigops = 0;
+            // Saturating: the counts of reused transactions come from the mempool, and a wrong
+            // count must not wrap the total below the limit.
+            let mut sigops: u32 = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
@@ -773,7 +775,7 @@ where
                 transaction_hashes.iter().zip(block.transactions.iter())
             {
                 if let Some(cached) = verified.get(&transaction_hash) {
-                    sigops += cached.block_sigop_count();
+                    sigops = sigops.saturating_add(cached.block_sigop_count());
                     block_miner_fees += cached.miner_fee;
                     continue;
                 }
@@ -802,7 +804,7 @@ where
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
 
-                sigops += response.sigops;
+                sigops = sigops.saturating_add(response.sigops);
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
