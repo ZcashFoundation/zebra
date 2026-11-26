@@ -62,6 +62,23 @@ struct DiscoveryBarrier {
     deadline: Instant,
 }
 
+/// What the discovery barrier did with a peer message.
+pub(super) enum Diverted {
+    /// The barrier is down, or the message isn't the barrier's pong or a block inventory, so the
+    /// message is handled as usual.
+    Pass(Message),
+
+    /// A single-block inventory for another block. It doesn't reply to a locator request while
+    /// the barrier is up, but it can still announce a block.
+    Announcement(Message),
+
+    /// A reply to the locator request that the barrier retired. It needs no other handling.
+    Consumed,
+
+    /// The barrier's pong, which took the barrier down. It needs no other handling.
+    Retired,
+}
+
 #[derive(Default)]
 pub(super) struct CompactRelay {
     pub(super) send: bool,
@@ -153,23 +170,31 @@ impl CompactRelay {
             .is_some_and(|barrier| barrier.deadline <= Instant::now())
     }
 
-    /// Quarantine all block inventories until the owned pong, including unsolicited gossip.
+    /// Keep all block inventories from the locator response handler until the owned pong.
     /// This relies on honest Zebra connections awaiting locator service calls and writes before
     /// handling later pings, including deferred recovery traffic. It is not a service-bit guarantee.
     /// Stock zcashd cannot enter this compact path; a missing owned pong closes it on timeout.
-    pub(super) fn divert_retired_discovery(&mut self, message: &Message) -> bool {
+    ///
+    /// The pong and the replies to the retired request are consumed. Other single-block
+    /// inventories are still block announcements.
+    pub(super) fn divert_retired_discovery(&mut self, message: Message) -> Diverted {
         let Some(barrier) = &self.discovery_barrier else {
-            return false;
+            return Diverted::Pass(message);
         };
         match message {
-            Message::Pong(nonce) if *nonce == barrier.nonce => {
+            Message::Pong(nonce) if nonce == barrier.nonce => {
                 self.discovery_barrier = None;
-                true
+                Diverted::Retired
             }
-            Message::Inv(items) if is_block_inventory(items) => {
+            Message::Inv(ref items) if is_block_inventory(items) => {
+                let starts_with_compact = items[0].block_hash() == Some(barrier.hash);
+                if items.len() == 1 && !starts_with_compact {
+                    // A singleton for another block may be unrelated gossip.
+                    return Diverted::Announcement(message);
+                }
                 // Only an extension of the screened compact's old locator is reusable. A singleton
-                // may be unrelated gossip; it neither consumes the barrier nor repopulates a cache.
-                if items.len() > 1 && items[0].block_hash() == Some(barrier.hash) {
+                // naming the compact's block repeats what this connection already announced.
+                if items.len() > 1 && starts_with_compact {
                     self.discovery = Some(Discovery {
                         parent: barrier.parent,
                         hashes: block_hashes(items)
@@ -178,9 +203,9 @@ impl CompactRelay {
                         until: Instant::now() + RETENTION,
                     });
                 }
-                true
+                Diverted::Consumed
             }
-            _ => false,
+            message => Diverted::Pass(message),
         }
     }
 

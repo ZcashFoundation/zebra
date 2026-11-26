@@ -49,6 +49,7 @@ use crate::{
     BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
+use compact_relay::Diverted;
 use InventoryResponse::*;
 
 mod compact_relay;
@@ -896,7 +897,12 @@ where
                         }
                         Either::Left(Some(Err(e))) => self.fail_with(e).await,
                         Either::Left(Some(Ok(msg))) => {
-                            self.compact.divert_retired_discovery(&msg);
+                            let (Diverted::Pass(msg) | Diverted::Announcement(msg)) =
+                                self.compact.divert_retired_discovery(msg)
+                            else {
+                                // The discovery barrier consumed the message.
+                                continue;
+                            };
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
                             if let Some(unhandled_msg) = unhandled_msg {
@@ -1072,10 +1078,8 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = if self.compact.divert_retired_discovery(&peer_msg) {
-                                Some(peer_msg)
-                            } else {
-                                match self.state {
+                            let request_msg = match self.compact.divert_retired_discovery(peer_msg) {
+                                Diverted::Pass(peer_msg) => match self.state {
                                     State::AwaitingResponse {
                                         ref mut handler, ..
                                     } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
@@ -1084,7 +1088,11 @@ where
                                                       peer_msg,
                                                       self.client_rx,
                                     ),
-                                }
+                                },
+                                // It isn't a response, but it can be an inbound block announcement.
+                                Diverted::Announcement(peer_msg) => Some(peer_msg),
+                                // The discovery barrier consumed the message.
+                                Diverted::Consumed | Diverted::Retired => None,
                             };
 
                             self.update_state_metrics(None);

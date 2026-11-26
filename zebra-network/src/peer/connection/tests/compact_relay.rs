@@ -450,6 +450,276 @@ async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
     .expect("only the owned pong retires discovery, including an empty old result");
 }
 
+/// A running connection whose block locator request was answered by a screened compact block.
+/// Its discovery barrier is up until the peer answers the barrier's ping.
+struct BarrierConnection {
+    task: tokio::task::JoinHandle<()>,
+    client: mpsc::Sender<ClientRequest>,
+    inbound: zebra_test::mock_service::MockService<Request, Response, PanicAssertion>,
+    outbound: mpsc::Receiver<Message>,
+    peer: mpsc::Sender<Result<Message, zebra_chain::serialization::SerializationError>>,
+    errors: crate::peer::ErrorSlot,
+    advertiser: Option<Arc<crate::peer::ConnectionInfo>>,
+    barrier: crate::types::Nonce,
+}
+
+impl BarrierConnection {
+    /// The peer's address.
+    const SOURCE: &'static str = "127.0.0.1:8233";
+
+    /// Starts a connection, and answers its block locator request with `compact`.
+    async fn start(compact: &Arc<CompactBlock>) -> Self {
+        let source: crate::PeerSocketAddr = Self::SOURCE.parse().unwrap();
+        let (mut template, _client, mut inbound, _outbound, _errors) =
+            new_test_connection::<PanicAssertion>();
+        let (mut minimum, _tip) = crate::peer::MinimumPeerVersion::with_mock_chain_tip(
+            &zebra_chain::parameters::Network::Mainnet,
+        );
+        let info = Arc::make_mut(&mut template.connection_info);
+        info.early_block_relay = true;
+        info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+        info.remote.version = minimum.current();
+        let advertiser = Some(template.connection_info.clone());
+        let (peer_tx, mut outbound) = mpsc::channel(0);
+        let peer_tx = peer_tx.sink_map_err(|_| {
+            zebra_chain::serialization::SerializationError::Parse("test peer closed")
+        });
+        let (mut client, client_rx) = mpsc::channel(0);
+        let (_adverts, advert_rx) = tokio::sync::mpsc::channel(1);
+        let (_bans, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
+        let errors = crate::peer::ErrorSlot::default();
+        let connection = crate::peer::Connection::new(
+            inbound.clone(),
+            (
+                client_rx,
+                advert_rx,
+                tokio::sync::watch::channel(None).1,
+                minimum,
+                bans_rx,
+            ),
+            errors.clone(),
+            peer_tx,
+            crate::peer_set::ActiveConnectionCounter::new_counter().track_connection(),
+            template.connection_info.clone(),
+            Vec::new(),
+        );
+        // Buffer a few messages, so the test can send messages while the connection waits.
+        let (mut peer, peer_rx) = mpsc::channel(8);
+        let task = tokio::spawn(connection.run(peer_rx));
+        assert!(matches!(
+            outbound.next().await,
+            Some(Message::SendCompact { .. })
+        ));
+
+        let parent = compact.header.previous_block_hash;
+        let (tx, discovery) = oneshot::channel();
+        client
+            .send(ClientRequest {
+                request: Request::FindBlocks {
+                    known_blocks: vec![parent],
+                    stop: None,
+                },
+                tx,
+                span: tracing::Span::none(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            outbound.next().await,
+            Some(Message::GetBlocks { .. })
+        ));
+        peer.send(Ok(Message::CompactBlock(compact.clone())))
+            .await
+            .unwrap();
+        inbound
+            .expect_request(Request::CheckCompactHeader(compact.clone()))
+            .await
+            .respond(Response::Nil);
+        let Some(Message::Ping(barrier)) = outbound.next().await else {
+            panic!("a screened compact that answers discovery sends a barrier ping")
+        };
+        inbound
+            .expect_request(Request::AdvertiseCompactBlock(
+                compact.header.hash(),
+                advertiser.clone(),
+                parent,
+            ))
+            .await
+            .respond(Response::Nil);
+        assert_eq!(
+            discovery.await.unwrap().unwrap(),
+            Response::BlockHashes(vec![compact.header.hash()])
+        );
+
+        Self {
+            task,
+            client,
+            inbound,
+            outbound,
+            peer,
+            errors,
+            advertiser,
+            barrier,
+        }
+    }
+
+    /// Sends `request` to the connection, and returns its response receiver.
+    async fn request(
+        &mut self,
+        request: Request,
+    ) -> oneshot::Receiver<Result<Response, crate::SharedPeerError>> {
+        let (tx, response) = oneshot::channel();
+        self.client
+            .send(ClientRequest {
+                request,
+                tx,
+                span: tracing::Span::none(),
+            })
+            .await
+            .unwrap();
+        response
+    }
+
+    /// Sends `message` from the peer.
+    async fn receive(&mut self, message: Message) {
+        self.peer.send(Ok(message)).await.unwrap();
+    }
+}
+
+/// The barrier's pong, and the replies to the block locator request it retired, are consumed
+/// while a compact block's missing transactions are recovered, so they don't use the recovery's
+/// limit on deferred messages.
+#[tokio::test(start_paused = true)]
+async fn discovery_barrier_replies_do_not_use_the_recovery_deferral_limit() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let start = tokio::time::Instant::now();
+        let mut connection = BarrierConnection::start(&compact).await;
+
+        // Start recovering the compact block's transactions.
+        let download = connection
+            .request(Request::BlockDownload {
+                hash: block.hash(),
+                advertiser: connection.advertiser.clone(),
+            })
+            .await;
+        connection
+            .inbound
+            .expect_request(Request::CompactBlockTransactions(compact.clone()))
+            .await
+            .respond(Response::CompactBlockTransactions(Vec::new()));
+        assert!(matches!(
+            connection.outbound.next().await,
+            Some(Message::GetBlockTransactions(_))
+        ));
+
+        // Unrelated messages wait until recovery finishes, up to the deferral limit.
+        for _ in 1..crate::peer::connection::MAX_DEFERRED_MESSAGES {
+            connection.receive(Message::Inv(Vec::new())).await;
+        }
+        let barrier = connection.barrier;
+        connection.receive(Message::Pong(barrier)).await;
+        connection
+            .receive(Message::Inv(vec![
+                block.hash().into(),
+                zebra_chain::block::Hash([7; 32]).into(),
+            ]))
+            .await;
+        connection
+            .receive(Message::BlockTransactions(BlockTransactions {
+                block_hash: block.hash(),
+                transactions: block.transactions[1..].to_vec(),
+            }))
+            .await;
+        connection
+            .inbound
+            .expect_request_that(|request| {
+                matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                    if **checked == *block && evidence.evidence_for(checked).is_some())
+            })
+            .await
+            .respond(Response::Nil);
+        assert_reconstructed(
+            download.await.unwrap().unwrap(),
+            &block,
+            BarrierConnection::SOURCE.parse().unwrap(),
+        );
+        assert!(connection.errors.try_get_error().is_none());
+        assert_eq!(
+            tokio::time::Instant::now(),
+            start,
+            "recovery finishes without its fallback timer"
+        );
+        connection.task.abort();
+    })
+    .await
+    .expect("recovery completes without timers");
+}
+
+/// While the discovery barrier is up and no request is waiting, the replies to the retired block
+/// locator request are consumed, and single-block inventories for other blocks are still block
+/// announcements.
+#[tokio::test(start_paused = true)]
+async fn discovery_barrier_keeps_other_block_announcements() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let mut connection = BarrierConnection::start(&compact).await;
+
+        // The previous reply can name only the compact's block, or extend it.
+        let extension = vec![block.hash(), zebra_chain::block::Hash([7; 32])];
+        connection
+            .receive(Message::Inv(vec![block.hash().into()]))
+            .await;
+        connection
+            .receive(Message::Inv(
+                extension.iter().copied().map(Into::into).collect(),
+            ))
+            .await;
+        // An announcement of another block still reaches the inbound service, and it's the first
+        // request the inbound service gets.
+        let other = zebra_chain::block::Hash([9; 32]);
+        connection.receive(Message::Inv(vec![other.into()])).await;
+        connection
+            .inbound
+            .expect_request(Request::AdvertiseBlock(
+                other,
+                connection.advertiser.clone(),
+            ))
+            .await
+            .respond(Response::Nil);
+        let barrier = connection.barrier;
+        connection.receive(Message::Pong(barrier)).await;
+
+        // The extension answers the next block locator request.
+        let response = connection
+            .request(Request::FindBlocks {
+                known_blocks: vec![block.header.previous_block_hash],
+                stop: None,
+            })
+            .await;
+        assert_eq!(
+            response.await.unwrap().unwrap(),
+            Response::BlockHashes(extension)
+        );
+        assert!(connection.outbound.try_recv().is_err());
+        connection.inbound.expect_no_requests().await;
+        assert!(connection.errors.try_get_error().is_none());
+        connection.task.abort();
+    })
+    .await
+    .expect("the barrier's replies are handled without timers");
+}
+
 #[tokio::test(start_paused = true)]
 async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
     let _init_guard = zebra_test::init();
