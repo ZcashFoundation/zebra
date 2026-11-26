@@ -345,14 +345,21 @@ pub mod indexer_client {
         ///
         /// The stream ends with `OK` after the block at `end_height`, or after the
         /// finalized tip if the tip is below `end_height`, possibly with no blocks.
-        /// It ends with `NOT_FOUND`, naming the height, at the first block at or below
-        /// the finalized tip whose body is not stored, after the blocks before it. It
-        /// ends with `RESOURCE_EXHAUSTED`, after the blocks already queued, if the
-        /// consumer stops reading for longer than the server's send timeout, and with
-        /// `UNAVAILABLE` if the state cannot be read.
+        /// It ends with `FAILED_PRECONDITION`, naming the height, at the first block
+        /// at or below the finalized tip whose body is not stored, after the blocks
+        /// before it. It ends with `DEADLINE_EXCEEDED`, after the blocks already
+        /// queued, if the consumer stops reading for longer than the server's send
+        /// timeout; the client can resume from the height after the last block it
+        /// received. It ends with `UNAVAILABLE` if the state cannot be read.
         ///
         /// Rejects a range whose end is below its start, or a height above the
         /// maximum block height, with `INVALID_ARGUMENT`, before reading any block.
+        ///
+        /// The server serves a limited number of these streams at once, across all
+        /// connections (16 in zebrad). Beyond that it refuses a request with
+        /// `RESOURCE_EXHAUSTED` before reading any block; the client should retry
+        /// later or open fewer streams at once. A stream counts against the limit
+        /// until it has ended and been closed.
         pub async fn get_block_range(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockRangeRequest>,
@@ -460,14 +467,21 @@ pub mod indexer_server {
         ///
         /// The stream ends with `OK` after the block at `end_height`, or after the
         /// finalized tip if the tip is below `end_height`, possibly with no blocks.
-        /// It ends with `NOT_FOUND`, naming the height, at the first block at or below
-        /// the finalized tip whose body is not stored, after the blocks before it. It
-        /// ends with `RESOURCE_EXHAUSTED`, after the blocks already queued, if the
-        /// consumer stops reading for longer than the server's send timeout, and with
-        /// `UNAVAILABLE` if the state cannot be read.
+        /// It ends with `FAILED_PRECONDITION`, naming the height, at the first block
+        /// at or below the finalized tip whose body is not stored, after the blocks
+        /// before it. It ends with `DEADLINE_EXCEEDED`, after the blocks already
+        /// queued, if the consumer stops reading for longer than the server's send
+        /// timeout; the client can resume from the height after the last block it
+        /// received. It ends with `UNAVAILABLE` if the state cannot be read.
         ///
         /// Rejects a range whose end is below its start, or a height above the
         /// maximum block height, with `INVALID_ARGUMENT`, before reading any block.
+        ///
+        /// The server serves a limited number of these streams at once, across all
+        /// connections (16 in zebrad). Beyond that it refuses a request with
+        /// `RESOURCE_EXHAUSTED` before reading any block; the client should retry
+        /// later or open fewer streams at once. A stream counts against the limit
+        /// until it has ended and been closed.
         async fn get_block_range(
             &self,
             request: tonic::Request<super::BlockRangeRequest>,

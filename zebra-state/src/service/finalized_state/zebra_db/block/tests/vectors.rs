@@ -180,6 +180,16 @@ fn test_block_db_round_trip_with(
         }
 
         assert_eq!(stored_block, original_block);
+
+        // The raw read reassembles the same bytes without deserializing the block.
+        let raw_bytes = state
+            .raw_block_bytes(finalized.height.into())
+            .expect("stored block body is complete")
+            .expect("block was stored at height");
+        assert_eq!(
+            raw_bytes, block_data,
+            "raw block bytes must equal the serialization"
+        );
     }
 }
 

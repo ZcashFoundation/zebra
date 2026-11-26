@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Added
-body: 'Added `ReadRequest::RawBlocksByHeightRange { start, count }`, which returns up to `count` finalized blocks from `start` as their raw consensus serializations in `ReadResponse::RawBlocks`. It stops at the finalized tip, stops before a block body that is not stored, and fails with `BlockReadError::BlockBodyUnavailable` if that block is at `start`. Added `ZebraDb::raw_block_bytes`, which assembles a finalized block serialization from the stored header and transactions.'
+body: 'Added `ReadRequest::RawBlocksByHeightRange { start, count }`, which returns up to `count` finalized blocks from `start` as their raw consensus serializations in `ReadResponse::RawBlocks`. It stops at the finalized tip, stops before a block body that is not stored, and fails with `BlockReadError::BlockBodyUnavailable` if that block is at `start`.'
 time: 2026-11-20T12:00:04.000000Z

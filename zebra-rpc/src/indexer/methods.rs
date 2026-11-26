@@ -1,9 +1,15 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::{collections::HashSet, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures::{future, stream, Stream, StreamExt};
-use tokio::sync::{mpsc, oneshot, Semaphore};
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
 use tower::util::ServiceExt;
@@ -33,7 +39,8 @@ const RESPONSE_BUFFER_SIZE: usize = 64;
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The number of blocks a `get_block_range` stream queues for its consumer, and reads from the
-/// state at a time. A stream holds at most twice this many, 32 MB at the maximum block size.
+/// state at a time. A stream holds at most twice this many, plus the one block the transport is
+/// sending: 17 blocks, about 34 MB at the maximum block size.
 const BLOCK_RANGE_BUFFER_SIZE: usize = 8;
 
 /// [`BLOCK_RANGE_BUFFER_SIZE`] as a state request count.
@@ -43,8 +50,9 @@ const BLOCK_RANGE_CHUNK_SIZE: u32 = BLOCK_RANGE_BUFFER_SIZE as u32;
 
 /// The number of `get_block_range` streams the server serves at once, across all connections.
 ///
-/// Together with [`BLOCK_RANGE_BUFFER_SIZE`], this bounds the memory held by open streams at 512 MB
-/// at the maximum block size. A request beyond the limit is refused with `RESOURCE_EXHAUSTED`.
+/// Together with [`BLOCK_RANGE_BUFFER_SIZE`], this bounds the memory held by open streams at about
+/// 544 MB at the maximum block size. A request beyond the limit is refused with
+/// `RESOURCE_EXHAUSTED`.
 pub(super) const MAX_BLOCK_RANGE_STREAMS: usize = 16;
 
 /// The stream type returned by `get_block_range`.
@@ -344,8 +352,9 @@ where
 /// The final status has its own channel, chained after the block channel, so it is delivered after
 /// every queued block even when a slow consumer has filled the block channel.
 ///
-/// Each stream holds one of `permits` until it ends. Returns `RESOURCE_EXHAUSTED` without starting
-/// a stream if none is free.
+/// Each stream holds one of `permits` until both its producer task has ended and the returned stream
+/// has been dropped, so the permit also covers blocks still queued for a client that has stopped
+/// reading. Returns `RESOURCE_EXHAUSTED` without starting a stream if none is free.
 pub(super) fn block_range_stream<ReadStateService: ReadState>(
     read_state: ReadStateService,
     permits: &Arc<Semaphore>,
@@ -353,11 +362,12 @@ pub(super) fn block_range_stream<ReadStateService: ReadState>(
     end: block::Height,
     send_timeout: Duration,
 ) -> Result<BlockRangeStream, Status> {
-    let permit = permits.clone().try_acquire_owned().map_err(|_| {
+    let permit = Arc::new(permits.clone().try_acquire_owned().map_err(|_| {
         Status::resource_exhausted(format!(
             "the server is already serving {MAX_BLOCK_RANGE_STREAMS} GetBlockRange streams"
         ))
-    })?;
+    })?);
+    let stream_permit = permit.clone();
 
     let (block_sender, block_receiver) = mpsc::channel(BLOCK_RANGE_BUFFER_SIZE);
     let (status_sender, status_receiver) = oneshot::channel();
@@ -377,7 +387,30 @@ pub(super) fn block_range_stream<ReadStateService: ReadState>(
     let status =
         stream::once(status_receiver).filter_map(|status| future::ready(status.ok().map(Err)));
 
-    Ok(Box::pin(ReceiverStream::new(block_receiver).chain(status)))
+    Ok(Box::pin(PermitStream {
+        inner: Box::pin(ReceiverStream::new(block_receiver).chain(status)),
+        _permit: stream_permit,
+    }))
+}
+
+/// A `get_block_range` stream that holds its share of the stream permit until it is dropped, so
+/// the permit stays taken while blocks are queued for the client, even after the producer task
+/// has ended.
+struct PermitStream {
+    inner: BlockRangeStream,
+    _permit: Arc<OwnedSemaphorePermit>,
+}
+
+impl Stream for PermitStream {
+    type Item = Result<BlockAndHeight, Status>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 /// Sends the finalized blocks from `start` to `end` inclusive to `block_sender`, reading them from
@@ -385,8 +418,8 @@ pub(super) fn block_range_stream<ReadStateService: ReadState>(
 ///
 /// Returns `None` when the range or the finalized tip is reached, or when the consumer has
 /// disconnected. Otherwise returns the status that ends the stream:
-/// - `NOT_FOUND` for a block body at or below the finalized tip that is not stored,
-/// - `RESOURCE_EXHAUSTED` if the consumer doesn't read a block within `send_timeout`,
+/// - `FAILED_PRECONDITION` for a block body at or below the finalized tip that is not stored,
+/// - `DEADLINE_EXCEEDED` if the consumer doesn't read a block within `send_timeout`,
 /// - `UNAVAILABLE` if the state can't be read.
 async fn serve_block_range<ReadStateService: ReadState>(
     read_state: ReadStateService,
@@ -421,7 +454,7 @@ async fn serve_block_range<ReadStateService: ReadState>(
                 if let Some(BlockReadError::BlockBodyUnavailable { height }) =
                     error.downcast_ref::<BlockReadError>()
                 {
-                    return Some(Status::not_found(format!(
+                    return Some(Status::failed_precondition(format!(
                         "block body at height {} is not stored",
                         height.0
                     )));
@@ -455,7 +488,7 @@ async fn serve_block_range<ReadStateService: ReadState>(
                     tracing::warn!(
                         "slow consumer, dropping get_block_range stream after send timed out"
                     );
-                    return Some(Status::resource_exhausted(format!(
+                    return Some(Status::deadline_exceeded(format!(
                         "the client did not read a block for {send_timeout:?}, \
                          the stream ended before height {}",
                         height.0

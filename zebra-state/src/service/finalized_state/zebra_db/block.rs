@@ -203,7 +203,7 @@ impl ZebraDb {
     ///
     /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
     #[allow(clippy::unwrap_in_result)]
-    pub fn raw_block_bytes(
+    pub(crate) fn raw_block_bytes(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<Vec<u8>>, BlockReadError> {

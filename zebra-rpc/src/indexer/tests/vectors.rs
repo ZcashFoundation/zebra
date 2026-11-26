@@ -212,6 +212,14 @@ async fn test_get_block_range(
     .collect::<Result<_>>()?;
     let raw_blocks =
         |range: std::ops::Range<usize>| ReadResponse::RawBlocks(blocks[range].to_vec());
+    // Placeholder blocks for ranges longer than the test vectors: the server doesn't parse them.
+    let placeholder_blocks = |heights: std::ops::RangeInclusive<u32>| {
+        ReadResponse::RawBlocks(
+            heights
+                .map(|height| (Height(height), height.to_le_bytes().to_vec()))
+                .collect(),
+        )
+    };
     let read = |start, count| ReadRequest::RawBlocksByHeightRange {
         start: Height(start),
         count,
@@ -232,7 +240,19 @@ async fn test_get_block_range(
             ],
             None,
         ),
-        // A missing body at height 3: ends `NOT_FOUND` after the blocks before it.
+        // More than one chunk: each read starts after the last block of the one before, and the
+        // stream ends `OK` after the last requested block.
+        (
+            1,
+            17,
+            vec![
+                (read(1, 8), Ok(placeholder_blocks(1..=8))),
+                (read(9, 8), Ok(placeholder_blocks(9..=16))),
+                (read(17, 1), Ok(placeholder_blocks(17..=17))),
+            ],
+            None,
+        ),
+        // A missing body at height 3: ends `FAILED_PRECONDITION` after the blocks before it.
         (
             1,
             5,
@@ -243,7 +263,17 @@ async fn test_get_block_range(
                     Err(BlockReadError::BlockBodyUnavailable { height: Height(3) }.into()),
                 ),
             ],
-            Some(tonic::Code::NotFound),
+            Some(tonic::Code::FailedPrecondition),
+        ),
+        // Corrupt block metadata is a state error, not a missing body: ends `UNAVAILABLE`.
+        (
+            1,
+            2,
+            vec![(
+                read(1, 2),
+                Err(BlockReadError::CorruptBlock { height: Height(1) }.into()),
+            )],
+            Some(tonic::Code::Unavailable),
         ),
         // A state read error: ends `UNAVAILABLE`.
         (
@@ -292,9 +322,9 @@ async fn test_get_block_range(
         assert!(
             status
                 .as_ref()
-                .is_none_or(|status| status.code() != tonic::Code::NotFound
+                .is_none_or(|status| status.code() != tonic::Code::FailedPrecondition
                     || status.message().contains("height 3")),
-            "NOT_FOUND should name the missing height: {status:?}"
+            "FAILED_PRECONDITION should name the missing height: {status:?}"
         );
     }
 
@@ -321,19 +351,21 @@ async fn read_block_range(
     }
 }
 
-/// Tests that a `GetBlockRange` stream whose consumer stops reading ends with
-/// `RESOURCE_EXHAUSTED` after the blocks already queued, even though the block channel is full.
+/// Tests that a `GetBlockRange` stream whose consumer stops reading ends with `DEADLINE_EXCEEDED`
+/// after the blocks already queued, even though the block channel is full, and that the stream
+/// keeps its permit while those blocks are queued, after its producer task has ended.
 #[tokio::test]
-async fn get_block_range_slow_consumer_ends_with_resource_exhausted() -> Result<()> {
+async fn get_block_range_slow_consumer_ends_with_deadline_exceeded() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError> =
         MockService::build().for_unit_tests();
     let send_timeout = Duration::from_millis(100);
+    let permits = Arc::new(Semaphore::new(1));
 
     let mut stream = block_range_stream(
         mock_read_service.clone(),
-        &Arc::new(Semaphore::new(1)),
+        &permits,
         Height(0),
         Height(1000),
         send_timeout,
@@ -356,6 +388,9 @@ async fn get_block_range_slow_consumer_ends_with_resource_exhausted() -> Result<
     tokio::time::sleep(send_timeout * 10).await;
     mock_read_service.expect_no_requests().await;
 
+    // The producer has timed out and ended, but its eight blocks are still queued.
+    assert_eq!(permits.available_permits(), 0);
+
     for expected_height in 0..8 {
         let block = stream
             .next()
@@ -370,8 +405,12 @@ async fn get_block_range_slow_consumer_ends_with_resource_exhausted() -> Result<
         .await
         .expect("the stream ends with a status")
         .expect_err("the final status is an error");
-    assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(status.code(), tonic::Code::DeadlineExceeded);
     assert!(stream.next().await.is_none());
+
+    assert_eq!(permits.available_permits(), 0);
+    drop(stream);
+    assert_eq!(permits.available_permits(), 1);
 
     Ok(())
 }
@@ -397,7 +436,8 @@ async fn get_block_range_stops_reading_after_the_client_disconnects() -> Result<
 }
 
 /// Tests that `GetBlockRange` refuses a stream with `RESOURCE_EXHAUSTED` while every permit is held,
-/// and serves one again once a stream has ended.
+/// that a short stream keeps its permit after its producer task has queued every block and ended,
+/// and that the permit is free again once the stream is dropped.
 #[tokio::test]
 async fn get_block_range_refuses_streams_beyond_the_limit() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -431,10 +471,23 @@ async fn get_block_range_refuses_streams_beyond_the_limit() -> Result<()> {
     assert_eq!(status.code(), tonic::Code::ResourceExhausted);
 
     read.respond(ReadResponse::RawBlocks(vec![(Height(0), Vec::new())]));
+
+    // The whole range fits in the queue, so the producer ends without waiting for the client.
+    // The unread block still holds the permit.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(permits.available_permits(), 0);
+    assert_eq!(
+        open_stream().err().map(|status| status.code()),
+        Some(tonic::Code::ResourceExhausted),
+        "a stream with unread blocks should still count against the limit"
+    );
+
     assert_eq!(first.next().await.expect("one block")?.height, 0);
     assert!(first.next().await.is_none());
+    assert_eq!(permits.available_permits(), 0);
 
-    // The task releases its permit as it ends, just after closing the stream.
+    // Dropping the drained stream frees its permit, once the producer task has also ended.
+    drop(first);
     tokio::time::timeout(Duration::from_secs(3), async {
         while permits.available_permits() == 0 {
             tokio::task::yield_now().await;

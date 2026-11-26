@@ -1304,6 +1304,9 @@ pub enum ReadRequest {
     /// So a caller that gets fewer than `count` blocks can request the next height to tell the
     /// finalized tip, an empty response, from a missing body, an error.
     ///
+    /// Like [`ReadRequest::Block`] and [`ReadRequest::BlockAndSize`], an incomplete secondary view
+    /// also stops the response early, before the first block it can't read yet.
+    ///
     /// All the blocks are held in memory at once, so keep `count` small.
     ///
     /// Returns
