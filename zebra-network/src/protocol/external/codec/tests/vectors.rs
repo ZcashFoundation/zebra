@@ -67,6 +67,48 @@ fn version_message_round_trip() {
     assert_eq!(*v, v_parsed);
 }
 
+/// Check that a pruned peer's `NODE_PRUNED` bit survives decoding, so it isn't mistaken for a
+/// full node.
+#[test]
+fn version_message_keeps_node_pruned() {
+    let (rt, _init_guard) = zebra_test::init_async();
+
+    let mut v = VERSION_TEST_VECTOR.clone();
+    let services = PeerServices::NODE_NETWORK | PeerServices::NODE_PRUNED;
+    match &mut v {
+        Message::Version(version) => version.services = services,
+        _ => unreachable!("const is the Message::Version variant"),
+    }
+
+    use tokio_util::codec::{FramedRead, FramedWrite};
+    let v_bytes = rt.block_on(async {
+        let mut bytes = Vec::new();
+        {
+            let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+            fw.send(v.clone())
+                .await
+                .expect("message should be serialized");
+        }
+        bytes
+    });
+
+    let v_parsed = rt.block_on(async {
+        let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+        fr.next()
+            .await
+            .expect("a next message should be available")
+            .expect("that message should deserialize")
+    });
+
+    match v_parsed {
+        Message::Version(version) => {
+            assert_eq!(version.services, services);
+            assert!(!version.services.serves_full_history());
+        }
+        other => panic!("expected a version message, got {other:?}"),
+    }
+}
+
 /// Check that version deserialization rejects out-of-range timestamps with
 /// an error.
 #[test]

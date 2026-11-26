@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: 'Zebra no longer treats peers that advertise `NODE_PRUNED` as able to serve historic blocks. While syncing, it rejects them as new outbound peers, and it stops routing historic block and `getblocks` requests to them. Since Zakura 1.8.8, pruned Zakura nodes advertise `NODE_NETWORK` with `NODE_PRUNED`, and their unanswered `getblocks` replies were stalling Zebra''s initial sync.'
+time: 2026-11-18T14:00:00.000000000Z

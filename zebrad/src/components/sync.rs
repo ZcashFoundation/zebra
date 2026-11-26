@@ -167,6 +167,10 @@ pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 /// failure loop.
 pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
+/// How many rounds of [`FANOUT`] requests `extend_tips` sends for a tip before dropping it,
+/// when no peer answers a round.
+const EXTEND_TIP_ROUNDS: usize = 3;
+
 /// Controls how long we wait between gossiping successive blocks or transactions.
 ///
 /// ## Correctness
@@ -1123,116 +1127,138 @@ where
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             debug!(?tip, "asking peers to extend chain tip");
-            let mut responses = FuturesUnordered::new();
-            for attempt in 0..FANOUT {
-                if attempt > 0 {
-                    // Let other tasks run, so we're more likely to choose a different peer.
-                    //
-                    // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
-                    tokio::task::yield_now().await;
+            // A tip whose requests all fail is dropped for good, so ask new peers before giving up.
+            for round in 0..EXTEND_TIP_ROUNDS {
+                if round > 0 {
+                    debug!(
+                        ?tip,
+                        round, "no peer answered, asking other peers to extend chain tip"
+                    );
                 }
+                let mut answered = false;
+                let mut responses = FuturesUnordered::new();
+                for attempt in 0..FANOUT {
+                    if attempt > 0 {
+                        // Let other tasks run, so we're more likely to choose a different peer.
+                        //
+                        // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+                        tokio::task::yield_now().await;
+                    }
 
-                let ready_tip_network = self.tip_network.ready().await;
-                responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
-                    zn::Request::FindBlocks {
-                        known_blocks: vec![tip.tip],
-                        stop: None,
-                    },
-                )));
-            }
-            while let Some(res) = responses.next().await {
-                match res
-                    .expect("panic in spawned extend tips request")
-                    .map_err::<Report, _>(|e| eyre!(e))
-                {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
-                        debug!(first = ?hashes.first(), len = ?hashes.len());
-                        trace!(?hashes);
+                    let ready_tip_network = self.tip_network.ready().await;
+                    responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
+                        zn::Request::FindBlocks {
+                            known_blocks: vec![tip.tip],
+                            stop: None,
+                        },
+                    )));
+                }
+                while let Some(res) = responses.next().await {
+                    match res
+                        .expect("panic in spawned extend tips request")
+                        .map_err::<Report, _>(|e| eyre!(e))
+                    {
+                        Ok(zn::Response::BlockHashes(hashes)) => {
+                            debug!(first = ?hashes.first(), len = ?hashes.len());
+                            trace!(?hashes);
 
-                        // Legacy zcashd nodes could prepend an unrelated hash
-                        // to their response. Check the first hash against the
-                        // previous response, and discard mismatches.
-                        let unknown_hashes = match hashes.as_slice() {
-                            [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
-                                rest
-                            }
-                            // If the first hash doesn't match, retry with the second.
-                            [first_hash, expected_hash, rest @ ..]
-                                if expected_hash == &tip.expected_next =>
-                            {
-                                debug!(?first_hash,
+                            // Legacy zcashd nodes could prepend an unrelated hash
+                            // to their response. Check the first hash against the
+                            // previous response, and discard mismatches.
+                            let unknown_hashes = match hashes.as_slice() {
+                                [expected_hash, rest @ ..]
+                                    if expected_hash == &tip.expected_next =>
+                                {
+                                    rest
+                                }
+                                // If the first hash doesn't match, retry with the second.
+                                [first_hash, expected_hash, rest @ ..]
+                                    if expected_hash == &tip.expected_next =>
+                                {
+                                    debug!(?first_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "unexpected first hash, but the second matches: using the hashes after the match");
-                                rest
-                            }
-                            // We ignore these responses
-                            [] => continue,
-                            [single_hash] => {
-                                debug!(?single_hash,
+                                    rest
+                                }
+                                // An empty list can't be an unrelated advertisement, so it answers.
+                                // We ignore these responses.
+                                [] => {
+                                    answered = true;
+                                    continue;
+                                }
+                                [single_hash] => {
+                                    debug!(?single_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
-                                continue;
-                            }
-                            [first_hash, second_hash, rest @ ..] => {
-                                debug!(?first_hash,
+                                    continue;
+                                }
+                                [first_hash, second_hash, rest @ ..] => {
+                                    debug!(?first_hash,
                                                 ?second_hash,
                                                 rest_len = ?rest.len(),
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response that starts with two unexpected hashes");
-                                continue;
-                            }
-                        };
-
-                        if unknown_hashes.is_empty() {
-                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
-                            continue;
-                        }
-
-                        trace!(?unknown_hashes);
-
-                        if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                            let new_tip = CheckedTip {
-                                tip: end[0],
-                                expected_next: end[1],
+                                    continue;
+                                }
                             };
 
-                            // Make sure we get the same tips, regardless of the
-                            // order of peer responses
-                            if !download_set.contains(&new_tip.expected_next) {
-                                debug!(
+                            // Unrelated hashes, such as a new block advertisement, aren't an answer.
+                            answered = true;
+
+                            if unknown_hashes.is_empty() {
+                                debug!(?tip.tip, "response contained no new hashes after the expected overlap");
+                                continue;
+                            }
+
+                            trace!(?unknown_hashes);
+
+                            if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                                let new_tip = CheckedTip {
+                                    tip: end[0],
+                                    expected_next: end[1],
+                                };
+
+                                // Make sure we get the same tips, regardless of the
+                                // order of peer responses
+                                if !download_set.contains(&new_tip.expected_next) {
+                                    debug!(
                                     ?new_tip,
                                     "adding new prospective tip, and removing any existing tips \
                                     in the new block hash list",
                                 );
-                                self.prospective_tips
-                                    .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                                self.prospective_tips.insert(new_tip);
+                                    self.prospective_tips
+                                        .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                                    self.prospective_tips.insert(new_tip);
+                                } else {
+                                    debug!(
+                                        ?new_tip,
+                                        "discarding prospective tip: already in download set"
+                                    );
+                                }
                             } else {
-                                debug!(
-                                    ?new_tip,
-                                    "discarding prospective tip: already in download set"
-                                );
+                                debug!("downloading response that extends only one block");
                             }
-                        } else {
-                            debug!("downloading response that extends only one block");
-                        }
 
-                        let prev_download_len = download_set.len();
-                        download_set.extend(unknown_hashes);
-                        let new_download_len = download_set.len();
-                        let new_hashes = new_download_len - prev_download_len;
-                        debug!(new_hashes, "added hashes to download set");
-                        metrics::histogram!("sync.extend.response.hash.count")
-                            .record(new_hashes as f64);
-                        let known_hashes = hashes.len() - unknown_hashes.len();
-                        peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
+                            let prev_download_len = download_set.len();
+                            download_set.extend(unknown_hashes);
+                            let new_download_len = download_set.len();
+                            let new_hashes = new_download_len - prev_download_len;
+                            debug!(new_hashes, "added hashes to download set");
+                            metrics::histogram!("sync.extend.response.hash.count")
+                                .record(new_hashes as f64);
+                            let known_hashes = hashes.len() - unknown_hashes.len();
+                            peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
+                        }
+                        Ok(_) => unreachable!("network returned wrong response"),
+                        // We ignore this error because we made multiple fanout requests.
+                        Err(e) => debug!(?e),
                     }
-                    Ok(_) => unreachable!("network returned wrong response"),
-                    // We ignore this error because we made multiple fanout requests.
-                    Err(e) => debug!(?e),
+                }
+                if answered {
+                    break;
                 }
             }
         }

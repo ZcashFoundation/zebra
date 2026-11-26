@@ -104,7 +104,7 @@ fn ensure_timeouts_consistent() {
     assert!(
         FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT < TIPS_RESPONSE_TIMEOUT / 3,
         "waiting for a busy serving peer should leave most of the tips response timeout \
-         for the peer's answer, because timed out tip extensions are not retried"
+         for the peer's answer, because each timed out tip extension round costs a full timeout"
     );
 
     // The default peer crawler interval should be at least
