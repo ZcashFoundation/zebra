@@ -415,6 +415,114 @@ fn early_relay_retains_large_small_transaction_blocks() {
     assert!(crate::request::block_wire_and_retained_bytes(&block, &[]).1 <= MAX_RETAINED_BYTES);
 }
 
+/// Returns `block` with `transaction` added, and its header committed and solved again, as
+/// `mining_rejection::candidate` builds it.
+async fn with_transaction(
+    read: &ReadStateService,
+    block: &Block,
+    transaction: zebra_chain::transaction::Transaction,
+) -> Arc<Block> {
+    use tower::ServiceExt;
+
+    let crate::ReadResponse::ChainInfo(info) = read
+        .clone()
+        .oneshot(crate::ReadRequest::ChainInfo)
+        .await
+        .unwrap()
+    else {
+        panic!("state returns template context");
+    };
+    let mut block = block.clone();
+    block.transactions.push(Arc::new(transaction));
+    Arc::make_mut(&mut block.header).merkle_root =
+        block.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut block.header).commitment_bytes = <[u8; 32]>::from(
+        block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &info
+                .chain_history_root
+                .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+            &block.auth_data_root(),
+        ),
+    )
+    .into();
+    let target = info.expected_difficulty.to_expanded().unwrap();
+    // Regtest disables Equihash, but the block still meets its proof of work target.
+    (0u32..100_000)
+        .find(|nonce| {
+            let mut bytes = [0; 32];
+            bytes[..4].copy_from_slice(&nonce.to_le_bytes());
+            Arc::make_mut(&mut block.header).nonce = bytes.into();
+            block.hash() <= target
+        })
+        .expect("the regtest target is reached within the bounded nonce search");
+    Arc::new(block)
+}
+
+/// A body with a transaction that has no inputs, or one that has no outputs, is authenticated but
+/// not published or reserved, so a sibling with the same parent is still published.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_relay_publishes_only_blocks_whose_transactions_have_inputs_and_outputs() {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+
+    use crate::service::tests::mining_rejection::{candidate, state};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (_state, read) = state(false).await;
+        let cache = read.early_relay.cache();
+        let block = candidate(&read, false, 0).await;
+        let input = transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: [8; 32].into(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[0x51; 100]),
+            sequence: u32::MAX,
+        };
+        let output = transparent::Output::new(
+            Amount::<NonNegative>::try_from(1).unwrap(),
+            transparent::Script::new(&[0x51; 100]),
+        );
+        for (inputs, outputs) in [(vec![input], Vec::new()), (Vec::new(), vec![output])] {
+            let transaction = Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                inputs,
+                outputs,
+                LockTime::unlocked(),
+                block::Height(0),
+            );
+            let malformed = with_transaction(&read, &block, transaction).await;
+            let guard = read
+                .clone()
+                .early_relay(malformed.clone(), false, true, EarlyRelayOrigin::Peer)
+                .await
+                .unwrap();
+            assert!(guard.is_some(), "the body is still authenticated");
+            assert!(cache.get(&malformed.hash()).is_none());
+            assert!(read.early_relay.entry.borrow().is_none());
+            assert!(read.early_relay.reservation.borrow().is_none());
+            assert_eq!(*cache.subscribe().borrow(), None);
+        }
+
+        let guard = read
+            .clone()
+            .early_relay(block.clone(), false, true, EarlyRelayOrigin::Peer)
+            .await
+            .unwrap();
+        assert!(guard.is_some());
+        assert!(
+            cache.get(&block.hash()).is_some(),
+            "a sibling with the same parent is published"
+        );
+    })
+    .await
+    .expect("early relay authentication finishes");
+}
+
 #[tokio::test(start_paused = true)]
 async fn early_relay_rejections_survive_time_and_competing_hashes() {
     let (state, cache, _snapshot, block) = cache();

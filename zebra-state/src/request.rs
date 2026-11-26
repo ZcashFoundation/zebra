@@ -1174,7 +1174,8 @@ pub enum Request {
     ///
     /// The caller must first check PoW/Equihash, size, cheap structure/resource limits, transaction
     /// Merkle root, duplicates, and branch consistency. Returns [`Response::EarlyRelay`]; only
-    /// current-best-tip children can be cached, and only while an early-relay subscription exists.
+    /// current-best-tip children whose transactions each have an input and an output can be
+    /// cached, and only while an early-relay subscription exists.
     EarlyRelay {
         /// The immutable block whose transaction authorization commitment must be checked.
         block: Arc<Block>,
