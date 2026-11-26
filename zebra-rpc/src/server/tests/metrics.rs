@@ -159,6 +159,37 @@ async fn start_test_rpc_server(
     (addr, server_handle, parked_started, parked_release)
 }
 
+fn assert_connection_metrics(
+    recorder: &TestMetricsRecorder,
+    active: f64,
+    max_active: f64,
+    rejected: Option<u64>,
+) {
+    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(active));
+    assert_eq!(
+        recorder.gauge_max("rpc.connections.active", &[]),
+        Some(max_active)
+    );
+    assert_eq!(
+        recorder.counter("rpc.connections.rejected.total", &[]),
+        rejected
+    );
+}
+
+fn assert_payload_histograms(
+    recorder: &TestMetricsRecorder,
+    req_bytes: &[f64],
+    resp_bytes: &[f64],
+    batch_sizes: &[f64],
+) {
+    assert_eq!(recorder.histogram("rpc.request.size_bytes", &[]), req_bytes);
+    assert_eq!(
+        recorder.histogram("rpc.response.size_bytes", &[]),
+        resp_bytes
+    );
+    assert_eq!(recorder.histogram("rpc.batch.size", &[]), batch_sizes);
+}
+
 #[tokio::test]
 async fn json_rpc_server_tracks_active_connections_and_429_rejections() {
     let _init_guard = zebra_test::init();
@@ -171,40 +202,28 @@ async fn json_rpc_server_tracks_active_connections_and_429_rejections() {
     let first = tokio::spawn(send_raw_http_post(addr, park_req));
     parked_started.notified().await;
 
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
+    assert_connection_metrics(&recorder, 1.0, 1.0, None);
     assert_eq!(recorder.gauge("rpc.active_requests", &[]), Some(1.0));
 
     // Second concurrent request exceeds `max_connections = 1` and gets HTTP 429.
     let ping_req = r#"{"jsonrpc":"2.0","method":"ping","params":[],"id":2}"#;
     let (status_429, _body_429) = send_raw_http_post(addr, ping_req).await;
     assert_eq!(status_429, 429);
-    assert_eq!(
-        recorder.counter("rpc.connections.rejected.total", &[]),
-        Some(1)
-    );
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
-    assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
-    assert!(recorder.histogram("rpc.request.size_bytes", &[]).is_empty());
-    assert!(recorder
-        .histogram("rpc.response.size_bytes", &[])
-        .is_empty());
-    assert!(recorder.histogram("rpc.batch.size", &[]).is_empty());
+    assert_connection_metrics(&recorder, 1.0, 1.0, Some(1));
+    assert_payload_histograms(&recorder, &[], &[], &[]);
 
     // Release parked request and verify cleanup + single-request payload sizes.
     parked_release.notify_one();
     let (status_ok, body_ok) = first.await.unwrap();
     assert_eq!(status_ok, 200);
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
+    assert_connection_metrics(&recorder, 0.0, 1.0, Some(1));
     assert_eq!(recorder.gauge("rpc.active_requests", &[]), Some(0.0));
-    assert_eq!(
-        recorder.histogram("rpc.request.size_bytes", &[]),
-        vec![park_req.len() as f64]
+    assert_payload_histograms(
+        &recorder,
+        &[park_req.len() as f64],
+        &[body_ok.len() as f64],
+        &[],
     );
-    assert_eq!(
-        recorder.histogram("rpc.response.size_bytes", &[]),
-        vec![body_ok.len() as f64]
-    );
-    assert!(recorder.histogram("rpc.batch.size", &[]).is_empty());
 
     let _ = server_handle.stop();
 }
@@ -222,14 +241,11 @@ async fn json_rpc_server_records_batch_and_payload_size_histograms() {
     let (batch_status, batch_resp) = send_raw_http_post(addr, &batch_req).await;
 
     assert_eq!(batch_status, 200);
-    assert_eq!(recorder.histogram("rpc.batch.size", &[]), vec![2.0]);
-    assert_eq!(
-        recorder.histogram("rpc.request.size_bytes", &[]),
-        vec![batch_req.len() as f64]
-    );
-    assert_eq!(
-        recorder.histogram("rpc.response.size_bytes", &[]),
-        vec![batch_resp.len() as f64]
+    assert_payload_histograms(
+        &recorder,
+        &[batch_req.len() as f64],
+        &[batch_resp.len() as f64],
+        &[2.0],
     );
     assert_eq!(
         recorder.counter(
@@ -258,8 +274,7 @@ async fn json_rpc_server_tracks_persistent_keep_alive_and_concurrent_connections
     for _ in 0..2 {
         let (status, _) = send_keep_alive_http_post(&mut keep_alive, addr, ping_req).await;
         assert_eq!(status, 200);
-        assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
-        assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
+        assert_connection_metrics(&recorder, 0.0, 1.0, None);
     }
 
     let park_req = r#"{"jsonrpc":"2.0","method":"park","params":[],"id":2}"#;
@@ -268,35 +283,25 @@ async fn json_rpc_server_tracks_persistent_keep_alive_and_concurrent_connections
         (keep_alive, status, body)
     });
     parked_started.notified().await;
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
+    assert_connection_metrics(&recorder, 1.0, 1.0, None);
 
     let mut second = TcpStream::connect(addr)
         .await
         .expect("should connect second persistent HTTP stream");
     let (status_429, _) = send_keep_alive_http_post(&mut second, addr, ping_req).await;
     assert_eq!(status_429, 429);
-    assert_eq!(
-        recorder.counter("rpc.connections.rejected.total", &[]),
-        Some(1)
-    );
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(1.0));
-    assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
+    assert_connection_metrics(&recorder, 1.0, 1.0, Some(1));
 
     parked_release.notify_one();
     let (mut keep_alive, status_ok, _) = first.await.unwrap();
     assert_eq!(status_ok, 200);
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
+    assert_connection_metrics(&recorder, 0.0, 1.0, Some(1));
 
     let (reuse_first, _) = send_keep_alive_http_post(&mut keep_alive, addr, ping_req).await;
     assert_eq!(reuse_first, 200);
     let (reuse_second, _) = send_keep_alive_http_post(&mut second, addr, ping_req).await;
     assert_eq!(reuse_second, 200);
-    assert_eq!(recorder.gauge("rpc.connections.active", &[]), Some(0.0));
-    assert_eq!(recorder.gauge_max("rpc.connections.active", &[]), Some(1.0));
-    assert_eq!(
-        recorder.counter("rpc.connections.rejected.total", &[]),
-        Some(1)
-    );
+    assert_connection_metrics(&recorder, 0.0, 1.0, Some(1));
 
     let _ = server_handle.stop();
 }
