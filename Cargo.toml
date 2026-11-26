@@ -155,7 +155,7 @@ serde-big-array = "0.5"
 serde_json = "1.0.140"
 serde_with = "3.12"
 sha2 = "0.10"
-sinsemilla = "0.2"
+sinsemilla = "0.2.1"
 siphasher = "1.0"
 schemars = "1"
 spandoc = "0.2"
@@ -412,4 +412,3 @@ orchard = { git = "https://github.com/upbqdn/orchard", rev = "2ea5fef78e9642636d
 pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "62f83c889634e10a6f0c34cf3e69d0e2f4e05b38" }
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "9d272a0f08def464067673cf92edbe1a0d01986e" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
-sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "3e175751a626e99a449b7ffe44631a44e6875dd4" }
