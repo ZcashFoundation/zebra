@@ -1798,6 +1798,19 @@
       }
     },
     {
+      "name": "sync.already.rejected.dropped.block.hash.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block hashes the syncer ignored because a compact relay peer already sent that block, and it failed validation after its early relay checks.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_already_rejected_dropped_block_hash_count"
+        ]
+      }
+    },
+    {
       "name": "sync.block.download.duration_seconds",
       "kind": "histogram",
       "unit": "seconds",

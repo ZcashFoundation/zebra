@@ -206,6 +206,12 @@ fn describe_sync() {
         "Block hashes the syncer ignored because they were already queued for download."
     );
     describe_counter!(
+        "sync.already.rejected.dropped.block.hash.count",
+        Unit::Count,
+        "Block hashes the syncer ignored because a compact relay peer already sent that block, \
+         and it failed validation after its early relay checks."
+    );
+    describe_counter!(
         "sync.no.height.dropped.block.count",
         Unit::Count,
         "Downloaded blocks dropped because they have no coinbase height."

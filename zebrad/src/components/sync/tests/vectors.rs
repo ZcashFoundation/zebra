@@ -4286,3 +4286,107 @@ fn infrastructure_verification_errors_restart_sync() {
         assert!(TestChainSync::should_restart_sync(&error), "{error:?}");
     }
 }
+
+/// A block from a peer that negotiated compact block relay, which passed the checks that
+/// authenticate it for early relay and then failed later validation, isn't downloaded or verified
+/// again, by the syncer's retry or by a later request. Refusing it doesn't restart the sync, or
+/// stop the rest of a batch from being queued.
+#[tokio::test(start_paused = true)]
+async fn rejected_early_relay_block_is_not_downloaded_again() {
+    let _init_guard = zebra_test::init();
+
+    let rejected: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let other: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let rejected_hash = rejected.hash();
+    let other_hash = other.hash();
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    let blocks = [rejected.clone(), other.clone()];
+    let network = tower::service_fn(move |request| {
+        let zn::Request::BlockDownload { hash, .. } = request else {
+            panic!("no tip requests are needed without prospective tips");
+        };
+        let block = blocks.iter().find(|block| block.hash() == hash).unwrap();
+        futures::future::ok::<_, crate::BoxError>(zn::Response::EarlyBlocks(vec![Available((
+            block.clone(),
+            Some(advertiser),
+        ))]))
+    });
+    let mut verifier = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
+    let mut read_state = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        verifier.clone(),
+        MockService::build().for_unit_tests(),
+        read_state.clone(),
+        tip,
+        misbehavior_tx,
+    );
+    chain_sync.full_verify_concurrency_limit = 1;
+
+    chain_sync
+        .request_blocks([rejected_hash].into_iter().collect())
+        .await
+        .unwrap();
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(rejected.clone()))
+        .await
+        .respond_error(crate::BoxError::from(RouterError::from(
+            VerifyBlockError::Transaction(TransactionError::BadBalance),
+        )));
+    read_state
+        .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(
+            rejected.clone(),
+        ))
+        .await
+        .respond(zs::ReadResponse::ValidBestTipBlockCommitments);
+
+    // The syncer retries blocks with invalid transactions, but the downloader refuses this one.
+    let extra = tokio::time::timeout(
+        MAX_SERVICE_REQUEST_DELAY,
+        chain_sync.try_to_sync_once(Default::default()),
+    )
+    .await
+    .expect("handling the failed block must not wait for a download")
+    .expect("a refused block must not restart the sync round");
+    assert!(extra.is_empty());
+    assert!(chain_sync.reobtain_hashes.is_empty());
+    assert_eq!(chain_sync.downloads.in_flight(), 0);
+    assert!(
+        misbehavior_rx.try_recv().is_err(),
+        "the first later failure on a parent must not score the peer",
+    );
+
+    // A later request skips the refused block, and queues the rest of its batch.
+    chain_sync.full_verify_concurrency_limit = 2;
+    let extra = chain_sync
+        .request_blocks([rejected_hash, other_hash].into_iter().collect())
+        .await
+        .expect("a refused block must not stop the batch");
+    assert!(extra.is_empty());
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+    let _other_verification = verifier
+        .expect_request(zebra_consensus::Request::Commit(other.clone()))
+        .await;
+    verifier.expect_no_requests().await;
+
+    assert!(!TestChainSync::should_restart_sync(
+        &BlockDownloadVerifyError::AlreadyRejected {
+            hash: rejected_hash
+        }
+    ));
+
+    chain_sync.downloads.cancel_all();
+}

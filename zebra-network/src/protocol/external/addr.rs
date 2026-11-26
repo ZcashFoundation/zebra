@@ -11,8 +11,7 @@ pub mod in_version;
 pub(crate) mod v1;
 pub(crate) mod v2;
 
-pub(crate) use canonical::connection_limit_key;
-pub use canonical::{canonical_peer_addr, canonical_socket_addr};
+pub use canonical::{canonical_peer_addr, canonical_socket_addr, connection_limit_key};
 pub use in_version::AddrInVersion;
 
 // These types and functions should only be visible in the `external` module,

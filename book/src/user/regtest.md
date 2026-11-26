@@ -136,8 +136,18 @@ fee or contextual check, Zebra rejects the block without penalising the peer,
 as the ZIP's peer misbehaviour rules require. Zebra checks the block while it
 verifies it, if the block's parent is the best tip. If the block fails before
 its parent is the best tip, Zebra waits up to 30 seconds for the parent. Zebra
-then ignores later announcements of the rejected block, instead of verifying it
-again.
+then ignores the rejected block's hash, whether a peer announces it or Zebra
+finds it while syncing, instead of downloading and verifying the block again.
+
+A peer gets at most one unpenalised later failure per parent block for the
+blocks that it announces, and one for the blocks that Zebra downloads from it
+while syncing. Any other later failure from that peer on the same parent is
+penalised as it would be without compact block relay. Peers are grouped as they
+are for bans, so an IPv4 address, or an IPv6 `/64`, counts as one peer. On
+networks with a minimum difficulty rule, like Testnet, the early relay checks
+can cost very little proof of work, so this limits the invalid blocks that a
+peer can make Zebra verify without being penalised. Valid blocks don't fail
+later validation, so they never use the allowance.
 
 Zebra still penalises the peer for a block that fails the early relay checks,
 or whose parent doesn't become Zebra's best tip in that time, because Zebra

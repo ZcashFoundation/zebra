@@ -2749,3 +2749,163 @@ async fn early_block_with_an_invalid_transaction_does_not_score_serving_peer(
 
     Ok(())
 }
+
+/// A peer gets at most one unpenalized later failure per parent block. So a second block on the
+/// same parent from the same peer, which passes the checks that authenticate it for early relay and
+/// then fails later validation, scores the peer. So does the same block again, once the downloader
+/// has forgotten it. A failure from another peer on the same parent, or from the same peer on a new
+/// parent, doesn't.
+#[tokio::test(flavor = "multi_thread")]
+async fn second_early_block_failure_on_the_same_parent_scores_serving_peer() -> Result<(), BoxError>
+{
+    use zebra_chain::{
+        parameters::NetworkUpgrade,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let network = regtest_with_nu5();
+    let (state, read, latest_chain_tip) = state_with_regtest_genesis(&network).await?;
+    let (block_verifier, _verifier_called) = failing_block_verifier(|| {
+        VerifyBlockError::Transaction(TransactionError::BadBalance).into()
+    });
+    let (inbound, mut peer_set, _mempool, mut misbehavior) =
+        setup_with_mock_mempool(block_verifier, state.clone(), latest_chain_tip).await;
+    let mut inbound = inbound.with_compact_relay(network, read.clone());
+
+    // Different transactions make different children of the best tip.
+    let shielded = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Block>()?
+        .transactions
+        .into_iter()
+        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+        .unwrap();
+    let no_inputs = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        vec![transparent::Output::new(
+            Amount::try_from(1).unwrap(),
+            transparent::Script::new(&[0x51]),
+        )],
+        LockTime::unlocked(),
+        Height(0),
+    ));
+    let first = child_of_best_tip(&read, vec![shielded.clone()]).await?;
+    let sibling = child_of_best_tip(&read, vec![no_inputs.clone()]).await?;
+    let other_sibling = child_of_best_tip(&read, vec![shielded.clone(), no_inputs]).await?;
+
+    let peer = PeerSocketAddr::from(([192, 168, 180, 22], 10_000));
+    let other_peer = PeerSocketAddr::from(([192, 168, 180, 23], 10_000));
+
+    assert_eq!(
+        serve_failing_early_block(
+            &mut inbound,
+            &mut peer_set,
+            &mut misbehavior,
+            first.clone(),
+            peer,
+        )
+        .await?,
+        None,
+        "the first failure must not score the peer",
+    );
+
+    // The downloader ignores the rejected block's hash.
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::AdvertiseBlock(first.hash(), Some(peer)))
+        .await?;
+    assert_eq!(response, Response::Nil);
+    peer_set.expect_no_requests().await;
+    assert!(
+        misbehavior.try_recv().is_err(),
+        "an ignored block must not score the peer",
+    );
+
+    // Once the downloader has forgotten the block, the same block again is another failure.
+    let Setup::Initialized {
+        block_downloads, ..
+    } = &mut inbound.setup
+    else {
+        panic!("the inbound service must be initialized after serving a block");
+    };
+    block_downloads.forget_rejected_early_blocks();
+    assert_eq!(
+        serve_failing_early_block(&mut inbound, &mut peer_set, &mut misbehavior, first, peer)
+            .await?,
+        Some((peer, 100)),
+        "the same block again on the same parent must score the peer",
+    );
+
+    assert_eq!(
+        serve_failing_early_block(&mut inbound, &mut peer_set, &mut misbehavior, sibling, peer)
+            .await?,
+        Some((peer, 100)),
+        "a second block on the same parent must score the peer",
+    );
+    assert_eq!(
+        serve_failing_early_block(
+            &mut inbound,
+            &mut peer_set,
+            &mut misbehavior,
+            other_sibling,
+            other_peer,
+        )
+        .await?,
+        None,
+        "another peer's failure on the same parent must not score that peer",
+    );
+
+    // Another block becomes the best tip, so the peer has an allowance for its children.
+    let parent = child_of_best_tip(&read, Vec::new()).await?;
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            parent.into(),
+        ))
+        .await?;
+    let child = child_of_best_tip(&read, vec![shielded]).await?;
+    assert_eq!(
+        serve_failing_early_block(&mut inbound, &mut peer_set, &mut misbehavior, child, peer)
+            .await?,
+        None,
+        "a failure on a new parent must not score the peer",
+    );
+
+    Ok(())
+}
+
+/// Advertises `block` from `peer`, serves it to the download task on a connection that negotiated
+/// compact block relay, and returns the address and score of the misbehaviour report for it, if
+/// there is one.
+///
+/// The inbound service's block verifier must fail the block.
+async fn serve_failing_early_block(
+    inbound: &mut Inbound,
+    peer_set: &mut MockService<Request, Response, PanicAssertion>,
+    misbehavior: &mut tokio::sync::mpsc::Receiver<MisbehaviorReport>,
+    block: Arc<Block>,
+    peer: PeerSocketAddr,
+) -> Result<Option<(PeerSocketAddr, u32)>, BoxError> {
+    let hash = block.hash();
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::AdvertiseBlock(hash, Some(peer)))
+        .await?;
+    assert_eq!(response, Response::Nil);
+
+    peer_set
+        .expect_request(Request::BlockDownload {
+            hash,
+            advertiser: Some(peer),
+        })
+        .await
+        .respond(Response::EarlyBlocks(vec![Available((block, Some(peer)))]));
+
+    let report = poll_for_misbehavior_report(inbound, misbehavior).await;
+    Ok(report.map(|report| (report.addr, report.score)))
+}

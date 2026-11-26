@@ -1451,3 +1451,171 @@ async fn later_failure_before_the_parent_is_the_best_tip_is_not_attributed() {
 
     state.expect_no_requests().await;
 }
+
+/// A peer gets at most one unpenalized later failure per parent block. So a second block on the
+/// same parent from the same peer, which passes the checks that authenticate it for early relay and
+/// then fails later validation, is attributed to the peer, even after a sync restart. A failure on
+/// another parent, and a failure from another peer on the same parent, aren't attributed.
+///
+/// The downloader refuses to download these blocks again. Once it has forgotten a block, the same
+/// block again from the same peer is attributed.
+#[tokio::test(start_paused = true)]
+async fn second_later_failure_on_the_same_parent_is_attributed() {
+    use crate::components::inbound::downloads::MAX_REJECTED_EARLY_BLOCKS;
+
+    let _init_guard = zebra_test::init();
+
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let other_peer: PeerSocketAddr = "127.0.0.2:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+
+    // Blocks with different hashes, on the same parent or on another one.
+    let with_header = |change: &dyn Fn(&mut block::Header)| {
+        let mut block = (*block_1()).clone();
+        change(Arc::make_mut(&mut block.header));
+        Arc::new(block)
+    };
+    let block = block_1();
+    let sibling = with_header(&|header| header.nonce.0[0] ^= 1);
+    let other_sibling = with_header(&|header| header.nonce.0[0] ^= 2);
+    let other_parent = with_header(&|header| header.previous_block_hash = block::Hash([1; 32]));
+    assert_eq!(
+        sibling.header.previous_block_hash,
+        block.header.previous_block_hash
+    );
+    assert_ne!(sibling.hash(), block.hash());
+    assert_ne!(other_sibling.hash(), sibling.hash());
+
+    // A description, the block, the peer that sends it, and whether the failure is attributed.
+    let cases = [
+        ("first failure", &block, advertiser, false),
+        ("same peer and parent", &sibling, advertiser, true),
+        ("another peer", &other_sibling, other_peer, false),
+        ("another parent", &other_parent, advertiser, false),
+    ];
+
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    for (case, block, peer, attributed) in cases {
+        assert_eq!(
+            serve_failing_early_block(
+                &mut downloads,
+                &mut network,
+                &mut verifier,
+                &mut state,
+                block,
+                peer,
+            )
+            .await,
+            attributed.then_some(peer),
+            "{case}",
+        );
+
+        // A sync restart keeps the allowances that peers have used, and the rejected blocks.
+        downloads.cancel_all();
+    }
+
+    // The downloader refuses the rejected blocks, without downloading or verifying them again.
+    for (_case, block, _peer, _attributed) in cases {
+        let hash = block.hash();
+        assert!(
+            matches!(
+                downloads.download_and_verify(hash).await,
+                Err(BlockDownloadVerifyError::AlreadyRejected { hash: rejected }) if rejected == hash
+            ),
+            "a rejected block must not be downloaded again",
+        );
+    }
+    assert!(downloads.is_empty());
+    network.expect_no_requests().await;
+    verifier.expect_no_requests().await;
+
+    // More blocks from the same peer on the same parent fill the downloader's rejected blocks, so
+    // it forgets the first block. These failures don't use an allowance, because they are scored.
+    for n in 0..MAX_REJECTED_EARLY_BLOCKS {
+        let n = u16::try_from(n + 1).expect("the number of rejected blocks is small");
+        let filler = with_header(&|header| {
+            header.nonce.0[0] ^= 4;
+            header.nonce.0[1] ^= n.to_le_bytes()[0];
+            header.nonce.0[2] ^= n.to_le_bytes()[1];
+        });
+        assert_eq!(
+            serve_failing_early_block(
+                &mut downloads,
+                &mut network,
+                &mut verifier,
+                &mut state,
+                &filler,
+                advertiser,
+            )
+            .await,
+            Some(advertiser),
+            "another block on the same parent",
+        );
+    }
+    assert_eq!(
+        serve_failing_early_block(
+            &mut downloads,
+            &mut network,
+            &mut verifier,
+            &mut state,
+            &block,
+            advertiser,
+        )
+        .await,
+        Some(advertiser),
+        "the same block again on the same parent, once it is forgotten",
+    );
+
+    state.expect_no_requests().await;
+}
+
+/// Downloads `block` from `peer` on a connection that negotiated compact block relay, fails it
+/// with a later validation failure after it passes the checks that authenticate it for early relay,
+/// and returns the peer that the failure is attributed to.
+async fn serve_failing_early_block(
+    downloads: &mut Downloads<MockNetwork, MockVerifier, MockState, MockChainTip>,
+    network: &mut MockNetwork,
+    verifier: &mut MockVerifier,
+    state: &mut MockState,
+    block: &Arc<Block>,
+    peer: PeerSocketAddr,
+) -> Option<PeerSocketAddr> {
+    use zebra_consensus::{error::TransactionError, router::RouterError, VerifyBlockError};
+
+    let hash = block.hash();
+    downloads
+        .download_and_verify(hash)
+        .await
+        .expect("download is queued");
+
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::EarlyBlocks(vec![Available((
+            block.clone(),
+            Some(peer),
+        ))]));
+
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .respond_error(zn::BoxError::from(RouterError::from(
+            VerifyBlockError::Transaction(TransactionError::BadBalance),
+        )));
+
+    state
+        .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(block.clone()))
+        .await
+        .respond(zs::ReadResponse::ValidBestTipBlockCommitments);
+
+    match downloads.next().await.expect("downloads is non-empty") {
+        Err(BlockDownloadVerifyError::Invalid {
+            advertiser_addr, ..
+        }) => advertiser_addr,
+        result => panic!("the block must fail verification, got: {result:?}"),
+    }
+}

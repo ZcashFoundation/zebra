@@ -203,7 +203,9 @@ pub use crate::{
     },
     policies::RetryLimit,
     protocol::{
-        external::{compact, Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},
+        external::{
+            compact, connection_limit_key, Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE,
+        },
         internal::{InventoryResponse, Request, Response},
     },
 };

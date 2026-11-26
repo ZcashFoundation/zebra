@@ -153,25 +153,113 @@ const EARLY_RELAY_PARENT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often to check whether that parent has become the best tip.
 const EARLY_RELAY_PARENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// The maximum number of blocks from peers that negotiated compact block relay that the gossiped
-/// block downloader remembers as invalid, after they passed the checks that authenticate them for
-/// early relay.
+/// The maximum number of blocks from peers that negotiated compact block relay that a block
+/// downloader remembers as invalid, after they passed the checks that authenticate them for early
+/// relay.
 ///
-/// Each of these blocks has valid proof of work at the expected difficulty, as a child of the
-/// best tip, so there are only a few of them. The limit bounds their memory on networks where
-/// that proof of work is cheap.
-const MAX_REJECTED_EARLY_BLOCKS: usize = 100;
+/// Each of these blocks has valid proof of work at the expected difficulty, as a child of the best
+/// tip, and the limit bounds their memory on networks where that proof of work is cheap. It is the
+/// same as [`MAX_EARLY_RELAY_ALLOWANCES`], so forgetting a block takes at least as many later
+/// failures as forgetting an allowance. Each hash takes about 50 bytes.
+pub(crate) const MAX_REJECTED_EARLY_BLOCKS: usize = MAX_EARLY_RELAY_ALLOWANCES;
+
+/// The maximum number of peer groups and parent blocks that a block downloader remembers in its
+/// [`EarlyRelayAllowances`].
+///
+/// While a block is the best tip, each entry for it comes from a different peer group. So a peer
+/// group's entry is only evicted, which gives the group another allowance for the same parent,
+/// after this many other peer groups or later parents have used theirs. That is five times the 200
+/// peers that Zebra connects to with its default configuration. Each entry takes less than 100
+/// bytes.
+const MAX_EARLY_RELAY_ALLOWANCES: usize = 1_000;
+
+/// The peer groups that a block downloader didn't score for a later validation failure of a block
+/// from a connection that negotiated compact block relay, after the block passed the checks that
+/// authenticate it for early relay, with the parent of that block.
+///
+/// # Security
+///
+/// The draft Compact Block Relay ZIP says that a node must not penalize the peer for such a block.
+/// On networks where the minimum difficulty rule makes the early relay checks cheap, like Testnet,
+/// an unbounded exemption would let a peer make the node verify invalid blocks without ever being
+/// scored. So a peer gets at most one unpenalized later failure per parent block, and any other
+/// later failure on that parent scores the peer as if there was no exemption.
+///
+/// Each downloader remembers the hashes of these blocks, and doesn't download them again, so it
+/// doesn't ask a peer for a block that has already failed. An honest peer relays a block early
+/// once its parent is the peer's best tip. Valid blocks never fail later validation, including a
+/// valid sibling relayed during a race, so they never use the allowance.
+///
+/// Peers are grouped by [`zn::connection_limit_key()`], like connection limits and bans, so a peer
+/// doesn't get another allowance by reconnecting from another port or from another address in its
+/// IPv6 `/64`. Each block downloader has its own allowances.
+#[derive(Debug, Default)]
+pub(crate) struct EarlyRelayAllowances {
+    /// The peer groups and parent blocks that have used their allowance, oldest first.
+    ///
+    /// Size-bounded by [`MAX_EARLY_RELAY_ALLOWANCES`].
+    used: IndexSet<(IpAddr, block::Hash)>,
+}
+
+impl EarlyRelayAllowances {
+    /// Returns `true` if the group of `peer` can send a child of `parent` that failed later
+    /// validation without being scored, and uses the group's allowance for `parent`.
+    ///
+    /// That is the case if the group hasn't used its allowance for `parent`. Returns `false` if it
+    /// has, so the failure must score the peer.
+    pub(crate) fn try_use(&mut self, peer: PeerSocketAddr, parent: block::Hash) -> bool {
+        if !self
+            .used
+            .insert((zn::connection_limit_key(peer.ip()), parent))
+        {
+            return false;
+        }
+
+        if self.used.len() > MAX_EARLY_RELAY_ALLOWANCES {
+            self.used.shift_remove_index(0);
+        }
+
+        true
+    }
+}
+
+/// Remembers `hash`, the hash of a block from a peer that negotiated compact block relay, which
+/// passed the checks that authenticate it for early relay and then failed later validation, in
+/// `rejected`, a block downloader's list of those hashes, oldest first.
+///
+/// The block's hash commits to its transactions and their authorizing data, so the downloader
+/// ignores the hash instead of verifying the same invalid block again. Forgets the oldest hash
+/// once there are more than [`MAX_REJECTED_EARLY_BLOCKS`].
+pub(crate) fn remember_rejected_early_block(
+    rejected: &mut IndexSet<block::Hash>,
+    hash: block::Hash,
+) {
+    if rejected.insert(hash) && rejected.len() > MAX_REJECTED_EARLY_BLOCKS {
+        rejected.shift_remove_index(0);
+    }
+}
 
 /// A block from a peer that negotiated compact block relay failed later validation, after it passed
 /// the checks that authenticate it for early relay.
 ///
 /// The draft Compact Block Relay ZIP says that a node must not penalize the peer for this block, so
-/// the gossiped block downloader doesn't attribute this error to the peer. The block's hash commits
-/// to its transactions and their authorizing data, so the downloader also ignores the hash after
-/// this error.
+/// the gossiped block downloader doesn't attribute this error to the peer, if the peer has an
+/// allowance for the block's parent in its [`EarlyRelayAllowances`]. Otherwise, it attributes the
+/// wrapped error to the peer. The block's hash commits to its transactions and their authorizing
+/// data, so the downloader also ignores the hash after this error.
 #[derive(Debug, Error)]
-#[error("block failed later validation after it was authenticated for early relay: {0}")]
-pub struct AuthenticatedBlockRejected(#[source] BoxError);
+#[error("block failed later validation after it was authenticated for early relay: {error}")]
+pub struct AuthenticatedBlockRejected {
+    /// The block verifier's error.
+    #[source]
+    error: BoxError,
+
+    /// The peer that sent the block.
+    peer: PeerSocketAddr,
+
+    /// The block's parent.
+    parent: block::Hash,
+}
 
 /// Returns `true` if `error` scores the peer that sent a block, and the block verifier only
 /// returns it after the block passed the verifier's part of the checks that authenticate a block
@@ -193,8 +281,9 @@ pub struct AuthenticatedBlockRejected(#[source] BoxError);
 /// - a miner fee failure, or
 /// - a state commit failure, except authorizing data that doesn't match the block's commitment.
 ///
-/// [`early_block_is_authenticated()`] asks the state for the rest of the early relay checks. Every
-/// other error keeps its score, including all the checkpoint verifier's errors.
+/// [`early_block_is_authenticated()`] asks the state for the rest of the early relay checks, and
+/// [`EarlyRelayAllowances`] bounds the failures that don't score a peer. Every other error keeps
+/// its score, including all the checkpoint verifier's errors.
 ///
 /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
 pub(crate) fn is_later_validation_failure(
@@ -272,7 +361,8 @@ where
 }
 
 /// Returns `true` if `block` at `height` passes the rest of the checks that authenticate it for
-/// early relay, so a later validation failure doesn't score the peer that sent it.
+/// early relay, so a later validation failure doesn't score the peer that sent it, if the peer has
+/// an allowance for the block's parent in its downloader's [`EarlyRelayAllowances`].
 ///
 /// `early_check` is the task from [`start_early_relay_check()`], if there is one. Otherwise the
 /// state checks the block now.
@@ -463,9 +553,14 @@ where
     /// checks that authenticate them for early relay and then failed later validation, oldest
     /// first.
     ///
-    /// The peers that sent these blocks aren't scored, so the downloader ignores their hashes
-    /// instead of verifying the blocks again. Size-bounded by [`MAX_REJECTED_EARLY_BLOCKS`].
+    /// Each of these hashes commits to its block's transactions and their authorizing data, so the
+    /// downloader ignores them instead of verifying the same invalid blocks again. See
+    /// [`remember_rejected_early_block()`].
     rejected_early_blocks: IndexSet<block::Hash>,
+
+    /// The peer groups that have used their allowance for a block on a parent, which passed the
+    /// checks that authenticate it for early relay and then failed later validation.
+    early_relay_allowances: EarlyRelayAllowances,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -495,22 +590,45 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let (result, hash) =
-                match join_result.expect("block download and verify tasks must not panic") {
-                    Ok(hash) => (Ok(hash), hash),
-                    Err((e, hash, advertiser_addr)) => {
-                        // The block's hash commits to its transactions and their authorizing
-                        // data, so a later advertisement of the hash is the same invalid block.
-                        if e.is::<AuthenticatedBlockRejected>()
-                            && this.rejected_early_blocks.insert(hash)
-                            && this.rejected_early_blocks.len() > MAX_REJECTED_EARLY_BLOCKS
-                        {
-                            this.rejected_early_blocks.shift_remove_index(0);
-                        }
+            let (result, hash) = match join_result
+                .expect("block download and verify tasks must not panic")
+            {
+                Ok(hash) => (Ok(hash), hash),
+                Err((e, hash, advertiser_addr)) => match e.downcast::<AuthenticatedBlockRejected>()
+                {
+                    Ok(rejected) => {
+                        remember_rejected_early_block(this.rejected_early_blocks, hash);
 
-                        (Err((e, advertiser_addr)), hash)
+                        if this
+                            .early_relay_allowances
+                            .try_use(rejected.peer, rejected.parent)
+                        {
+                            debug!(
+                                ?hash,
+                                peer = ?rejected.peer,
+                                error = ?rejected.error,
+                                "authenticated early relay block failed later validation: \
+                                 rejected it without scoring the peer",
+                            );
+
+                            let error: BoxError = rejected;
+                            (Err((error, None)), hash)
+                        } else {
+                            debug!(
+                                ?hash,
+                                peer = ?rejected.peer,
+                                error = ?rejected.error,
+                                "peer already sent a block on the same parent that failed \
+                                 later validation: scoring the peer",
+                            );
+
+                            let AuthenticatedBlockRejected { error, peer, .. } = *rejected;
+                            (Err((error, Some(peer))), hash)
+                        }
                     }
-                };
+                    Err(e) => (Err((e, advertiser_addr)), hash),
+                },
+            };
             if let Some((_, Some(ip))) = this.cancel_handles.remove(&hash) {
                 assert!(
                     this.in_flight_ips.remove(&ip),
@@ -568,6 +686,7 @@ where
             cancel_handles: HashMap::new(),
             in_flight_ips: HashSet::new(),
             rejected_early_blocks: IndexSet::new(),
+            early_relay_allowances: EarlyRelayAllowances::default(),
         }
     }
 
@@ -578,6 +697,14 @@ where
     pub fn with_read_state(mut self, read_state: zs::ReadStateService) -> Self {
         self.read_state = Some(read_state);
         self
+    }
+
+    /// Forgets the blocks that failed later validation after they passed the checks that
+    /// authenticate them for early relay, like the downloader does once it has remembered
+    /// [`MAX_REJECTED_EARLY_BLOCKS`] newer ones.
+    #[cfg(test)]
+    pub(super) fn forget_rejected_early_blocks(&mut self) {
+        self.rejected_early_blocks.clear();
     }
 
     /// Queue a block for download and verification.
@@ -834,11 +961,13 @@ where
             // relay must not be scored when a block that passes the ZIP's early relay checks fails
             // later validation. The verifier has run its part of those checks before it returns
             // a later validation failure, and the state runs the rest of them. Other blocks and
-            // failures keep their score.
+            // failures keep their score, and `poll_next()` scores the peer if it has already used
+            // its allowance for the block's parent.
             match (result, early_block, read_state) {
                 (Err((error, Some(advertiser_addr))), Some(block), Some(read_state))
                     if is_later_validation_failure(&*error) =>
                 {
+                    let parent = block.header.previous_block_hash;
                     if early_block_is_authenticated(
                         read_state,
                         latest_chain_tip,
@@ -848,15 +977,14 @@ where
                     )
                     .await
                     {
-                        debug!(
-                            ?hash,
-                            ?advertiser_addr,
-                            ?error,
-                            "authenticated early relay block failed later validation: \
-                             rejected it without scoring the peer",
-                        );
-
-                        Err((BoxError::from(AuthenticatedBlockRejected(error)), None))
+                        Err((
+                            BoxError::from(AuthenticatedBlockRejected {
+                                error,
+                                peer: advertiser_addr,
+                                parent,
+                            }),
+                            None,
+                        ))
                     } else {
                         Err((error, Some(advertiser_addr)))
                     }
