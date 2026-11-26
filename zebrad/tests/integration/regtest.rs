@@ -1574,3 +1574,42 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
 
     Ok(())
 }
+
+/// Checks that `getblockchaininfo` reports `initial_block_download_complete: true` and stops
+/// extrapolating `estimatedheight` on Regtest from genesis and after mining blocks.
+#[tokio::test]
+async fn regtest_getblockchaininfo_initial_block_download_complete() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
+
+    let genesis_info = client.blockchain_info().await?;
+    assert_eq!(genesis_info.blocks(), Height(0));
+    assert!(genesis_info.initial_block_download_complete());
+    assert_eq!(genesis_info.estimated_height(), Height(0));
+    assert_eq!(genesis_info.verification_progress(), 1.0);
+
+    client.generate(2).await?;
+
+    let mined_info = client.blockchain_info().await?;
+    assert_eq!(mined_info.blocks(), Height(2));
+    assert!(mined_info.initial_block_download_complete());
+    assert_eq!(mined_info.estimated_height(), Height(2));
+    assert_eq!(mined_info.verification_progress(), 1.0);
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}

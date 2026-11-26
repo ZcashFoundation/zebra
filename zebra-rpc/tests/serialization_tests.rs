@@ -136,6 +136,8 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
 
     let chain = obj.chain();
     let blocks = obj.blocks();
+    let initial_block_download_complete = obj.initial_block_download_complete();
+    assert!(initial_block_download_complete);
     let headers = obj.headers();
     let difficulty = obj.difficulty();
     let verification_progress = obj.verification_progress();
@@ -161,6 +163,7 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let new_obj = GetBlockchainInfoResponse::new(
         chain.clone(),
         blocks,
+        initial_block_download_complete,
         best_block_hash,
         estimated_height,
         chain_supply.clone(),
@@ -444,6 +447,23 @@ fn test_responses_without_nsm_value_balance() -> Result<(), Box<dyn std::error::
         panic!("a verbose getblock response is an object");
     };
     assert_eq!(*block.nsm_value_balance(), None);
+
+    Ok(())
+}
+
+/// Responses from older nodes that omit `initial_block_download_complete` deserialize as `false`.
+#[test]
+fn test_get_blockchain_info_without_initial_block_download_complete(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut value: serde_json::Value = serde_json::from_str(GET_BLOCKCHAIN_INFO_RESPONSE)?;
+    value
+        .as_object_mut()
+        .expect("the response is a JSON object")
+        .remove("initial_block_download_complete")
+        .expect("the test vector has `initial_block_download_complete`");
+
+    let info: GetBlockchainInfoResponse = serde_json::from_value(value)?;
+    assert!(!info.initial_block_download_complete());
 
     Ok(())
 }

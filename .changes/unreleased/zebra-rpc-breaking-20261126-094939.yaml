@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`client::GetBlockchainInfoResponse::new` takes a new `initial_block_download_complete: bool` parameter after `blocks`. ([#12643](https://github.com/ZcashFoundation/zebra/issues/12643))'
+time: 2026-11-26T09:49:39.937073079Z

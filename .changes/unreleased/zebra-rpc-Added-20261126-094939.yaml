@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `client::GetBlockchainInfoResponse::initial_block_download_complete` for the `initial_block_download_complete` field of `getblockchaininfo` responses. Responses from older nodes that omit the field deserialize as `false`. ([#12643](https://github.com/ZcashFoundation/zebra/issues/12643))
+time: 2026-11-26T09:49:39.940263341Z

@@ -36,7 +36,10 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     ops::RangeInclusive,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -114,8 +117,8 @@ use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
     get_block_template::{
         constants::{
-            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
-            ZCASHD_FUNDING_STREAM_ORDER,
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MAX_TIME_SINCE_CHAIN_TIP,
+            MEMPOOL_LONG_POLL_INTERVAL, ZCASHD_FUNDING_STREAM_ORDER,
         },
         precompute,
         proposal::proposal_block_from_template,
@@ -225,8 +228,10 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockchainInfoResponse`]. It only contains the fields
-    /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
+    /// Differences from the `zcashd` reference in Zebra's [`GetBlockchainInfoResponse`]:
+    /// - `softforks` and `pruneheight` are omitted.
+    /// - `chainwork` and `commitments` are `0` placeholders.
+    /// - `nsmValueBalance` is added.
     #[method(name = "getblockchaininfo")]
     async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse>;
 
@@ -939,9 +944,39 @@ where
     /// The last best tip publication a template was served for, shared by all RPC clones.
     first_template_tip: FirstTemplateTip,
 
+    /// Monotonic latch tracking whether initial block download has completed, shared by all RPC clones.
+    initial_block_download_complete: InitialBlockDownloadLatch,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
+}
+
+/// Monotonic latch tracking whether initial block download has completed,
+/// shared across all [`RpcImpl`] clones.
+///
+/// Matches `zcashd`'s `IBDLatchToFalse` in `src/main.cpp`: once `true`, it stays `true`
+/// for the lifetime of the node.
+#[derive(Clone, Debug, Default)]
+struct InitialBlockDownloadLatch(Arc<AtomicBool>);
+
+impl InitialBlockDownloadLatch {
+    /// Returns `true` if initial block download has already completed, or evaluates
+    /// `is_complete` and latches to `true` when it succeeds.
+    fn is_complete_or_latch(&self, is_complete: impl FnOnce() -> bool) -> bool {
+        if self.0.load(Ordering::Acquire) {
+            return true;
+        }
+
+        if is_complete() {
+            if !self.0.swap(true, Ordering::AcqRel) {
+                tracing::info!("initial block download complete");
+            }
+            return true;
+        }
+
+        false
+    }
 }
 
 /// The last best tip publication that a block template was served for, shared by all RPC clones.
@@ -1071,6 +1106,7 @@ where
             last_warn_error_log_rx,
             gbt,
             first_template_tip: Default::default(),
+            initial_block_download_complete: Default::default(),
             #[cfg(test)]
             template_clock: None,
         };
@@ -1429,28 +1465,66 @@ where
         };
 
         let now = Utc::now();
-        let (estimated_height, verification_progress) = self
-            .latest_chain_tip
-            .best_tip_height_and_block_time()
-            .map(|(tip_height, tip_block_time)| {
-                let height =
-                    NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, network)
-                        .estimate_height_at(now);
+        let latest_tip = self.latest_chain_tip.best_tip_height_and_block_time();
 
-                // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
-                // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
-                // later than the current time on the local clock.
-                let height =
-                    if tip_block_time > now || height < tip_height || debug_force_finished_sync {
-                        tip_height
+        let initial_block_download_complete = self
+            .initial_block_download_complete
+            .is_complete_or_latch(|| {
+                let Some((chain_tip_height, tip_block_time)) = latest_tip else {
+                    return false;
+                };
+                if !tip_pool_values_found {
+                    return false;
+                }
+                if debug_force_finished_sync {
+                    return true;
+                }
+                if chain_tip_height < network.checkpoint_list().max_height() {
+                    return false;
+                }
+                if network.disable_pow() {
+                    return true;
+                }
+                self.gbt.sync_status().is_close_to_tip()
+                    && (!matches!(network, Network::Mainnet)
+                        || now - tip_block_time <= MAX_TIME_SINCE_CHAIN_TIP)
+            });
+
+        let (estimated_height, verification_progress) = if initial_block_download_complete {
+            // Match `zcashd` (`src/rpc/blockchain.cpp`): stop wall-clock extrapolation once
+            // initial block download completes, and report this response's `blocks` height.
+            (tip_height, 1.0)
+        } else {
+            latest_tip
+                .map(|(chain_tip_height, tip_block_time)| {
+                    let height = NetworkChainTipHeightEstimator::new(
+                        tip_block_time,
+                        chain_tip_height,
+                        network,
+                    )
+                    .estimate_height_at(now);
+
+                    // Check if the estimated height is below Zebra's latest tip height, or if the
+                    // latest tip's block time is later than the current time on the local clock.
+                    let height = if tip_block_time > now || height < chain_tip_height {
+                        chain_tip_height
                     } else {
                         height
                     };
 
-                (height, f64::from(tip_height.0) / f64::from(height.0))
-            })
-            // TODO: Add a `genesis_block_time()` method on `Network` to use here.
-            .unwrap_or((Height::MIN, 0.0));
+                    // Guard against `0.0 / 0.0 = NaN` at genesis (`Height(0)`) when no time has
+                    // elapsed or the block timestamp is ahead of the local clock.
+                    let progress = if height.0 == 0 {
+                        0.0
+                    } else {
+                        (f64::from(chain_tip_height.0) / f64::from(height.0)).min(1.0)
+                    };
+
+                    (height, progress)
+                })
+                // TODO: Add a `genesis_block_time()` method on `Network` to use here.
+                .unwrap_or((Height::MIN, 0.0))
+        };
 
         let verification_progress = if network.is_regtest() {
             1.0
@@ -1503,6 +1577,7 @@ where
         let response = GetBlockchainInfoResponse {
             chain: network.bip70_network_name(),
             blocks: tip_height,
+            initial_block_download_complete,
             best_block_hash: tip_hash,
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
@@ -4044,6 +4119,14 @@ pub struct GetBlockchainInfoResponse {
     #[getter(copy)]
     blocks: Height,
 
+    /// Whether the initial block download is complete.
+    ///
+    /// Latches to `true` once Zebra has synced to the chain tip and remains `true` for the
+    /// lifetime of the node. Responses from older `zebrad` releases that omit this field
+    /// deserialize as `false`.
+    #[serde(default)]
+    initial_block_download_complete: bool,
+
     /// The current number of headers we have validated in the best chain, that is,
     /// the height of the best chain.
     #[getter(copy)]
@@ -4075,8 +4158,6 @@ pub struct GetBlockchainInfoResponse {
     best_block_hash: block::Hash,
 
     /// If syncing, the estimated height of the chain, else the current best height, numeric.
-    ///
-    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
     #[serde(rename = "estimatedheight")]
     #[getter(copy)]
     estimated_height: Height,
@@ -4112,6 +4193,7 @@ impl Default for GetBlockchainInfoResponse {
         Self {
             chain: "main".to_string(),
             blocks: Height(1),
+            initial_block_download_complete: false,
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
             chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
@@ -4146,6 +4228,7 @@ impl GetBlockchainInfoResponse {
     pub fn new(
         chain: String,
         blocks: Height,
+        initial_block_download_complete: bool,
         best_block_hash: block::Hash,
         estimated_height: Height,
         chain_supply: GetBlockchainInfoBalance,
@@ -4164,6 +4247,7 @@ impl GetBlockchainInfoResponse {
         Self {
             chain,
             blocks,
+            initial_block_download_complete,
             best_block_hash,
             estimated_height,
             chain_supply,
