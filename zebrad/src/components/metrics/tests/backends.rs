@@ -58,10 +58,14 @@ const LABEL_VALUES: &[(&str, usize)] = &[
 /// How many values a label key that [`LABEL_VALUES`] doesn't list takes.
 const OTHER_LABEL_VALUES: usize = 4;
 
-/// Metrics that nodes recorded with more label sets than [`LABEL_VALUES`] predicts.
+/// Metrics that nodes recorded with more label sets than [`LABEL_VALUES`] predicts, or whose
+/// fixed method set is smaller than `method` in [`LABEL_VALUES`].
 const OBSERVED_LABEL_SETS: &[(&str, usize)] = &[
     // A two-node Regtest run exported 51 connection state series.
     ("zebra.net.connection.state", 51),
+    // `zebra.indexer.rpc.Indexer` defines 4 RPCs, 3 of which are server streams.
+    ("indexer.grpc.request.duration_seconds", 4),
+    ("indexer.grpc.streams.active", 3),
 ];
 
 static METADATA: Metadata<'static> =

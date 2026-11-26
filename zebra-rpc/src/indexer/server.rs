@@ -101,6 +101,10 @@ where
 
     let tcp_listener = tokio::net::TcpListener::bind(listen_addr).await?;
 
+    for method in super::methods::STREAM_METHODS {
+        metrics::gauge!("indexer.grpc.streams.active", "method" => *method).increment(0.0);
+    }
+
     let listen_addr = tcp_listener.local_addr()?;
     tracing::info!("{OPENED_RPC_ENDPOINT_MSG}{}", listen_addr);
 

@@ -400,6 +400,54 @@
       }
     },
     {
+      "name": "indexer.grpc.request.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to handle an indexer gRPC unary call or open a server stream, by method.",
+      "labels": [
+        "method"
+      ],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.0025,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.5,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "indexer_grpc_request_duration_seconds_bucket",
+          "indexer_grpc_request_duration_seconds_sum",
+          "indexer_grpc_request_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "indexer.grpc.streams.active",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Open indexer gRPC server streams, by method.",
+      "labels": [
+        "method"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "indexer_grpc_streams_active"
+        ]
+      }
+    },
+    {
       "name": "mempool.cancelled.verify.tasks.total",
       "kind": "counter",
       "unit": "count",
@@ -931,6 +979,60 @@
       }
     },
     {
+      "name": "rpc.batch.size",
+      "kind": "histogram",
+      "unit": "count",
+      "description": "JSON-RPC calls (including notifications) in each non-empty batch request.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          1.0,
+          2.0,
+          4.0,
+          8.0,
+          16.0,
+          32.0,
+          64.0,
+          128.0,
+          256.0,
+          512.0,
+          1024.0
+        ],
+        "series": [
+          "rpc_batch_size_bucket",
+          "rpc_batch_size_sum",
+          "rpc_batch_size_count"
+        ]
+      }
+    },
+    {
+      "name": "rpc.connections.active",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "JSON-RPC HTTP requests currently holding a server connection permit.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "rpc_connections_active"
+        ]
+      }
+    },
+    {
+      "name": "rpc.connections.rejected.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "JSON-RPC HTTP requests rejected with HTTP 429 because all connection permits were in use.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "rpc_connections_rejected_total"
+        ]
+      }
+    },
+    {
       "name": "rpc.errors.total",
       "kind": "counter",
       "unit": "count",
@@ -1041,6 +1143,37 @@
       }
     },
     {
+      "name": "rpc.request.size_bytes",
+      "kind": "histogram",
+      "unit": "bytes",
+      "description": "HTTP request body size of accepted JSON-RPC requests, in bytes.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          64.0,
+          256.0,
+          1024.0,
+          4096.0,
+          16384.0,
+          65536.0,
+          262144.0,
+          1048576.0,
+          2097152.0,
+          4194304.0,
+          8388608.0,
+          16777216.0,
+          33554432.0,
+          67108864.0
+        ],
+        "series": [
+          "rpc_request_size_bytes_bucket",
+          "rpc_request_size_bytes_sum",
+          "rpc_request_size_bytes_count"
+        ]
+      }
+    },
+    {
       "name": "rpc.requests.total",
       "kind": "counter",
       "unit": "count",
@@ -1053,6 +1186,37 @@
         "type": "counter",
         "series": [
           "rpc_requests_total"
+        ]
+      }
+    },
+    {
+      "name": "rpc.response.size_bytes",
+      "kind": "histogram",
+      "unit": "bytes",
+      "description": "HTTP response body size of completed JSON-RPC responses, in bytes.",
+      "labels": [],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          64.0,
+          256.0,
+          1024.0,
+          4096.0,
+          16384.0,
+          65536.0,
+          262144.0,
+          1048576.0,
+          2097152.0,
+          4194304.0,
+          8388608.0,
+          16777216.0,
+          33554432.0,
+          67108864.0
+        ],
+        "series": [
+          "rpc_response_size_bytes_bucket",
+          "rpc_response_size_bytes_sum",
+          "rpc_response_size_bytes_count"
         ]
       }
     },

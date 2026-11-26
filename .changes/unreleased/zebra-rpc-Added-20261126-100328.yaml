@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added the `rpc.connections.active` gauge, `rpc.connections.rejected.total` counter, `rpc.request.size_bytes`, `rpc.response.size_bytes`, and `rpc.batch.size` histograms, and `indexer.grpc.request.duration_seconds` and `indexer.grpc.streams.active` metrics with a `method` label, and fixed `rpc.active_requests` to decrement when a request future is dropped.
+time: 2026-11-26T10:03:28.520352408Z

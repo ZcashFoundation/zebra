@@ -106,6 +106,10 @@ histograms are exported as Prometheus histograms, with `_bucket` series that can
 aggregated across nodes:
 
 - `rpc.request.duration_seconds`
+- `rpc.request.size_bytes`
+- `rpc.response.size_bytes`
+- `rpc.batch.size`
+- `indexer.grpc.request.duration_seconds`
 - `zcash.net.peer.handshake.duration_seconds`
 - every histogram in [Performance timing](#performance-timing)
 
@@ -247,6 +251,27 @@ one total per minute, and each gauge's latest value once a minute.
 | `state.memory.fork.evicted.count` | counter | Forks dropped because the node tracked too many |
 | `state.memory.backup.restored.block.count` | gauge | Blocks restored from the non-finalized backup at startup |
 | `state.memory.backup.restore.duration_seconds` | gauge | How long restoring the non-finalized backup took at startup |
+
+## RPC and indexer metrics
+
+In addition to `rpc.requests.total`, `rpc.request.duration_seconds`, `rpc.active_requests`,
+`rpc.errors.total`, and the mining metrics in [Performance timing](#performance-timing),
+Zebra exports JSON-RPC HTTP connection, payload, and batch metrics and indexer gRPC metrics
+when the corresponding server is enabled:
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `rpc.connections.active` | gauge | count | | JSON-RPC HTTP requests currently holding a server connection permit. |
+| `rpc.connections.rejected.total` | counter | count | | JSON-RPC HTTP requests rejected with HTTP 429 because all connection permits were in use. |
+| `rpc.request.size_bytes` | histogram | bytes | | HTTP request body size of accepted JSON-RPC requests, in bytes. |
+| `rpc.response.size_bytes` | histogram | bytes | | HTTP response body size of completed JSON-RPC responses, in bytes. |
+| `rpc.batch.size` | histogram | count | | JSON-RPC calls (including notifications) in each non-empty batch request. |
+| `indexer.grpc.request.duration_seconds` | histogram | seconds | `method` | Time taken to handle an indexer gRPC unary call (`GetBlock`) or open a server stream (`ChainTipChange`, `NonFinalizedStateChange`, `MempoolChange`). |
+| `indexer.grpc.streams.active` | gauge | count | `method` | Open indexer gRPC server streams, by `method`. |
+
+For server-streaming indexer methods (`ChainTipChange`, `NonFinalizedStateChange`, and
+`MempoolChange`), `indexer.grpc.request.duration_seconds` measures how long opening the stream
+took, not the lifetime of the stream.
 
 ## Network metric aggregation
 

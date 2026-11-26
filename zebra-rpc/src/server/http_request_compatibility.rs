@@ -206,37 +206,50 @@ impl<S> HttpRequestMiddleware<S> {
     async fn request_to_json_rpc_2(
         request: HttpRequest<HttpBody>,
         max_request_body_size: usize,
-    ) -> Result<(JsonRpcVersion, HttpRequest<HttpBody>), BoxError> {
+    ) -> Result<ParsedHttpRequest, BoxError> {
         let (parts, body) = request.into_parts();
         let bytes = Limited::new(body, max_request_body_size)
             .collect()
             .await?
             .to_bytes();
-        let (version, bytes) =
+        let wire_bytes = bytes.len();
+        let (version, batch_bytes, bytes) =
             if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
                 let version = request.version();
                 if matches!(version, JsonRpcVersion::Unknown) {
-                    (version, bytes)
+                    (version, None, bytes)
                 } else {
                     (
                         version,
+                        None,
                         serde_json::to_vec(&request.into_2()).expect("valid").into(),
                     )
                 }
             } else {
-                (JsonRpcVersion::Unknown, bytes)
+                // Defer batch array traversal until after `service.call` returns `200 OK` so
+                // rejected requests (e.g. HTTP 429) skip metrics-only JSON parsing.
+                let batch_bytes = bytes
+                    .iter()
+                    .find(|byte| !byte.is_ascii_whitespace())
+                    .is_some_and(|&byte| byte == b'[')
+                    .then(|| bytes.clone());
+                (JsonRpcVersion::Unknown, batch_bytes, bytes)
             };
-        Ok((
+        Ok(ParsedHttpRequest {
             version,
+            wire_bytes,
+            batch_bytes,
             // `Vec::from` reuses the buffer without copying when it is uniquely owned.
-            HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
-        ))
+            request: HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
+        })
     }
-    /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
+
+    /// Maps JSON-2.0 to whatever JSON-RPC version the client is using, returning the rewritten
+    /// HTTP response and its serialized wire byte length.
     async fn response_from_json_rpc_2(
         version: JsonRpcVersion,
         response: HttpResponse<HttpBody>,
-    ) -> Result<HttpResponse<HttpBody>, BoxError> {
+    ) -> Result<(HttpResponse<HttpBody>, usize), BoxError> {
         let (parts, body) = response.into_parts();
         let bytes = body.collect().await?.to_bytes();
         let bytes =
@@ -247,11 +260,59 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 bytes
             };
-        Ok(HttpResponse::from_parts(
-            parts,
-            HttpBody::from(bytes.as_ref().to_vec()),
+        let wire_bytes = bytes.len();
+        Ok((
+            HttpResponse::from_parts(parts, HttpBody::from(Vec::from(bytes))),
+            wire_bytes,
         ))
     }
+}
+
+/// Request metadata captured while parsing and normalizing an HTTP JSON-RPC request.
+struct ParsedHttpRequest {
+    version: JsonRpcVersion,
+    wire_bytes: usize,
+    batch_bytes: Option<hyper::body::Bytes>,
+    request: HttpRequest<HttpBody>,
+}
+
+/// Returns the number of elements in a valid, non-empty JSON array without allocating elements.
+fn non_empty_json_array_len(bytes: &[u8]) -> Option<usize> {
+    struct SeqLenVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for SeqLenVisitor {
+        type Value = Option<usize>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON array")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut len: usize = 0;
+            while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                len = len.saturating_add(1);
+            }
+            Ok((len > 0).then_some(len))
+        }
+    }
+
+    struct ArrayLen(Option<usize>);
+
+    impl<'de> serde::Deserialize<'de> for ArrayLen {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_seq(SeqLenVisitor).map(Self)
+        }
+    }
+
+    serde_json::from_slice::<ArrayLen>(bytes)
+        .ok()
+        .and_then(|array| array.0)
 }
 
 /// Implement the Layer for HttpRequestMiddleware to allow injecting the credentials
@@ -315,10 +376,30 @@ where
         let max_request_body_size = self.max_request_body_size;
 
         async move {
-            let (version, request) =
-                Self::request_to_json_rpc_2(request, max_request_body_size).await?;
-            let response = service.call(request).await.map_err(Into::into)?;
-            Self::response_from_json_rpc_2(version, response).await
+            let parsed = Self::request_to_json_rpc_2(request, max_request_body_size).await?;
+            let response = service.call(parsed.request).await.map_err(Into::into)?;
+            let (response, response_wire_bytes) =
+                Self::response_from_json_rpc_2(parsed.version, response).await?;
+
+            // Skip transport rejections (such as HTTP 400, 405, 413, 415, and 429) so small
+            // error bodies don't skew RPC payload-size distributions and rejected batches skip
+            // metrics-only array traversal.
+            if response.status() == hyper::StatusCode::OK {
+                // Request bodies are bounded by `max_request_body_size` (~4 MiB) << 2^53.
+                metrics::histogram!("rpc.request.size_bytes").record(parsed.wire_bytes as f64);
+                // Response bodies are bounded by `u32::MAX` << 2^53.
+                metrics::histogram!("rpc.response.size_bytes").record(response_wire_bytes as f64);
+                if let Some(batch_size) = parsed
+                    .batch_bytes
+                    .as_deref()
+                    .and_then(non_empty_json_array_len)
+                {
+                    // Batch member count is bounded by `max_request_body_size` << 2^53.
+                    metrics::histogram!("rpc.batch.size").record(batch_size as f64);
+                }
+            }
+
+            Ok(response)
         }
         .boxed()
     }
@@ -532,5 +613,184 @@ mod tests {
         assert_eq!(response.status(), hyper::StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body.as_ref(), INNER_BODY.as_bytes());
+    }
+
+    async fn call_json_body(
+        auth: Option<Cookie>,
+        request_body: &str,
+        status: hyper::StatusCode,
+        response_body: &'static str,
+    ) -> (
+        HttpResponse<HttpBody>,
+        crate::metrics::tests::TestMetricsRecorder,
+    ) {
+        use tower::ServiceExt;
+
+        let recorder = crate::metrics::tests::TestMetricsRecorder::default();
+        let _recorder_guard = metrics::set_default_local_recorder(&recorder);
+
+        let inner = service_fn(move |_request: HttpRequest| async move {
+            Ok::<_, BoxError>(
+                HttpResponse::builder()
+                    .status(status)
+                    .body(HttpBody::from(response_body))
+                    .unwrap(),
+            )
+        });
+        let mut middleware = HttpRequestMiddleware::new(inner, auth, 4096);
+        let request = HttpRequest::new(HttpBody::from(request_body.to_owned()));
+
+        let response = middleware
+            .ready()
+            .await
+            .expect("the middleware is always ready")
+            .call(request)
+            .await
+            .expect("the middleware returns an HTTP response");
+        drop(_recorder_guard);
+        (response, recorder)
+    }
+
+    #[tokio::test]
+    async fn single_json_rpc_2_records_payload_sizes_without_batch_metric() {
+        let _init_guard = zebra_test::init();
+        let req = r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#;
+        let resp = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+
+        let (response, recorder) = call_json_body(None, req, hyper::StatusCode::OK, resp).await;
+
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        assert_eq!(
+            recorder.histogram("rpc.request.size_bytes", &[]),
+            vec![req.len() as f64]
+        );
+        assert_eq!(
+            recorder.histogram("rpc.response.size_bytes", &[]),
+            vec![resp.len() as f64]
+        );
+        assert!(recorder.histogram("rpc.batch.size", &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn json_rpc_1_records_pre_rewrite_request_and_post_rewrite_response_sizes() {
+        let _init_guard = zebra_test::init();
+        // Bitcoind-style 1.0 request without `"jsonrpc"`.
+        let req = r#"{"method":"getinfo","params":[],"id":1}"#;
+        // Inner jsonrpsee service emits 2.0, which `response_from_json_rpc_2` rewrites back.
+        let inner_resp = r#"{"jsonrpc":"2.0","id":1,"result":"ok"}"#;
+
+        let (response, recorder) =
+            call_json_body(None, req, hyper::StatusCode::OK, inner_resp).await;
+        let wire_resp = response.into_body().collect().await.unwrap().to_bytes();
+
+        assert_ne!(wire_resp.len(), inner_resp.len());
+        assert_eq!(
+            recorder.histogram("rpc.request.size_bytes", &[]),
+            vec![req.len() as f64]
+        );
+        assert_eq!(
+            recorder.histogram("rpc.response.size_bytes", &[]),
+            vec![wire_resp.len() as f64]
+        );
+        assert!(recorder.histogram("rpc.batch.size", &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_requests_record_batch_size_for_non_empty_arrays_only() {
+        let _init_guard = zebra_test::init();
+
+        let batch3 = r#"[{"jsonrpc":"2.0","method":"a","id":1},{"jsonrpc":"2.0","method":"b"},{"jsonrpc":"2.0","method":"c","id":3}]"#;
+        let batch3_resp =
+            r#"[{"jsonrpc":"2.0","id":1,"result":1},{"jsonrpc":"2.0","id":3,"result":3}]"#;
+        let (_, recorder) = call_json_body(None, batch3, hyper::StatusCode::OK, batch3_resp).await;
+        assert_eq!(recorder.histogram("rpc.batch.size", &[]), vec![3.0]);
+        assert_eq!(
+            recorder.histogram("rpc.request.size_bytes", &[]),
+            vec![batch3.len() as f64]
+        );
+        assert_eq!(
+            recorder.histogram("rpc.response.size_bytes", &[]),
+            vec![batch3_resp.len() as f64]
+        );
+
+        let batch1 = r#"  [{"jsonrpc":"2.0","method":"a","id":1}]"#;
+        let (_, recorder) = call_json_body(None, batch1, hyper::StatusCode::OK, "[]").await;
+        assert_eq!(recorder.histogram("rpc.batch.size", &[]), vec![1.0]);
+
+        for invalid_or_empty in ["[]", " [  ] ", "[{\"jsonrpc\":\"2.0\"", "[1,2]trailing"] {
+            let (_, recorder) =
+                call_json_body(None, invalid_or_empty, hyper::StatusCode::OK, "[]").await;
+            assert!(
+                recorder.histogram("rpc.batch.size", &[]).is_empty(),
+                "expected no batch sample for {invalid_or_empty:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_ok_responses_skip_payload_and_batch_histograms() {
+        let _init_guard = zebra_test::init();
+        let req = r#"[{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}]"#;
+
+        let (resp_401, recorder_401) =
+            call_json_body(Some(Cookie::default()), req, hyper::StatusCode::OK, "{}").await;
+        assert_eq!(resp_401.status(), hyper::StatusCode::UNAUTHORIZED);
+        assert!(recorder_401
+            .histogram("rpc.request.size_bytes", &[])
+            .is_empty());
+        assert!(recorder_401
+            .histogram("rpc.response.size_bytes", &[])
+            .is_empty());
+        assert!(recorder_401.histogram("rpc.batch.size", &[]).is_empty());
+
+        let (resp_429, recorder_429) = call_json_body(
+            None,
+            req,
+            hyper::StatusCode::TOO_MANY_REQUESTS,
+            "Too many connections. Please try again later.",
+        )
+        .await;
+        assert_eq!(resp_429.status(), hyper::StatusCode::TOO_MANY_REQUESTS);
+        assert!(recorder_429
+            .histogram("rpc.request.size_bytes", &[])
+            .is_empty());
+        assert!(recorder_429
+            .histogram("rpc.response.size_bytes", &[])
+            .is_empty());
+        assert!(recorder_429.histogram("rpc.batch.size", &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn deferred_batch_parsing_retains_array_bytes_only_and_skips_429_batches() {
+        let _init_guard = zebra_test::init();
+
+        // Array-shaped body retains bytes without parsing in `request_to_json_rpc_2`.
+        let array_req = HttpRequest::new(HttpBody::from("  [{\"jsonrpc\":\"2.0\""));
+        let parsed_array = HttpRequestMiddleware::<()>::request_to_json_rpc_2(array_req, 4096)
+            .await
+            .expect("array body should be collected without JSON parsing");
+        assert!(parsed_array.batch_bytes.is_some());
+
+        // Single JSON-RPC object does not retain batch bytes.
+        let single_req = HttpRequest::new(HttpBody::from(
+            r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#,
+        ));
+        let parsed_single = HttpRequestMiddleware::<()>::request_to_json_rpc_2(single_req, 4096)
+            .await
+            .expect("single request should parse");
+        assert!(parsed_single.batch_bytes.is_none());
+
+        // Rejected HTTP 429 batch skips recording `rpc.batch.size`.
+        let batch_req =
+            r#"[{"jsonrpc":"2.0","method":"a","id":1},{"jsonrpc":"2.0","method":"b","id":2}]"#;
+        let (resp, recorder) = call_json_body(
+            None,
+            batch_req,
+            hyper::StatusCode::TOO_MANY_REQUESTS,
+            "Too many connections",
+        )
+        .await;
+        assert_eq!(resp.status(), hyper::StatusCode::TOO_MANY_REQUESTS);
+        assert!(recorder.histogram("rpc.batch.size", &[]).is_empty());
     }
 }

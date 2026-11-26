@@ -4,4 +4,5 @@
 
 mod cookie;
 mod http_request_compatibility;
+mod metrics;
 mod vectors;
