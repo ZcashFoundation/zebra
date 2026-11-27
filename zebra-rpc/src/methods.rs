@@ -1129,6 +1129,7 @@ where
             template_cache.subscribe(),
             self.network.clone(),
             self.gbt.block_verifier_router(),
+            self.gbt.proposal_transactions().clone(),
         );
         let update_templates = precompute::run(
             self.network.clone(),
@@ -2850,6 +2851,7 @@ where
                 &self.network,
                 latest_chain_tip,
                 sync_status,
+                self.gbt.proposal_transactions(),
             )
             .await;
         }
@@ -3110,12 +3112,21 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        // Large blocks decode their transactions on Rayon, so keep that off the async executor.
-        let block = tokio::task::spawn_blocking(move || {
-            Block::zcash_deserialize_parallel(&mut block_bytes.as_slice())
-        })
-        .await
-        .map_misc_error()?;
+        // A solved block template has the transaction bytes of a block proposal that Zebra has
+        // validated, so its transactions are already decoded. Large blocks decode their
+        // transactions on Rayon, so keep that off the async executor.
+        let block = match self
+            .gbt
+            .proposal_transactions()
+            .block_with_validated_transactions(&block_bytes)
+        {
+            Some(block) => Ok(block),
+            None => tokio::task::spawn_blocking(move || {
+                Block::zcash_deserialize_parallel(&mut block_bytes.as_slice())
+            })
+            .await
+            .map_misc_error()?,
+        };
         let block: Block = match block {
             Ok(block) => block,
             Err(error) => {

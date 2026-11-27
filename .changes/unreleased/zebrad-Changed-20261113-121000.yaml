@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Commit a solved `getblocktemplate` template without decoding its transactions again.'
+time: 2026-11-13T12:10:00.000000000Z

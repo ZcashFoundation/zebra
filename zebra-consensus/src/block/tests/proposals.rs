@@ -19,7 +19,7 @@ use zebra_state as zs;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    block::{Request, SemanticBlockVerifier},
+    block::{Request, SemanticBlockVerifier, VerifyBlockError},
     transaction, BoxError,
 };
 
@@ -215,7 +215,8 @@ async fn solved_proposal_is_committed_without_validating_it_again() {
         Some(proposal.hash())
     );
 
-    // The solved proposal only needs the state to commit the proposal's validation result.
+    // The solved proposal only needs the state to commit the proposal's validation result. That
+    // is its only state request: the commit rejects a block that is already in the state.
     let verify = tokio::spawn(
         verifier
             .ready()
@@ -223,10 +224,6 @@ async fn solved_proposal_is_committed_without_validating_it_again() {
             .expect("the verifier is always ready")
             .call(Request::Commit(solved.clone())),
     );
-    state
-        .expect_request(zs::Request::KnownBlock(solved.hash()))
-        .await
-        .respond(zs::Response::KnownBlock(None));
     commit_solved_proposal(&mut state, &solved).await;
     assert_eq!(
         verify.await.expect("the verifier doesn't panic").ok(),
@@ -235,6 +232,63 @@ async fn solved_proposal_is_committed_without_validating_it_again() {
     transaction_verifier.expect_no_requests().await;
 
     // The validation result was used, so the same block is verified in full the next time.
+    let verify = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::Commit(solved.clone())),
+    );
+    verify_block(&mut state, &mut transaction_verifier, &solved).await;
+    assert_eq!(
+        verify.await.expect("the verifier doesn't panic").ok(),
+        Some(solved.hash())
+    );
+}
+
+/// Proposals that only differ in their nonce are the same proposal, so the verifier keeps one
+/// validation result for them. Once a block has used it, another block with that header gets the
+/// known block check before its proof of work is checked, like any other block.
+#[tokio::test]
+async fn proposals_with_one_header_keep_one_validation_result() {
+    let _init_guard = zebra_test::init();
+
+    let network = network();
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut transaction_verifier: MockTransactionVerifier = MockService::build().for_unit_tests();
+    let mut verifier =
+        SemanticBlockVerifier::new(&network, state.clone(), transaction_verifier.clone());
+
+    for proposal in [block(0), block(2)] {
+        let verify = tokio::spawn(
+            verifier
+                .ready()
+                .await
+                .expect("the verifier is always ready")
+                .call(Request::CheckProposal(proposal.clone())),
+        );
+        validate_proposal(&network, &mut state, &mut transaction_verifier, &proposal).await;
+        assert_eq!(
+            verify.await.expect("the verifier doesn't panic").ok(),
+            Some(proposal.hash())
+        );
+    }
+
+    let solved = block(1);
+    let verify = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::Commit(solved.clone())),
+    );
+    commit_solved_proposal(&mut state, &solved).await;
+    assert_eq!(
+        verify.await.expect("the verifier doesn't panic").ok(),
+        Some(solved.hash())
+    );
+
+    // A second result for this header would be committed here, without the known block check.
     let verify = tokio::spawn(
         verifier
             .ready()
@@ -336,8 +390,10 @@ async fn proposal_with_changed_authorizing_data_is_verified_in_full() {
         proposal.transactions[0].unmined_id()
     );
 
-    // The mocked transaction verifier and state accept the block. The real ones check the
-    // changed script, and the header's commitment to it.
+    // The block has the proposal's header, so the verifier only asks the state if it is new once
+    // its transactions turn out to differ from the proposal's. The mocked transaction verifier
+    // and state accept the block. The real ones check the changed script, and the header's
+    // commitment to it.
     let verify = tokio::spawn(
         verifier
             .ready()
@@ -360,10 +416,6 @@ async fn proposal_with_changed_authorizing_data_is_verified_in_full() {
             .expect("the verifier is always ready")
             .call(Request::Commit(solved.clone())),
     );
-    state
-        .expect_request(zs::Request::KnownBlock(solved.hash()))
-        .await
-        .respond(zs::Response::KnownBlock(None));
     commit_solved_proposal(&mut state, &solved).await;
     assert_eq!(
         verify.await.expect("the verifier doesn't panic").ok(),
@@ -417,12 +469,8 @@ async fn solved_proposal_needs_valid_proof_of_work() {
             .ready()
             .await
             .expect("the verifier is always ready")
-            .call(Request::Commit(unsolved.clone())),
+            .call(Request::Commit(unsolved)),
     );
-    state
-        .expect_request(zs::Request::KnownBlock(unsolved.hash()))
-        .await
-        .respond(zs::Response::KnownBlock(None));
     state.expect_no_requests().await;
     transaction_verifier.expect_no_requests().await;
     let result = verify.await.expect("the verifier doesn't panic");
@@ -436,14 +484,158 @@ async fn solved_proposal_needs_valid_proof_of_work() {
             .expect("the verifier is always ready")
             .call(Request::Commit(solved.clone())),
     );
-    state
-        .expect_request(zs::Request::KnownBlock(solved.hash()))
-        .await
-        .respond(zs::Response::KnownBlock(None));
     commit_solved_proposal(&mut state, &solved).await;
     assert_eq!(
         verify.await.expect("the verifier doesn't panic").ok(),
         Some(solved.hash())
     );
     transaction_verifier.expect_no_requests().await;
+}
+
+/// Returns the error that the state answers with when it already has a block.
+fn duplicate_block_error() -> BoxError {
+    // The state answers a commit of a validation result like the commit of any other block.
+    Box::new(zs::CommitSemanticallyVerifiedError::from(
+        zs::CommitBlockError::Duplicate {
+            hash_or_height: None,
+            location: zs::KnownBlock::BestChain,
+        },
+    ))
+}
+
+/// A solved proposal skips the check that the block is new, so the state's commit is what
+/// rejects a block it already has. That error is still a duplicate block error, which
+/// `submitblock` reports as a duplicate, and which doesn't count against a peer.
+#[tokio::test]
+async fn duplicate_solved_proposal_keeps_its_error() {
+    let _init_guard = zebra_test::init();
+
+    let network = network();
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut transaction_verifier: MockTransactionVerifier = MockService::build().for_unit_tests();
+    let mut verifier =
+        SemanticBlockVerifier::new(&network, state.clone(), transaction_verifier.clone());
+
+    let (proposal, solved) = (block(0), block(1));
+
+    let verify = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::CheckProposal(proposal.clone())),
+    );
+    validate_proposal(&network, &mut state, &mut transaction_verifier, &proposal).await;
+    assert_eq!(
+        verify.await.expect("the verifier doesn't panic").ok(),
+        Some(proposal.hash())
+    );
+
+    let verify = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::Commit(solved.clone())),
+    );
+    state
+        .expect_request_that(|request| {
+            matches!(request, zs::Request::CommitContextuallyVerifiedBlock(_))
+        })
+        .await
+        .respond_error(duplicate_block_error());
+
+    let error = verify
+        .await
+        .expect("the verifier doesn't panic")
+        .expect_err("the state already has the block");
+    assert!(
+        matches!(error, VerifyBlockError::Commit(_)),
+        "unexpected error: {error:?}"
+    );
+    assert!(error.is_duplicate_request());
+    assert_eq!(error.misbehavior_score(), 0);
+
+    state.expect_no_requests().await;
+    transaction_verifier.expect_no_requests().await;
+}
+
+/// A proposal's validation result is used once, also while its commit is still in progress.
+/// Another request for the same block is verified in full, starting with the check that the
+/// block is new.
+#[tokio::test]
+async fn solved_proposal_is_verified_in_full_while_it_is_committed() {
+    let _init_guard = zebra_test::init();
+
+    let network = network();
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut transaction_verifier: MockTransactionVerifier = MockService::build().for_unit_tests();
+    let mut verifier =
+        SemanticBlockVerifier::new(&network, state.clone(), transaction_verifier.clone());
+
+    let (proposal, solved) = (block(0), block(1));
+
+    let verify = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::CheckProposal(proposal.clone())),
+    );
+    validate_proposal(&network, &mut state, &mut transaction_verifier, &proposal).await;
+    assert_eq!(
+        verify.await.expect("the verifier doesn't panic").ok(),
+        Some(proposal.hash())
+    );
+
+    // The first request takes the validation result, and waits for the state to commit it.
+    let first = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::Commit(solved.clone())),
+    );
+    let first_commit = state
+        .expect_request_that(|request| {
+            matches!(request, zs::Request::CommitContextuallyVerifiedBlock(_))
+        })
+        .await;
+
+    // The second request finds no validation result, so it asks the state if the block is new
+    // before anything else. The mocked state lets it go on to its own commit.
+    let second = tokio::spawn(
+        verifier
+            .ready()
+            .await
+            .expect("the verifier is always ready")
+            .call(Request::Commit(solved.clone())),
+    );
+    state
+        .expect_request(zs::Request::KnownBlock(solved.hash()))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    state
+        .expect_request(zs::Request::MiningCandidate(solved.clone()))
+        .await
+        .respond(zs::Response::MiningCandidate(None));
+    verify_coinbase(&mut transaction_verifier, &solved).await;
+    state
+        .expect_request_that(|request| {
+            matches!(request, zs::Request::CommitSemanticallyVerifiedBlock(_))
+        })
+        .await
+        .respond_error(duplicate_block_error());
+
+    let error = second
+        .await
+        .expect("the verifier doesn't panic")
+        .expect_err("the state is committing the block");
+    assert!(error.is_duplicate_request(), "unexpected error: {error:?}");
+
+    first_commit.respond(zs::Response::Committed(solved.hash()));
+    assert_eq!(
+        first.await.expect("the verifier doesn't panic").ok(),
+        Some(solved.hash())
+    );
 }
