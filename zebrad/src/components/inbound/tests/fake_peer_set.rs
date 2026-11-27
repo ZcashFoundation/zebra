@@ -3054,6 +3054,40 @@ fn compact_header_screening_checks_proof_of_work_and_shape() {
     assert!(super::super::screen_compact_header(&compact, &network).is_err());
 }
 
+/// Until its setup is done, the inbound service fails the compact relay requests of a
+/// connection, which would take `Nil` as a passed check or an admitted download. It still
+/// ignores a peer's other requests.
+#[tokio::test]
+async fn compact_requests_fail_during_setup() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let (_setup_tx, setup_rx) = oneshot::channel();
+    let mut inbound = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES.zcash_deserialize_into()?;
+    let compact = Arc::new(zebra_network::compact::CompactBlock::from_block(&block, 1)?);
+    for request in [
+        Request::CheckCompactHeader(compact.clone()),
+        Request::CompactBlockTransactions(compact),
+        Request::CheckCompactBlock(block.clone(), None),
+        Request::AdvertiseCompactBlock(block.hash(), None, block.header.previous_block_hash),
+    ] {
+        let name = request.to_string();
+        assert!(
+            inbound.ready().await?.call(request).await.is_err(),
+            "{name} fails during setup"
+        );
+    }
+
+    assert_eq!(
+        inbound.ready().await?.call(Request::Peers).await?,
+        Response::Nil
+    );
+
+    Ok(())
+}
+
 /// Tree roots requests are answered from the finalized state, and refused for other chains.
 #[tokio::test]
 async fn inbound_answers_tree_roots_from_read_state() -> Result<(), crate::BoxError> {
