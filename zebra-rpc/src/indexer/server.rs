@@ -74,11 +74,58 @@ where
             .http2_keepalive_timeout(Some(HTTP2_KEEPALIVE_TIMEOUT))
             .add_service(reflection_service)
             .add_service(IndexerServer::new(indexer_service))
-            .serve_with_incoming(TcpIncoming::from(tcp_listener))
+            .serve_with_incoming(tcp_incoming(tcp_listener))
             .await?;
 
         Ok(())
     });
 
     Ok((server_task, listen_addr))
+}
+
+/// Builds the incoming TCP stream for the indexer gRPC server with `TCP_NODELAY` enabled.
+fn tcp_incoming(tcp_listener: tokio::net::TcpListener) -> TcpIncoming {
+    TcpIncoming::from(tcp_listener).with_nodelay(Some(true))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
+
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_stream::StreamExt;
+
+    use super::tcp_incoming;
+
+    #[tokio::test]
+    async fn indexer_grpc_tcp_incoming_enables_nodelay() {
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .expect("ephemeral loopback port is bindable");
+        let addr = listener
+            .local_addr()
+            .expect("bound listener always has a local address");
+        let mut incoming = tcp_incoming(listener);
+
+        let (client, accepted) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(TcpStream::connect(addr), incoming.next())
+        })
+        .await
+        .expect("loopback connect and accept complete within timeout");
+
+        let _client = client.expect("loopback connection to bound listener succeeds");
+        let stream = accepted
+            .expect("listener yields the accepted connection")
+            .expect("loopback accept succeeds");
+
+        assert!(
+            stream
+                .nodelay()
+                .expect("accepted TCP stream supports reading TCP_NODELAY"),
+            "indexer gRPC server must enable TCP_NODELAY on accepted sockets"
+        );
+    }
 }

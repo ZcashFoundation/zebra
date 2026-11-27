@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Enabled `TCP_NODELAY` on the indexer and lightwalletd gRPC servers to avoid Nagle and delayed-ACK stalls on small RPC responses.
+time: 2026-11-26T12:53:08.85118678Z
