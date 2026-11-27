@@ -1495,11 +1495,15 @@ impl Chain {
     }
 
     /// Replaces the tip block with `block`, which has the same transactions and the same header
-    /// apart from the nonce and Equihash solution, like a solved block proposal.
+    /// apart from the time, nonce and Equihash solution, like a solved block proposal.
     ///
     /// Only the block hash index, the tip's history tree, the recorded block size and the stored
     /// block depend on those header fields, so this costs a history tree append rather than a
     /// block push. An error leaves the chain unchanged.
+    ///
+    /// The new tip keeps the replaced tip's created outputs, which the chain's address index
+    /// shares, and drops `block`'s equal ones. A caller that frees those later keeps its own
+    /// reference to them.
     ///
     /// Returns the replaced tip block, so the caller chooses when to free what only that block
     /// holds.
@@ -1511,7 +1515,7 @@ impl Chain {
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn rebind_tip(
         &mut self,
-        block: ContextuallyVerifiedBlock,
+        mut block: ContextuallyVerifiedBlock,
     ) -> Result<Arc<ContextuallyVerifiedBlock>, ValidateContextError> {
         let height = self.non_finalized_tip_height();
         let previous = self
@@ -1523,6 +1527,9 @@ impl Chain {
             "rebinding keeps the tip's transactions"
         );
         let previous_hash = previous.hash;
+        // The chain's address index shares the tip's created outputs. `block` creates the same
+        // outputs, because it has the tip's transactions at the tip's height, so it keeps them.
+        let new_outputs = previous.new_outputs.clone();
         // Proposals skip proof of work, so the solution can change length when it is solved.
         let (previous_size, size) = (solution_size(&previous.block), solution_size(&block.block));
 
@@ -1552,6 +1559,7 @@ impl Chain {
         *info = BlockInfo::new(*info.value_pools(), info.size() + size - previous_size);
         self.height_by_hash.remove(&previous_hash);
         self.height_by_hash.insert(block.hash, height);
+        block.new_outputs = new_outputs;
         let replaced = self
             .blocks
             .insert(height, Arc::new(block))

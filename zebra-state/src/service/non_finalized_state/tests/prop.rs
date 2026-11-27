@@ -716,7 +716,8 @@ fn different_blocks_different_chains() -> Result<()> {
 
 /// Rebinding a chain's tip to a solved block gives the same chain as pushing the solved block,
 /// for a chain with a history tree. The solved block is the tip block with another nonce, which
-/// changes its hash, and optionally a solution of another length, which changes its size.
+/// changes its hash. It can also have a solution of another length, which changes its size, and
+/// another time, which the history tree commits to.
 ///
 /// The prepared chain of a block proposal can still have root blocks that the state finalized
 /// since the proposal was validated, so this also checks that popping root blocks before or
@@ -732,6 +733,7 @@ fn rebound_tip_equals_pushed_history_tree() -> Result<()> {
     |((chain, count, network, finalized_tree) in PreparedChain::new_heartwood(),
       nonce in any::<[u8; 32]>(),
       resize_solution in any::<bool>(),
+      retime in any::<bool>(),
       pops_before in 0usize..3,
       pops_after in 0usize..3)| {
         prop_assert!(finalized_tree.is_some());
@@ -754,6 +756,16 @@ fn rebound_tip_equals_pushed_history_tree() -> Result<()> {
             header.solution = match header.solution {
                 Solution::Common(_) => Solution::Regtest([0; 36]),
                 Solution::Regtest(_) => Solution::default(),
+            };
+        }
+        // A block that solves an earlier proposal can have another time than the proposal whose
+        // chain is rebound. Header times are u32 seconds, so the last one moves back instead.
+        if retime {
+            let second = chrono::Duration::seconds(1);
+            header.time = if header.time.timestamp() < i64::from(u32::MAX) {
+                header.time + second
+            } else {
+                header.time - second
             };
         }
         prop_assume!(solved_block.hash() != tip.hash);

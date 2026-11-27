@@ -893,6 +893,151 @@ async fn write_worker_rebinds_a_solved_proposal() {
     join_write_worker(sender, worker).await;
 }
 
+/// A block that solves a validated proposal is committed by rebinding the chain of a later
+/// proposal that only changed the time, like a block template that was refreshed for the time.
+#[tokio::test]
+async fn write_worker_rebinds_a_solved_proposal_after_a_time_refresh() {
+    let _init_guard = zebra_test::init();
+
+    assert!(
+        commit_solved_proposal_after_a_later_one(time_refresh).await,
+        "the commit rebinds the later proposal's chain instead of pushing the block",
+    );
+}
+
+/// A block that solves a validated proposal is applied to its parent chain when a later proposal
+/// also changed the difficulty threshold, because the chain's work depends on it.
+#[tokio::test]
+async fn write_worker_pushes_a_solved_proposal_after_a_difficulty_change() {
+    let _init_guard = zebra_test::init();
+
+    // Short test chains skip the difficulty rule, so the later proposal is still valid.
+    assert!(
+        !commit_solved_proposal_after_a_later_one(|proposal| time_refresh(proposal).set_work(10))
+            .await,
+        "the commit pushes the block, and keeps the later proposal's chain",
+    );
+}
+
+/// Returns a copy of `proposal` that is a second later, like a block template that was only
+/// refreshed for the time.
+fn time_refresh(proposal: &Block) -> Arc<Block> {
+    let mut refreshed = proposal.clone();
+    Arc::make_mut(&mut refreshed.header).time = proposal.header.time + chrono::Duration::seconds(1);
+
+    Arc::new(refreshed)
+}
+
+/// Validates a block proposal on the best tip, and then `later_proposal(proposal)`, another
+/// proposal on the same parent. Each is validated on its own snapshot of the state, as the read
+/// state service does, and only the later proposal's chain is kept for the commit of a solved
+/// proposal. Then commits a block that solves the first proposal, with the first proposal's
+/// result, as the block verifier does.
+///
+/// Checks that the commit gives the same best chain as applying the solved block to its parent
+/// chain. Returns `true` if the commit rebound the later proposal's chain, which is then no longer
+/// kept, or `false` if it applied the block to its parent chain, and kept the later chain.
+async fn commit_solved_proposal_after_a_later_one(
+    later_proposal: impl FnOnce(&Block) -> Arc<Block>,
+) -> bool {
+    let network = Network::Mainnet;
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block1 = block1_on_genesis(&state, &finalized.db);
+    let mut proposal: Block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .expect("block is valid");
+
+    let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    // The proposals' parent has to be in the non-finalized state for a chain to be rebound.
+    let committed = send_commit(tx, block1.clone().prepare(), None).await;
+    assert_eq!(committed.ok(), Some(block1.hash()));
+
+    // Give the proposal a header that is contextually valid on the best tip, as a block template
+    // has, and validate it on a snapshot. The block verifier keeps its result.
+    let mut snapshot = state_receiver.borrow().clone();
+    let context = read::difficulty::get_block_template_chain_info(&snapshot, &db, &network)
+        .expect("the state has a context for the next block");
+    let header = Arc::make_mut(&mut proposal.header);
+    header.previous_block_hash = context.tip_hash;
+    header.time = context.min_time.into();
+    header.difficulty_threshold = context.expected_difficulty;
+    let proposal = Arc::new(proposal);
+    let mut expected = snapshot.clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, proposal.clone().prepare())
+        .expect("the proposal is contextually valid");
+    let contextual = snapshot
+        .remove_chain_with_tip(proposal.hash())
+        .expect("validation adds the proposal to a chain")
+        .tip_block()
+        .expect("the proposal is the chain's tip")
+        .clone();
+
+    // The read state service keeps the chain of the latest proposal it validated.
+    let later = later_proposal(&proposal);
+    let mut snapshot = state_receiver.borrow().clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, later.clone().prepare())
+        .expect("the later proposal is contextually valid");
+    let later_chain = snapshot
+        .remove_chain_with_tip(later.hash())
+        .expect("validation adds the later proposal to a chain");
+    // The later chain's address index shares its tip's created outputs, and a rebound tip keeps
+    // them, so this tells a rebound chain from a pushed one.
+    let later_outputs = later_chain
+        .tip_block()
+        .expect("the later proposal is the chain's tip")
+        .new_outputs
+        .clone();
+    snapshot.store_prepared_chain(later_chain);
+    assert!(snapshot.has_prepared_chain());
+
+    // A miner solves the first proposal, so the block verifier commits the solved block with that
+    // proposal's result.
+    let solved = nonce_variant(&proposal, [0xff; 32]);
+    let received_time = std::time::Instant::now();
+    let mut rebound = contextual;
+    rebound.rebind(solved.clone(), received_time);
+    let committed = send_commit(tx, solved.clone().prepare(), Some(Box::new(rebound))).await;
+    assert_eq!(committed.ok(), Some(solved.hash()));
+    assert_eq!(latest.best_tip_hash(), Some(solved.hash()));
+
+    let mut pushed = solved.clone().prepare();
+    pushed.received_time = Some(received_time);
+    validate_and_commit_non_finalized(&db, &mut expected, pushed)
+        .expect("the solved block is contextually valid");
+    let best_chain = state_receiver
+        .borrow()
+        .best_chain()
+        .expect("the state has a best chain")
+        .clone();
+    assert!(
+        best_chain.eq_internal_state(expected.best_chain().expect("the state has a best chain")),
+        "the commit gives the same chain as applying the solved block to its parent chain",
+    );
+
+    let rebound_later_chain = Arc::ptr_eq(
+        &best_chain
+            .tip_block()
+            .expect("the best chain has blocks")
+            .new_outputs,
+        &later_outputs,
+    );
+    assert_eq!(
+        snapshot.has_prepared_chain(),
+        !rebound_later_chain,
+        "the commit takes the later proposal's chain only to rebind it",
+    );
+
+    join_write_worker(sender, worker).await;
+
+    rebound_later_chain
+}
+
 /// The block write task drops a prepared chain once the best chain is longer than it, and keeps
 /// it while a block that solves its proposal could still extend the best chain.
 #[tokio::test]

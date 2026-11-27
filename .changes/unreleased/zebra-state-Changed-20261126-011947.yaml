@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'A commit of a solved block proposal reuses the chain of a later validated proposal that has the same transactions and header apart from the time, nonce and solution.'
+time: 2026-11-26T01:19:47.000000000-05:00
