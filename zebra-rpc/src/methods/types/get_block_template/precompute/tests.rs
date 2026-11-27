@@ -6,6 +6,7 @@ use zcash_keys::address::Address;
 
 use zebra_chain::{
     block,
+    chain_tip::mock::{MockChainTip, MockChainTipSender},
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -66,6 +67,16 @@ fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateR
 /// Returns a template for the notification and coinbase tests.
 fn template() -> BlockTemplateResponse {
     template_with_max_time(&Network::Mainnet, DateTime32::from(1654008719))
+}
+
+/// Returns a mock chain tip on the block `tip_hash`, and the sender that changes it.
+///
+/// Keep the sender until the test ends: once it is dropped, waiting for a chain tip change fails.
+fn chain_tip_at(tip_hash: block::Hash) -> (MockChainTip, MockChainTipSender) {
+    let (chain_tip, chain_tip_sender) = MockChainTip::new();
+    chain_tip_sender.send_best_tip_hash(tip_hash);
+
+    (chain_tip, chain_tip_sender)
 }
 
 /// Testnet difficulty changes strictly after max_time; other networks and minimum difficulty
@@ -441,11 +452,13 @@ async fn refreshed_template_proposals_share_their_transactions() {
     });
 
     let cache = TemplateCache::default();
+    let (chain_tip, _chain_tip_sender) = chain_tip_at(template().previous_block_hash);
     let validator = tokio::spawn(validate_templates(
         cache.subscribe(),
         Network::Mainnet,
         verifier,
         ProposalTransactions::default(),
+        chain_tip,
     ));
 
     let first_template = template();
@@ -499,11 +512,13 @@ async fn template_on_another_block_replaces_a_running_validation() {
 
     let (verifier, mut verified_rx) = stuck_verifier();
     let cache = TemplateCache::default();
+    let (chain_tip, chain_tip_sender) = MockChainTip::new();
     let validator = tokio::spawn(validate_templates(
         cache.subscribe(),
         Network::Mainnet,
         verifier,
         ProposalTransactions::default(),
+        chain_tip,
     ));
 
     let first_template = template();
@@ -512,6 +527,8 @@ async fn template_on_another_block_replaces_a_running_validation() {
 
     let mut proposals = Vec::new();
     for template in [first_template, next_tip_template] {
+        // Like the updater, publish a template on the chain tip after the tip changes.
+        chain_tip_sender.send_best_tip_hash(template.previous_block_hash);
         cache.publish(template);
 
         // The verifier never answers, so the second proposal only reaches it if the first
@@ -538,11 +555,13 @@ async fn stuck_validation_is_dropped_after_its_timeout() {
 
     let (verifier, mut verified_rx) = stuck_verifier();
     let cache = TemplateCache::default();
+    let (chain_tip, _chain_tip_sender) = chain_tip_at(template().previous_block_hash);
     let validator = tokio::spawn(validate_templates(
         cache.subscribe(),
         Network::Mainnet,
         verifier,
         ProposalTransactions::default(),
+        chain_tip,
     ));
 
     let first_template = template();
@@ -573,5 +592,128 @@ async fn stuck_validation_is_dropped_after_its_timeout() {
     assert!(
         first_validation_started.elapsed() >= TEMPLATE_VALIDATION_TIMEOUT - Duration::from_secs(1),
         "a refreshed template on the same block waits for the running validation",
+    );
+}
+
+/// Returns a block verifier that, like the state, only accepts a proposal on the block that
+/// `chain_tip` reports, and reports the proposals it accepts.
+fn tip_checking_verifier(
+    chain_tip: MockChainTip,
+) -> (
+    impl BlockVerifierService,
+    tokio::sync::mpsc::UnboundedReceiver<Arc<block::Block>>,
+) {
+    let (accepted_tx, accepted_rx) = tokio::sync::mpsc::unbounded_channel();
+    let verifier = tower::service_fn(move |request: zebra_consensus::Request| {
+        let block = request.block();
+        let result: Result<block::Hash, zebra_consensus::BoxError> =
+            if chain_tip.best_tip_hash() == Some(block.header.previous_block_hash) {
+                let hash = block.hash();
+                accepted_tx
+                    .send(block)
+                    .expect("the test holds the receiver");
+                Ok(hash)
+            } else {
+                Err("proposal is not based on the current best chain tip".into())
+            };
+
+        std::future::ready(result)
+    });
+
+    (verifier, accepted_rx)
+}
+
+/// A template on a block that is still being verified is validated once that block is the chain
+/// tip, because the state rejects a proposal that isn't on its tip. On an empty mempool, the first
+/// full template on the block can have the same long poll ID, so a long polling miner keeps
+/// working on the early template, and submits it when it solves it.
+#[tokio::test(start_paused = true)]
+async fn template_on_a_block_being_verified_is_validated_once_the_block_is_the_tip() {
+    let _init_guard = zebra_test::init();
+
+    let early_template = template();
+    let mut full_template = early_template.clone();
+    full_template.cur_time = DateTime32::from(early_template.cur_time.timestamp() + 1);
+
+    // The chain tip is the parent of the block that the templates are on.
+    let (chain_tip, chain_tip_sender) = chain_tip_at(block::Hash([0x01; 32]));
+    let (verifier, mut accepted_rx) = tip_checking_verifier(chain_tip.clone());
+    let cache = TemplateCache::default();
+    let validator = tokio::spawn(validate_templates(
+        cache.subscribe(),
+        Network::Mainnet,
+        verifier,
+        ProposalTransactions::default(),
+        chain_tip,
+    ));
+
+    cache.publish(early_template.clone());
+
+    // The clock is paused, and only moves when every task is waiting. So the validator has taken
+    // the early template when this sleep ends.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // The block is committed, and then the updater publishes a full template on it.
+    chain_tip_sender.send_best_tip_hash(early_template.previous_block_hash);
+    cache.publish(full_template.clone());
+
+    let mut validated_times = Vec::new();
+    for _ in 0..2 {
+        let proposal = tokio::time::timeout(Duration::from_secs(10), accepted_rx.recv())
+            .await
+            .expect("both templates are validated")
+            .expect("the validator holds the sender");
+        validated_times.push(proposal.header.time);
+    }
+    validator.abort();
+
+    assert_eq!(
+        validated_times,
+        [early_template.cur_time, full_template.cur_time]
+            .map(chrono::DateTime::<chrono::Utc>::from),
+        "the early template is validated first, and then the full template",
+    );
+}
+
+/// A template on another block ends the wait for the chain tip, so a template on a block that is
+/// rejected while it is being verified doesn't hold up the chain tip's template.
+#[tokio::test(start_paused = true)]
+async fn template_on_another_block_ends_the_wait_for_the_chain_tip() {
+    let _init_guard = zebra_test::init();
+
+    let rejected_block_template = template();
+    let mut tip_template = rejected_block_template.clone();
+    tip_template.previous_block_hash = block::Hash([0x01; 32]);
+
+    let (chain_tip, _chain_tip_sender) = chain_tip_at(tip_template.previous_block_hash);
+    let (verifier, mut accepted_rx) = tip_checking_verifier(chain_tip.clone());
+    let cache = TemplateCache::default();
+    let validator = tokio::spawn(validate_templates(
+        cache.subscribe(),
+        Network::Mainnet,
+        verifier,
+        ProposalTransactions::default(),
+        chain_tip,
+    ));
+
+    cache.publish(rejected_block_template);
+
+    // The clock is paused, so the validator is waiting for the block when this sleep ends.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // The block is rejected, so the updater publishes a template on the chain tip again.
+    cache.publish(tip_template.clone());
+
+    // The block is never the chain tip, so the proposal on the tip only reaches the verifier if
+    // the wait for the block was dropped, well before the validation timeout.
+    let proposal = tokio::time::timeout(TEMPLATE_VALIDATION_TIMEOUT / 3, accepted_rx.recv())
+        .await
+        .expect("a template on another block is validated without waiting")
+        .expect("the validator holds the sender");
+    validator.abort();
+
+    assert_eq!(
+        proposal.header.previous_block_hash,
+        tip_template.previous_block_hash
     );
 }
