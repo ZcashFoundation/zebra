@@ -5882,7 +5882,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -7304,7 +7304,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "16.0.0"
+version = "16.1.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -7373,7 +7373,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "19.0.0"
+version = "20.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7455,7 +7455,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -7494,7 +7494,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "14.0.0"
+version = "15.0.0"
 dependencies = [
  "jsonrpsee-types",
  "reqwest 0.12.28",
@@ -7507,7 +7507,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7573,7 +7573,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "15.0.0"
+version = "15.0.1"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7592,7 +7592,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "17.0.0"
+version = "18.0.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -7667,7 +7667,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "11.0.0"
+version = "11.0.1"
 dependencies = [
  "clap",
  "color-eyre",
@@ -7687,7 +7687,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "7.1.0"
+version = "8.0.0"
 dependencies = [
  "abscissa_core",
  "bytes",
