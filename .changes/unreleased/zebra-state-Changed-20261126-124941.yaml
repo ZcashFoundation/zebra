@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Raised the ideal process open file descriptor limit (`IDEAL_OPEN_FILE_LIMIT`) from 1024 to 16384 so RocksDB `max_open_files` and P2P/RPC/gRPC sockets are not capped to 488 each on Linux hosts with a 1024 default soft limit ([#12661](https://github.com/ZcashFoundation/zebra/issues/12661)).
+time: 2026-11-26T12:49:41.866786739Z
