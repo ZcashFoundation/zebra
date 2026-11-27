@@ -871,6 +871,64 @@ async fn updater_publishes_a_kept_template_when_its_block_is_committed_during_a_
     );
 }
 
+/// If the state commits the block of the kept template while the updater reads the early work at
+/// the start of its loop, and has early work on a child of that block by the time it answers, the
+/// updater publishes the kept template without building one, and nothing on the child.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_publishes_a_kept_template_when_early_work_on_its_blocks_child_arrives_during_a_read(
+) {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, tip_hash) = updater.best_tip();
+
+    let candidate = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x22; 32]),
+    );
+    let child = (
+        candidate.0.next().expect("the height is valid"),
+        Hash([0x33; 32]),
+    );
+    updater.set_candidate(Some(candidate));
+    updater.candidate_read().await;
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+
+    // A chain tip change that keeps the tip ends the wait after the withdrawal, and the updater
+    // refreshes the chain tip's template.
+    updater.wake_updater();
+    updater.build().await;
+    updater.answer_mempool();
+    updater.template_after(tip_hash, &tip_template).await;
+    updater.forget_reads();
+
+    // The updater wakes up again. While the mock state holds the updater's read of the early work,
+    // the block is committed, and the state starts verifying a child of the block.
+    let release = updater.hold_candidate_read();
+    updater.wake_updater();
+    updater.candidate_read().await;
+    updater.commit(candidate);
+    updater.set_candidate(Some(child));
+    release
+        .send(())
+        .expect("the read state responder holds the read");
+
+    updater.template_on(candidate.1).await;
+    let kept_template = updater.template(candidate.1);
+
+    // The child isn't committed, so nothing else is published while the state verifies it.
+    let mut templates = updater.cache.subscribe();
+    updater
+        .assert_nothing_published(&mut templates, &kept_template, child.1)
+        .await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        0,
+        "the template on the block is published without being built again"
+    );
+}
+
 /// When the chain tip changes while the updater builds a template, and the state is already
 /// verifying a block on the new tip when the updater sees the change, the updater builds the
 /// template on that block first. If the state then withdraws its work on the block, the updater

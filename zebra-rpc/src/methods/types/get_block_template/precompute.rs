@@ -339,6 +339,15 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 .is_some_and(|early| early.template.previous_block_hash == candidate.tip_hash);
 
             if !is_built {
+                // The state can commit the kept template's block during the read, and then have
+                // early work on a child of that block when it answers, so publish the template
+                // before replacing it.
+                publish_early_template(
+                    &mut early_template,
+                    latest_chain_tip.best_tip_hash(),
+                    &cache,
+                );
+
                 // The state has early work on one block at a time, so work on another block
                 // replaces the kept template.
                 early_template = None;
