@@ -91,6 +91,7 @@ The mempool responds to chain tip changes:
 4. **Transaction Storage**:
    - Stores verified transactions in memory
    - Tracks transaction dependencies
+   - Limits the unconfirmed transactions that a transaction can depend on (see [Transaction Dependencies](#transaction-dependencies))
    - Enforces size limits and eviction policies
 
 5. **Transaction Gossip**:
@@ -107,6 +108,8 @@ Transactions can be rejected for multiple reasons, categorized into:
 2. **Same Effects Tip Rejections** (`SameEffectsTipRejectionError`):
    - Spending conflicts with other mempool transactions
    - Missing outputs from mempool transactions
+   - More than 2 unconfirmed ancestors in the mempool
+   - Groups of more than 3 unconfirmed dependent transactions in the mempool
    - Applies to any transaction with the same effects at the current tip
 
 3. **Same Effects Chain Rejections** (`SameEffectsChainRejectionError`):
@@ -117,6 +120,15 @@ Transactions can be rejected for multiple reasons, categorized into:
    - Applies until a rollback or network upgrade
 
 Rejection reasons are stored alongside rejected transaction IDs to prevent repeated verification of invalid transactions.
+
+## Transaction Dependencies
+
+A transaction can spend the transparent outputs of other transactions in the mempool. The mempool tracks these dependencies, and limits them when it stores a transaction:
+
+- A transaction can have at most 2 unconfirmed ancestors in the mempool: the transactions that it spends outputs of, the transactions that those transactions spend outputs of, and so on.
+- A group of mempool transactions that are connected through spent outputs, in either direction, can have at most 3 transactions. The group includes a transaction's parents, children and siblings, so the mempool also rejects a transaction that would join two groups into one that is too large.
+
+These limits are policy, not consensus rules. The mempool rejects a transaction that exceeds them until the next chain tip, without scoring the peer that sent it. The transaction can be sent again once enough of its unconfirmed ancestors are mined.
 
 ## Memory Management
 

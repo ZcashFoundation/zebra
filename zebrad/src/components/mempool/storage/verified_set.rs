@@ -17,6 +17,7 @@ use zebra_node_services::mempool::TransactionDependencies;
 use crate::components::mempool::pending_outputs::PendingOutputs;
 
 use super::super::SameEffectsTipRejectionError;
+use super::{MAX_MEMPOOL_ANCESTORS, MAX_MEMPOOL_PACKAGE_TRANSACTIONS};
 
 // Imports for doc links
 #[allow(unused_imports)]
@@ -146,7 +147,8 @@ impl VerifiedSet {
     /// Insert a `transaction` into the set.
     ///
     /// Returns an error if the `transaction` has spend conflicts with any other transaction
-    /// already in the set.
+    /// already in the set, spends outputs that are missing from the set, or would exceed the
+    /// dependency limits that [`VerifiedSet::check_dependency_limits`] describes.
     ///
     /// Two transactions have a spend conflict if they spend the same UTXO or if they reveal the
     /// same nullifier.
@@ -169,6 +171,8 @@ impl VerifiedSet {
                 return Err(SameEffectsTipRejectionError::MissingOutput);
             }
         }
+
+        self.check_dependency_limits(&spent_mempool_outpoints)?;
 
         let tx_id = transaction.transaction.id.mined_id();
         self.transaction_dependencies
@@ -332,6 +336,78 @@ impl VerifiedSet {
             || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers())
             || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers())
             || Self::has_conflicts(&self.ironwood_nullifiers, tx.ironwood_nullifiers())
+    }
+
+    /// Returns an error if a transaction that spends `spent_mempool_outpoints` would have more
+    /// than [`MAX_MEMPOOL_ANCESTORS`] unconfirmed ancestors in the set, or would make a package of
+    /// transactions in the set larger than [`MAX_MEMPOOL_PACKAGE_TRANSACTIONS`].
+    ///
+    /// The unconfirmed ancestors of a transaction are the transactions in the set that it spends
+    /// outputs of, the transactions that those transactions spend outputs of, and so on. Its
+    /// package is every transaction in the set that is connected to it through spent outputs, in
+    /// either direction, so it includes the other children of its ancestors. A transaction that
+    /// spends outputs of two packages joins them into one.
+    ///
+    /// The transaction has no children in the set: the set only stores a transaction once the
+    /// outputs that it spends are in the set, and this transaction isn't in the set yet.
+    fn check_dependency_limits(
+        &self,
+        spent_mempool_outpoints: &[transparent::OutPoint],
+    ) -> Result<(), SameEffectsTipRejectionError> {
+        let dependencies = self.transaction_dependencies.dependencies();
+        let dependents = self.transaction_dependencies.dependents();
+
+        // Finding one more ancestor than the limit is enough to reject the transaction.
+        let ancestors = Self::linked_transactions(
+            spent_mempool_outpoints.iter().map(|outpoint| outpoint.hash),
+            &[dependencies],
+            MAX_MEMPOOL_ANCESTORS + 1,
+        );
+        if ancestors.len() > MAX_MEMPOOL_ANCESTORS {
+            return Err(SameEffectsTipRejectionError::TooManyAncestors);
+        }
+
+        // The transaction joins the packages of its ancestors. It isn't in the set yet, so a
+        // package that already has the maximum number of transactions has no room for it.
+        let package = Self::linked_transactions(
+            ancestors,
+            &[dependencies, dependents],
+            MAX_MEMPOOL_PACKAGE_TRANSACTIONS,
+        );
+        if package.len() >= MAX_MEMPOOL_PACKAGE_TRANSACTIONS {
+            return Err(SameEffectsTipRejectionError::TooManyPackageTransactions);
+        }
+
+        Ok(())
+    }
+
+    /// Returns the transactions in `start`, and the transactions that `links` connect to them,
+    /// directly or indirectly.
+    ///
+    /// Each of the `links` maps a transaction to the transactions that it spends outputs of, or
+    /// to the transactions that spend its outputs. Stops once it has found `limit` transactions,
+    /// so the dependency limit checks do a bounded amount of work.
+    fn linked_transactions(
+        start: impl IntoIterator<Item = transaction::Hash>,
+        links: &[&HashMap<transaction::Hash, HashSet<transaction::Hash>>],
+        limit: usize,
+    ) -> HashSet<transaction::Hash> {
+        let mut found = HashSet::new();
+        let mut unvisited: Vec<_> = start.into_iter().collect();
+
+        while found.len() < limit {
+            let Some(tx_id) = unvisited.pop() else {
+                break;
+            };
+
+            if found.insert(tx_id) {
+                for linked_ids in links.iter().filter_map(|link| link.get(&tx_id)) {
+                    unvisited.extend(linked_ids);
+                }
+            }
+        }
+
+        found
     }
 
     /// Removes the tracked transaction outputs from the mempool.

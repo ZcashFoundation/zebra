@@ -29,7 +29,9 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{queue::CHANNEL_AND_QUEUE_CAPACITY, server::OPENED_RPC_ENDPOINT_MSG};
-use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
+use zebrad::components::mempool::{
+    downloads::MAX_INBOUND_CONCURRENCY, SameEffectsTipRejectionError,
+};
 
 use crate::common::{
     cached_state::future_blocks,
@@ -219,6 +221,10 @@ pub async fn run() -> Result<()> {
 /// Sends non-coinbase transactions from a block to the mempool, verifies that the transactions
 /// can be found in the mempool via lightwalletd, and commits the block to Zebra's chainstate.
 ///
+/// A block can have more unconfirmed dependent transactions than the mempool accepts, so the
+/// mempool can reject some of the transactions because of its dependency limits. Those
+/// transactions, and the transactions that spend their outputs, don't enter the mempool.
+///
 /// Returns the zebrad test child that's handling the RPC requests.
 
 #[tracing::instrument(skip_all)]
@@ -254,11 +260,30 @@ async fn send_transactions_from_block(
     );
 
     let mut has_tx_with_shielded_elements = false;
+
+    // The transactions from this block that the mempool rejected because of its dependency limits,
+    // and the transactions that spend their outputs.
+    let mut rejected_transactions: HashSet<transaction::Hash> = HashSet::new();
+
     for &transaction in &transactions {
         let transaction_hash = transaction.hash();
 
+        // The mempool can't verify a transaction that spends outputs of a rejected transaction:
+        // it waits for those outputs until the verification times out. So don't send it.
+        if transaction
+            .spent_outpoints()
+            .any(|outpoint| rejected_transactions.contains(&outpoint.hash))
+        {
+            tracing::info!(
+                ?transaction_hash,
+                "skipping transaction that spends outputs of a rejected transaction",
+            );
+            rejected_transactions.insert(transaction_hash);
+            continue;
+        }
+
         // See <https://github.com/zcash/lightwalletd/blob/master/parser/transaction.go#L367>
-        has_tx_with_shielded_elements |= transaction.version() >= 4
+        let has_shielded_elements = transaction.version() >= 4
             && (transaction.has_shielded_inputs() || transaction.has_shielded_outputs());
 
         let expected_response = wallet_grpc::SendResponse {
@@ -271,7 +296,21 @@ async fn send_transactions_from_block(
         let request = prepare_send_transaction_request(transaction.clone());
 
         match rpc_client.send_transaction(request).await {
-            Ok(response) => assert_eq!(response.into_inner(), expected_response),
+            Ok(response) => {
+                let response = response.into_inner();
+
+                if is_dependency_limit_rejection(&response) {
+                    tracing::info!(
+                        ?transaction_hash,
+                        ?response,
+                        "mempool rejected transaction because of its dependency limits",
+                    );
+                    rejected_transactions.insert(transaction_hash);
+                    continue;
+                }
+
+                assert_eq!(response, expected_response);
+            }
             Err(err) => {
                 tracing::warn!(?err, "failed to send transaction");
                 let send_tx_rsp = zebrad_rpc_client
@@ -282,6 +321,8 @@ async fn send_transactions_from_block(
                 tracing::warn!(?send_tx_rsp, "failed to send tx twice");
             }
         };
+
+        has_tx_with_shielded_elements |= has_shielded_elements;
     }
 
     // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
@@ -322,6 +363,18 @@ async fn send_transactions_from_block(
     }
 
     Ok((has_tx_with_shielded_elements, counter))
+}
+
+/// Returns `true` if `response` is an error from the mempool rejecting the transaction because of
+/// its limits on unconfirmed dependent transactions.
+fn is_dependency_limit_rejection(response: &wallet_grpc::SendResponse) -> bool {
+    response.error_code != 0
+        && [
+            SameEffectsTipRejectionError::TooManyAncestors,
+            SameEffectsTipRejectionError::TooManyPackageTransactions,
+        ]
+        .iter()
+        .any(|error| response.error_message.contains(&error.to_string()))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.

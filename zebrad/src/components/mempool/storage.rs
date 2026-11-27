@@ -50,6 +50,20 @@ mod verified_set;
 /// [ZIP-401]: https://zips.z.cash/zip-0401#specification
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
+/// The maximum number of transactions in a package of unconfirmed transactions in the mempool.
+///
+/// A package is a group of mempool transactions that are connected through the transparent
+/// outputs they create and spend, in either direction. So it contains a transaction's unconfirmed
+/// parents, children and siblings, and every other mempool transaction connected to them.
+pub(crate) const MAX_MEMPOOL_PACKAGE_TRANSACTIONS: usize = 3;
+
+/// The maximum number of unconfirmed ancestors of a transaction in the mempool.
+///
+/// The unconfirmed ancestors of a transaction are the mempool transactions that it spends outputs
+/// of, the mempool transactions that those transactions spend outputs of, and so on. They are in
+/// the same package as the transaction, so the package limit leaves room for one fewer ancestor.
+pub(crate) const MAX_MEMPOOL_ANCESTORS: usize = MAX_MEMPOOL_PACKAGE_TRANSACTIONS - 1;
+
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
 /// or lock times. These rejections are only valid for the current tip.
 ///
@@ -70,7 +84,8 @@ pub enum ExactTipRejectionError {
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
 /// These rejections are only valid for the current tip.
 ///
-/// Each committed block clears these rejections, because new blocks can evict other transactions.
+/// Each committed block clears these rejections, because new blocks can evict other transactions,
+/// and can mine the unconfirmed transactions that a rejected transaction depends on.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
@@ -86,6 +101,28 @@ pub enum SameEffectsTipRejectionError {
         another transaction in the mempool"
     )]
     MissingOutput,
+
+    /// The transaction would have more than [`MAX_MEMPOOL_ANCESTORS`] unconfirmed ancestors in the
+    /// mempool.
+    ///
+    /// The mempool can accept the transaction once enough of its unconfirmed ancestors are mined.
+    #[error(
+        "transaction rejected because it would have more than {MAX_MEMPOOL_ANCESTORS} \
+        unconfirmed ancestors in the mempool"
+    )]
+    TooManyAncestors,
+
+    /// The transaction would make a package of unconfirmed transactions in the mempool larger than
+    /// [`MAX_MEMPOOL_PACKAGE_TRANSACTIONS`] transactions.
+    ///
+    /// The transaction joins the packages of all the mempool transactions that it spends outputs
+    /// of, so this also rejects a transaction that would join two packages. The mempool can accept
+    /// the transaction once enough of its unconfirmed ancestors are mined.
+    #[error(
+        "transaction rejected because it would make a group of unconfirmed dependent transactions \
+        in the mempool larger than {MAX_MEMPOOL_PACKAGE_TRANSACTIONS} transactions"
+    )]
+    TooManyPackageTransactions,
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).

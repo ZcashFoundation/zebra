@@ -357,19 +357,24 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
         ..Default::default()
     });
 
+    // Each transaction spends outputs of the one before it, so the chain can only be as long as
+    // the mempool's limit on unconfirmed ancestors allows.
     let unmined_txs_with_transparent_outputs = || {
-        network.unmined_transactions_in_blocks(..).filter(|tx| {
-            // treat outputs < 100 zatoshis as "dust" for these tests, we want them out
-            let dust_threshold: Amount<NonNegative> =
-                Amount::try_from(100u64).expect("valid amount");
-            !tx.transaction.transaction.outputs().is_empty()
-                && tx
-                    .transaction
-                    .transaction
-                    .outputs()
-                    .iter()
-                    .all(|out| out.value >= dust_threshold)
-        })
+        network
+            .unmined_transactions_in_blocks(..)
+            .filter(|tx| {
+                // treat outputs < 100 zatoshis as "dust" for these tests, we want them out
+                let dust_threshold: Amount<NonNegative> =
+                    Amount::try_from(100u64).expect("valid amount");
+                !tx.transaction.transaction.outputs().is_empty()
+                    && tx
+                        .transaction
+                        .transaction
+                        .outputs()
+                        .iter()
+                        .all(|out| out.value >= dust_threshold)
+            })
+            .take(MAX_MEMPOOL_ANCESTORS + 1)
     };
 
     let mut fake_spent_outpoints: Vec<OutPoint> = Vec::new();
@@ -440,6 +445,322 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
         0,
         "verified set should be empty"
     );
+
+    Ok(())
+}
+
+/// Returns the coinbase transactions of the first Mainnet test blocks, with their outputs replaced
+/// by `output_count` standard transparent outputs.
+///
+/// Tests insert these transactions with outputs of earlier transactions as their spent mempool
+/// outputs. The transactions don't spend any outputs or reveal any nullifiers themselves, so they
+/// never conflict with each other.
+fn transactions_with_outputs(output_count: usize) -> Vec<VerifiedUnminedTx> {
+    let output = transparent::Output {
+        value: Amount::try_from(10_000).expect("valid amount"),
+        lock_script: p2pkh_lock_script(&[0; 20]),
+    };
+
+    Network::Mainnet
+        .unmined_transactions_in_blocks(1..=10)
+        .map(|tx| {
+            let mut transaction = tx.transaction.transaction;
+            Arc::make_mut(&mut transaction).set_outputs(vec![output.clone(); output_count]);
+
+            VerifiedUnminedTx::new(transaction.into(), tx.miner_fee, 0, 0, Arc::new(Vec::new()))
+                .expect("the test fee pays for the replaced outputs")
+        })
+        .collect()
+}
+
+/// Returns the outpoint of the output at `index` in `transaction`.
+fn output(transaction: &VerifiedUnminedTx, index: usize) -> OutPoint {
+    OutPoint::from_usize(transaction.transaction.id.mined_id(), index)
+}
+
+/// Check that the mempool accepts a chain of dependent transactions up to its limit on
+/// unconfirmed ancestors, and rejects a transaction that would have one more ancestor.
+#[test]
+fn mempool_rejects_transaction_with_too_many_unconfirmed_ancestors() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let mut transactions = transactions_with_outputs(1).into_iter();
+
+    // Each transaction spends the output of the one before it, so the last one has the most
+    // unconfirmed ancestors that the mempool allows.
+    let mut spent_outpoints = Vec::new();
+    for _ in 0..=MAX_MEMPOOL_ANCESTORS {
+        let tx = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        storage.insert(tx.clone(), spent_outpoints, None)?;
+        spent_outpoints = vec![output(&tx, 0)];
+    }
+
+    let rejected = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    let error = SameEffectsTipRejectionError::TooManyAncestors;
+    let dependencies = storage.transaction_dependencies().clone();
+
+    assert_eq!(
+        storage.insert(rejected.clone(), spent_outpoints, None),
+        Err(error.clone().into())
+    );
+    assert_eq!(
+        storage.rejection_error(&rejected.transaction.id),
+        Some(error.into())
+    );
+    assert_eq!(storage.transaction_count(), MAX_MEMPOOL_ANCESTORS + 1);
+    assert_eq!(
+        storage.transaction_dependencies().dependencies(),
+        dependencies.dependencies()
+    );
+    assert_eq!(
+        storage.transaction_dependencies().dependents(),
+        dependencies.dependents()
+    );
+
+    Ok(())
+}
+
+/// Check that the mempool rejects a transaction that would make a package of unconfirmed
+/// transactions too large, even though it has only one unconfirmed ancestor.
+#[test]
+fn mempool_rejects_too_many_children_of_unconfirmed_transaction() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    // The parent and these children fill a package, and the parent has an output for one more
+    // child.
+    let admitted_children = MAX_MEMPOOL_PACKAGE_TRANSACTIONS - 1;
+    let mut transactions = transactions_with_outputs(admitted_children + 1).into_iter();
+
+    let parent = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    storage.insert(parent.clone(), Vec::new(), None)?;
+
+    for index in 0..admitted_children {
+        let child = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        storage.insert(child, vec![output(&parent, index)], None)?;
+    }
+
+    let rejected = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    let error = SameEffectsTipRejectionError::TooManyPackageTransactions;
+    let dependencies = storage.transaction_dependencies().clone();
+
+    assert_eq!(
+        storage.insert(
+            rejected.clone(),
+            vec![output(&parent, admitted_children)],
+            None
+        ),
+        Err(error.clone().into())
+    );
+    assert_eq!(
+        storage.rejection_error(&rejected.transaction.id),
+        Some(error.into())
+    );
+    assert_eq!(
+        storage.transaction_count(),
+        MAX_MEMPOOL_PACKAGE_TRANSACTIONS
+    );
+    assert_eq!(
+        storage.transaction_dependencies().dependencies(),
+        dependencies.dependencies()
+    );
+    assert_eq!(
+        storage.transaction_dependencies().dependents(),
+        dependencies.dependents()
+    );
+
+    Ok(())
+}
+
+/// Check that the mempool rejects a transaction that would join two packages of unconfirmed
+/// transactions into one that is too large, even though it has an allowed number of unconfirmed
+/// ancestors.
+#[test]
+fn mempool_rejects_transaction_joining_two_unconfirmed_packages() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let mut transactions = transactions_with_outputs(2).into_iter();
+
+    // Two packages, each with a parent and a child that spends the first output of the parent.
+    let mut parents = Vec::new();
+    for _ in 0..2 {
+        let parent = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        let child = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+
+        storage.insert(parent.clone(), Vec::new(), None)?;
+        storage.insert(child, vec![output(&parent, 0)], None)?;
+        parents.push(parent);
+    }
+
+    // This transaction spends the second output of both parents.
+    let rejected = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    let error = SameEffectsTipRejectionError::TooManyPackageTransactions;
+    let dependencies = storage.transaction_dependencies().clone();
+
+    assert_eq!(
+        storage.insert(
+            rejected.clone(),
+            parents.iter().map(|parent| output(parent, 1)).collect(),
+            None
+        ),
+        Err(error.clone().into())
+    );
+    assert_eq!(
+        storage.rejection_error(&rejected.transaction.id),
+        Some(error.into())
+    );
+    assert_eq!(storage.transaction_count(), 2 * parents.len());
+    assert_eq!(
+        storage.transaction_dependencies().dependencies(),
+        dependencies.dependencies()
+    );
+    assert_eq!(
+        storage.transaction_dependencies().dependents(),
+        dependencies.dependents()
+    );
+
+    Ok(())
+}
+
+/// Check that the mempool accepts a transaction that joins unconfirmed transactions into a
+/// package with the maximum number of transactions.
+#[test]
+fn mempool_accepts_transaction_joining_unconfirmed_parents() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let mut transactions = transactions_with_outputs(1).into_iter();
+
+    // Parents that aren't connected to any other transactions in the mempool. The transaction
+    // that spends their outputs has the most unconfirmed ancestors that the mempool allows.
+    let mut parents = Vec::new();
+    for _ in 0..MAX_MEMPOOL_ANCESTORS {
+        let parent = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        storage.insert(parent.clone(), Vec::new(), None)?;
+        parents.push(parent);
+    }
+
+    let child = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+
+    assert_eq!(
+        storage.insert(
+            child.clone(),
+            parents.iter().map(|parent| output(parent, 0)).collect(),
+            None
+        ),
+        Ok(child.transaction.id)
+    );
+    assert_eq!(
+        storage.transaction_count(),
+        MAX_MEMPOOL_PACKAGE_TRANSACTIONS
+    );
+
+    Ok(())
+}
+
+/// Check that the mempool accepts a transaction that it rejected for having too many unconfirmed
+/// ancestors, after a block mines one of those ancestors and the mempool clears its rejections
+/// for the new chain tip.
+#[test]
+fn mempool_accepts_dependent_transaction_after_its_ancestor_is_mined() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: u64::MAX,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let mut transactions = transactions_with_outputs(1).into_iter();
+
+    let mut chain = Vec::new();
+    let mut spent_outpoints = Vec::new();
+    for _ in 0..=MAX_MEMPOOL_ANCESTORS {
+        let tx = transactions
+            .next()
+            .expect("the test blocks have more transactions than the test uses");
+        storage.insert(tx.clone(), spent_outpoints, None)?;
+        spent_outpoints = vec![output(&tx, 0)];
+        chain.push(tx);
+    }
+
+    let dependent = transactions
+        .next()
+        .expect("the test blocks have more transactions than the test uses");
+    let rejection: Result<UnminedTxId, MempoolError> =
+        Err(SameEffectsTipRejectionError::TooManyAncestors.into());
+
+    assert_eq!(
+        storage.insert(dependent.clone(), spent_outpoints.clone(), None),
+        rejection
+    );
+
+    // A block mines the first transaction of the chain, and the mempool updates its storage in
+    // the same order as it does for a new chain tip.
+    let mined = &chain[0];
+    let mined_ids: HashSet<_> = [mined.transaction.id.mined_id()].into();
+    storage.clear_mined_dependencies(&mined_ids);
+    let removed = storage
+        .reject_and_remove_same_effects(&mined_ids, vec![mined.transaction.transaction.clone()]);
+
+    assert_eq!(removed.mined, HashSet::from([mined.transaction.id]));
+    assert!(removed.invalidated.is_empty());
+
+    // The rejection lasts until the mempool clears the rejections for the old tip.
+    assert_eq!(
+        storage.insert(dependent.clone(), spent_outpoints.clone(), None),
+        rejection
+    );
+
+    storage.clear_tip_rejections();
+
+    assert_eq!(
+        storage.insert(dependent.clone(), spent_outpoints, None),
+        Ok(dependent.transaction.id)
+    );
+    assert_eq!(storage.transaction_count(), MAX_MEMPOOL_ANCESTORS + 1);
 
     Ok(())
 }
