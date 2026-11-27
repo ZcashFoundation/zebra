@@ -1015,6 +1015,80 @@ async fn router_reuses_mempool_verification_from_a_mempool_sent_after_the_first_
     assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 1);
 }
 
+/// A block proposal takes its transactions' verification from the mempool, and the block that
+/// solves it is committed with the proposal's validation result, without verifying them again.
+/// Neither of them records the reuse counters.
+#[tokio::test]
+async fn solved_proposal_commits_without_verifying_the_proposals_reused_transaction() {
+    let _init_guard = zebra_test::init();
+    let recorder = ReuseRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
+    let network = network();
+    let proposal = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    let mut solved = (*proposal).clone();
+    Arc::make_mut(&mut solved.header).nonce = [1; 32].into();
+    let solved = Arc::new(solved);
+    assert_ne!(solved.hash(), proposal.hash());
+
+    // The state validates the proposal with the spend's output, as `mock_state` answers it, and
+    // commits the validation result for the solved block.
+    let spent_outputs: std::collections::HashMap<_, _> = proposal.transactions[1]
+        .spent_outpoints()
+        .map(|outpoint| {
+            let output = transparent::Output::new(
+                (FEE + 1).try_into().unwrap(),
+                transparent::Script::new(&[0x51]),
+            );
+            (
+                outpoint,
+                transparent::OrderedUtxo::new(output, Height(1), 1),
+            )
+        })
+        .collect();
+    let state: State = BoxCloneService::new(service_fn({
+        let network = network.clone();
+        move |request| match request {
+            zs::Request::CheckBlockProposalValidity(block) => {
+                let contextual = zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+                    block,
+                    spent_outputs.clone(),
+                    zebra_chain::amount::DeferredPoolBalanceChange::zero(),
+                    &network,
+                    Default::default(),
+                )
+                .expect("the spend's output covers its value");
+                ready(Ok(zs::Response::ValidBlockProposal(Box::new(contextual)))).boxed()
+            }
+            zs::Request::CommitContextuallyVerifiedBlock(contextual) => {
+                let committed = zs::SemanticallyVerifiedBlock::from(*contextual);
+                ready(Ok(zs::Response::Committed(committed.hash))).boxed()
+            }
+            request => mock_state().oneshot(request).boxed(),
+        }
+    }));
+    let mut harness = Harness::new(&network, state).with_mempool(mempool(
+        &proposal,
+        vec![entry(proposal.transactions[1].clone())],
+    ));
+
+    let validation = harness
+        .verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CheckProposal(proposal.clone()));
+    assert_eq!(validation.await.unwrap(), proposal.hash());
+    // The proposal took the spend from the mempool.
+    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 0);
+    assert_eq!(recorder.hits_and_misses(), (0, 0));
+
+    assert_eq!(harness.verify(solved.clone()).await.unwrap(), solved.hash());
+    // The solved block used the proposal's result, so nothing verified the spend.
+    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.calls.await_utxo.load(Ordering::SeqCst), 0);
+    assert_eq!(recorder.hits_and_misses(), (0, 0));
+}
+
 /// A mempool answer of the wrong kind is a bug in the mempool service, so the block verifier panics
 /// instead of verifying every transaction without a trace.
 #[tokio::test]
