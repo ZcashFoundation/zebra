@@ -28,6 +28,7 @@ use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
+    diagnostic::task::WaitForPanics,
     parameters::{checkpoint::list::CheckpointList, Network},
 };
 
@@ -254,7 +255,7 @@ where
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, mempool transaction verifier,
-/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
+/// a [`BackgroundTaskHandles`] with the state checkpoint and Orchard table preload task,
 /// and the maximum configured checkpoint verification height.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -302,6 +303,9 @@ where
 {
     // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
+
+    // Build shared scalar and batch tables off the async workers without delaying initialization.
+    let orchard_tree_preload = tokio::task::spawn_blocking(sinsemilla::precompute);
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
@@ -379,6 +383,7 @@ where
             }
 
             tracing::info!("finished state checkpoint validation");
+            orchard_tree_preload.wait_for_panics().await;
         }
         .instrument(Span::current()),
     );
@@ -456,8 +461,8 @@ pub fn init_checkpoint_list(config: Config, network: &Network) -> (Arc<Checkpoin
 /// The background task handles for `zebra-consensus` verifier initialization.
 #[derive(Debug)]
 pub struct BackgroundTaskHandles {
-    /// A handle to the state checkpoint verify task.
-    /// Finishes when all the checkpoints are verified, or when the state tip is reached.
+    /// A handle to state checkpoint verification and background Orchard tree table preload.
+    /// Finishes when both tasks complete; checkpoints stop at the current state tip.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
 }
 

@@ -25,8 +25,6 @@ use lazy_static::lazy_static;
 use thiserror::Error;
 use zcash_primitives::merkle_tree::HashSer;
 
-use super::sinsemilla::*;
-
 use crate::{
     serialization::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
@@ -36,6 +34,10 @@ use crate::{
 
 pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
+
+mod batch;
+#[cfg(test)]
+mod tests;
 
 /// The type that is used to update the note commitment tree.
 pub type NoteCommitmentUpdate = pallas::Base;
@@ -57,21 +59,60 @@ pub(super) const MERKLE_DEPTH: u8 = 32;
 /// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
 /// <https://zips.z.cash/protocol/protocol.pdf#constants>
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-    let mut s = bitvec![u8, Lsb0;];
-
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-    let l = MERKLE_DEPTH - 1 - layer;
-    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from([l, 0])[0..10]);
-    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left.to_repr())[0..255]);
-    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right.to_repr())[0..255]);
+    let prefix = BitArray::<_, Lsb0>::from([MERKLE_DEPTH - 1 - layer, 0]);
+    let left = BitArray::<_, Lsb0>::from(left.to_repr());
+    let right = BitArray::<_, Lsb0>::from(right.to_repr());
 
-    match sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s) {
-        Some(h) => h,
-        None => pallas::Base::zero(),
+    MERKLE_CRH_DOMAIN
+        .hash(
+            prefix[..10]
+                .iter()
+                .by_vals()
+                .chain(left[..255].iter().by_vals())
+                .chain(right[..255].iter().by_vals()),
+        )
+        .unwrap_or(pallas::Base::zero())
+}
+
+/// Packs the public MerkleCRH message into its 52 little-endian 10-bit words.
+fn merkle_crh_words(level: u8, left: pallas::Base, right: pallas::Base) -> [u16; 52] {
+    let left = BitArray::<_, Lsb0>::from(left.to_repr());
+    let right = BitArray::<_, Lsb0>::from(right.to_repr());
+    let mut words = [0; 52];
+    words[0] = u16::from(level);
+    for i in 0..25 {
+        words[i + 1] = left[i * 10..i * 10 + 10].load_le();
+    }
+    words[26] = left[250..255].load_le::<u16>() | (right[..5].load_le::<u16>() << 5);
+    for i in 0..25 {
+        words[i + 27] = right[i * 10 + 5..i * 10 + 15].load_le();
+    }
+    words
+}
+
+/// Hashes a level of public node pairs, preserving the specification's bottom-to-zero mapping.
+fn merkle_crh_orchard_batch(
+    domain: &sinsemilla::HashDomain,
+    level: u8,
+    nodes: &[Node],
+    out: &mut [Node],
+) {
+    assert_eq!(nodes.len(), out.len() * 2, "one output per node pair");
+    let words: Vec<_> = nodes
+        .chunks_exact(2)
+        .map(|pair| merkle_crh_words(level, pair[0].0, pair[1].0))
+        .collect();
+    for (out, hash) in out.iter_mut().zip(domain.hash_many_vartime(&words)) {
+        *out = Node(hash.unwrap_or(pallas::Base::zero()));
     }
 }
 
 lazy_static! {
+    /// Derive the fixed domain's group-hash generator once, rather than once per node.
+    static ref MERKLE_CRH_DOMAIN: sinsemilla::HashDomain =
+        sinsemilla::HashDomain::new("z.cash:Orchard-MerkleCRH");
+
     /// List of "empty" Orchard note commitment nodes, one for each layer.
     ///
     /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
@@ -191,6 +232,17 @@ impl Node {
     /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
         self.to_repr()
+    }
+
+    /// Combines independent public node pairs at the same level.
+    fn combine_batch(level: u8, nodes: &[Self], out: &mut [Self]) {
+        if out.len() <= 1 {
+            for (pair, out) in nodes.chunks_exact(2).zip(out) {
+                *out = Self::combine(level.into(), &pair[0], &pair[1]);
+            }
+        } else {
+            merkle_crh_orchard_batch(&MERKLE_CRH_DOMAIN, level, nodes, out);
+        }
     }
 }
 
@@ -360,7 +412,7 @@ pub struct NoteCommitmentTree {
     ///
     /// Every time the root is computed by [`Self::root`] it is cached here,
     /// and the cached value will be returned by [`Self::root`] until the tree is
-    /// changed by [`Self::append`]. This greatly increases performance
+    /// changed by [`Self::append`] or [`Self::append_batch`]. This greatly increases performance
     /// because it avoids recomputing the root when the tree does not change
     /// between blocks. In the finalized state, the tree is read from
     /// disk for every block processed, which would also require recomputing
@@ -397,6 +449,32 @@ impl NoteCommitmentTree {
         } else {
             Err(NoteCommitmentTreeError::FullTree)
         }
+    }
+
+    /// Appends commitments in order, batching independent parent hashes by tree level.
+    ///
+    /// Returns the last [`TRACKED_SUBTREE_HEIGHT`] subtree completed by these commitments,
+    /// or `None` if none was completed. A block can complete at most one such subtree.
+    /// An empty batch leaves the tree and cached root unchanged.
+    ///
+    /// Returns an error when the tree is full, retaining any commitments that fit,
+    /// just like successive calls to [`Self::append`].
+    #[allow(clippy::unwrap_in_result)]
+    pub fn append_batch(
+        &mut self,
+        note_commitments: &[NoteCommitmentUpdate],
+    ) -> Result<Option<(NoteCommitmentSubtreeIndex, Node)>, NoteCommitmentTreeError> {
+        let old_size = self.inner.tree_size();
+        let result = batch::append_batch(&mut self.inner, note_commitments);
+
+        if self.inner.tree_size() != old_size {
+            *self
+                .cached_root
+                .get_mut()
+                .expect("a thread that previously held exclusive lock access panicked") = None;
+        }
+
+        result.map_err(|_| NoteCommitmentTreeError::FullTree)
     }
 
     /// Returns frontier of non-empty tree, or `None` if the tree is empty.

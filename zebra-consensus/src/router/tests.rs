@@ -30,6 +30,66 @@ use super::*;
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
+/// Startup stays responsive while its completion handle covers the actual table initializer.
+#[test]
+fn startup_preload_initializes_orchard_tree_tables_without_waiting() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            let (release, blocked) = std::sync::mpsc::channel();
+            let (started, ready) = oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(120)).unwrap();
+            });
+            ready.await.unwrap();
+
+            let state = tower::service_fn(|request| async move {
+                Ok::<_, BoxError>(match request {
+                    zs::Request::Tip => zs::Response::Tip(None),
+                    zs::Request::BestChainBlockHash(_) => zs::Response::BlockHash(None),
+                    _ => panic!("unexpected state request during initialization"),
+                })
+            });
+            let (_router, _transaction, handles, _) = tokio::time::timeout(
+                Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+                init(
+                    Config::default(),
+                    &Network::Mainnet,
+                    state,
+                    oneshot::channel::<
+                        Buffer<
+                            BoxService<mempool::Request, mempool::Response, BoxError>,
+                            mempool::Request,
+                        >,
+                    >()
+                    .1,
+                ),
+            )
+            .await
+            .expect("router initialization must not await queued table construction");
+            tokio::task::yield_now().await;
+            assert!(
+                !handles.state_checkpoint_verify_handle.is_finished(),
+                "the startup handle must cover queued table construction"
+            );
+
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            handles.state_checkpoint_verify_handle.await.unwrap();
+            let orchard_merkle = sinsemilla::HashDomain::new("z.cash:Orchard-MerkleCRH");
+            assert!(orchard_merkle.precomputed_message_words() >= 52);
+        })
+        .await
+    });
+    runtime.shutdown_timeout(Duration::from_secs(5));
+    result.expect("startup table preload must finish without delaying initialization");
+}
+
 /// Generate a block with no transactions (not even a coinbase transaction).
 ///
 /// The generated block should fail validation.
