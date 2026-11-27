@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Updated `zcash_primitives` to 0.31.1 and `zcash_transparent` to 0.11.1, which read and write Orchard proofs and transparent scripts in bulk instead of one byte at a time. This reduces the CPU cost of parsing and serializing transactions.
+time: 2026-11-27T20:52:04.470016674Z

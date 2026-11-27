@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Updated `zcash_primitives` to 0.31.1 and `zcash_transparent` to 0.11.1, which read and write Orchard proofs and transparent scripts in bulk when a `Transaction` is parsed or serialized.
+time: 2026-11-27T20:52:07.56419931Z

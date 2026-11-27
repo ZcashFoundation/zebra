@@ -31,7 +31,7 @@ async-error = [
 ]
 
 # Experimental internal miner support
-internal-miner = ["equihash/solver"]
+internal-miner = ["equihash/solver", "equihash/unsafe-solver"]
 
 # Test-only features
 

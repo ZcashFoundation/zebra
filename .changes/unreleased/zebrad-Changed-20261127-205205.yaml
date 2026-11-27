@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Updated `zcash_script` to 0.6.1, which renders the `asm` fields of verbose `getblock` and `getrawtransaction` responses without allocating a string per byte.
+time: 2026-11-27T20:52:05.500718Z
