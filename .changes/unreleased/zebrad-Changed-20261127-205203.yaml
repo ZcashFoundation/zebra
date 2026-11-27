@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Updated `equihash` to 0.3.1 and enabled its accelerated verifier, which checks block proof-of-work faster, using AVX2 or NEON instructions when the CPU has them. Builds with the experimental `internal-miner` feature also solve Equihash faster.
+time: 2026-11-27T20:52:03.436436168Z

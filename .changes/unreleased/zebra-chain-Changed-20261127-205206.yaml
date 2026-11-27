@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Updated `equihash` to 0.3.1 and enabled its `unsafe-verifier` feature, so `Solution::check` uses AVX2 or NEON instructions when the CPU has them. The `internal-miner` feature now also enables `equihash/unsafe-solver`, which speeds up `Solution::solve`.
+time: 2026-11-27T20:52:06.531550772Z
