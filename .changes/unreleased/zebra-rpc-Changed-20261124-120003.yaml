@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: '`getblocktemplate` serves a coinbase-only template on a block that is still being verified, while the state publishes early mining work for that block. The block template updater only precomputes templates once the read state answers `ReadRequest::MiningCandidateChanges`.'
-time: 2026-11-24T12:00:03.000000000Z

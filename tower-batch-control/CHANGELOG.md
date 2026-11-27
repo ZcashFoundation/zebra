@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [2.0.0] - 2026-11-27
+
+### Breaking Changes
+
+- Added a required `max_idle` duration to `Batch::new`, `Batch::pair`, and `BatchLayer::new` for idle-triggered flushing without extending `max_latency`. Pass `max_latency` to preserve latency-only timer flushing. Durations that overflow their deadlines do not panic. Queued input is drained before idle flushing, without extending the latency bound.
+
 ## [1.2.0] - 2026-11-16
 
 ### Changed

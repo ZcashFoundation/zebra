@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-11-27
+
+### Breaking Changes
+
+- `mempool::Request` and `mempool::Response` are not `#[non_exhaustive]`, so exhaustive matches on them must handle the new `VerifiedTransactionsForBlock` variants.
+
+### Added
+
+- Added `mempool::Request::VerifiedTransactionsForBlock`, which asks the mempool for its verified transactions with a block's mined hashes when the block's parent is its last seen tip, and `mempool::Response::VerifiedTransactionsForBlock`, which returns them by mined hash. The block verifier in `zebra-consensus` reuses their verification, so a mempool service must answer only with the output of the mempool transaction verifier, unmodified apart from the `time` and `height` that the mempool sets, with the tip height that each transaction was verified at as `height`, or with no transactions.
+
 ## [14.0.0] - 2026-11-16
 
 ### Breaking Changes

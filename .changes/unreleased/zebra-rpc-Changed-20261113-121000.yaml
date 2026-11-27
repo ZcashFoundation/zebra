@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: '`submitblock` gives a solved block proposal the decoded transactions of the proposal that Zebra validated, instead of decoding them again.'
-time: 2026-11-13T12:10:00.000000000Z

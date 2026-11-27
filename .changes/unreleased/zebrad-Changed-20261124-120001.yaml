@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Added the `siphasher` dependency, which the compact block encoding uses for short transaction IDs.'
-time: 2026-11-24T12:00:01.000000000Z

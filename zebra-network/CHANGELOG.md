@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.0.0] - 2026-11-27
+
+### Breaking Changes
+
+- Added compact block relay, off by default: the `Config::compact_block_relay` field, the `ConnectionInfo::early_block_relay` field, the `PeerServices::NODE_COMPACT_BLOCKS` service bit, the `Request::AdvertiseCompactBlock`, `Request::CheckCompactHeader`, `Request::CompactBlockTransactions` and `Request::CheckCompactBlock` inbound requests, the `Response::CompactBlockTransactions` and `Response::EarlyBlocks` responses, and `PeerError::InboundOnlyRequest`. Block downloads from connections that negotiated compact block relay return `Response::EarlyBlocks` instead of `Response::Blocks`. A block rebuilt from a compact announcement answers an ordinary block download, so it is verified like any other block. Code that builds a `Config` or `ConnectionInfo` with a struct literal must set the new fields, and exhaustive matches must handle the new variants.
+
+### Added
+
+- Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, and `metrics::LABELS`, which lists the label keys of each labelled metric.
+- Added the `zebra.net.block.decode.wait_seconds` and `zebra.net.block.decode.duration_seconds` histograms, which time decoding received block messages.
+- Added `PeerServices::NODE_PRUNED` (experimental service bit 25, advertised by pruned Zakura nodes) and `PeerServices::serves_full_history()`.
+- Added the `compact` module: the compact block announcement, the request and response for the transactions a receiver is missing, and the reconstruction of a block from candidate transactions.
+- Added `connection_limit_key()`, which returns the peer group that Zebra applies connection limits and bans to: an IPv4 address, or the `/64` prefix of an IPv6 address.
+
+### Changed
+
+- Changed the `zebra.net.connection.state` gauge updates to build each label with one string allocation instead of two. The gauge keeps its name, labels, and values.
+- Changed the `zcash.net.peers.missing_services` label from `remote_services`, the service bits the rejected peer sent, to `missing_service`, the required service it lacks, such as `NODE_NETWORK`. Removed the `cache` label, the peer cache file path, from `zcash.net.peers.initial` and `zcash.net.peers.cache`. The `seed` label of `zcash.net.peers.initial` now names only Zebra's default DNS seeders, and labels every other configured initial peer `custom`. Update dashboards and alerts that select on these labels.
+- The `Codec` decodes the transactions of a block with 64 or more transactions in parallel, for one block at a time.
+
+### Fixed
+
+- Remove banned and outdated connections before admitting new peers, so obsolete connections do not block eligible replacements in the same IPv4 address or IPv6 /64 group ([#12109](https://github.com/ZcashFoundation/zebra/issues/12109)).
+- The `Codec` decodes the messages that are already buffered behind a message it ignores, such as one with an unknown command, instead of waiting for more bytes. After 1,024 ignored messages in a row, it waits for more bytes.
+- Zebra no longer treats peers that advertise `NODE_PRUNED` as able to serve historic blocks. While syncing, it rejects them as new outbound peers, and it stops routing historic block and `getblocks` requests to them. Since Zakura 1.8.8, pruned Zakura nodes advertise `NODE_NETWORK` with `NODE_PRUNED`, and their unanswered `getblocks` replies were stalling Zebra's initial sync.
+
+### Security
+
+- Bound the upfront body-capacity reservation in the P2P codec, so a peer can no longer force a reservation near the 2 MiB protocol maximum by sending only a header and withholding the body. The buffer now grows as body bytes arrive, never beyond the declared length. (#10564)
+
 ## [16.0.0] - 2026-11-16
 
 ### Changed

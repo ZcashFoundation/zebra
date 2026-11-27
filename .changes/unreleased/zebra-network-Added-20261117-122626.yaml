@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: Added the `zebra.net.block.decode.wait_seconds` and `zebra.net.block.decode.duration_seconds` histograms, which time decoding received block messages.
-time: 2026-11-17T12:26:26.875437Z

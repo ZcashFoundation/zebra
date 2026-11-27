@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: 'Added `Request::MiningCandidate`, `ReadRequest::MiningCandidate` and `ReadRequest::MiningCandidateChanges`, their responses, and the `MiningCandidateGuard` and `MiningCandidateChanges` types, which give miners work on a block as soon as its proof of work is checked. Exhaustive matches on the request and response enums must handle the new variants.'
-time: 2026-11-12T14:10:00.000000000Z

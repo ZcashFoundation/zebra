@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: 'Added `PeerServices::NODE_PRUNED` (experimental service bit 25, advertised by pruned Zakura nodes) and `PeerServices::serves_full_history()`.'
-time: 2026-11-18T14:00:00.000000000Z

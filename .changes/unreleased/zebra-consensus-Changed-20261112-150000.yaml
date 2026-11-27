@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: 'The semantic block verifier keeps the validation results of block proposals, and commits a solved proposal after checking its proof of work and time, without verifying its transactions again.'
-time: 2026-11-12T15:00:00.000000000Z

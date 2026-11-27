@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: 'Added `connection_limit_key()`, which returns the peer group that Zebra applies connection limits and bans to: an IPv4 address, or the `/64` prefix of an IPv6 address.'
-time: 2026-11-26T12:00:00.000000000Z

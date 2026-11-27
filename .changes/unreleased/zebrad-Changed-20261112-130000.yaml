@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Decode large blocks received from peers in parallel, like submitted blocks.'
-time: 2026-11-12T13:00:00.000000000Z
