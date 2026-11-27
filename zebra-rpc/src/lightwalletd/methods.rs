@@ -23,8 +23,8 @@ use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
 
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
-    GetAddressUtxosRequest, GetAddressUtxosResponse, RpcServer as RpcMethods,
-    MAX_REQUEST_ADDRESSES,
+    GetAddressTxIdsResponse, GetAddressUtxosRequest, GetAddressUtxosResponse,
+    RpcServer as RpcMethods, MAX_REQUEST_ADDRESSES,
 };
 
 use super::{
@@ -831,7 +831,7 @@ where
         Ok((height != 0).then_some(height))
     };
 
-    let txids = rpc
+    let response = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest::new(
             vec![request.address],
             range_height(range.start)?,
@@ -839,6 +839,10 @@ where
         ))
         .await
         .map_err(rpc_arg_error_to_status)?;
+
+    let GetAddressTxIdsResponse::TxIds(txids) = response else {
+        unreachable!("requested getaddresstxids without chainInfo");
+    };
 
     let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
     let response_stream = ReceiverStream::new(response_receiver);

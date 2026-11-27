@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`ReadResponse::AddressesTransactionIds` now includes `tip: Option<(block::Height, block::Hash)>` captured from the same state snapshot as `tx_ids`.'
+time: 2026-11-26T10:00:23.242213607Z

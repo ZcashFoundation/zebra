@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Changed `ReadResponse::AddressesTransactionIds` from a tuple variant to a struct variant `{ tx_ids, tip }`. Update matches and constructors to use the named fields.
+time: 2026-11-26T10:00:23.233854241Z

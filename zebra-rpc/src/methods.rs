@@ -33,7 +33,7 @@
 
 use std::{
     cmp,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
     ops::RangeInclusive,
     sync::{Arc, Mutex},
@@ -451,25 +451,31 @@ pub trait Rpc {
     ///         - `addresses`: (array of strings, required) The addresses to get transactions from.
     ///         - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
     ///         - `end`: (numeric, optional) The upper height to stop looking for transactions (inclusive).
+    ///         - `chainInfo`: (boolean, optional, default=false) Include chain info (`hash` and `height`) with results.
     ///
     /// Example of the object form:
     /// ```json
     /// {
     ///   "addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"],
     ///   "start": 1000,
-    ///   "end": 2000
+    ///   "end": 2000,
+    ///   "chainInfo": true
     /// }
     /// ```
     ///
     /// # Notes
     ///
-    /// - Only the multi-argument format is used by lightwalletd and this is what we currently support:
-    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
+    /// - When `chainInfo` is `false` or omitted, returns an array of transaction ID strings.
+    ///   When `chainInfo` is `true`, returns `{ "txids": [...], "hash": "<tip hash>", "height": <height> }`
+    ///   captured from the same chain snapshot as the index read.
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
     /// - At most 10,000 addresses are accepted, and a query matching more than 100,000
     ///   transactions is rejected; narrow the height range instead.
     #[method(name = "getaddresstxids")]
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
+    async fn get_address_tx_ids(
+        &self,
+        request: GetAddressTxIdsRequest,
+    ) -> Result<GetAddressTxIdsResponse>;
 
     /// Returns all unspent outputs for a list of addresses.
     ///
@@ -2603,63 +2609,88 @@ where
         }
     }
 
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
+    async fn get_address_tx_ids(
+        &self,
+        request: GetAddressTxIdsRequest,
+    ) -> Result<GetAddressTxIdsResponse> {
+        const MAX_ADDRESS_TX_IDS_TIP_RETRIES: usize = 3;
+
         let mut read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
-        let height_range = build_height_range(
-            request.start,
-            request.end,
-            best_chain_tip_height(&latest_chain_tip)?,
-        )?;
-
         let valid_addresses = request.valid_addresses()?;
-
-        // Ask for one more than the cap, so an oversized result can be detected.
+        let mut tip_height = best_chain_tip_height(&latest_chain_tip)?;
         let cap = self.max_address_query_results;
-        let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
-            addresses: valid_addresses,
-            height_range,
-            max_entries: Some(cap.saturating_add(1)),
-        };
-        let response = read_state
-            .ready()
-            .and_then(|service| service.call(request))
-            .await
-            .map_misc_error()?;
 
-        let hashes = match response {
-            zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
-                if hashes.len() > cap {
-                    return Err(format!(
-                        "more than {cap} transactions match; narrow the height range"
-                    ))
-                    .map_error(server::error::LegacyCode::InvalidParameter);
-                }
+        let mut snapshot = None;
+        for _ in 0..=MAX_ADDRESS_TX_IDS_TIP_RETRIES {
+            let query_range =
+                build_address_tx_ids_query_range(request.start, request.end, tip_height)?;
 
-                let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+            // Ask for one more than the cap, so an oversized result can be detected.
+            let (tx_ids, tip) = read_address_tx_ids(
+                &mut read_state,
+                valid_addresses.clone(),
+                query_range.clone(),
+                cap.saturating_add(1),
+            )
+            .await?;
 
-                hashes
-                    .iter()
-                    .map(|(tx_loc, tx_id)| {
-                        // Check that the returned transactions are in chain order.
-                        assert!(
-                            *tx_loc > last_tx_location,
-                            "Transactions were not in chain order:\n\
-                                 {tx_loc:?} {tx_id:?} was after:\n\
-                                 {last_tx_location:?}",
-                        );
-
-                        last_tx_location = *tx_loc;
-
-                        tx_id.to_string()
-                    })
-                    .collect()
+            // Re-check clamping against the exact snapshot tip before checking the result cap,
+            // so a stale clamp from a moving tip isn't rejected for hitting too many results.
+            if let Some(snapshot_height) =
+                stale_address_tx_ids_tip_height(request.start, request.end, &query_range, tip)?
+            {
+                tip_height = snapshot_height;
+                continue;
             }
-            _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
-        };
 
-        Ok(hashes)
+            snapshot = Some((tx_ids, tip));
+            break;
+        }
+
+        let (tx_ids, tip) = snapshot
+            .ok_or_misc_error("state tip changed repeatedly during getaddresstxids query")?;
+
+        if tx_ids.len() > cap {
+            return Err(format!(
+                "more than {cap} transactions match; narrow the height range"
+            ))
+            .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
+        let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+
+        let txids = tx_ids
+            .iter()
+            .map(|(tx_loc, tx_id)| {
+                // Check that the returned transactions are in chain order.
+                assert!(
+                    *tx_loc > last_tx_location,
+                    "Transactions were not in chain order:\n\
+                         {tx_loc:?} {tx_id:?} was after:\n\
+                         {last_tx_location:?}",
+                );
+
+                last_tx_location = *tx_loc;
+
+                tx_id.to_string()
+            })
+            .collect();
+
+        if !request.chain_info {
+            return Ok(GetAddressTxIdsResponse::TxIds(txids));
+        }
+
+        let (height, hash) = tip.ok_or_misc_error("No blocks in state")?;
+
+        Ok(GetAddressTxIdsResponse::TxIdsAndChainInfo(
+            GetAddressTxIdsResponseObject {
+                txids,
+                hash,
+                height,
+            },
+        ))
     }
 
     async fn get_address_utxos(
@@ -5170,10 +5201,18 @@ pub struct GetAddressTxIdsRequest {
     /// A list of addresses. The RPC method will get transactions IDs that sent or received
     /// funds to or from these addresses.
     addresses: Vec<String>,
-    // The height to start looking for transactions.
+    /// The height to start looking for transactions.
     start: Option<u32>,
-    // The height to end looking for transactions.
+    /// The height to end looking for transactions.
     end: Option<u32>,
+    /// Whether to return chain info along with the transaction IDs.
+    #[new(default)]
+    #[serde(
+        default,
+        rename = "chainInfo",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    chain_info: bool,
 }
 
 impl GetAddressTxIdsRequest {
@@ -5184,7 +5223,14 @@ impl GetAddressTxIdsRequest {
             addresses,
             start: Some(start),
             end: Some(end),
+            chain_info: false,
         }
+    }
+
+    /// Sets whether to include chain info (`hash` and `height`) in the response.
+    pub fn with_chain_info(mut self, chain_info: bool) -> Self {
+        self.chain_info = chain_info;
+        self
     }
 
     /// Returns the contents of [`GetAddressTxIdsRequest`].
@@ -5204,15 +5250,18 @@ impl From<DGetAddressTxIdsRequest> for GetAddressTxIdsRequest {
                 addresses: vec![addr],
                 start: None,
                 end: None,
+                chain_info: false,
             },
             DGetAddressTxIdsRequest::Object {
                 addresses,
                 start,
                 end,
+                chain_info,
             } => GetAddressTxIdsRequest {
                 addresses,
                 start,
                 end,
+                chain_info,
             },
         }
     }
@@ -5224,7 +5273,7 @@ impl From<DGetAddressTxIdsRequest> for GetAddressTxIdsRequest {
 enum DGetAddressTxIdsRequest {
     /// A single address string.
     Single(String),
-    /// A full request object with address list and optional height range.
+    /// A full request object with address list, optional height range, and optional chainInfo flag.
     Object {
         /// A list of addresses to get transactions from.
         addresses: Vec<String>,
@@ -5232,6 +5281,9 @@ enum DGetAddressTxIdsRequest {
         start: Option<u32>,
         /// The height to end looking for transactions.
         end: Option<u32>,
+        /// Whether to return chain info along with the transaction IDs.
+        #[serde(default, rename = "chainInfo")]
+        chain_info: bool,
     },
 }
 
@@ -5239,6 +5291,30 @@ impl ValidateAddresses for GetAddressTxIdsRequest {
     fn addresses(&self) -> &[String] {
         &self.addresses
     }
+}
+
+/// Response to a `getaddresstxids` RPC request.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetAddressTxIdsResponse {
+    /// Response when `chainInfo` is false or not provided.
+    TxIds(Vec<String>),
+    /// Response when `chainInfo` is true.
+    TxIdsAndChainInfo(GetAddressTxIdsResponseObject),
+}
+
+/// Response to a `getaddresstxids` RPC request, when `chainInfo` is true.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct GetAddressTxIdsResponseObject {
+    /// The transaction IDs in chain order.
+    txids: Vec<String>,
+    /// The hash of the best chain tip block used for the query, in RPC byte order.
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    hash: block::Hash,
+    /// The height of the best chain tip block used for the query.
+    #[getter(copy)]
+    height: block::Height,
 }
 
 /// Information about the sapling and orchard note commitment trees if any.
@@ -5398,13 +5474,14 @@ fn build_height_range(
     chain_height: Height,
 ) -> Result<RangeInclusive<Height>> {
     // Convert optional values to Height, using 0 (as Height(0)) when missing.
-    // If start is above chain_height, clamp it to chain_height.
-    let start = Height(start.unwrap_or(0)).min(chain_height);
+    // Clamp raw u32 values before constructing `Height` so values above `Height::MAX`
+    // don't exceed `Height`'s invariant.
+    let start = Height(start.unwrap_or(0).min(chain_height.0));
 
     // For `end`, treat a zero value or missing value as `chain_height`:
     let end = match end {
         Some(0) | None => chain_height,
-        Some(val) => Height(val).min(chain_height),
+        Some(val) => Height(val.min(chain_height.0)),
     };
 
     if start > end {
@@ -5416,6 +5493,88 @@ fn build_height_range(
     }
 
     Ok(start..=end)
+}
+
+/// Builds the state query height range for `getaddresstxids`.
+///
+/// Validates `start`/`end` against `tip_height` using `zcashd`-compatible clamping,
+/// and leaves `end` unclamped to `tip_height` when `start <= tip_height` so advancing
+/// tips can be served in a single state read.
+fn build_address_tx_ids_query_range(
+    start: Option<u32>,
+    end: Option<u32>,
+    tip_height: Height,
+) -> Result<RangeInclusive<Height>> {
+    let clamped_range = build_height_range(start, end, tip_height)?;
+
+    let raw_start = start.unwrap_or(0);
+    if raw_start <= tip_height.0 {
+        let query_end = match end {
+            Some(0) | None => Height::MAX,
+            Some(val) => Height(val.min(Height::MAX.0)),
+        };
+        Ok(Height(raw_start)..=query_end)
+    } else {
+        Ok(clamped_range)
+    }
+}
+
+/// Reads transparent address transaction IDs and the atomic snapshot tip from `read_state`.
+async fn read_address_tx_ids<ReadState>(
+    read_state: &mut ReadState,
+    addresses: HashSet<transparent::Address>,
+    height_range: RangeInclusive<Height>,
+    max_entries: usize,
+) -> Result<(
+    BTreeMap<TransactionLocation, transaction::Hash>,
+    Option<(Height, block::Hash)>,
+)>
+where
+    ReadState: tower::Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Send
+        + 'static,
+{
+    let state_request = zebra_state::ReadRequest::TransactionIdsByAddresses {
+        addresses,
+        height_range,
+        max_entries: Some(max_entries),
+    };
+    let response = read_state
+        .ready()
+        .and_then(|service| service.call(state_request))
+        .await
+        .map_misc_error()?;
+
+    match response {
+        zebra_state::ReadResponse::AddressesTransactionIds { tx_ids, tip } => Ok((tx_ids, tip)),
+        _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+    }
+}
+
+/// Returns `Ok(Some(snapshot_height))` when `query_range` no longer matches `zcashd`
+/// clamping at the snapshot tip returned by state, signaling that the caller should retry.
+fn stale_address_tx_ids_tip_height(
+    start: Option<u32>,
+    end: Option<u32>,
+    query_range: &RangeInclusive<Height>,
+    tip: Option<(Height, block::Hash)>,
+) -> Result<Option<Height>> {
+    let Some((snapshot_height, _snapshot_hash)) = tip else {
+        return Ok(None);
+    };
+
+    let expected_range = build_height_range(start, end, snapshot_height)?;
+    let range_matches_snapshot = *query_range.start() == *expected_range.start()
+        && (*query_range.end()).min(snapshot_height) == *expected_range.end();
+
+    if range_matches_snapshot {
+        Ok(None)
+    } else {
+        Ok(Some(snapshot_height))
+    }
 }
 
 /// Given a potentially negative index, find the corresponding `Height`.

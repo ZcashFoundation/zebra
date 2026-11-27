@@ -176,10 +176,10 @@ enum RpcCall {
     /// DTO has `#[serde(from = "DGetAddressBalanceRequest")]` two-form
     /// (Addresses{[..]} or Address(s)). Fuzzed via `Vec<String>`.
     GetAddressBalance(Vec<String>),
-    /// `getaddresstxids(GetAddressTxIdsRequest)` — methods.rs:2044. Two-
-    /// form DTO + optional `start`/`end` u32 height bounds. Fuzzed via
-    /// raw fields constructor.
-    GetAddressTxIds(Vec<String>, Option<u32>, Option<u32>),
+    /// `getaddresstxids(GetAddressTxIdsRequest)` — methods.rs:2562. Two-
+    /// form DTO + optional `start`/`end` u32 height bounds + `chain_info`
+    /// bool. Fuzzed via raw fields constructor.
+    GetAddressTxIds(Vec<String>, Option<u32>, Option<u32>, bool),
     /// `getaddressutxos(GetAddressUtxosRequest)` — methods.rs:2093. Two-
     /// form DTO + `chain_info` bool, and the `start_height` / `max_entries`
     /// limits, which are pushed into the state index scan. Same family as
@@ -407,9 +407,10 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
                 balance: Amount::zero(),
                 received: 0,
             }),
-            R::TransactionIdsByAddresses { .. } => {
-                Ok(Resp::AddressesTransactionIds(Default::default()))
-            }
+            R::TransactionIdsByAddresses { .. } => Ok(Resp::AddressesTransactionIds {
+                tx_ids: Default::default(),
+                tip: Some((block::Height(0), block::Hash([0u8; 32]))),
+            }),
             R::UtxosByAddresses { .. } => {
                 // AddressUtxos requires an `AddressUtxos` struct; the field is
                 // private to zebra-state so we cannot construct it without a
@@ -745,14 +746,14 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
                 .catch_unwind()
                 .await;
         }
-        RpcCall::GetAddressTxIds(addrs, start, end) => {
+        RpcCall::GetAddressTxIds(addrs, start, end, chain_info) => {
             // `derive(new)` generates `GetAddressTxIdsRequest::new(addresses,
-            // start, end)` matching the field order in methods.rs:4302-4310
+            // start, end)` matching the field order in methods.rs
             // (addresses: Vec<String>, start: Option<u32>, end: Option<u32>).
             // We pass `start` / `end` straight through so the fuzzer can
             // explore both `Some(_)` and `None` branches of the optional
-            // height bounds.
-            let req = GetAddressTxIdsRequest::new(addrs, start, end);
+            // height bounds, and `chain_info` to cover both response formats.
+            let req = GetAddressTxIdsRequest::new(addrs, start, end).with_chain_info(chain_info);
             let _ = AssertUnwindSafe(rpc.get_address_tx_ids(req))
                 .catch_unwind()
                 .await;

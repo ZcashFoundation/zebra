@@ -448,16 +448,16 @@ impl ZebraDb {
     ///
     /// Specifically, a block in the partial chain must be a child block of the finalized tip.
     /// (But the child block does not have to be the partial chain root.)
-    ///
-    /// This condition does not apply if there is only one address.
-    /// Since address transactions are only appended by blocks, and this query reads them in order,
-    /// it is impossible to get inconsistent transactions for a single address.
     pub fn partial_finalized_transparent_tx_ids(
         &self,
         addresses: &HashSet<transparent::Address>,
         query_height_range: RangeInclusive<Height>,
         limit: Option<usize>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        if query_height_range.is_empty() {
+            return BTreeMap::new();
+        }
+
         // Truncate the locations before looking up hashes, so the lookups are bounded by
         // `limit` across all addresses.
         let mut transaction_locations = BTreeSet::new();

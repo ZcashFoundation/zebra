@@ -2105,14 +2105,14 @@ impl Service<ReadRequest> for ReadStateService {
                 addresses,
                 height_range,
                 max_entries,
-            } => read::transparent_tx_ids(
-                state.latest_best_chain(),
+            } => read::transparent_tx_ids_with(
+                || state.latest_best_chain(),
                 &state.db,
                 addresses,
                 height_range,
                 max_entries,
             )
-            .map(ReadResponse::AddressesTransactionIds),
+            .map(|(tx_ids, tip)| ReadResponse::AddressesTransactionIds { tx_ids, tip }),
 
             // For the get_address_utxos RPC.
             ReadRequest::UtxosByAddresses {

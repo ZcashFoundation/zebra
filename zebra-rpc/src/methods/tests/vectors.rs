@@ -1891,11 +1891,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // call the method with an invalid address string
     let rpc_rsp = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: vec!["t1invalidaddress".to_owned()],
-            start: Some(1),
-            end: Some(2),
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            vec!["t1invalidaddress".to_owned()],
+            Some(1),
+            Some(2),
+        ))
         .await
         .unwrap_err();
 
@@ -1911,11 +1911,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: Option<u32> = Some(2);
     let end: Option<u32> = Some(1);
     let error = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start,
-            end,
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(addresses.clone(), start, end))
         .await
         .unwrap_err();
     assert_eq!(
@@ -2081,13 +2077,13 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses,
-            start,
-            end,
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(addresses, start, end))
         .await
         .expect("arguments are valid so no error can happen here");
+
+    let GetAddressTxIdsResponse::TxIds(response) = response else {
+        panic!("expected GetAddressTxIdsResponse::TxIds variant");
+    };
 
     // One founders reward output per coinbase transactions, no other transactions.
     assert_eq!(response.len(), expected_response_len);
@@ -2156,11 +2152,11 @@ async fn getaddresstxids_single_equals_object_full_range() {
     let addr_str = address.to_string();
 
     let object_response = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: vec![addr_str.clone()],
-            start: None,
-            end: None,
-        })
+        .get_address_tx_ids(GetAddressTxIdsRequest::new(
+            vec![addr_str.clone()],
+            None,
+            None,
+        ))
         .await
         .expect("Object variant should succeed");
 
@@ -2436,11 +2432,11 @@ async fn rpc_address_queries_are_capped() {
     let addresses = vec!["t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string()];
     let invalid_params = i32::from(server::error::LegacyCode::InvalidParameter);
     let tx_ids = |end| {
-        rpc.get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start: Some(1),
-            end: Some(end),
-        })
+        rpc.get_address_tx_ids(GetAddressTxIdsRequest::new(
+            addresses.clone(),
+            Some(1),
+            Some(end),
+        ))
     };
     let utxos = |max_entries| {
         rpc.get_address_utxos(
@@ -2448,7 +2444,10 @@ async fn rpc_address_queries_are_capped() {
         )
     };
 
-    assert_eq!(tx_ids(3).await.expect("at the cap").len(), 3);
+    let GetAddressTxIdsResponse::TxIds(at_cap) = tx_ids(3).await.expect("at the cap") else {
+        panic!("expected GetAddressTxIdsResponse::TxIds variant");
+    };
+    assert_eq!(at_cap.len(), 3);
     assert_eq!(tx_ids(4).await.unwrap_err().code(), invalid_params);
 
     assert!(utxos(3).await.is_ok());

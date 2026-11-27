@@ -154,7 +154,7 @@ owners' current releases and the version line at the top is updated.
 | [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html) | Zebra | Done    |                                                                                                             |
 | [`getaddressdeltas`](https://zcash.github.io/rpc/getaddressdeltas.html)   | —     | Retired | Block-explorer index, out of scope for a validator node. Build on the indexer gRPC service instead. [#8440] |
 | [`getaddressmempool`](https://zcash.github.io/rpc/getaddressmempool.html) | —     | Retired | Block-explorer index, out of scope for a validator node. Build on the indexer gRPC service instead.         |
-| [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)     | Zebra | Done    |                                                                                                             |
+| [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)     | Zebra | Done    | Superset: accepts optional `chainInfo` to return the tip `hash` and `height` with `txids`, matching `getaddressutxos`. |
 | [`getaddressutxos`](https://zcash.github.io/rpc/getaddressutxos.html)     | Zebra | Done    |                                                                                                             |
 
 ### Mining
