@@ -562,6 +562,19 @@ impl MinerParams {
         }
     }
 
+    /// Returns `true` if the coinbase transaction that pays these parameters has a Sapling output.
+    ///
+    /// This mirrors the receiver that `TransactionTemplate::new_coinbase()` pays: a unified
+    /// address pays its Orchard receiver first, and its Sapling receiver only when it has no
+    /// Orchard receiver.
+    pub(crate) fn pays_sapling_coinbase(&self) -> bool {
+        match &self.addr {
+            Address::Unified(addr) => addr.orchard().is_none() && addr.sapling().is_some(),
+            Address::Sapling(_) => true,
+            _ => false,
+        }
+    }
+
     /// Randomizes the memo.
     pub fn randomize_memo(&mut self) {
         let mut random = [0u8; 512];
@@ -745,8 +758,23 @@ where
         sync_status: SyncStatus,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
+        let miner_params = MinerParams::new(net, conf).ok();
+
+        if miner_params
+            .as_ref()
+            .is_some_and(MinerParams::pays_sapling_coinbase)
+        {
+            tracing::warn!(
+                "`mining.miner_address` pays block rewards to a Sapling address. \
+                 A draft ZIP (https://github.com/zcash/zips/pull/1415) proposes to disallow \
+                 Sapling outputs in coinbase transactions from a future network upgrade. \
+                 To receive rewards in the Ironwood pool, use a unified address with an \
+                 Orchard receiver."
+            );
+        }
+
         Self {
-            miner_params: MinerParams::new(net, conf).ok(),
+            miner_params,
             block_verifier_router,
             sync_status,
             mined_block_sender: mined_block_sender

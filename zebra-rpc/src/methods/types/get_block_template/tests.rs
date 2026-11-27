@@ -646,6 +646,46 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
 }
 
+/// A miner address pays a Sapling coinbase only when Sapling is the receiver the coinbase uses.
+#[test]
+fn pays_sapling_coinbase_follows_the_coinbase_receiver() {
+    let net = Network::new_default_testnet();
+    let decode = |addr_type| {
+        Address::decode(&net, default_miner_address(net.kind(), &addr_type))
+            .expect("hard-coded miner address is valid")
+    };
+
+    assert!(
+        MinerParams::from(decode(MinerAddressType::Sapling)).pays_sapling_coinbase(),
+        "a Sapling address pays a Sapling coinbase"
+    );
+    assert!(
+        !MinerParams::from(decode(MinerAddressType::Unified)).pays_sapling_coinbase(),
+        "a unified address with an Orchard receiver pays its Orchard receiver"
+    );
+    assert!(
+        !MinerParams::from(decode(MinerAddressType::Transparent)).pays_sapling_coinbase(),
+        "a transparent address pays a transparent coinbase"
+    );
+
+    let Address::Unified(unified) = decode(MinerAddressType::Unified) else {
+        panic!("hard-coded Unified address decodes as a unified address");
+    };
+    let without_orchard = zcash_keys::address::UnifiedAddress::from_receivers(
+        None,
+        unified.sapling().copied(),
+        unified.transparent().copied(),
+        None,
+        None,
+    )
+    .expect("the hard-coded Unified address has Sapling and transparent receivers");
+
+    assert!(
+        MinerParams::from(Address::Unified(Box::new(without_orchard))).pays_sapling_coinbase(),
+        "a unified address without an Orchard receiver falls back to its Sapling receiver"
+    );
+}
+
 /// Coinbase fee metadata reports the value collected, with ZIP 235 rounded once per block.
 #[test]
 fn coinbase_fee_metadata_matches_collected_fees() {

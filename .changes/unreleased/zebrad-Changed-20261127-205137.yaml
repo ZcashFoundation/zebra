@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra now logs a warning at startup when `mining.miner_address` pays block rewards to a Sapling address, either a Sapling address or a unified address with a Sapling receiver and no Orchard receiver. A draft ZIP proposes to disallow Sapling outputs in coinbase transactions from a future network upgrade. Mining is unchanged. To receive rewards in the Ironwood pool, use a unified address with an Orchard receiver.
+time: 2026-11-27T20:51:37.000000Z
