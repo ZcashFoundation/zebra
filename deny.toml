@@ -181,7 +181,6 @@ allow-git = [
     "https://github.com/upbqdn/halo2",
     "https://github.com/upbqdn/orchard",
     "https://github.com/upbqdn/pasta_curves",
-    "https://github.com/upbqdn/sinsemilla",
     "https://github.com/zcash/sapling-crypto",
 ]
 
