@@ -502,6 +502,18 @@ impl Service<zn::Request> for Inbound {
                 misbehavior_sender: _,
             } => (cached_peer_addr_response, block_downloads, mempool, state),
             _ => {
+                // A connection takes `Nil` for one of its compact relay requests as a passed
+                // check or an admitted download, so those requests fail until setup is done.
+                if matches!(
+                    req,
+                    zn::Request::CheckCompactHeader(_)
+                        | zn::Request::CompactBlockTransactions(_)
+                        | zn::Request::CheckCompactBlock(..)
+                        | zn::Request::AdvertiseCompactBlock(..)
+                ) {
+                    return async { Err("the inbound service is still starting".into()) }.boxed();
+                }
+
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
             }

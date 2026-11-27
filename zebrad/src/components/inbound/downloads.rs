@@ -382,7 +382,8 @@ where
         self.queue_download(hash, advertiser, None)
     }
 
-    /// A compact header supplies a parent hash whose height we verify from local state.
+    /// A compact header that passed screening supplies a parent hash whose height we verify from
+    /// local state.
     pub(crate) fn download_and_verify_compact(
         &mut self,
         hash: block::Hash,
@@ -578,9 +579,9 @@ where
             }
             .map_err(|e| (e, None))?;
 
-            // Compact announcements can bypass header screening when throttled. Only the
-            // validated local parent header establishes height; an unknown parent leaves
-            // the download on archive peers.
+            // Only compact announcements whose header passed screening supply a parent, and only
+            // the validated local parent header establishes height. An unknown parent leaves the
+            // download on archive peers.
             let known_height = if let Some(parent) = compact_parent {
                 match timeout(
                     PARENT_LOOKUP_TIMEOUT,

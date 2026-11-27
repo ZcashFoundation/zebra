@@ -361,13 +361,10 @@ where
                 return;
             }
         }
-        // Reconstruction starts only after the downloader applies its global/per-IP admission.
-        self.drive_peer_request(Request::AdvertiseCompactBlock(
-            hash,
-            advertiser,
-            block.header.previous_block_hash,
-        ))
-        .await;
+        // A header that wasn't screened gives its download no height, so the block is advertised
+        // like a block inventory. The downloader still applies its global/per-IP admission.
+        self.drive_peer_request(Request::AdvertiseBlock(hash, advertiser))
+            .await;
     }
 
     pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {
