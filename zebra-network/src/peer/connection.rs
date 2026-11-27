@@ -382,6 +382,18 @@ impl Handler {
                 }
             }
 
+            // The peer can send the full block while its compact block's missing transactions are
+            // recovered, for example when it answers an earlier request for the block. The full
+            // block is the response that a fallback request would get.
+            (Handler::CompactBlock { reconstruction, .. }, Message::Block(block))
+                if block.hash() == reconstruction.block_hash() =>
+            {
+                Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
+                    block,
+                    transient_addr,
+                ))])))
+            }
+
             // Inventory has no request identifier: a block announcement is indistinguishable
             // from a valid singleton reply. Keep accepting these replies.
             // An empty inventory can be a late mempool reply after cancellation.
@@ -992,6 +1004,14 @@ where
                                 peer_msg.command()
                             )));
 
+                            let recovering = matches!(
+                                self.state,
+                                State::AwaitingResponse {
+                                    handler: Handler::CompactBlock { .. },
+                                    ..
+                                }
+                            );
+
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
                             // keeping a live reference to handler across the
@@ -1011,6 +1031,20 @@ where
                             };
 
                             self.update_state_metrics(None);
+
+                            // A full block can finish compact recovery, so stop decoding
+                            // transactions for it.
+                            if recovering
+                                && !matches!(
+                                    self.state,
+                                    State::AwaitingResponse {
+                                        handler: Handler::CompactBlock { .. },
+                                        ..
+                                    }
+                                )
+                            {
+                                self.clear_compact_recovery();
+                            }
 
                             // If the message was not consumed as a response,
                             // check whether it can be handled as a request.

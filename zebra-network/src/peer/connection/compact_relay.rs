@@ -54,6 +54,11 @@ const RETENTION: Duration = Duration::from_secs(15);
 const ANNOUNCED_BLOCKS: usize = 4;
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The number of transaction recovery requests answered for each delivered announcement.
+///
+/// A Zebra recipient asks once for each announcement, so the second reply allows one repeat.
+pub(super) const MAX_RECOVERY_REPLIES: usize = 2;
+
 struct ServingBlock {
     block: Arc<Block>,
     /// Keep the sent short-ID keys reproducible without retaining the compact transaction vectors.
@@ -65,8 +70,11 @@ pub(super) struct CompactRelay {
     pub(super) send: bool,
     received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
     sent: Option<(ServingBlock, Option<Instant>, OwnedSemaphorePermit)>,
-    /// Bound aggregate recovery payloads, including repeated or empty requests.
+    /// Bound aggregate recovery payloads, including repeated requests.
     recovery_bytes_left: usize,
+    /// Bound the number of recovery replies for each delivered announcement. The byte budget
+    /// bounds their size, not their number.
+    recovery_replies_left: usize,
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(Arc<Block>, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
@@ -131,6 +139,7 @@ impl CompactRelay {
         *until = Some(Instant::now() + RETENTION);
         self.recovery_bytes_left =
             usize::try_from(MAX_BLOCK_BYTES).expect("the block byte limit fits in memory");
+        self.recovery_replies_left = MAX_RECOVERY_REPLIES;
     }
 
     pub(super) fn expire(&mut self) {
@@ -227,6 +236,21 @@ where
         timeout_at(deadline, send)
             .await
             .map_err(|_| PeerError::ConnectionSendTimeout)?
+    }
+
+    /// Returns an error if the peer is now banned, or below the minimum version.
+    ///
+    /// Requests are checked like this right before they are written, so a response that needs no
+    /// write is checked before it is returned.
+    fn live_authorization(&mut self) -> Result<(), PeerError> {
+        let address = self.connection_info.connected_addr.get_transient_addr();
+        if self.connection_info.remote.version < self.minimum_peer_version.current()
+            || address.is_some_and(|addr| self.bans_receiver.borrow().is_banned(addr.ip()))
+        {
+            Err(PeerError::ConnectionDropped)
+        } else {
+            Ok(())
+        }
     }
 
     /// Fetch the committed block before constructing an announcement.
@@ -339,10 +363,15 @@ where
         let deadline = Instant::now() + constants::REQUEST_TIMEOUT;
         self.compact.download_deadline = Some(deadline);
         self.compact.expire();
-        if let Some((block, _, _)) = &self.compact.reconstructed {
-            if block.hash() == hash {
-                return Ok(self.compact_response(block.clone()));
-            }
+        let cached = self
+            .compact
+            .reconstructed
+            .as_ref()
+            .map(|(block, _, _)| block)
+            .filter(|block| block.hash() == hash)
+            .cloned();
+        if let Some(block) = cached {
+            return self.compact_response(block);
         }
         if self
             .compact
@@ -377,7 +406,7 @@ where
                             )
                             .await
                         {
-                            return Ok(self.compact_response(block));
+                            return self.compact_response(block);
                         }
                     } else if indexes.len() < reconstruction.transaction_count().div_ceil(2) {
                         // Recovering most of a block costs about as much as downloading it, and
@@ -409,11 +438,18 @@ where
         })
     }
 
-    fn compact_response(&self, block: Arc<Block>) -> Handler {
-        Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
-            block,
-            self.connection_info.connected_addr.get_transient_addr(),
-        ))])))
+    /// Returns a block rebuilt from the peer's compact announcement, if the peer is still eligible.
+    ///
+    /// Rebuilding waits for the inbound service, so the peer can be banned, or fall below the
+    /// minimum version, before the block is ready.
+    fn compact_response(&mut self, block: Arc<Block>) -> Result<Handler, PeerError> {
+        self.live_authorization()?;
+        Ok(Handler::Finished(Ok(Response::Blocks(vec![
+            InventoryResponse::Available((
+                block,
+                self.connection_info.connected_addr.get_transient_addr(),
+            )),
+        ]))))
     }
 
     async fn finish_compact(
@@ -466,9 +502,14 @@ where
             .finish_compact(reconstruction, response, permit, deadline)
             .await
         {
-            let response = self.compact_response(block);
-            if let State::AwaitingResponse { handler, .. } = &mut self.state {
-                *handler = response;
+            match self.compact_response(block) {
+                Ok(response) => {
+                    if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                        *handler = response;
+                    }
+                }
+                // Failing the connection also fails the waiting request.
+                Err(error) => self.fail_with(error).await,
             }
         } else {
             self.fallback_compact(hash, deadline).await;
@@ -505,14 +546,21 @@ where
         if serving.block.hash() != request.block_hash {
             return;
         }
-        if request
-            .indexes
-            .last()
-            .is_some_and(|index| *index >= serving.block.transactions.len())
+        // A request for no transactions gets no reply.
+        if request.indexes.is_empty()
+            || request
+                .indexes
+                .last()
+                .is_some_and(|index| *index >= serving.block.transactions.len())
             || request.indexes.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return;
         }
+        // A request that doesn't fit the byte budget still uses its reply.
+        let Some(replies_left) = self.compact.recovery_replies_left.checked_sub(1) else {
+            return;
+        };
+        self.compact.recovery_replies_left = replies_left;
         let overhead = request.block_hash.zcash_serialized_size()
             + CompactSizeMessage::try_from(request.indexes.len())
                 .expect("recovery indexes are bounded by the advertised block")
@@ -543,8 +591,9 @@ where
             block_hash: request.block_hash,
             transactions,
         };
-        // Repeated recovery shares a byte budget, and requests are only answered until the snapshot
-        // expires. The reply gets the usual send timeout, because an honest peer can ask late.
+        // Repeated recovery shares the reply limit and a byte budget, and requests are only answered
+        // until the snapshot expires. The reply gets the usual send timeout, because an honest peer
+        // can ask late.
         if let Err(error) = self
             .peer_tx
             .send(Message::BlockTransactions(response))
