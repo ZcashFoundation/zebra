@@ -14,7 +14,11 @@
 use std::{sync::Arc, time::Duration};
 
 use jsonrpsee::core::RpcResult;
-use tokio::{sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+    time::{sleep, sleep_until, Instant},
+};
 
 use tower::ServiceExt;
 
@@ -27,7 +31,7 @@ use zebra_chain::{
     serialization::{DateTime32, Duration32},
     work::difficulty::ParameterDifficulty,
 };
-use zebra_node_services::mempool::MempoolService;
+use zebra_node_services::mempool::{MempoolChange, MempoolService};
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, ReadState};
 
 use crate::{
@@ -71,6 +75,13 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
         NEW_TIP_TIMEOUT
     }
 }
+
+/// The shortest time between a template build and the next build for a newly verified mempool
+/// transaction.
+///
+/// The first transaction after a quiet time rebuilds the template straight away, so miners pick
+/// up its fee without waiting for the periodic refresh.
+pub(crate) const MEMPOOL_REBUILD_PAUSE: Duration = Duration::from_secs(1);
 
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
@@ -201,6 +212,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     coinbase_cache: CoinbaseCache,
     cache: TemplateCache,
     mempool: Mempool,
+    mut mempool_changes: broadcast::Receiver<MempoolChange>,
     read_state: ReadStateService,
     mut latest_chain_tip: Tip,
     sync_status: SyncStatus,
@@ -369,6 +381,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
         }
 
+        // Only wait for mempool changes that this build's mempool snapshot can't include.
+        mempool_changes = mempool_changes.resubscribe();
+        let build_started = Instant::now();
+
         // Await the full build even if the tip changes: dropping it would detach its
         // `spawn_blocking` proof, letting repeated tip changes accumulate CPU-heavy work.
         let built = match build(
@@ -446,6 +462,13 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             continue;
         }
 
+        // A steady flow of transactions rebuilds the template at most once per pause, and a
+        // build that takes longer than the pause, like one that proves a shielded coinbase, is
+        // followed by a pause of at least its own duration.
+        let build_finished = Instant::now();
+        let next_mempool_build =
+            build_finished + MEMPOOL_REBUILD_PAUSE.max(build_finished - build_started);
+
         // Build the coinbase transaction for the block after next while we're idle, so the next tip
         // change doesn't have to wait for a shielded coinbase proof.
         if let Some(height) = latest_chain_tip
@@ -471,9 +494,32 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 }
             }
             _ = candidate_changes.published() => {}
+            _ = verified_transaction_added(&mut mempool_changes, next_mempool_build) => {}
             _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
         }
     }
+}
+
+/// Waits until the mempool has verified a new transaction, and it is at least `not_before`.
+///
+/// Never returns if the mempool has shut down, so it can be used in a `select!`.
+async fn verified_transaction_added(
+    mempool_changes: &mut broadcast::Receiver<MempoolChange>,
+    not_before: Instant,
+) {
+    loop {
+        match mempool_changes.recv().await {
+            Ok(change) if change.is_added() => break,
+            // Rejected and mined transactions don't add anything to a template. Mined ones come
+            // with a chain tip change, which rebuilds the template anyway.
+            Ok(_) => {}
+            // The missed changes could include a verified transaction.
+            Err(broadcast::error::RecvError::Lagged(_)) => break,
+            Err(broadcast::error::RecvError::Closed) => std::future::pending::<()>().await,
+        }
+    }
+
+    sleep_until(not_before).await;
 }
 
 /// Returns the state information for mining on top of a block with a valid proof of work that
