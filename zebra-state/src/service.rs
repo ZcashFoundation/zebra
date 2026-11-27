@@ -1592,6 +1592,27 @@ impl Service<ReadRequest> for ReadStateService {
         };
 
         let request_handler = move || match req {
+            ReadRequest::CheckBestTipHeader { header, height } => {
+                read::difficulty::check_best_tip_header(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    &header,
+                    height,
+                )?;
+                Ok(ReadResponse::ValidBestTipHeader)
+            }
+
+            ReadRequest::CheckBestTipBlockCommitments(block) => {
+                read::difficulty::check_best_tip_block_commitments(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    block,
+                )?;
+                Ok(ReadResponse::ValidBestTipBlockCommitments)
+            }
+
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
 

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added the `ReadRequest::CheckBestTipHeader` and `ReadRequest::CheckBestTipBlockCommitments` requests and the `ReadResponse::ValidBestTipHeader` and `ReadResponse::ValidBestTipBlockCommitments` responses, which check a header or block that extends the best tip without committing it; exhaustive matches must handle them.'
+time: 2026-11-12T14:00:00.000000000Z

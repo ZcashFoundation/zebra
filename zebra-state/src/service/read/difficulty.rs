@@ -16,10 +16,11 @@ use crate::{
     service::{
         block_iter::any_chain_ancestor_iter,
         check::{
+            block_commitment_is_valid_for_chain_history,
             difficulty::{
                 pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
             },
-            AdjustedDifficulty,
+            difficulty_threshold_and_time_are_valid, AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
         read::{
@@ -217,6 +218,81 @@ fn best_relevant_chain_and_history_tree(
         best_relevant_chain,
         history_tree,
     ))
+}
+
+/// Checks that `header` at `height` is a direct child of the best tip, and that its difficulty
+/// threshold and time are valid in that context.
+///
+/// Returns the history tree of the best tip, which is the parent of the candidate block.
+/// This does not check the header's proof of work.
+pub fn check_best_tip_header(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    header: &block::Header,
+    height: Height,
+) -> Result<Arc<HistoryTree>, BoxError> {
+    let extends_tip = |tip_height: Height, tip_hash: block::Hash| {
+        header.previous_block_hash == tip_hash && tip_height.next().ok() == Some(height)
+    };
+
+    // Reject a header that doesn't extend the best tip before loading the blocks for the
+    // difficulty adjustment and the history tree. Peers send these headers, and most stale ones
+    // stop here.
+    if read::best_tip(non_finalized_state, db)
+        .is_some_and(|(tip_height, tip_hash)| !extends_tip(tip_height, tip_hash))
+    {
+        return Err("header does not extend the committed best tip".into());
+    }
+
+    // The finalized tip can change between the two reads, so check the loaded tip as well.
+    let (tip_height, tip_hash, relevant_data, history_tree) =
+        best_relevant_chain_and_history_tree(non_finalized_state, db, network)?;
+
+    if !extends_tip(tip_height, tip_hash) {
+        return Err("header does not extend the committed best tip".into());
+    }
+
+    // The difficulty adjustment needs a representable time, and its work calculation needs a
+    // valid threshold. Peers control both fields.
+    if header.difficulty_threshold.to_work().is_none() || DateTime32::try_from(header.time).is_err()
+    {
+        return Err("header has an invalid difficulty threshold or time".into());
+    }
+
+    difficulty_threshold_and_time_are_valid(
+        header.difficulty_threshold,
+        AdjustedDifficulty::new_from_header_time(header.time, tip_height, network, relevant_data),
+    )?;
+
+    Ok(history_tree)
+}
+
+/// Checks that `block` is an NU5 or later direct child of the best tip, and that its header commits
+/// to the best tip's chain history and to the block's own authorizing data.
+///
+/// This does not check the block's proof of work, Merkle root, or transactions.
+pub fn check_best_tip_block_commitments(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    block: Arc<block::Block>,
+) -> Result<(), BoxError> {
+    let height = block
+        .coinbase_height()
+        .ok_or("block has no coinbase height")?;
+
+    // Earlier blocks do not commit to their transactions' authorizing data.
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu5 {
+        return Err("block is before the NU5 block commitments".into());
+    }
+
+    let history_tree =
+        check_best_tip_header(non_finalized_state, db, network, &block.header, height)?;
+
+    block_commitment_is_valid_for_chain_history(block, network, &history_tree)?;
+
+    Ok(())
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_data`, tip, `network`,
