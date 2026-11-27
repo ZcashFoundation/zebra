@@ -44,6 +44,10 @@ mod tests;
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// The length of the largest message that the codec decodes after the handshake, including its
+/// header.
+pub(crate) const MAX_MESSAGE_WIRE_LEN: usize = HEADER_LEN + MAX_PROTOCOL_MESSAGE_LEN;
+
 /// The number of messages in a row that one [`Decoder::decode`] call ignores.
 ///
 /// The messages behind them in the buffer are decoded when the peer sends more bytes. Peers

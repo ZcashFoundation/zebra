@@ -242,8 +242,9 @@ parents, and a two-second recovery timeout fall back to a full block without
 punishing the announcing peer. The recovery deadline starts after the
 missing-transaction request is written and is not extended by unrelated peer
 writes. Unrelated advertisements and inbound requests wait until recovery
-completes or fallback begins. Transport backpressure can still delay delivery of
-the fallback request.
+completes or fallback begins, and a full block for the recovering block completes
+the download. Transport backpressure can still delay delivery of the fallback
+request.
 Up to two recovery responses share a block-size payload budget for 15 seconds
 after delivery. Once publication permission is withdrawn, they are only sent while
 ordinary block requests still serve the block. This serving deadline

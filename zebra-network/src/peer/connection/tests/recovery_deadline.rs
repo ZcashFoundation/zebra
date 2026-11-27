@@ -226,8 +226,8 @@ async fn compact_recovery_bounds_deferred_messages_and_preserves_deadline_order(
         Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
         let response = recovering(&mut connection, &block);
         let messages = if mode == "bytes" {
-            // Each inv fits on its own, but together they exceed the one-MiB wire-byte budget.
-            vec![Message::Inv(vec![InventoryHash::Block(block.hash()); 15_000]); 2]
+            // Each inv fits on its own, but together they exceed the deferred wire-byte limit.
+            vec![Message::Inv(vec![InventoryHash::Block(block.hash()); 15_000]); 6]
         } else {
             (0..if mode == "count" { 65 } else { 64 })
                 .map(|nonce| Message::Ping(Nonce(nonce)))
@@ -266,6 +266,106 @@ async fn compact_recovery_bounds_deferred_messages_and_preserves_deadline_order(
         assert!(errors.try_get_error().is_none());
         drop(response);
     }
+}
+
+/// During compact recovery, a full block for the recovering hash finishes the download, without
+/// waiting for the recovery deadline or requesting the block again.
+#[tokio::test(start_paused = true)]
+async fn full_block_for_the_recovering_hash_finishes_the_download() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    let (mut connection, _client, _inbound, mut outbound, errors) =
+        new_test_connection::<PanicAssertion>();
+    Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let (recovery, active_recovery) = tokio::sync::watch::channel(Some((block.hash(), deadline)));
+    connection.compact_recovery = Some(recovery);
+    let response = recovering(&mut connection, &block);
+    let (mut peer, peer_rx) = futures::channel::mpsc::channel(1);
+    let run = connection.run(peer_rx);
+    tokio::pin!(run);
+    assert!(futures::poll!(&mut run).is_pending());
+    assert!(matches!(
+        outbound.try_recv(),
+        Ok(Message::SendCompact { .. })
+    ));
+
+    peer.try_send(Ok(Message::Block(block.clone()))).unwrap();
+    assert!(futures::poll!(&mut run).is_pending());
+    assert_eq!(
+        response
+            .now_or_never()
+            .expect("the full block finishes the download")
+            .unwrap()
+            .unwrap(),
+        Response::EarlyBlocks(vec![InventoryResponse::Available((block, None))])
+    );
+    assert!(
+        active_recovery.borrow().is_none(),
+        "transaction recovery responses are no longer decoded"
+    );
+    assert!(
+        outbound.try_recv().is_err(),
+        "the block isn't requested again"
+    );
+    assert!(errors.try_get_error().is_none());
+}
+
+/// During compact recovery, any one message that the codec accepts is deferred, without closing
+/// the connection, and recovery still finishes.
+#[tokio::test(start_paused = true)]
+async fn large_message_during_compact_recovery_keeps_the_connection() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    // A block that is larger than a mebibyte.
+    let large: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_141042_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    let (mut connection, _client, mut inbound, mut outbound, errors) =
+        new_test_connection::<PanicAssertion>();
+    Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+    let response = recovering(&mut connection, &block);
+    let messages = vec![
+        Message::Block(large),
+        Message::BlockTransactions(BlockTransactions {
+            block_hash: block.hash(),
+            transactions: block.transactions[1..].to_vec(),
+        }),
+    ];
+    let peer_rx =
+        futures::stream::iter(messages.into_iter().map(Ok)).chain(futures::stream::pending());
+    let run = connection.run(peer_rx);
+    tokio::pin!(run);
+    assert!(futures::poll!(&mut run).is_pending());
+    assert!(matches!(
+        outbound.try_recv(),
+        Ok(Message::SendCompact { .. })
+    ));
+    let completed = tokio::select! {
+        _ = &mut run => panic!("a large message during recovery must keep the connection open"),
+        completed = async {
+            inbound
+                .expect_request_that(|request| {
+                    matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                        if **checked == *block && evidence.evidence_for(checked).is_some())
+                })
+                .await
+                .respond(Response::Nil);
+            response.await.unwrap().unwrap()
+        } => completed,
+    };
+    let Response::ReconstructedBlock(reconstructed, _) = completed else {
+        panic!("the transaction reply after the large message completes compact recovery")
+    };
+    assert_eq!(reconstructed.block(), &block);
+    assert!(errors.try_get_error().is_none());
 }
 
 #[tokio::test(start_paused = true)]
