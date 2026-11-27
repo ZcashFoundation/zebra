@@ -7,7 +7,6 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use futures::future::BoxFuture;
 use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use tokio::sync::oneshot;
 use tower::{service_fn, util::BoxCloneService};
@@ -17,10 +16,7 @@ use zebra_chain::{
 };
 use zebra_node_services::mempool;
 
-use crate::block::{
-    mempool_reuse::{check_candidate, ReuseRules},
-    ReuseAudits,
-};
+use crate::block::mempool_reuse::{check_candidate, ReuseRules};
 
 use super::*;
 
@@ -170,33 +166,6 @@ fn mempool(block: &Block, entries: Vec<VerifiedUnminedTx>) -> Mempool {
     }))
 }
 
-/// A mempool that has verified the spend of each of `blocks`, which share a parent, and answers
-/// a lookup for any of them.
-fn mempool_with_spends(blocks: &[Arc<Block>]) -> Mempool {
-    let entries: std::collections::HashMap<_, _> = blocks
-        .iter()
-        .map(|block| {
-            let spend = block.transactions[1].clone();
-            (spend.hash(), entry(spend))
-        })
-        .collect();
-    BoxCloneService::new(service_fn(move |request| {
-        let mempool::Request::VerifiedTransactionsForBlock {
-            transaction_hashes, ..
-        } = request
-        else {
-            panic!("block verification must request only bounded verified candidates")
-        };
-        let verified = transaction_hashes
-            .iter()
-            .filter_map(|hash| Some((*hash, entries.get(hash)?.clone())))
-            .collect();
-        ready(Ok(mempool::Response::VerifiedTransactionsForBlock(
-            verified,
-        )))
-    }))
-}
-
 /// A mempool that panics when the block verifier sends it a request.
 fn panicking_mempool() -> Mempool {
     BoxCloneService::new(service_fn(
@@ -247,8 +216,6 @@ fn counting_state(state: State, calls: &Arc<Calls>) -> State {
 /// A block verifier whose state and transaction verifier count the requests they get.
 struct Harness {
     verifier: SemanticBlockVerifier<State, TxVerifier>,
-    /// The block verifier's transaction verifier.
-    transaction_verifier: TxVerifier,
     calls: Arc<Calls>,
 }
 
@@ -271,8 +238,7 @@ impl Harness {
             }
         }));
         Self {
-            verifier: SemanticBlockVerifier::new(network, state, transactions.clone()),
-            transaction_verifier: transactions,
+            verifier: SemanticBlockVerifier::new(network, state, transactions),
             calls,
         }
     }
@@ -287,14 +253,6 @@ impl Harness {
     /// Gives the block verifier the mempool that `receiver` gets, when it arrives.
     fn with_mempool_receiver(mut self, receiver: oneshot::Receiver<Mempool>) -> Self {
         self.verifier = self.verifier.with_mempool(receiver);
-        self
-    }
-
-    /// Turns on the background audits of reused transactions, which use the block verifier's
-    /// transaction verifier.
-    fn with_reuse_audits(mut self) -> Self {
-        let audits = ReuseAudits::spawn(self.transaction_verifier.clone());
-        self.verifier = self.verifier.with_reuse_audits(audits);
         self
     }
 
@@ -327,23 +285,11 @@ const MISS: &str = "zebra.consensus.block.mempool_reuse.miss";
 const TIMEOUT: &str = "zebra.consensus.block.mempool_reuse.timeout";
 /// The counter of mempool lookups that failed.
 const ERROR: &str = "zebra.consensus.block.mempool_reuse.error";
-/// The counter of background audits of reused transactions, by result.
-const AUDIT: &str = "zebra.consensus.block.mempool_reuse.audit";
-/// The results of the background audits.
-const AUDIT_RESULTS: [&str; 4] = ["match", "mismatch", "inconclusive", "skipped"];
 
 /// The counters the block verifier records for its reuse of the mempool's verification, with
 /// their `result` labels.
-const REUSE_COUNTERS: [(&str, Option<&str>); 8] = [
-    (HIT, None),
-    (MISS, None),
-    (TIMEOUT, None),
-    (ERROR, None),
-    (AUDIT, Some(AUDIT_RESULTS[0])),
-    (AUDIT, Some(AUDIT_RESULTS[1])),
-    (AUDIT, Some(AUDIT_RESULTS[2])),
-    (AUDIT, Some(AUDIT_RESULTS[3])),
-];
+const REUSE_COUNTERS: [(&str, Option<&str>); 4] =
+    [(HIT, None), (MISS, None), (TIMEOUT, None), (ERROR, None)];
 
 /// Records the counters in [`REUSE_COUNTERS`], and ignores every other metric.
 #[derive(Default)]
@@ -364,26 +310,6 @@ impl ReuseRecorder {
     /// Returns the counts of `hit` and `miss`.
     fn hits_and_misses(&self) -> (u64, u64) {
         (self.count(HIT, None), self.count(MISS, None))
-    }
-
-    /// Returns the counts of the audit results, in the order of [`AUDIT_RESULTS`].
-    fn audits(&self) -> [u64; 4] {
-        AUDIT_RESULTS.map(|result| self.count(AUDIT, Some(result)))
-    }
-
-    /// Waits until the block verifier has counted `count` audit results, so that its background
-    /// audits can finish.
-    ///
-    /// The deadline is longer than the audits' own timeout, so a test with paused time reaches an
-    /// audit's timeout first.
-    async fn wait_for_audits(&self, count: u64) {
-        tokio::time::timeout(Duration::from_secs(120), async {
-            while self.audits().iter().sum::<u64>() < count {
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
-        .await
-        .expect("the block verifier counts the result of each audit");
     }
 }
 
@@ -1085,222 +1011,8 @@ async fn router_reuses_mempool_verification_from_a_mempool_sent_after_the_first_
         second.hash()
     );
     assert_eq!(recorder.hits_and_misses(), (1, 0));
-    // `router::init` turns the audits on, so the router audits the second block's spend.
-    recorder.wait_for_audits(1).await;
-    assert_eq!(recorder.audits(), [1, 0, 0, 0]);
-    // The first block's spend and the audit looked up their spent outputs, but the second block
-    // didn't verify its spend.
-    assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 2);
-}
-
-/// A state whose `AwaitUtxo` answers are `utxo_lookup`'s, and which answers the other requests
-/// like [`mock_state`].
-fn state_with_utxo_lookup(
-    utxo_lookup: fn() -> BoxFuture<'static, Result<zs::Response, BoxError>>,
-) -> State {
-    BoxCloneService::new(service_fn(move |request| match request {
-        zs::Request::AwaitUtxo(_) => utxo_lookup(),
-        request => mock_state().oneshot(request).boxed(),
-    }))
-}
-
-/// Waits until `condition` is true, so that background tasks can run.
-async fn wait_until(condition: impl Fn() -> bool) {
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !condition() {
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-    })
-    .await
-    .expect("the background tasks make the condition true");
-}
-
-/// The block verifier verifies a transaction that it took from the mempool again after the block
-/// is committed, and the transaction verifier agrees with a correct mempool verification.
-#[tokio::test]
-async fn reuse_audit_agrees_with_a_correct_mempool_verification() {
-    let _init_guard = zebra_test::init();
-    let recorder = ReuseRecorder::default();
-    let _recorder = metrics::set_default_local_recorder(&recorder);
-    let network = network();
-    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
-    let mut harness = Harness::new(&network, mock_state())
-        .with_mempool(mempool(&block, vec![entry(block.transactions[1].clone())]))
-        .with_reuse_audits();
-
-    assert_eq!(harness.verify(block.clone()).await.unwrap(), block.hash());
-    recorder.wait_for_audits(1).await;
-    assert_eq!(recorder.audits(), [1, 0, 0, 0]);
-    // The audit verified the spend, so the block itself didn't.
-    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 1);
-    assert_eq!(harness.calls.await_utxo.load(Ordering::SeqCst), 1);
-}
-
-/// An audit that disagrees with the mempool's verification is counted as a mismatch, but the
-/// block it audits stays committed.
-#[tokio::test]
-async fn reuse_audit_reports_a_mismatch_without_rejecting_the_block() {
-    let _init_guard = zebra_test::init();
-    let recorder = ReuseRecorder::default();
-    let _recorder = metrics::set_default_local_recorder(&recorder);
-    let network = network();
-
-    // The mempool's verification has a signature operation that the transaction doesn't have.
-    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
-    let mut wrong_sigops = entry(block.transactions[1].clone());
-    wrong_sigops.legacy_sigop_count = 5;
-    // `OP_RETURN` fails the spend's script, but the block verifier takes the mempool's
-    // verification of the same transaction object.
-    let failing = spend_output(0, &[0x6a], LockTime::unlocked(), Height(0));
-    let failing_block = candidate(&network, Height(3), failing.clone());
-
-    let cases = [
-        ("a wrong signature operation count", block, wrong_sigops),
-        ("a failing script", failing_block, entry(failing)),
-    ];
-    for (mismatches, (name, block, cached)) in (1..).zip(cases) {
-        let mut harness = Harness::new(&network, mock_state())
-            .with_mempool(mempool(&block, vec![cached]))
-            .with_reuse_audits();
-        assert_eq!(harness.verify(block.clone()).await.unwrap(), block.hash());
-        assert_eq!(harness.calls.commits.load(Ordering::SeqCst), 1, "{name}");
-        recorder.wait_for_audits(mismatches).await;
-        assert_eq!(recorder.audits(), [0, mismatches, 0, 0], "{name}");
-    }
-}
-
-/// An audit that gets no verdict from the transaction verifier is inconclusive: its spent output
-/// doesn't arrive in time, the state's lookup times out, or the state fails.
-#[tokio::test(start_paused = true)]
-async fn reuse_audit_without_a_verdict_is_inconclusive() {
-    let _init_guard = zebra_test::init();
-    let recorder = ReuseRecorder::default();
-    let _recorder = metrics::set_default_local_recorder(&recorder);
-    let network = network();
-    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
-
-    let utxo_lookups: [(&str, fn() -> BoxFuture<'static, _>); 3] = [
-        ("an output that doesn't arrive", || pending().boxed()),
-        ("a lookup that times out", || {
-            ready(Err(tower::timeout::error::Elapsed::new().into())).boxed()
-        }),
-        ("a state that fails", || {
-            ready(Err("state failed".into())).boxed()
-        }),
-    ];
-    for (inconclusive, (name, utxo_lookup)) in (1..).zip(utxo_lookups) {
-        let mut harness = Harness::new(&network, state_with_utxo_lookup(utxo_lookup))
-            .with_mempool(mempool(&block, vec![entry(block.transactions[1].clone())]))
-            .with_reuse_audits();
-        assert_eq!(harness.verify(block.clone()).await.unwrap(), block.hash());
-        recorder.wait_for_audits(inconclusive).await;
-        assert_eq!(recorder.audits(), [0, 0, inconclusive, 0], "{name}");
-    }
-}
-
-/// The block verifier audits one block at a time, and keeps at most one more block's audit
-/// waiting, so it skips the audits of the blocks after that.
-#[tokio::test]
-async fn reuse_audits_over_the_limit_are_skipped() {
-    let _init_guard = zebra_test::init();
-    let recorder = ReuseRecorder::default();
-    let _recorder = metrics::set_default_local_recorder(&recorder);
-    let network = network();
-    let blocks: Vec<_> = (0..3)
-        .map(|index| {
-            let spend = spend_output(index, &[0x51], LockTime::unlocked(), Height(0));
-            candidate(&network, Height(3), spend)
-        })
-        .collect();
-
-    // The audits never get their spent outputs, so the first audit keeps running.
-    let mut harness = Harness::new(&network, state_with_utxo_lookup(|| pending().boxed()))
-        .with_mempool(mempool_with_spends(&blocks))
-        .with_reuse_audits();
-    for (committed, block) in (1..).zip(&blocks) {
-        assert_eq!(harness.verify(block.clone()).await.unwrap(), block.hash());
-        if committed == 1 {
-            // The first audit is running, and waits for its spent output.
-            wait_until(|| harness.calls.await_utxo.load(Ordering::SeqCst) == 1).await;
-        }
-    }
-    // The second block's audit waits, and the third block's audit is skipped.
-    assert_eq!(recorder.audits(), [0, 0, 0, 1]);
-}
-
-/// A block that solves a validated block proposal is committed with the proposal's validation
-/// result, so the block verifier audits a transaction that the proposal took from the mempool once
-/// that block is committed.
-#[tokio::test]
-async fn solved_proposal_is_audited_with_the_proposals_reused_transaction() {
-    let _init_guard = zebra_test::init();
-    let recorder = ReuseRecorder::default();
-    let _recorder = metrics::set_default_local_recorder(&recorder);
-    let network = network();
-    let proposal = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
-    let mut solved = (*proposal).clone();
-    Arc::make_mut(&mut solved.header).nonce = [1; 32].into();
-    let solved = Arc::new(solved);
-    assert_ne!(solved.hash(), proposal.hash());
-
-    // The state validates the proposal with the spend's output, as `mock_state` answers it, and
-    // commits the validation result for the solved block.
-    let spent_outputs: std::collections::HashMap<_, _> = proposal.transactions[1]
-        .spent_outpoints()
-        .map(|outpoint| {
-            let output = transparent::Output::new(
-                (FEE + 1).try_into().unwrap(),
-                transparent::Script::new(&[0x51]),
-            );
-            (
-                outpoint,
-                transparent::OrderedUtxo::new(output, Height(1), 1),
-            )
-        })
-        .collect();
-    let state: State = BoxCloneService::new(service_fn({
-        let network = network.clone();
-        move |request| match request {
-            zs::Request::CheckBlockProposalValidity(block) => {
-                let contextual = zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-                    block,
-                    spent_outputs.clone(),
-                    zebra_chain::amount::DeferredPoolBalanceChange::zero(),
-                    &network,
-                    Default::default(),
-                )
-                .expect("the spend's output covers its value");
-                ready(Ok(zs::Response::ValidBlockProposal(Box::new(contextual)))).boxed()
-            }
-            zs::Request::CommitContextuallyVerifiedBlock(contextual) => {
-                let committed = zs::SemanticallyVerifiedBlock::from(*contextual);
-                ready(Ok(zs::Response::Committed(committed.hash))).boxed()
-            }
-            request => mock_state().oneshot(request).boxed(),
-        }
-    }));
-    let mut harness = Harness::new(&network, state)
-        .with_mempool(mempool(
-            &proposal,
-            vec![entry(proposal.transactions[1].clone())],
-        ))
-        .with_reuse_audits();
-
-    let validation = harness
-        .verifier
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::CheckProposal(proposal.clone()));
-    assert_eq!(validation.await.unwrap(), proposal.hash());
-    // The proposal took the spend from the mempool.
-    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 0);
-
-    assert_eq!(harness.verify(solved.clone()).await.unwrap(), solved.hash());
-    recorder.wait_for_audits(1).await;
-    assert_eq!(recorder.audits(), [1, 0, 0, 0]);
-    // Only the audit verified the spend.
-    assert_eq!(harness.calls.non_coinbase.load(Ordering::SeqCst), 1);
+    // The second block's spend wasn't verified, so it didn't look up its spent output.
+    assert_eq!(calls.await_utxo.load(Ordering::SeqCst), 1);
 }
 
 /// A mempool answer of the wrong kind is a bug in the mempool service, so the block verifier panics

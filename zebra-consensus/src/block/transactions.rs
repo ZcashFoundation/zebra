@@ -68,12 +68,10 @@ where
         let mut sigops: u32 = 0;
         let mut block_miner_fees = Ok(Amount::zero());
 
-        for (index, (&transaction_hash, transaction)) in transaction_hashes
-            .iter()
-            .zip(block.transactions.iter())
-            .enumerate()
+        for (&transaction_hash, transaction) in
+            transaction_hashes.iter().zip(block.transactions.iter())
         {
-            if let Some(cached) = candidates.take(index, transaction, transaction_hash, rules)? {
+            if let Some(cached) = candidates.take(transaction, transaction_hash, rules)? {
                 sigops = sigops.saturating_add(cached.block_sigop_count());
                 block_miner_fees += cached.miner_fee;
                 // Taking a transaction from the mempool doesn't wait for anything, so let other

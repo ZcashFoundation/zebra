@@ -40,7 +40,7 @@ use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
-    block::{Request, ReuseAudits, SemanticBlockVerifier, VerifyBlockError},
+    block::{Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
@@ -473,8 +473,7 @@ where
 
     let block =
         SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone())
-            .with_mempool(block_mempool)
-            .with_reuse_audits(ReuseAudits::spawn(block_transaction.clone()));
+            .with_mempool(block_mempool);
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,
