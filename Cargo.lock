@@ -1944,7 +1944,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "git+https://github.com/upbqdn/halo2?rev=d2b5175ff49a2c4e29e88d4500e5e19f8c035e36#d2b5175ff49a2c4e29e88d4500e5e19f8c035e36"
+source = "git+https://github.com/upbqdn/halo2?rev=360774d03644347de24975737938f06aec4dd521#360774d03644347de24975737938f06aec4dd521"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1968,7 +1968,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.1"
-source = "git+https://github.com/upbqdn/halo2?rev=d2b5175ff49a2c4e29e88d4500e5e19f8c035e36#d2b5175ff49a2c4e29e88d4500e5e19f8c035e36"
+source = "git+https://github.com/upbqdn/halo2?rev=360774d03644347de24975737938f06aec4dd521#360774d03644347de24975737938f06aec4dd521"
 dependencies = [
  "bitvec",
  "ff",
@@ -1979,7 +1979,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.2"
-source = "git+https://github.com/upbqdn/halo2?rev=d2b5175ff49a2c4e29e88d4500e5e19f8c035e36#d2b5175ff49a2c4e29e88d4500e5e19f8c035e36"
+source = "git+https://github.com/upbqdn/halo2?rev=360774d03644347de24975737938f06aec4dd521#360774d03644347de24975737938f06aec4dd521"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3568,7 +3568,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.16.0"
-source = "git+https://github.com/upbqdn/orchard?rev=de4537bfc59b8fc204b95000f52f4d38bd29b2db#de4537bfc59b8fc204b95000f52f4d38bd29b2db"
+source = "git+https://github.com/upbqdn/orchard?rev=2ea5fef78e9642636d9c8b033f61476093f42e6e#2ea5fef78e9642636d9c8b033f61476093f42e6e"
 dependencies = [
  "aes",
  "bitvec",
@@ -3687,7 +3687,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.4"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=d0dde74e281d0ca2a2ecd67f38ca7dcc993af1f0#d0dde74e281d0ca2a2ecd67f38ca7dcc993af1f0"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=62f83c889634e10a6f0c34cf3e69d0e2f4e05b38#62f83c889634e10a6f0c34cf3e69d0e2f4e05b38"
 dependencies = [
  "blake2b_simd",
  "cpufeatures 0.3.1",
