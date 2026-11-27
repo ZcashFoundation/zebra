@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: 'Lowered `transaction::zip317::MARGINAL_FEE` from 1,000 to 400 zatoshis per logical action, which `conventional_fee()` and `unpaid_actions()` follow, and `transaction::zip317::MEMPOOL_TX_FEE_REQUIREMENT_CAP` from 1,000 to 800 zatoshis, so that the size-based minimum fee in `mempool_checks()` never rejects a transaction that pays its conventional fee.'
+time: 2026-11-25T18:00:00.000000000Z

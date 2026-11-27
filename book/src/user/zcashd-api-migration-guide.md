@@ -310,7 +310,7 @@ or the sidecar.
 | Method                      | Owner | Status | Notes                                                                                                                                                                     |
 | --------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getbestblockheightandhash` | Zebra | Done   | Tip height and hash in one call, so a caller cannot read a torn pair across two requests.                                                                                 |
-| `getstandardfee`            | Zebra | Done   | Returns `{standard_fee, version}`: the ZIP 317 marginal fee per logical action, in zatoshis, for the next block. The value depends on the next block's height ([#11557]). |
+| `getstandardfee`            | Zebra | Done   | Returns `{standard_fee, version}`: the recommended fee per logical action, in zatoshis, for the next block. The value depends on the next block's height ([#11557]).      |
 | `generatetoaddress`         | Zebra | Done   | Regtest only. Like `generate`, but pays the coinbase to a given address instead of the configured `mining.miner_address`, which lets one node fund several test wallets.  |
 | `rpc.discover`              | Zebra | Done   | OpenRPC schema for every Zebra RPC method.                                                                                                                                |
 
