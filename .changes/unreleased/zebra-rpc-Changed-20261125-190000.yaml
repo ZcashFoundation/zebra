@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Changed `getblocktemplate` to select mempool transactions in order of fee rate instead of by ZIP 317 weighted random selection. Each transaction is rated together with the unselected mempool transactions it spends outputs from, directly or indirectly, and added after them. A template is treated as full with 3,000 or fewer unused bytes, or after 1,000 failed tries in a row.'
+time: 2026-11-25T19:00:00.000000000Z

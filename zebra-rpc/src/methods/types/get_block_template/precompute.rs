@@ -1,7 +1,7 @@
 //! A precomputed block template for the `getblocktemplate` RPC.
 //!
 //! Miners call `getblocktemplate` far more often than the chain tip or the mempool change, and
-//! building a template needs a state read, a mempool read, ZIP-317 transaction selection, and a
+//! building a template needs a state read, a mempool read, transaction selection, and a
 //! coinbase transaction, which re-runs a shielded proof when the miner address has a shielded
 //! component. So [`run()`] keeps a template for the current chain tip ready in a [`TemplateCache`],
 //! and the RPC only has to check that the template still extends the tip.
@@ -851,7 +851,7 @@ async fn store_precomputed_coinbase(
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
-        // ZIP-317 transaction selection needs for its size and sigop limits.
+        // transaction selection needs for its size and sigop limits.
         Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), None, coinbase),
         Err(error) => tracing::warn!(?error, "precomputed coinbase transaction task failed"),
     }

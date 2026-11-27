@@ -70,7 +70,9 @@ pub use proposal::{BlockProposalResponse, BlockTemplateTimeSource};
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.
 ///
-/// See the `dependencies_depth()` function in [`zip317`] for more details.
+/// It is 0 for a transaction that spends no outputs of other selected mempool transactions, and
+/// otherwise one more than the largest depth of the selected transactions it spends outputs from.
+/// See [`zip317`] for how transactions are selected.
 #[cfg(test)]
 type InBlockTxDependenciesDepth = usize;
 
@@ -294,8 +296,8 @@ impl BlockTemplateResponse {
             Vec<_>,
         ) = mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
 
-        // Transaction selection returns transactions in an arbitrary order,
-        // but Zebra's snapshot tests expect the same order every time.
+        // Transaction selection returns transactions in fee rate order, but Zebra's tests sort
+        // them by dependency depth and hash, so that their expected order does not depend on fees.
         //
         // # Correctness
         //
@@ -1125,8 +1127,6 @@ where
         .oneshot(mempool::Request::FullTransactions)
         .await
         .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
-
-    // TODO: Order transactions in block templates based on their dependencies
 
     let mempool::Response::FullTransactions {
         transactions,

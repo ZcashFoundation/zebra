@@ -1,6 +1,6 @@
 //! An implementation of the [ZIP-317] fee calculations for [UnminedTx]s:
 //! - [conventional fee](https://zips.z.cash/zip-0317#fee-calculation)
-//! - [block production transaction weight](https://zips.z.cash/zip-0317#block-production)
+//! - fee weight ratio, the miner fee divided by the conventional fee, for mempool metrics
 
 use std::cmp::max;
 
@@ -30,22 +30,17 @@ const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// The standard size of p2pkh outputs for the ZIP-317 fee calculation, in bytes.
 const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
-/// The weight ratio cap for ZIP-317 block production.
-/// `weight_ratio_cap` in ZIP-317.
-const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 10.0;
-
-/// The minimum fee for the block production weight ratio calculation, in zatoshis.
+/// The minimum fee for the fee weight ratio calculation, in zatoshis.
 /// If a transaction has a lower fee, this value is used instead.
 ///
 /// This avoids special handling for transactions with zero weight.
 const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
 
 /// If a tx has more than `BLOCK_UNPAID_ACTION_LIMIT` "unpaid actions", it will never be mined by
-/// the [_Recommended algorithm for block template construction_][alg-def], implemented in Zebra
-/// [here][alg-impl].
+/// the [_Recommended algorithm for block template construction_][alg-def], or by Zebra's block
+/// template transaction selection, which applies the same limit.
 ///
 /// [alg-def]: https://zips.z.cash/zip-0317#recommended-algorithm-for-block-template-construction
-/// [alg-impl]: https://github.com/zcashfoundation/zebra/blob/95e4d0973caac075b47589f6a05f9d744acd3db3/zebra-rpc/src/methods/get_block_template_rpcs/zip317.rs#L39
 pub const BLOCK_UNPAID_ACTION_LIMIT: u32 = 0;
 
 /// The minimum fee per kilobyte for Zebra mempool transactions.
@@ -107,11 +102,13 @@ pub fn unpaid_actions(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -
     unpaid_actions.try_into().unwrap_or_default()
 }
 
-/// Returns the block production fee weight ratio for `transaction`, as defined by [ZIP-317].
+/// Returns the fee weight ratio for `transaction`: `miner_fee` divided by its [ZIP-317]
+/// conventional fee, for mempool metrics. The ratio is not capped, and block template selection
+/// does not use it.
 ///
 /// This calculation will always return a positive, non-zero value.
 ///
-/// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+/// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
 pub fn conventional_fee_weight_ratio(
     transaction: &UnminedTx,
     miner_fee: Amount<NonNegative>,
@@ -130,9 +127,7 @@ pub fn conventional_fee_weight_ratio(
 
     let conventional_fee = i64::from(transaction.conventional_fee) as f32;
 
-    let uncapped_weight = miner_fee / conventional_fee;
-
-    uncapped_weight.min(BLOCK_PRODUCTION_WEIGHT_RATIO_CAP)
+    miner_fee / conventional_fee
 }
 
 /// Returns the conventional actions for `transaction`, `max(logical_actions, GRACE_ACTIONS)`,

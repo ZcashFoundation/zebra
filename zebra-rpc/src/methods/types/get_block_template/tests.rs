@@ -391,7 +391,7 @@ fn coinbase_cache_reuses_built_coinbase() {
 }
 
 /// Verifies the fix for #10907: the multi-entry coinbase cache retains both the zero-fee fake
-/// coinbase (used for ZIP-317 weight sizing) and the real-fee coinbase simultaneously, so
+/// coinbase (used to size transaction selection) and the real-fee coinbase simultaneously, so
 /// `getblocktemplate` doesn't rebuild shielded proofs on every short-poll.
 #[test]
 fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
@@ -404,7 +404,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
 
     let cache = CoinbaseCache::default();
 
-    // Simulate what getblocktemplate does: store a fake coinbase at zero fee (ZIP-317 sizing),
+    // Simulate what getblocktemplate does: store a fake coinbase at zero fee (selection sizing),
     // then store the real coinbase at the actual fee.
     let fake_coinbase = TransactionTemplate::new_coinbase(
         &Network::Mainnet,
