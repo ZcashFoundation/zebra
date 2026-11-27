@@ -6,7 +6,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures::Stream;
@@ -56,6 +56,53 @@ where
     }
 }
 
+/// Server-streaming method names exposed by [`Indexer`].
+pub(super) const STREAM_METHODS: &[&str] =
+    &["ChainTipChange", "NonFinalizedStateChange", "MempoolChange"];
+
+/// Records `indexer.grpc.request.duration_seconds` for an indexer RPC handler invocation.
+async fn record_method_duration<T>(
+    method: &'static str,
+    future: impl Future<Output = Result<T, Status>>,
+) -> Result<T, Status> {
+    let start = Instant::now();
+    let result = future.await;
+    metrics::histogram!("indexer.grpc.request.duration_seconds", "method" => method)
+        .record(start.elapsed().as_secs_f64());
+    result
+}
+
+/// Stream wrapper that tracks active server streams in `indexer.grpc.streams.active`.
+struct TrackedStream<S> {
+    inner: S,
+    method: &'static str,
+}
+
+impl<S> TrackedStream<S> {
+    fn new(inner: S, method: &'static str) -> Self {
+        metrics::gauge!("indexer.grpc.streams.active", "method" => method).increment(1.0);
+        Self { inner, method }
+    }
+}
+
+impl<S> Drop for TrackedStream<S> {
+    fn drop(&mut self) {
+        metrics::gauge!("indexer.grpc.streams.active", "method" => self.method).decrement(1.0);
+    }
+}
+
+impl<S: Stream + Unpin> Stream for TrackedStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.get_mut().inner).poll_next(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
 where
@@ -73,107 +120,85 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
-        let subscription_permit = self.acquire_subscription_permit()?;
-        let span = Span::current();
-        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
-        let mut chain_tip_change = self.chain_tip_change.clone();
+        record_method_duration("ChainTipChange", async move {
+            let subscription_permit = self.acquire_subscription_permit()?;
+            let span = Span::current();
+            let (mut response_sender, response_stream) =
+                indexer_stream_channel(subscription_permit);
+            let mut chain_tip_change = self.chain_tip_change.clone();
 
-        tokio::spawn(async move {
-            // Notify the client of chain tip changes until the channel is closed or the client
-            // disconnects.
-            loop {
-                let changed = tokio::select! {
-                    biased;
-                    () = response_sender.closed() => {
-                        span.in_scope(|| {
-                            tracing::info!("client disconnected, dropping chain_tip_change task");
-                        });
+            tokio::spawn(async move {
+                // Notify the client of chain tip changes until the channel is closed or the client
+                // disconnects.
+                loop {
+                    let changed = tokio::select! {
+                        biased;
+                        () = response_sender.closed() => {
+                            span.in_scope(|| {
+                                tracing::info!(
+                                    "client disconnected, dropping chain_tip_change task"
+                                );
+                            });
+                            return;
+                        }
+                        result = chain_tip_change.best_tip_changed() => result,
+                    };
+
+                    if changed.is_err() {
+                        break;
+                    }
+
+                    let Some((tip_height, tip_hash)) = chain_tip_change.best_tip_height_and_hash()
+                    else {
+                        continue;
+                    };
+
+                    if !response_sender
+                        .send_item(
+                            BlockHashAndHeight::new(tip_hash, tip_height),
+                            "chain_tip_change",
+                            &span,
+                        )
+                        .await
+                    {
                         return;
                     }
-                    result = chain_tip_change.best_tip_changed() => result,
-                };
-
-                if changed.is_err() {
-                    break;
                 }
 
-                let Some((tip_height, tip_hash)) = chain_tip_change.best_tip_height_and_hash()
-                else {
-                    continue;
-                };
+                span.in_scope(|| {
+                    tracing::warn!("chain_tip_change channel has closed");
+                });
 
-                if !response_sender
-                    .send_item(
-                        BlockHashAndHeight::new(tip_hash, tip_height),
-                        "chain_tip_change",
-                        &span,
-                    )
-                    .await
-                {
-                    return;
-                }
-            }
-
-            span.in_scope(|| {
-                tracing::warn!("chain_tip_change channel has closed");
+                response_sender
+                    .finish_with_status(Status::unavailable("chain_tip_change channel has closed"));
             });
 
-            response_sender
-                .finish_with_status(Status::unavailable("chain_tip_change channel has closed"));
-        });
-
-        Ok(Response::new(Box::pin(response_stream)))
+            let stream: Self::ChainTipChangeStream =
+                Box::pin(TrackedStream::new(response_stream, "ChainTipChange"));
+            Ok(Response::new(stream))
+        })
+        .await
     }
 
     async fn non_finalized_state_change(
         &self,
         request: tonic::Request<NonFinalizedStateChangeRequest>,
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
-        // The caller may provide the hashes of the chain tips it already has so the server only
-        // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
-        let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
-        let subscription_permit = self.acquire_subscription_permit()?;
+        record_method_duration("NonFinalizedStateChange", async move {
+            // The caller may provide the hashes of the chain tips it already has so the server only
+            // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
+            // Construct `TrackedStream` only after validation and permit acquisition so rejected calls
+            // don't touch the gauge.
+            let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
+            let subscription_permit = self.acquire_subscription_permit()?;
 
-        let span = Span::current();
-        let read_state = self.read_state.clone();
-        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
+            let span = Span::current();
+            let read_state = self.read_state.clone();
+            let (mut response_sender, response_stream) =
+                indexer_stream_channel(subscription_permit);
 
-        tokio::spawn(async move {
-            let subscribe_result = tokio::select! {
-                biased;
-                () = response_sender.closed() => {
-                    span.in_scope(|| {
-                        tracing::info!(
-                            "client disconnected, dropping non_finalized_state_change task"
-                        );
-                    });
-                    return;
-                }
-                result = read_state.oneshot(ReadRequest::NonFinalizedBlocksListener {
-                    known_chain_tips,
-                }) => result,
-            };
-
-            let mut non_finalized_state_change = match subscribe_result {
-                Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
-                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-                Err(error) => {
-                    span.in_scope(|| {
-                        tracing::error!(
-                            ?error,
-                            "failed to subscribe to non-finalized state changes"
-                        );
-                    });
-
-                    response_sender.finish_with_status(Status::unavailable(
-                        "failed to subscribe to non-finalized state changes",
-                    ));
-                    return;
-                }
-            };
-
-            loop {
-                let next_block = tokio::select! {
+            tokio::spawn(async move {
+                let subscribe_result = tokio::select! {
                     biased;
                     () = response_sender.closed() => {
                         span.in_scope(|| {
@@ -183,150 +208,201 @@ where
                         });
                         return;
                     }
-                    block = non_finalized_state_change.recv() => block,
+                    result = read_state.oneshot(ReadRequest::NonFinalizedBlocksListener {
+                        known_chain_tips,
+                    }) => result,
                 };
 
-                let Some((hash, block)) = next_block else {
-                    break;
+                let mut non_finalized_state_change = match subscribe_result {
+                    Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
+                    Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                    Err(error) => {
+                        span.in_scope(|| {
+                            tracing::error!(
+                                ?error,
+                                "failed to subscribe to non-finalized state changes"
+                            );
+                        });
+
+                        response_sender.finish_with_status(Status::unavailable(
+                            "failed to subscribe to non-finalized state changes",
+                        ));
+                        return;
+                    }
                 };
 
-                if !response_sender
-                    .send_item(
-                        BlockAndHash::new(hash, block),
-                        "non_finalized_state_change",
-                        &span,
-                    )
-                    .await
-                {
-                    return;
+                loop {
+                    let next_block = tokio::select! {
+                        biased;
+                        () = response_sender.closed() => {
+                            span.in_scope(|| {
+                                tracing::info!(
+                                    "client disconnected, dropping non_finalized_state_change task"
+                                );
+                            });
+                            return;
+                        }
+                        block = non_finalized_state_change.recv() => block,
+                    };
+
+                    let Some((hash, block)) = next_block else {
+                        break;
+                    };
+
+                    if !response_sender
+                        .send_item(
+                            BlockAndHash::new(hash, block),
+                            "non_finalized_state_change",
+                            &span,
+                        )
+                        .await
+                    {
+                        return;
+                    }
                 }
-            }
 
-            span.in_scope(|| {
-                tracing::warn!("non-finalized state change channel has closed");
+                span.in_scope(|| {
+                    tracing::warn!("non-finalized state change channel has closed");
+                });
+
+                response_sender.finish_with_status(Status::unavailable(
+                    "non-finalized state change channel has closed",
+                ));
             });
 
-            response_sender.finish_with_status(Status::unavailable(
-                "non-finalized state change channel has closed",
+            let stream: Self::NonFinalizedStateChangeStream = Box::pin(TrackedStream::new(
+                response_stream,
+                "NonFinalizedStateChange",
             ));
-        });
-
-        Ok(Response::new(Box::pin(response_stream)))
+            Ok(Response::new(stream))
+        })
+        .await
     }
 
     async fn mempool_change(
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
-        let subscription_permit = self.acquire_subscription_permit()?;
-        let span = Span::current();
-        let (mut response_sender, response_stream) = indexer_stream_channel(subscription_permit);
-        let mut mempool_change = self.mempool_change.subscribe();
+        record_method_duration("MempoolChange", async move {
+            let subscription_permit = self.acquire_subscription_permit()?;
+            let span = Span::current();
+            let (mut response_sender, response_stream) =
+                indexer_stream_channel(subscription_permit);
+            let mut mempool_change = self.mempool_change.subscribe();
 
-        tokio::spawn(async move {
-            // Notify the client of mempool changes until the channel closes, lags, or the client
-            // disconnects.
-            loop {
-                let change = tokio::select! {
-                    biased;
-                    () = response_sender.closed() => {
-                        span.in_scope(|| {
-                            tracing::info!("client disconnected, dropping mempool_change task");
-                        });
-                        return;
-                    }
-                    result = mempool_change.recv() => result,
-                };
-
-                match change {
-                    Ok(change) => {
-                        for tx_id in change.tx_ids() {
+            tokio::spawn(async move {
+                // Notify the client of mempool changes until the channel closes, lags, or the client
+                // disconnects.
+                loop {
+                    let change = tokio::select! {
+                        biased;
+                        () = response_sender.closed() => {
                             span.in_scope(|| {
-                                tracing::debug!("mempool change: {:?}", change);
+                                tracing::info!(
+                                    "client disconnected, dropping mempool_change task"
+                                );
                             });
+                            return;
+                        }
+                        result = mempool_change.recv() => result,
+                    };
 
-                            let msg = mempool_change_message(change.kind(), tx_id);
-                            if !response_sender
-                                .send_item(msg, "mempool_change", &span)
-                                .await
-                            {
-                                return;
+                    match change {
+                        Ok(change) => {
+                            for tx_id in change.tx_ids() {
+                                span.in_scope(|| {
+                                    tracing::debug!("mempool change: {:?}", change);
+                                });
+
+                                let msg = mempool_change_message(change.kind(), tx_id);
+                                if !response_sender
+                                    .send_item(msg, "mempool_change", &span)
+                                    .await
+                                {
+                                    return;
+                                }
                             }
                         }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        span.in_scope(|| {
-                            tracing::warn!(
-                                skipped,
-                                "mempool_change stream lagged, dropping subscription"
-                            );
-                        });
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            span.in_scope(|| {
+                                tracing::warn!(
+                                    skipped,
+                                    "mempool_change stream lagged, dropping subscription"
+                                );
+                            });
 
-                        response_sender.finish_with_status(Status::aborted(format!(
-                            "mempool_change stream lagged by {skipped} updates; \
-                             resubscribe and resync"
-                        )));
-                        return;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        span.in_scope(|| {
-                            tracing::warn!("mempool_change channel has closed");
-                        });
+                            response_sender.finish_with_status(Status::aborted(format!(
+                                "mempool_change stream lagged by {skipped} updates; \
+                                 resubscribe and resync"
+                            )));
+                            return;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            span.in_scope(|| {
+                                tracing::warn!("mempool_change channel has closed");
+                            });
 
-                        response_sender.finish_with_status(Status::unavailable(
-                            "mempool_change channel has closed",
-                        ));
-                        return;
+                            response_sender.finish_with_status(Status::unavailable(
+                                "mempool_change channel has closed",
+                            ));
+                            return;
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        Ok(Response::new(Box::pin(response_stream)))
+            let stream: Self::MempoolChangeStream =
+                Box::pin(TrackedStream::new(response_stream, "MempoolChange"));
+            Ok(Response::new(stream))
+        })
+        .await
     }
 
     async fn get_block(
         &self,
         request: tonic::Request<BlockRequest>,
     ) -> Result<Response<BlockAndHash>, Status> {
-        // The request carries a single `hash_or_height` byte string: a 32-byte block hash in
-        // display order, or a 4-byte big-endian block height. The length tells the two apart.
-        let hash_or_height = request.into_inner().hash_or_height;
-        let hash_or_height = match hash_or_height.len() {
-            32 => zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash_or_height)?),
-            4 => {
-                let height = u32::from_be_bytes(
-                    hash_or_height
-                        .try_into()
-                        .expect("a 4-byte vec always converts to a [u8; 4]"),
-                );
-                let height = block::Height::try_from(height).map_err(|_| {
-                    Status::invalid_argument(format!("block height out of range: {height}"))
-                })?;
-                zebra_state::HashOrHeight::Height(height)
-            }
-            len => {
-                return Err(Status::invalid_argument(format!(
-                    "block request must be a 32-byte hash or a 4-byte height, got {len} bytes"
-                )));
-            }
-        };
+        record_method_duration("GetBlock", async move {
+            // The request carries a single `hash_or_height` byte string: a 32-byte block hash in
+            // display order, or a 4-byte big-endian block height. The length tells the two apart.
+            let hash_or_height = request.into_inner().hash_or_height;
+            let hash_or_height = match hash_or_height.len() {
+                32 => zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash_or_height)?),
+                4 => {
+                    let height = u32::from_be_bytes(
+                        hash_or_height
+                            .try_into()
+                            .expect("a 4-byte vec always converts to a [u8; 4]"),
+                    );
+                    let height = block::Height::try_from(height).map_err(|_| {
+                        Status::invalid_argument(format!("block height out of range: {height}"))
+                    })?;
+                    zebra_state::HashOrHeight::Height(height)
+                }
+                len => {
+                    return Err(Status::invalid_argument(format!(
+                        "block request must be a 32-byte hash or a 4-byte height, got {len} bytes"
+                    )));
+                }
+            };
 
-        match self
-            .read_state
-            .clone()
-            .oneshot(ReadRequest::Block(hash_or_height))
-            .await
-        {
-            Ok(ReadResponse::Block(Some(block))) => {
-                Ok(Response::new(BlockAndHash::new(block.hash(), block)))
+            match self
+                .read_state
+                .clone()
+                .oneshot(ReadRequest::Block(hash_or_height))
+                .await
+            {
+                Ok(ReadResponse::Block(Some(block))) => {
+                    Ok(Response::new(BlockAndHash::new(block.hash(), block)))
+                }
+                Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
+                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                Err(error) => Err(Status::unavailable(format!(
+                    "failed to read block: {error}"
+                ))),
             }
-            Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
-            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => Err(Status::unavailable(format!(
-                "failed to read block: {error}"
-            ))),
-        }
+        })
+        .await
     }
 }
 

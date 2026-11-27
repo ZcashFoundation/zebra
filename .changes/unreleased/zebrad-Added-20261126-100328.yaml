@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added JSON-RPC connection permit (`rpc.connections.active`) and HTTP 429 rejection (`rpc.connections.rejected.total`) metrics, JSON-RPC wire payload-size (`rpc.request.size_bytes`, `rpc.response.size_bytes`) and batch-size (`rpc.batch.size`) histograms, and indexer gRPC per-method latency (`indexer.grpc.request.duration_seconds`) and active stream (`indexer.grpc.streams.active`) metrics. They are exported as Prometheus histograms with buckets where applicable.
+time: 2026-11-26T10:03:28.515377055Z

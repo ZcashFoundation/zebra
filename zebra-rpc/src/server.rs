@@ -36,6 +36,7 @@ use crate::{
 
 pub mod cookie;
 pub mod error;
+mod http_metrics;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
 pub mod rpc_metrics;
@@ -147,7 +148,11 @@ impl RpcServer {
         let http_middleware_layer =
             HttpRequestMiddlewareLayer::with_auth(auth, max_request_body_size);
 
-        let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
+        let http_middleware = tower::ServiceBuilder::new()
+            .layer(http_middleware_layer)
+            .layer(http_metrics::HttpMetricsLayer::new(
+                http_metrics::DEFAULT_MAX_CONNECTIONS,
+            ));
 
         let rpc = rpc.into_rpc();
         let registered_methods: Arc<HashSet<_>> = Arc::new(rpc.method_names().collect());
@@ -161,11 +166,16 @@ impl RpcServer {
 
         let server = Server::builder()
             .http_only()
+            .max_connections(http_metrics::DEFAULT_MAX_CONNECTIONS)
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
             .max_response_body_size(conf.max_response_body_size)
             .build(listen_addr)
             .await?;
+
+        metrics::gauge!("rpc.connections.active").increment(0.0);
+        metrics::gauge!("rpc.active_requests").increment(0.0);
+        metrics::counter!("rpc.connections.rejected.total").increment(0);
 
         info!("{OPENED_RPC_ENDPOINT_MSG}{}", server.local_addr()?);
 

@@ -43,8 +43,31 @@ const DOWNLOAD_BUCKETS: &[f64] = &[
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0,
 ];
 
-/// The histograms that Prometheus exports as histograms with these bucket upper bounds, in
-/// seconds. Every other histogram is exported as a summary with quantiles.
+/// Bucket upper bounds for JSON-RPC HTTP request and response payload sizes, in bytes.
+const RPC_PAYLOAD_SIZE_BUCKETS: &[f64] = &[
+    64.0,
+    256.0,
+    1_024.0,
+    4_096.0,
+    16_384.0,
+    65_536.0,
+    262_144.0,
+    1_048_576.0,
+    2_097_152.0,
+    4_194_304.0,
+    8_388_608.0,
+    16_777_216.0,
+    33_554_432.0,
+    67_108_864.0,
+];
+
+/// Bucket upper bounds for JSON-RPC batch member counts.
+const RPC_BATCH_SIZE_BUCKETS: &[f64] = &[
+    1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1_024.0,
+];
+
+/// The histograms that Prometheus exports as histograms with these bucket upper bounds, in each
+/// histogram's own unit. Every other histogram is exported as a summary with quantiles.
 ///
 /// Adding a histogram here removes its `quantile` series, which breaks queries that use them.
 pub const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
@@ -91,6 +114,13 @@ pub const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
         &[
             0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0,
         ],
+    ),
+    ("rpc.request.size_bytes", RPC_PAYLOAD_SIZE_BUCKETS),
+    ("rpc.response.size_bytes", RPC_PAYLOAD_SIZE_BUCKETS),
+    ("rpc.batch.size", RPC_BATCH_SIZE_BUCKETS),
+    (
+        "indexer.grpc.request.duration_seconds",
+        BLOCK_LATENCY_BUCKETS,
     ),
     (
         "zcash.net.peer.handshake.duration_seconds",

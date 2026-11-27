@@ -60,6 +60,22 @@ pub(crate) fn method_label(
     registered_methods.get(method).copied().unwrap_or("unknown")
 }
 
+/// RAII guard for `rpc.active_requests` so cancelled or dropped RPC futures never leak the gauge.
+struct ActiveRequestGuard;
+
+impl ActiveRequestGuard {
+    fn new() -> Self {
+        metrics::gauge!("rpc.active_requests").increment(1.0);
+        Self
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        metrics::gauge!("rpc.active_requests").decrement(1.0);
+    }
+}
+
 impl<'a, S> RpcServiceT<'a> for RpcMetricsMiddleware<S>
 where
     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
@@ -71,10 +87,11 @@ where
         let method = self.method_label(request.method_name());
         let start = Instant::now();
 
-        // Increment active requests gauge
-        metrics::gauge!("rpc.active_requests").increment(1.0);
+        // Increment active requests gauge before entering the async block and decrement on drop.
+        let active_request = ActiveRequestGuard::new();
 
         ResponseFuture::future(Box::pin(async move {
+            let _active_request = active_request;
             let response = service.call(request).await;
             let duration = start.elapsed().as_secs_f64();
 
@@ -106,9 +123,6 @@ where
                 )
                 .increment(1);
             }
-
-            // Decrement active requests gauge
-            metrics::gauge!("rpc.active_requests").decrement(1.0);
 
             response
         }))
