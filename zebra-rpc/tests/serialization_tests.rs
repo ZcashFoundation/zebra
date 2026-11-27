@@ -203,6 +203,34 @@ fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
     let new_obj = GetAddressBalanceResponse::new(obj.balance(), obj.received());
 
     assert_eq!(obj, new_obj);
+    assert_eq!(
+        serde_json::to_string(&new_obj)?,
+        r#"{"balance":11290259389,"received":11290259390}"#
+    );
+
+    // Test request and response with `chainInfo: true`
+    let req_with_ci_json =
+        r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"],"chainInfo":true}"#;
+    let req_with_ci: GetAddressBalanceRequest = serde_json::from_str(req_with_ci_json)?;
+    assert_eq!(
+        req_with_ci,
+        GetAddressBalanceRequest::new_with_chain_info(
+            vec![String::from("t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak")],
+            true,
+        )
+    );
+    assert_eq!(serde_json::to_string(&req_with_ci)?, req_with_ci_json);
+
+    let tip_hash: zebra_chain::block::Hash =
+        "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f".parse()?;
+    let resp_with_ci_json = r#"{"balance":11290259389,"received":11290259390,"hash":"000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f","height":123}"#;
+    let resp_with_ci: GetAddressBalanceResponse = serde_json::from_str(resp_with_ci_json)?;
+    assert_eq!(
+        resp_with_ci,
+        GetAddressBalanceResponse::new(11290259389, 11290259390)
+            .with_chain_info(tip_hash, zebra_chain::block::Height(123))
+    );
+    assert_eq!(serde_json::to_string(&resp_with_ci)?, resp_with_ci_json);
 
     Ok(())
 }

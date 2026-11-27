@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: '`getaddressbalance` now accepts an optional `chainInfo` boolean in request objects; when `true`, it returns `hash` and `height` captured atomically from the same chain snapshot as `balance` and `received` ([#12663](https://github.com/ZcashFoundation/zebra/issues/12663)).'
+time: 2026-11-26T12:58:31.41417032Z

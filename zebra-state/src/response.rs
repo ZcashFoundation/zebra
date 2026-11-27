@@ -607,12 +607,16 @@ pub enum ReadResponse {
     ),
 
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
-    /// and the total received funds, including change.
+    /// the total received funds (including change), and the tip height and hash of the chain
+    /// snapshot that was queried.
     AddressBalance {
         /// The total balance of the addresses.
         balance: Amount<NonNegative>,
         /// The total received funds in zatoshis, including change.
         received: u64,
+        /// The tip height and hash of the chain snapshot that produced `balance` and `received`,
+        /// or `None` if the state is empty.
+        tip: Option<(block::Height, block::Hash)>,
     },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]

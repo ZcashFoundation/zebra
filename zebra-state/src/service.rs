@@ -2095,9 +2095,12 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
-                let (balance, received) =
-                    read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
-                Ok(ReadResponse::AddressBalance { balance, received })
+                read::transparent_balance_with(|| state.latest_best_chain(), &state.db, addresses)
+                    .map(|((balance, received), tip)| ReadResponse::AddressBalance {
+                        balance,
+                        received,
+                        tip,
+                    })
             }
 
             // For the get_address_tx_ids RPC.

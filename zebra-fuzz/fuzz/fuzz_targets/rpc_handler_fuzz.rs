@@ -174,8 +174,8 @@ enum RpcCall {
     // ── Tier-B · address index (dual-form serde dto) ───────────────────
     /// `getaddressbalance(GetAddressBalanceRequest)` — methods.rs:1132.
     /// DTO has `#[serde(from = "DGetAddressBalanceRequest")]` two-form
-    /// (Addresses{[..]} or Address(s)). Fuzzed via `Vec<String>`.
-    GetAddressBalance(Vec<String>),
+    /// (Addresses{[..]} or Address(s)) plus optional `chain_info` bool.
+    GetAddressBalance(Vec<String>, bool),
     /// `getaddresstxids(GetAddressTxIdsRequest)` — methods.rs:2562. Two-
     /// form DTO + optional `start`/`end` u32 height bounds + `chain_info`
     /// bool. Fuzzed via raw fields constructor.
@@ -406,6 +406,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::AddressBalance(_) => Ok(Resp::AddressBalance {
                 balance: Amount::zero(),
                 received: 0,
+                tip: Some((block::Height(0), block::Hash([0u8; 32]))),
             }),
             R::TransactionIdsByAddresses { .. } => Ok(Resp::AddressesTransactionIds {
                 tx_ids: Default::default(),
@@ -740,8 +741,8 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
         }
 
         // ── Tier-B address index ───────────────────────────────────
-        RpcCall::GetAddressBalance(addrs) => {
-            let req = GetAddressBalanceRequest::new(addrs);
+        RpcCall::GetAddressBalance(addrs, chain_info) => {
+            let req = GetAddressBalanceRequest::new_with_chain_info(addrs, chain_info);
             let _ = AssertUnwindSafe(rpc.get_address_balance(req))
                 .catch_unwind()
                 .await;
