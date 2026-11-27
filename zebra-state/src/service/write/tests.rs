@@ -9,9 +9,12 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::precomputed_trees::REUSED_TREES,
+    service::{
+        arbitrary::{early_mining_work_counts, EarlyMiningWorkCounts},
+        precomputed_trees::REUSED_TREES,
+    },
     tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
-    Config, ContextuallyVerifiedBlock,
+    CommitSemanticallyVerifiedError, Config, ContextuallyVerifiedBlock,
 };
 
 use super::*;
@@ -481,6 +484,243 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
         reused_trees() > reused_trees_before,
         "the commit reuses the trees that were computed for the candidate"
     );
+
+    join_write_worker(sender, worker).await;
+}
+
+/// Returns Mainnet block 1, with a header that is contextually valid on the genesis block in
+/// `state` and `db`.
+fn block1_on_genesis(state: &NonFinalizedState, db: &ZebraDb) -> Arc<Block> {
+    let mut block1: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("block is valid");
+
+    // Mainnet block 1 was mined hours after the genesis block, which the contextual time rule
+    // doesn't allow. The state doesn't check proof of work, so the header can be changed.
+    let context = read::difficulty::get_block_template_chain_info(state, db, &Network::Mainnet)
+        .expect("a state with a genesis block has a context for the next block");
+    let header = Arc::make_mut(&mut block1.header);
+    header.time = context.min_time.into();
+    header.difficulty_threshold = context.expected_difficulty;
+
+    Arc::new(block1)
+}
+
+/// Returns a copy of `block` with another `nonce`, so it has the same parent and transactions,
+/// and another hash.
+fn nonce_variant(block: &Block, nonce: [u8; 32]) -> Arc<Block> {
+    let mut variant = block.clone();
+    Arc::make_mut(&mut variant.header).nonce = nonce.into();
+
+    Arc::new(variant)
+}
+
+/// Sends `block` to the block write task as a mining candidate, and returns the answer.
+async fn send_mining_candidate(
+    tx: &UnboundedSender<NonFinalizedWriteMessage>,
+    block: Arc<Block>,
+) -> Option<GetBlockTemplateChainInfo> {
+    let (rsp_tx, rsp_rx) = oneshot::channel();
+    tx.send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+        .await
+        .expect("the write task answers")
+        .expect("the write task is running")
+}
+
+/// Sends `block` to the block write task to be committed, with `contextual`, the result of
+/// validating it as a block proposal if it solves one. Returns the response.
+async fn send_commit(
+    tx: &UnboundedSender<NonFinalizedWriteMessage>,
+    block: SemanticallyVerifiedBlock,
+    contextual: Option<Box<ContextuallyVerifiedBlock>>,
+) -> Result<block::Hash, CommitSemanticallyVerifiedError> {
+    let (rsp_tx, rsp_rx) = oneshot::channel();
+    tx.send(NonFinalizedWriteMessage::Commit((
+        block, rsp_tx, contextual,
+    )))
+    .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(10), rsp_rx)
+        .await
+        .expect("the write task answers")
+        .expect("the write task is running")
+}
+
+/// A mining candidate's work is kept when another block is committed first, so the commit of the
+/// candidate's own block still reuses it.
+#[tokio::test]
+async fn candidate_trees_survive_another_blocks_commit() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block = block1_on_genesis(&state, &finalized.db);
+    let sibling = nonce_variant(&block, [0xff; 32]);
+
+    let (tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    assert!(
+        send_mining_candidate(tx, block.clone()).await.is_some(),
+        "a block that extends the best tip gets work",
+    );
+    let committed = send_commit(tx, sibling.clone().prepare(), None).await;
+    assert_eq!(committed.expect("the sibling is valid"), sibling.hash());
+
+    let before = early_mining_work_counts();
+    let committed = send_commit(tx, block.clone().prepare(), None).await;
+    assert_eq!(committed.expect("the block is valid"), block.hash());
+    assert_eq!(
+        early_mining_work_counts(),
+        EarlyMiningWorkCounts {
+            reused_trees: before.reused_trees + 1,
+            reused_history_trees: before.reused_history_trees + 1,
+            skipped_commitment_checks: before.skipped_commitment_checks + 1,
+            ..before
+        },
+        "the commit reuses the candidate's work, although its sibling was committed first",
+    );
+
+    let published = state_receiver.borrow();
+    assert!(published.any_chain_contains(&sibling.hash()));
+    assert!(published.any_chain_contains(&block.hash()));
+    drop(published);
+
+    join_write_worker(sender, worker).await;
+}
+
+/// A mining candidate's work is kept when a solved block proposal is committed first, so the
+/// commit of the candidate's own block still reuses it.
+#[tokio::test]
+async fn candidate_trees_survive_a_solved_proposal_commit() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block = block1_on_genesis(&state, &finalized.db);
+    let proposal = nonce_variant(&block, [1; 32]);
+    let solved = nonce_variant(&block, [2; 32]);
+
+    let (tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    assert!(
+        send_mining_candidate(tx, block.clone()).await.is_some(),
+        "a block that extends the best tip gets work",
+    );
+
+    // Validate a proposal on a snapshot of the state, like the read state service does, and
+    // commit a block that solves it with the result.
+    let mut snapshot = state_receiver.borrow().clone();
+    validate_and_commit_non_finalized(&db, &mut snapshot, proposal.clone().prepare())
+        .expect("the proposal is contextually valid");
+    let mut rebound = snapshot
+        .remove_chain_with_tip(proposal.hash())
+        .expect("validation adds the proposal to a chain")
+        .tip_block()
+        .expect("the proposal is the chain's tip")
+        .clone();
+    rebound.rebind(solved.clone(), std::time::Instant::now());
+    let committed = send_commit(tx, solved.clone().prepare(), Some(Box::new(rebound))).await;
+    assert_eq!(committed.expect("the solved block is valid"), solved.hash());
+
+    let before = early_mining_work_counts();
+    let committed = send_commit(tx, block.clone().prepare(), None).await;
+    assert_eq!(committed.expect("the block is valid"), block.hash());
+    assert_eq!(
+        early_mining_work_counts(),
+        EarlyMiningWorkCounts {
+            reused_trees: before.reused_trees + 1,
+            reused_history_trees: before.reused_history_trees + 1,
+            skipped_commitment_checks: before.skipped_commitment_checks + 1,
+            ..before
+        },
+        "the commit reuses the candidate's work, although a solved proposal was committed first",
+    );
+
+    let published = state_receiver.borrow();
+    assert!(published.any_chain_contains(&solved.hash()));
+    assert!(published.any_chain_contains(&block.hash()));
+    drop(published);
+
+    join_write_worker(sender, worker).await;
+}
+
+/// A mining candidate's work is kept when a sibling is committed first on a non-finalized parent,
+/// so the commit of the candidate's own block, which forks the sibling's chain at that parent,
+/// still reuses it.
+#[tokio::test]
+async fn candidate_trees_survive_a_sibling_commit_on_a_non_finalized_parent() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (finalized, state, _genesis) = new_state_with_mainnet_genesis();
+    let block1 = block1_on_genesis(&state, &finalized.db);
+    let mut block: Block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .expect("block is valid");
+
+    let (tip_sender, _latest, _change) = ChainTipSender::new(None, &network);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let db = finalized.db.clone();
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let tx = sender.non_finalized.as_ref().unwrap();
+
+    let committed = send_commit(tx, block1.clone().prepare(), None).await;
+    assert_eq!(committed.expect("block 1 is valid"), block1.hash());
+
+    // Give Mainnet block 2 a header that is contextually valid on block 1, as a block template
+    // has.
+    let snapshot = state_receiver.borrow().clone();
+    let context = read::difficulty::get_block_template_chain_info(&snapshot, &db, &network)
+        .expect("the state has a context for the next block");
+    let header = Arc::make_mut(&mut block.header);
+    header.previous_block_hash = context.tip_hash;
+    header.time = context.min_time.into();
+    header.difficulty_threshold = context.expected_difficulty;
+    let block = Arc::new(block);
+    let sibling = nonce_variant(&block, [0xff; 32]);
+
+    assert!(
+        send_mining_candidate(tx, block.clone()).await.is_some(),
+        "a block that extends the best tip gets work",
+    );
+    // The sibling extends block 1's chain, so the block's commit forks that chain at block 1.
+    let committed = send_commit(tx, sibling.clone().prepare(), None).await;
+    assert_eq!(committed.expect("the sibling is valid"), sibling.hash());
+
+    let before = early_mining_work_counts();
+    let committed = send_commit(tx, block.clone().prepare(), None).await;
+    assert_eq!(committed.expect("the block is valid"), block.hash());
+    assert_eq!(
+        early_mining_work_counts(),
+        EarlyMiningWorkCounts {
+            reused_trees: before.reused_trees + 1,
+            reused_history_trees: before.reused_history_trees + 1,
+            skipped_commitment_checks: before.skipped_commitment_checks + 1,
+            ..before
+        },
+        "the commit reuses the candidate's work on a fork of its sibling's chain",
+    );
+
+    let published = state_receiver.borrow();
+    assert_eq!(
+        published.chain_count(),
+        2,
+        "the block forks its sibling's chain"
+    );
+    assert!(published.any_chain_contains(&sibling.hash()));
+    assert!(published.any_chain_contains(&block.hash()));
+    drop(published);
 
     join_write_worker(sender, worker).await;
 }
