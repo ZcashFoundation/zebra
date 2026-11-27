@@ -3767,6 +3767,10 @@ async fn getblocktemplate_precomputed() {
         .with_max_request_delay(request_delay)
         .for_unit_tests();
 
+    let mut block_verifier_router: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(request_delay)
+        .for_unit_tests();
+
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
@@ -3801,7 +3805,7 @@ async fn getblocktemplate_precomputed() {
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
+        block_verifier_router.clone(),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -3889,6 +3893,16 @@ async fn getblocktemplate_precomputed() {
     })
     .await
     .expect("the updater task should precompute a template for the chain tip");
+
+    // Each published template is validated as a block proposal, so the block verifier doesn't
+    // validate it again when a miner submits it with a proof of work.
+    block_verifier_router
+        .expect_request_that(|request| {
+            matches!(request, zebra_consensus::Request::CheckProposal(proposal)
+                if proposal.header.previous_block_hash == tip_hash)
+        })
+        .await
+        .respond(Hash([0; 32]));
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block

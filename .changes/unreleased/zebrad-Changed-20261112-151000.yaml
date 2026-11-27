@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Validate each new mining block template as a block proposal in the background, so a miner that submits it unchanged, apart from the nonce and solution, gets it committed without another validation.'
+time: 2026-11-12T15:10:00.000000000Z
