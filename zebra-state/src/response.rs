@@ -426,6 +426,11 @@ impl NonFinalizedBlocksListener {
             //
             // See the `NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE` documentation for more details.
             loop {
+                if sender.is_closed() {
+                    tracing::debug!("non-finalized blocks receiver closed, ending task");
+                    break;
+                }
+
                 let non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
 
                 // Send blocks that weren't in the last seen copy of the non-finalized state. The
@@ -442,13 +447,23 @@ impl NonFinalizedBlocksListener {
 
                 prev_non_finalized_state = non_finalized_state;
 
-                // Wait for the next update to the non-finalized state.
-                if let Err(error) = non_finalized_state_receiver.changed().await {
-                    warn!(
-                        ?error,
-                        "non-finalized state receiver closed, is Zebra shutting down?"
-                    );
-                    break;
+                // Wait for the next update to the non-finalized state, or exit promptly if the
+                // receiver has been dropped.
+                tokio::select! {
+                    biased;
+                    () = sender.closed() => {
+                        tracing::debug!("non-finalized blocks receiver closed, ending task");
+                        break;
+                    }
+                    result = non_finalized_state_receiver.changed() => {
+                        if let Err(error) = result {
+                            warn!(
+                                ?error,
+                                "non-finalized state receiver closed, is Zebra shutting down?"
+                            );
+                            break;
+                        }
+                    }
                 }
             }
         });

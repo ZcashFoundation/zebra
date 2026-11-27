@@ -192,3 +192,28 @@ async fn sends_only_new_blocks_on_update() {
     assert_eq!(recv_hash(&mut received).await, hashes[3]);
     assert_idle(&mut received).await;
 }
+
+/// Dropping the listener receiver terminates the background task promptly even when no state
+/// updates occur.
+#[tokio::test]
+async fn listener_exits_promptly_when_receiver_dropped_without_updates() {
+    let network = Network::Mainnet;
+    let blocks = fake_chain(&network, 2);
+    let hashes: Vec<_> = blocks.iter().map(|b| b.hash()).collect();
+
+    let (tx, rx) = watch::channel(state_from_chain(&network, &blocks));
+    let listener = NonFinalizedBlocksListener::spawn(WatchReceiver::new(rx), HashSet::new());
+    let mut received = listener.unwrap();
+
+    // Drain initial blocks so the spawned task parks on `non_finalized_state_receiver.changed()`.
+    assert_eq!(recv_hash(&mut received).await, hashes[0]);
+    assert_eq!(recv_hash(&mut received).await, hashes[1]);
+    assert!(!tx.is_closed(), "listener task should still be running");
+
+    // Drop the receiver without publishing any state updates.
+    drop(received);
+
+    tokio::time::timeout(Duration::from_secs(1), tx.closed())
+        .await
+        .expect("listener task should exit promptly after receiver is dropped");
+}

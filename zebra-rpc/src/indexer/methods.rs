@@ -1,14 +1,22 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::{collections::HashSet, pin::Pin, time::Duration};
+use std::{
+    collections::HashSet,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures::Stream;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
 use tracing::Span;
-use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
+use zebra_chain::{
+    block, chain_tip::ChainTip, serialization::BytesInDisplayOrder, transaction::UnminedTxId,
+};
 use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{
     ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
@@ -48,36 +56,42 @@ where
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
         let span = Span::current();
-        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
         let mut chain_tip_change = self.chain_tip_change.clone();
 
         tokio::spawn(async move {
-            // Notify the client of chain tip changes until the channel is closed
-            while let Ok(()) = chain_tip_change.best_tip_changed().await {
-                let Some((tip_height, tip_hash)) = chain_tip_change.best_tip_height_and_hash()
-                else {
-                    continue;
-                };
-
-                let send = response_sender.send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)));
-                match tokio::time::timeout(SEND_TIMEOUT, send).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => {
+            // Notify the client of chain tip changes until the channel is closed or the client
+            // disconnects.
+            loop {
+                let changed = tokio::select! {
+                    biased;
+                    () = response_sender.closed() => {
                         span.in_scope(|| {
                             tracing::info!("client disconnected, dropping chain_tip_change task");
                         });
                         return;
                     }
-                    Err(_) => {
-                        span.in_scope(|| {
-                            tracing::warn!(
-                                "slow consumer, dropping chain_tip_change stream after \
-                                 send timed out"
-                            );
-                        });
-                        return;
-                    }
+                    result = chain_tip_change.best_tip_changed() => result,
+                };
+
+                if changed.is_err() {
+                    break;
+                }
+
+                let Some((tip_height, tip_hash)) = chain_tip_change.best_tip_height_and_hash()
+                else {
+                    continue;
+                };
+
+                if !response_sender
+                    .send_item(
+                        BlockHashAndHeight::new(tip_hash, tip_height),
+                        "chain_tip_change",
+                        &span,
+                    )
+                    .await
+                {
+                    return;
                 }
             }
 
@@ -85,11 +99,8 @@ where
                 tracing::warn!("chain_tip_change channel has closed");
             });
 
-            let _ = response_sender
-                .send(Err(Status::unavailable(
-                    "chain_tip_change channel has closed",
-                )))
-                .await;
+            response_sender
+                .finish_with_status(Status::unavailable("chain_tip_change channel has closed"));
         });
 
         Ok(Response::new(Box::pin(response_stream)))
@@ -101,18 +112,29 @@ where
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
         let span = Span::current();
         let read_state = self.read_state.clone();
-        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
 
         // The caller may provide the hashes of the chain tips it already has so the server only
         // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
         let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
 
         tokio::spawn(async move {
-            let mut non_finalized_state_change = match read_state
-                .oneshot(ReadRequest::NonFinalizedBlocksListener { known_chain_tips })
-                .await
-            {
+            let subscribe_result = tokio::select! {
+                biased;
+                () = response_sender.closed() => {
+                    span.in_scope(|| {
+                        tracing::info!(
+                            "client disconnected, dropping non_finalized_state_change task"
+                        );
+                    });
+                    return;
+                }
+                result = read_state.oneshot(ReadRequest::NonFinalizedBlocksListener {
+                    known_chain_tips,
+                }) => result,
+            };
+
+            let mut non_finalized_state_change = match subscribe_result {
                 Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
                 Ok(_) => unreachable!("unexpected response type from ReadStateService"),
                 Err(error) => {
@@ -123,24 +145,17 @@ where
                         );
                     });
 
-                    let _ = response_sender
-                        .send(Err(Status::unavailable(
-                            "failed to subscribe to non-finalized state changes",
-                        )))
-                        .await;
+                    response_sender.finish_with_status(Status::unavailable(
+                        "failed to subscribe to non-finalized state changes",
+                    ));
                     return;
                 }
             };
 
             loop {
-                let Some((hash, block)) = non_finalized_state_change.recv().await else {
-                    break;
-                };
-
-                let send = response_sender.send(Ok(BlockAndHash::new(hash, block)));
-                match tokio::time::timeout(SEND_TIMEOUT, send).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => {
+                let next_block = tokio::select! {
+                    biased;
+                    () = response_sender.closed() => {
                         span.in_scope(|| {
                             tracing::info!(
                                 "client disconnected, dropping non_finalized_state_change task"
@@ -148,15 +163,22 @@ where
                         });
                         return;
                     }
-                    Err(_) => {
-                        span.in_scope(|| {
-                            tracing::warn!(
-                                "slow consumer, dropping non_finalized_state_change stream after \
-                                 send timed out"
-                            );
-                        });
-                        return;
-                    }
+                    block = non_finalized_state_change.recv() => block,
+                };
+
+                let Some((hash, block)) = next_block else {
+                    break;
+                };
+
+                if !response_sender
+                    .send_item(
+                        BlockAndHash::new(hash, block),
+                        "non_finalized_state_change",
+                        &span,
+                    )
+                    .await
+                {
+                    return;
                 }
             }
 
@@ -164,11 +186,9 @@ where
                 tracing::warn!("non-finalized state change channel has closed");
             });
 
-            let _ = response_sender
-                .send(Err(Status::unavailable(
-                    "non-finalized state change channel has closed",
-                )))
-                .await;
+            response_sender.finish_with_status(Status::unavailable(
+                "non-finalized state change channel has closed",
+            ));
         });
 
         Ok(Response::new(Box::pin(response_stream)))
@@ -179,62 +199,66 @@ where
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
         let span = Span::current();
-        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-        let response_stream = ReceiverStream::new(response_receiver);
+        let (mut response_sender, response_stream) = indexer_stream_channel();
         let mut mempool_change = self.mempool_change.subscribe();
 
         tokio::spawn(async move {
-            // Notify the client of chain tip changes until the channel is closed
-            while let Ok(change) = mempool_change.recv().await {
-                for tx_id in change.tx_ids() {
-                    span.in_scope(|| {
-                        tracing::debug!("mempool change: {:?}", change);
-                    });
+            // Notify the client of mempool changes until the channel closes, lags, or the client
+            // disconnects.
+            loop {
+                let change = tokio::select! {
+                    biased;
+                    () = response_sender.closed() => {
+                        span.in_scope(|| {
+                            tracing::info!("client disconnected, dropping mempool_change task");
+                        });
+                        return;
+                    }
+                    result = mempool_change.recv() => result,
+                };
 
-                    let msg = Ok(MempoolChangeMessage {
-                        change_type: match change.kind() {
-                            MempoolChangeKind::Added => 0,
-                            MempoolChangeKind::Invalidated => 1,
-                            MempoolChangeKind::Mined => 2,
-                        },
-                        tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
-                        auth_digest: tx_id
-                            .auth_digest()
-                            .map(|d| d.bytes_in_display_order().to_vec())
-                            .unwrap_or_default(),
-                    });
+                match change {
+                    Ok(change) => {
+                        for tx_id in change.tx_ids() {
+                            span.in_scope(|| {
+                                tracing::debug!("mempool change: {:?}", change);
+                            });
 
-                    let send = response_sender.send(msg);
-                    match tokio::time::timeout(SEND_TIMEOUT, send).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(_)) => {
-                            span.in_scope(|| {
-                                tracing::info!("client disconnected, dropping mempool_change task");
-                            });
-                            return;
+                            let msg = mempool_change_message(change.kind(), tx_id);
+                            if !response_sender
+                                .send_item(msg, "mempool_change", &span)
+                                .await
+                            {
+                                return;
+                            }
                         }
-                        Err(_) => {
-                            span.in_scope(|| {
-                                tracing::warn!(
-                                    "slow consumer, dropping mempool_change stream after \
-                                     send timed out"
-                                );
-                            });
-                            return;
-                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        span.in_scope(|| {
+                            tracing::warn!(
+                                skipped,
+                                "mempool_change stream lagged, dropping subscription"
+                            );
+                        });
+
+                        response_sender.finish_with_status(Status::aborted(format!(
+                            "mempool_change stream lagged by {skipped} updates; \
+                             resubscribe and resync"
+                        )));
+                        return;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        span.in_scope(|| {
+                            tracing::warn!("mempool_change channel has closed");
+                        });
+
+                        response_sender.finish_with_status(Status::unavailable(
+                            "mempool_change channel has closed",
+                        ));
+                        return;
                     }
                 }
             }
-
-            span.in_scope(|| {
-                tracing::warn!("mempool_change channel has closed");
-            });
-
-            let _ = response_sender
-                .send(Err(Status::unavailable(
-                    "mempool_change channel has closed",
-                )))
-                .await;
         });
 
         Ok(Response::new(Box::pin(response_stream)))
@@ -282,6 +306,119 @@ where
                 "failed to read block: {error}"
             ))),
         }
+    }
+}
+
+/// Producer half of an indexer server stream, pairing a bounded item queue with a side channel
+/// for its terminal gRPC status so status delivery never blocks on or loses to a full item queue.
+struct StreamSender<T> {
+    items: mpsc::Sender<T>,
+    terminal_status: Option<oneshot::Sender<Status>>,
+}
+
+/// Consumer half of an indexer server stream that drains buffered items before yielding any
+/// terminal error status.
+struct IndexerStream<T> {
+    items: mpsc::Receiver<T>,
+    terminal_status: Option<oneshot::Receiver<Status>>,
+}
+
+/// Creates a paired [`StreamSender`] and [`IndexerStream`] with a bounded item buffer.
+fn indexer_stream_channel<T>() -> (StreamSender<T>, IndexerStream<T>) {
+    let (items_tx, items_rx) = mpsc::channel(RESPONSE_BUFFER_SIZE);
+    let (status_tx, status_rx) = oneshot::channel();
+    (
+        StreamSender {
+            items: items_tx,
+            terminal_status: Some(status_tx),
+        },
+        IndexerStream {
+            items: items_rx,
+            terminal_status: Some(status_rx),
+        },
+    )
+}
+
+impl<T> StreamSender<T> {
+    async fn closed(&self) {
+        self.items.closed().await;
+    }
+
+    /// Sends a stream item to the client with [`SEND_TIMEOUT`] backpressure, returning `false` if
+    /// the client disconnected or timed out.
+    async fn send_item(&mut self, item: T, stream_name: &'static str, span: &Span) -> bool {
+        match tokio::time::timeout(SEND_TIMEOUT, self.items.send(item)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => {
+                span.in_scope(|| {
+                    tracing::info!("client disconnected, dropping {stream_name} task");
+                });
+                false
+            }
+            Err(_) => {
+                span.in_scope(|| {
+                    tracing::warn!(
+                        "slow consumer, dropping {stream_name} stream after send timed out"
+                    );
+                });
+                if let Some(status_tx) = self.terminal_status.take() {
+                    let _ = status_tx.send(Status::deadline_exceeded(format!(
+                        "{stream_name} stream timed out sending to slow consumer"
+                    )));
+                }
+                false
+            }
+        }
+    }
+
+    /// Records a terminal gRPC error status independently of the item queue and closes the stream.
+    fn finish_with_status(mut self, status: Status) {
+        if let Some(status_tx) = self.terminal_status.take() {
+            let _ = status_tx.send(status);
+        }
+    }
+}
+
+impl<T> Stream for IndexerStream<T> {
+    type Item = Result<T, Status>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.items.poll_recv(cx) {
+            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => {
+                let Some(status_rx) = this.terminal_status.as_mut() else {
+                    return Poll::Ready(None);
+                };
+                match Pin::new(status_rx).poll(cx) {
+                    Poll::Ready(result) => {
+                        this.terminal_status = None;
+                        match result {
+                            Ok(status) => Poll::Ready(Some(Err(status))),
+                            Err(_) => Poll::Ready(None),
+                        }
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
+}
+
+/// Converts a mempool change kind and transaction ID into a [`MempoolChangeMessage`].
+fn mempool_change_message(kind: MempoolChangeKind, tx_id: &UnminedTxId) -> MempoolChangeMessage {
+    MempoolChangeMessage {
+        change_type: match kind {
+            MempoolChangeKind::Added => 0,
+            MempoolChangeKind::Invalidated => 1,
+            MempoolChangeKind::Mined => 2,
+        },
+        tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
+        auth_digest: tx_id
+            .auth_digest()
+            .map(|d| d.bytes_in_display_order().to_vec())
+            .unwrap_or_default(),
     }
 }
 
@@ -397,5 +534,486 @@ mod tests {
         );
 
         assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    mod stream_lifecycle {
+        use std::{
+            future::Future,
+            pin::Pin,
+            sync::{Arc, Weak},
+            task::{Context, Poll},
+        };
+
+        use chrono::{DateTime, Utc};
+        use futures::StreamExt;
+        use tokio::sync::{broadcast, mpsc, oneshot};
+        use tower::{BoxError, Service};
+        use zebra_chain::{
+            chain_tip::mock::MockChainTip,
+            parameters::Network,
+            transaction::{self, UnminedTxId},
+        };
+        use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
+        use zebra_state::NonFinalizedBlocksListener;
+        use zebra_test::mock_service::MockService;
+
+        use super::*;
+
+        /// Wrapper around [`MockChainTip`] that tracks when all clones held by spawned tasks are
+        /// dropped.
+        #[derive(Clone)]
+        struct TrackedChainTip {
+            inner: MockChainTip,
+            _alive: Arc<()>,
+        }
+
+        impl TrackedChainTip {
+            fn new() -> (
+                Self,
+                zebra_chain::chain_tip::mock::MockChainTipSender,
+                Weak<()>,
+            ) {
+                let (inner, sender) = MockChainTip::new();
+                let alive = Arc::new(());
+                let weak = Arc::downgrade(&alive);
+                (
+                    Self {
+                        inner,
+                        _alive: alive,
+                    },
+                    sender,
+                    weak,
+                )
+            }
+        }
+
+        impl ChainTip for TrackedChainTip {
+            fn best_tip_height(&self) -> Option<block::Height> {
+                self.inner.best_tip_height()
+            }
+
+            fn best_tip_hash(&self) -> Option<block::Hash> {
+                self.inner.best_tip_hash()
+            }
+
+            fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+                self.inner.best_tip_height_and_hash()
+            }
+
+            fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
+                self.inner.best_tip_block_time()
+            }
+
+            fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+                self.inner.best_tip_height_and_block_time()
+            }
+
+            fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
+                self.inner.best_tip_mined_transaction_ids()
+            }
+
+            fn estimate_distance_to_network_chain_tip(
+                &self,
+                network: &Network,
+            ) -> Option<(block::HeightDiff, block::Height)> {
+                self.inner.estimate_distance_to_network_chain_tip(network)
+            }
+
+            async fn best_tip_changed(&mut self) -> Result<(), BoxError> {
+                self.inner.best_tip_changed().await
+            }
+
+            fn mark_best_tip_seen(&mut self) {
+                self.inner.mark_best_tip_seen();
+            }
+        }
+
+        /// A `ReadState` service whose `call()` future stays pending forever and signals when
+        /// dropped.
+        #[derive(Clone)]
+        struct PendingReadState {
+            dropped: Arc<std::sync::Mutex<Option<oneshot::Sender<()>>>>,
+        }
+
+        impl Service<ReadRequest> for PendingReadState {
+            type Response = ReadResponse;
+            type Error = BoxError;
+            type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: ReadRequest) -> Self::Future {
+                let tx = self.dropped.lock().expect("test mutex not poisoned").take();
+                Box::pin(async move {
+                    let _guard = tx;
+                    std::future::pending().await
+                })
+            }
+        }
+
+        async fn wait_until(predicate: impl Fn() -> bool) -> bool {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while !predicate() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .is_ok()
+        }
+
+        #[tokio::test]
+        async fn chain_tip_change_stops_promptly_on_disconnect_without_events() {
+            let (tip, _tip_sender, weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(4);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx),
+            };
+
+            let stream = rpc
+                .chain_tip_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("chain_tip_change should return a stream")
+                .into_inner();
+            drop(rpc);
+
+            assert!(
+                weak.upgrade().is_some(),
+                "spawned chain_tip_change task should still hold its ChainTip clone"
+            );
+
+            drop(stream);
+
+            assert!(
+                wait_until(|| weak.upgrade().is_none()).await,
+                "chain_tip_change task should exit promptly after client disconnects"
+            );
+        }
+
+        #[tokio::test]
+        async fn non_finalized_state_change_stops_promptly_on_disconnect_without_events() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(4);
+            let mut read_state = MockService::build()
+                .with_max_request_delay(Duration::from_secs(2))
+                .for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state: read_state.clone(),
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx),
+            };
+
+            let (blocks_tx, blocks_rx) = mpsc::channel(4);
+            let stream = rpc
+                .non_finalized_state_change(tonic::Request::new(NonFinalizedStateChangeRequest {
+                    chain_tip_hashes: Vec::new(),
+                }))
+                .await
+                .expect("non_finalized_state_change should return a stream")
+                .into_inner();
+
+            read_state
+                .expect_request(ReadRequest::NonFinalizedBlocksListener {
+                    known_chain_tips: HashSet::new(),
+                })
+                .await
+                .respond(ReadResponse::NonFinalizedBlocksListener(
+                    NonFinalizedBlocksListener(Arc::new(blocks_rx)),
+                ));
+
+            // Yield so the spawned task moves into waiting on `non_finalized_state_change.recv()`.
+            tokio::task::yield_now().await;
+            assert!(
+                !blocks_tx.is_closed(),
+                "listener receiver should still be alive"
+            );
+
+            drop(stream);
+
+            tokio::time::timeout(Duration::from_secs(1), blocks_tx.closed())
+                .await
+                .expect("non_finalized_state_change task should exit promptly after disconnect");
+        }
+
+        #[tokio::test]
+        async fn non_finalized_state_change_stops_promptly_if_disconnected_during_subscribe() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(4);
+            let (dropped_tx, dropped_rx) = oneshot::channel();
+            let read_state = PendingReadState {
+                dropped: Arc::new(std::sync::Mutex::new(Some(dropped_tx))),
+            };
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx),
+            };
+
+            let stream = rpc
+                .non_finalized_state_change(tonic::Request::new(NonFinalizedStateChangeRequest {
+                    chain_tip_hashes: Vec::new(),
+                }))
+                .await
+                .expect("non_finalized_state_change should return a stream")
+                .into_inner();
+
+            // Let the spawned task start awaiting `read_state.oneshot(...)`.
+            tokio::task::yield_now().await;
+
+            drop(stream);
+
+            tokio::time::timeout(Duration::from_secs(1), dropped_rx)
+                .await
+                .expect("pending read_state subscription should be dropped on disconnect")
+                .expect_err("oneshot sender should be dropped, not sent to");
+        }
+
+        #[tokio::test]
+        async fn mempool_change_stops_promptly_on_disconnect_without_events() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(4);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            assert_eq!(mempool_tx.receiver_count(), 1);
+
+            drop(stream);
+
+            assert!(
+                wait_until(|| mempool_tx.receiver_count() == 0).await,
+                "mempool_change task should exit promptly after client disconnects"
+            );
+        }
+
+        #[tokio::test]
+        async fn mempool_change_returns_aborted_when_lagged() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            // Send 3 updates into a capacity-1 broadcast channel before the task polls, forcing
+            // `RecvError::Lagged(2)`.
+            for byte in 1..=3u8 {
+                let tx_ids = [UnminedTxId::Legacy(transaction::Hash::from([byte; 32]))]
+                    .into_iter()
+                    .collect();
+                mempool_tx
+                    .send(MempoolChange::added(tx_ids))
+                    .expect("mempool_change task should be subscribed");
+            }
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("stream should yield lag error promptly")
+                .expect("stream should yield a terminal status")
+                .expect_err("lagged stream should return an error status");
+
+            assert_eq!(status.code(), Code::Aborted);
+            assert!(
+                status.message().contains("lagged by 2"),
+                "expected lag count in status message, got: {}",
+                status.message()
+            );
+        }
+
+        #[tokio::test]
+        async fn mempool_change_returns_unavailable_when_closed() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            // Drop both `rpc` (which holds a `MempoolTxSubscriber` clone of the sender) and
+            // `mempool_tx` so the broadcast channel closes.
+            drop(rpc);
+            drop(mempool_tx);
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("stream should yield closed error promptly")
+                .expect("stream should yield a terminal status")
+                .expect_err("closed stream should return an error status");
+
+            assert_eq!(status.code(), Code::Unavailable);
+            assert!(
+                status.message().contains("closed"),
+                "expected closed message, got: {}",
+                status.message()
+            );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn mempool_change_preserves_aborted_status_when_response_queue_is_full() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            // Fill every slot of the bounded response queue via a single broadcast message.
+            let full_batch: HashSet<UnminedTxId> = (0..RESPONSE_BUFFER_SIZE)
+                .map(|idx| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(
+                        &u64::try_from(idx)
+                            .expect("buffer index fits in u64")
+                            .to_le_bytes(),
+                    );
+                    UnminedTxId::Legacy(transaction::Hash::from(bytes))
+                })
+                .collect();
+            mempool_tx
+                .send(MempoolChange::added(full_batch))
+                .expect("mempool_change task should be subscribed");
+            tokio::task::yield_now().await;
+
+            // Overflow the capacity-1 broadcast channel to force `RecvError::Lagged(1)` while the
+            // response queue is completely full.
+            for byte in [0xfeu8, 0xff] {
+                let tx_ids = [UnminedTxId::Legacy(transaction::Hash::from([byte; 32]))]
+                    .into_iter()
+                    .collect();
+                mempool_tx
+                    .send(MempoolChange::added(tx_ids))
+                    .expect("mempool_change task should still be subscribed");
+            }
+
+            // Advance past `SEND_TIMEOUT` so task exit cannot depend on waiting longer.
+            tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
+            assert!(
+                wait_until(|| mempool_tx.receiver_count() == 0).await,
+                "lagged mempool_change task should exit promptly even with a full response queue"
+            );
+
+            for idx in 0..RESPONSE_BUFFER_SIZE {
+                let item = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                    .await
+                    .expect("buffered item should be readable")
+                    .unwrap_or_else(|| panic!("missing buffered item {idx}"));
+                assert!(item.is_ok(), "buffered item {idx} should succeed");
+            }
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("terminal lag status should follow buffered items")
+                .expect("stream must yield terminal ABORTED status instead of EOF")
+                .expect_err("terminal item must be an error status");
+            assert_eq!(status.code(), Code::Aborted);
+            assert!(
+                stream.next().await.is_none(),
+                "stream must end after status"
+            );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn mempool_change_preserves_unavailable_status_when_response_queue_is_full() {
+            let (tip, _tip_sender, _weak) = TrackedChainTip::new();
+            let (mempool_tx, _) = broadcast::channel(1);
+            let read_state = MockService::build().for_unit_tests();
+
+            let rpc = IndexerRPC {
+                read_state,
+                chain_tip_change: tip,
+                mempool_change: MempoolTxSubscriber::new(mempool_tx.clone()),
+            };
+
+            let mut stream = rpc
+                .mempool_change(tonic::Request::new(Empty {}))
+                .await
+                .expect("mempool_change should return a stream")
+                .into_inner();
+
+            let full_batch: HashSet<UnminedTxId> = (0..RESPONSE_BUFFER_SIZE)
+                .map(|idx| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(
+                        &u64::try_from(idx)
+                            .expect("buffer index fits in u64")
+                            .to_le_bytes(),
+                    );
+                    UnminedTxId::Legacy(transaction::Hash::from(bytes))
+                })
+                .collect();
+            mempool_tx
+                .send(MempoolChange::added(full_batch))
+                .expect("mempool_change task should be subscribed");
+            tokio::task::yield_now().await;
+
+            // Drop upstream senders while the response queue is completely full.
+            drop(rpc);
+            drop(mempool_tx);
+
+            tokio::time::advance(SEND_TIMEOUT + Duration::from_secs(1)).await;
+
+            for idx in 0..RESPONSE_BUFFER_SIZE {
+                let item = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                    .await
+                    .expect("buffered item should be readable")
+                    .unwrap_or_else(|| panic!("missing buffered item {idx}"));
+                assert!(item.is_ok(), "buffered item {idx} should succeed");
+            }
+
+            let status = tokio::time::timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("terminal unavailable status should follow buffered items")
+                .expect("stream must yield terminal UNAVAILABLE status instead of EOF")
+                .expect_err("terminal item must be an error status");
+            assert_eq!(status.code(), Code::Unavailable);
+            assert!(
+                stream.next().await.is_none(),
+                "stream must end after status"
+            );
+        }
     }
 }

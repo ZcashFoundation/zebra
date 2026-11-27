@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Fixed `NonFinalizedBlocksListener` tasks leaking until the next state update after their receiver is dropped.
+time: 2026-11-26T12:48:11.548922538Z
