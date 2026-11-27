@@ -436,6 +436,11 @@ where
 
             check::merkle_root_validity(&network, &block, &transaction_hashes)?;
 
+            // Bound shielded work before output recovery, proof verification, or computing the
+            // note commitment trees for early mining work. This runs after the Merkle root check,
+            // so a body that doesn't match its header is rejected as that.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
@@ -443,6 +448,7 @@ where
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
+
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
             // From the NSM reissuance height, the block subsidy depends on the
@@ -466,8 +472,24 @@ where
                 Some((expected_block_subsidy, deferred_pool_balance_change))
             };
 
-            // Bound shielded work before output recovery or proof verification.
-            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+            // Let miners build on this block now, rather than when its transactions are verified.
+            // Its proof of work is valid, and the Merkle root has bound its transactions to its
+            // header, so a changed body under a valid header gets no work. The guard keeps the
+            // work available until this block is committed, and withdraws it if the block is
+            // rejected.
+            let _mining_candidate = if request.is_proposal() {
+                None
+            } else {
+                // Early work is optional, so a state error here doesn't fail verification.
+                match state_service
+                    .clone()
+                    .oneshot(zs::Request::MiningCandidate(block.clone()))
+                    .await
+                {
+                    Ok(zs::Response::MiningCandidate(guard)) => guard,
+                    _ => None,
+                }
+            };
 
             // Now do the slower checks
 

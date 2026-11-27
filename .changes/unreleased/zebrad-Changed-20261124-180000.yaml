@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'The `submitblock` RPC returns `inconclusive` for a block that is not verified and committed within 30 seconds, instead of waiting until the block is committed or dropped. Zebra keeps verifying the block, and commits and announces it if it is valid. A block whose parent never arrives used to wait for about a hundred blocks.'
+time: 2026-11-24T18:00:00.000000000Z

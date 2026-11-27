@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'The semantic block verifier sends `zebra_state::Request::MiningCandidate` to its state service for a block once its proof of work, Merkle root, time, coinbase position and subsidy are checked, while its transactions are still being verified. It ignores an error response, but a custom or mock state service has to answer the request.'
+time: 2026-11-24T12:00:02.000000000Z

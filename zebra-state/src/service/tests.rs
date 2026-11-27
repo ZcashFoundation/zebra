@@ -104,6 +104,112 @@ async fn state_propagates_incomplete_block_body_errors() {
     .unwrap();
 }
 
+/// Early mining work on a block is published once the block write task has computed it, and it
+/// is withdrawn when the verifier's guard is dropped, or after a timeout.
+#[tokio::test(start_paused = true)]
+async fn mining_candidate_is_published_while_its_block_is_verified() {
+    use tokio::sync::{oneshot, watch};
+    use zebra_chain::work::difficulty::ParameterDifficulty;
+
+    use super::{publish_mining_candidate, MINING_CANDIDATE_TIMEOUT};
+
+    let _init_guard = zebra_test::init();
+
+    let parent_hash = block::Hash([1; 32]);
+    let chain_info = crate::GetBlockTemplateChainInfo {
+        tip_hash: block::Hash([2; 32]),
+        tip_height: Height(2),
+        chain_history_root: None,
+        expected_difficulty: Network::Mainnet.target_difficulty_limit().to_compact(),
+        cur_time: 2.into(),
+        min_time: 1.into(),
+        max_time: 3.into(),
+        chain_value_pools: Default::default(),
+    };
+
+    let candidates = watch::Sender::<Option<super::MiningCandidate>>::new(None);
+    let mut changes = candidates.subscribe();
+    let mut publications = crate::response::MiningCandidateChanges(candidates.subscribe());
+    let published = || {
+        candidates
+            .borrow()
+            .as_ref()
+            .map(|candidate| (candidate.parent_hash, candidate.chain_info.clone()))
+    };
+
+    // Starts publishing the work for a block, like the state does. The returned sender is for
+    // the block write task's answer.
+    let start = || {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        let (guard, verification) = watch::channel(());
+        let task = tokio::spawn(publish_mining_candidate(
+            rsp_rx,
+            parent_hash,
+            verification,
+            candidates.clone(),
+        ));
+
+        (guard, rsp_tx, task)
+    };
+
+    // The work is published when the block write task answers with it.
+    let (guard, answer, task) = start();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), changes.changed())
+            .await
+            .is_err(),
+        "there is no work to publish before the block write task answers",
+    );
+    answer
+        .send(Some(chain_info.clone()))
+        .expect("the task waits for the answer");
+    changes.changed().await.expect("the sender is in scope");
+    assert_eq!(published(), Some((parent_hash, chain_info.clone())));
+    publications.published().await;
+
+    // Dropping the guard withdraws the work, as the verifier does when verification ends.
+    drop(guard);
+    changes.changed().await.expect("the sender is in scope");
+    assert_eq!(published(), None);
+    task.await.expect("the task doesn't panic");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), publications.published())
+            .await
+            .is_err(),
+        "a withdrawal is not a publication",
+    );
+
+    // A block that is rejected while its work is being computed never has its work published,
+    // and neither does a block that the block write task has no work for.
+    let (guard, answer, task) = start();
+    drop(guard);
+    answer
+        .send(Some(chain_info.clone()))
+        .expect("the task waits for the answer");
+    task.await.expect("the task doesn't panic");
+
+    let (_guard, answer, task) = start();
+    answer.send(None).expect("the task waits for the answer");
+    task.await.expect("the task doesn't panic");
+
+    assert!(!changes.has_changed().expect("the sender is in scope"));
+
+    // The work is withdrawn if verification takes too long.
+    let (guard, answer, task) = start();
+    answer
+        .send(Some(chain_info))
+        .expect("the task waits for the answer");
+    changes.changed().await.expect("the sender is in scope");
+    assert!(published().is_some());
+
+    tokio::time::sleep(MINING_CANDIDATE_TIMEOUT).await;
+    changes.changed().await.expect("the sender is in scope");
+    assert_eq!(published(), None);
+    task.await.expect("the task doesn't panic");
+
+    drop(guard);
+}
+
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
 ) -> Result<()> {

@@ -24,7 +24,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -48,7 +48,7 @@ use crate::{
         ValidateContextError,
     },
     request::TimedSpan,
-    response::NonFinalizedBlocksListener,
+    response::{MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener},
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -60,8 +60,8 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
-    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
-    StateInitError,
+    GetBlockTemplateChainInfo, KnownBlock, ReadRequest, ReadResponse, Request, Response,
+    SemanticallyVerifiedBlock, StateInitError,
 };
 
 pub mod block_iter;
@@ -73,6 +73,7 @@ pub mod check;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod precomputed_trees;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -197,6 +198,13 @@ pub(crate) struct StateService {
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 
+    /// The task that publishes and withdraws the current mining candidate's early work.
+    ///
+    /// The state handles one candidate at a time, until this task finishes. That bounds the
+    /// work that blocks with a valid proof of work can queue on the block write task, and means
+    /// a published candidate is never replaced by another block while it is being verified.
+    mining_candidate_task: Option<tokio::task::JoinHandle<()>>,
+
     // Metrics
     //
     /// A metric tracking the maximum height that's currently in `finalized_state_queued_blocks`
@@ -247,6 +255,75 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+
+    /// The early mining work on a block that is still being verified, if there is any.
+    ///
+    /// The state only computes it while there are subscribers to this channel.
+    mining_candidate: watch::Sender<Option<MiningCandidate>>,
+}
+
+/// Early mining work on a block whose proof of work is valid, but which is still being verified.
+#[derive(Clone, Debug)]
+pub(crate) struct MiningCandidate {
+    /// The hash of the block's parent, which was the best tip when the work was computed.
+    parent_hash: block::Hash,
+
+    /// The state information for building a block template on top of the block.
+    chain_info: GetBlockTemplateChainInfo,
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl MiningCandidate {
+    /// Returns early mining work for tests.
+    pub(crate) fn new_for_tests(
+        parent_hash: block::Hash,
+        chain_info: GetBlockTemplateChainInfo,
+    ) -> Self {
+        Self {
+            parent_hash,
+            chain_info,
+        }
+    }
+}
+
+/// How long early mining work on a block stays available while the block is being verified.
+///
+/// Blocks are verified in well under a second. This bounds how long miners build on a block with
+/// a valid proof of work whose verification has stalled, for example on a transparent input that
+/// doesn't exist. A block that takes longer to verify is mined on once it is committed, as it
+/// would be without early work.
+const MINING_CANDIDATE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Publishes the early mining work on a block to `candidates`, and withdraws the work when the
+/// verifier's guard is dropped, or after [`MINING_CANDIDATE_TIMEOUT`].
+///
+/// `chain_info` is the block write task's answer for the block, and `verification` is the
+/// receiver for the verifier's [`MiningCandidateGuard`].
+async fn publish_mining_candidate(
+    chain_info: oneshot::Receiver<Option<GetBlockTemplateChainInfo>>,
+    parent_hash: block::Hash,
+    mut verification: watch::Receiver<()>,
+    candidates: watch::Sender<Option<MiningCandidate>>,
+) {
+    let Ok(Some(chain_info)) = chain_info.await else {
+        return;
+    };
+
+    // The verifier drops the guard when the block is committed or rejected. If it did that
+    // while the work was being computed, there is nothing to publish.
+    if verification.has_changed().is_err() {
+        return;
+    }
+
+    candidates.send_replace(Some(MiningCandidate {
+        parent_hash,
+        chain_info,
+    }));
+
+    let verified = async { while verification.changed().await.is_ok() {} };
+    let _ = tokio::time::timeout(MINING_CANDIDATE_TIMEOUT, verified).await;
+
+    candidates.send_replace(None);
 }
 
 impl Drop for StateService {
@@ -480,6 +557,7 @@ impl StateService {
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
+            mining_candidate_task: None,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -1070,6 +1148,57 @@ impl StateService {
         self.read_service.best_tip()
     }
 
+    /// Starts computing early mining work on `block`, which has a valid proof of work but is
+    /// still being verified. Returns a guard that keeps the work available.
+    ///
+    /// Returns `None` if nothing is subscribed to early mining work, if the state is already
+    /// handling another mining candidate, or if the block write task isn't taking non-finalized
+    /// blocks yet. That task only starts taking them when the first non-finalized block after a
+    /// restart is committed, so that block doesn't get early work.
+    fn start_mining_candidate(&mut self, block: Arc<block::Block>) -> Option<MiningCandidateGuard> {
+        let candidates = self.read_service.mining_candidate.clone();
+
+        // Nodes that aren't mining don't need this work.
+        if candidates.receiver_count() == 0 {
+            return None;
+        }
+
+        if self
+            .mining_candidate_task
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
+        {
+            return None;
+        }
+
+        // The block write task is still waiting for finalized blocks, so it wouldn't answer
+        // until this block's commit arrives.
+        if self.block_write_sender.finalized.is_some() {
+            return None;
+        }
+
+        let parent_hash = block.header.previous_block_hash;
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        self.block_write_sender
+            .non_finalized
+            .as_ref()?
+            .send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
+            .ok()?;
+
+        let (guard, verification) = watch::channel(());
+
+        // This task runs until the block write task has answered, so only one candidate is ever
+        // queued, and then until the work is withdrawn.
+        self.mining_candidate_task = Some(tokio::spawn(publish_mining_candidate(
+            rsp_rx,
+            parent_hash,
+            verification,
+            candidates,
+        )));
+
+        Some(MiningCandidateGuard(guard))
+    }
+
     fn send_invalidate_block(
         &self,
         hash: block::Hash,
@@ -1152,6 +1281,7 @@ impl ReadStateService {
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
             block_write_task,
+            mining_candidate: watch::Sender::new(None),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1498,6 +1628,12 @@ impl Service<Request> for StateService {
                 }
                 .instrument(span)
                 .boxed()
+            }
+
+            Request::MiningCandidate(block) => {
+                let guard = self.start_mining_candidate(block);
+
+                async move { Ok(Response::MiningCandidate(guard)) }.boxed()
             }
 
             // Runs concurrently using the ReadStateService
@@ -1984,6 +2120,26 @@ impl Service<ReadRequest> for ReadStateService {
                 )
                 .map(ReadResponse::ChainInfo)
             }
+
+            // Used by the `getblocktemplate` RPC.
+            ReadRequest::MiningCandidate => {
+                // Early work is only useful while its block's parent is still the best tip.
+                // After that, either the block was committed, and work on it is ordinary work
+                // on the best tip, or another block was, and the block is on a side chain.
+                let candidate = state.mining_candidate.borrow().clone();
+                let tip_hash = state.best_tip().map(|(_, hash)| hash);
+
+                Ok(ReadResponse::MiningCandidate(
+                    candidate
+                        .filter(|candidate| Some(candidate.parent_hash) == tip_hash)
+                        .map(|candidate| candidate.chain_info),
+                ))
+            }
+
+            // Used by the block template updater task.
+            ReadRequest::MiningCandidateChanges => Ok(ReadResponse::MiningCandidateChanges(
+                MiningCandidateChanges(state.mining_candidate.subscribe()),
+            )),
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             ReadRequest::SolutionRate { num_blocks, height } => {

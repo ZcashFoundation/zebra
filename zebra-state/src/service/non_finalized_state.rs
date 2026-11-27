@@ -66,6 +66,11 @@ pub struct NonFinalizedState {
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
+    /// Note commitment trees that were computed before the commit of the block they belong to.
+    ///
+    /// The block write task sets this for one commit. Clones never carry it.
+    pub(crate) precomputed_trees: Option<crate::service::precomputed_trees::PrecomputedTrees>,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -122,6 +127,7 @@ impl Clone for NonFinalizedState {
             // Only the write task reports evicted blocks.
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            precomputed_trees: None,
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -145,6 +151,7 @@ impl NonFinalizedState {
             }),
             evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
+            precomputed_trees: None,
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -785,19 +792,25 @@ impl NonFinalizedState {
             )?;
         }
 
-        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+        Self::validate_and_update_parallel(
+            new_chain,
+            contextual,
+            sprout_final_treestates,
+            self.precomputed_trees.as_ref(),
+        )
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
     #[tracing::instrument(
-        skip(new_chain, contextual, sprout_final_treestates),
+        skip(new_chain, contextual, sprout_final_treestates, precomputed_trees),
         fields(height = ?contextual.height, hash = %contextual.hash)
     )]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+        precomputed_trees: Option<&crate::service::precomputed_trees::PrecomputedTrees>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
         let mut sprout_anchor_result = None;
@@ -841,7 +854,11 @@ impl NonFinalizedState {
                 // https://github.com/rust-lang/rust/issues/93610
                 let new_chain = Arc::try_unwrap(new_chain)
                     .unwrap_or_else(|shared_chain| (*shared_chain).clone());
-                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+                chain_push_result = Some(
+                    new_chain
+                        .push_with_trees(contextual, precomputed_trees)
+                        .map(Arc::new),
+                );
             });
         });
 

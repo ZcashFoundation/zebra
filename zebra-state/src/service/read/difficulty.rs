@@ -8,6 +8,7 @@ use zebra_chain::{
     block::{self, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -23,6 +24,7 @@ use crate::{
             difficulty_threshold_and_time_are_valid, AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
+        precomputed_trees::PrecomputedTrees,
         read::{
             self, find::calculate_median_time_past, tree::history_tree,
             FINALIZED_STATE_QUERY_RETRIES,
@@ -293,6 +295,89 @@ pub fn check_best_tip_block_commitments(
     block_commitment_is_valid_for_chain_history(block, network, &history_tree)?;
 
     Ok(())
+}
+
+/// Returns the [`GetBlockTemplateChainInfo`] for mining on top of `block`, and the note commitment
+/// trees after `block`, without committing it.
+///
+/// `block` must have a valid proof of work and transaction Merkle root, and its shielded data
+/// must be within the block limits. This checks the contextual rules for its header, which don't
+/// depend on its transactions being valid: it extends the best tip, its difficulty threshold and
+/// time are the expected ones, and its header commits to the chain history and to its
+/// authorizing data.
+///
+/// The returned chain info has empty chain value pools, so this returns an error if the subsidy
+/// of the block after `block` depends on them.
+pub(crate) fn mining_candidate_chain_info(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    block: &Arc<block::Block>,
+) -> Result<(GetBlockTemplateChainInfo, PrecomputedTrees), BoxError> {
+    let network = &non_finalized_state.network;
+    let height = block
+        .coinbase_height()
+        .ok_or("block has no coinbase height")?;
+    let child_height = height.next()?;
+
+    // The value pools after `block` are only known once its transactions are verified.
+    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(child_height, network) {
+        return Err("the next block's subsidy depends on unverified chain value pools".into());
+    }
+
+    let mut history_tree =
+        check_best_tip_header(non_finalized_state, db, network, &block.header, height)?;
+    block_commitment_is_valid_for_chain_history(block.clone(), network, &history_tree)?;
+
+    // Start from the same parent trees as the commit of `block`, so the commit can reuse the
+    // result. The commit only reuses it if its own parent trees are equal.
+    let parent_trees = match non_finalized_state.best_chain() {
+        Some(chain) => chain.note_commitment_trees_for_tip(),
+        None => db.note_commitment_trees_for_tip(),
+    };
+    let trees = PrecomputedTrees::compute(block.clone(), parent_trees)?;
+
+    let sapling_root = trees.output().sapling.root();
+    // Blocks from Sapling to Heartwood commit to the Sapling root, rather than the chain history.
+    if let block::Commitment::FinalSaplingRoot(expected_root) = block.commitment(network)? {
+        if expected_root != sapling_root {
+            return Err("block commits to another Sapling note commitment tree root".into());
+        }
+    }
+
+    Arc::make_mut(&mut history_tree).push(
+        network,
+        block.clone(),
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root,
+            orchard: &trees.output().orchard.root(),
+            ironwood: &trees.output().ironwood.root(),
+        },
+    )?;
+
+    // The difficulty adjustment for the next block uses `block` and its ancestors.
+    let relevant_data = std::iter::once((block.header.difficulty_threshold, block.header.time))
+        .chain(
+            any_chain_ancestor_iter::<block::Header>(
+                non_finalized_state,
+                db,
+                block.header.previous_block_hash,
+            )
+            .map(|header| (header.difficulty_threshold, header.time)),
+        )
+        .take(pow_adjustment_block_span(network, child_height))
+        .collect();
+
+    let chain_info = difficulty_time_and_history_tree(
+        relevant_data,
+        height,
+        block.hash(),
+        network,
+        history_tree,
+        Default::default(),
+        DateTime32::now(),
+    )?;
+
+    Ok((chain_info, trees))
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_data`, tip, `network`,

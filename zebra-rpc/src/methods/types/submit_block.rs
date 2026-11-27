@@ -1,5 +1,7 @@
 //! Parameter and response types for the `submitblock` RPC.
 
+use std::time::Duration;
+
 use tokio::sync::mpsc;
 
 use zebra_chain::block;
@@ -7,6 +9,23 @@ use zebra_chain::block;
 // Allow doc links to these imports.
 #[allow(unused_imports)]
 use crate::methods::GetBlockTemplateHandler;
+
+/// How long `submitblock` waits for a block to be verified and committed, before it returns
+/// `inconclusive`.
+///
+/// A block is verified and committed in well under a second. But the block verifier waits for a
+/// block's parent, and for the transparent outputs it spends. So a block whose parent never
+/// arrives isn't answered until the state drops it from its queue, which takes about a hundred
+/// blocks. A miner can find a block like that on early work, if the block it builds on is then
+/// rejected.
+pub(crate) const SUBMIT_BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long the verification of a submitted block carries on in the background, after
+/// `submitblock` has returned `inconclusive` for it.
+///
+/// This is the time that Zebra's syncer gives the block verifier for a block, which is longer
+/// than any wait inside the verifier. A block that is in the state's queue by then stays there.
+pub(crate) const SUBMIT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(8 * 60);
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
@@ -39,7 +58,8 @@ pub enum SubmitBlockErrorResponse {
     Duplicate,
     /// Block was already added to the state queue or channel, but not yet committed to the non-finalized state
     DuplicateInconclusive,
-    /// Block was already committed to the non-finalized state, but not on the best chain
+    /// Block was already committed to the non-finalized state, but not on the best chain, or
+    /// the block is still being verified
     Inconclusive,
     /// Block rejected as invalid
     Rejected,
