@@ -54,6 +54,11 @@ const RETENTION: Duration = Duration::from_secs(15);
 const ANNOUNCED_BLOCKS: usize = 4;
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The number of transaction recovery requests answered for each delivered announcement.
+///
+/// A Zebra recipient asks once for each announcement, so the second reply allows one repeat.
+pub(super) const MAX_RECOVERY_REPLIES: usize = 2;
+
 struct ServingBlock {
     block: Arc<Block>,
     /// Keep the sent short-ID keys reproducible without retaining the compact transaction vectors.
@@ -65,8 +70,11 @@ pub(super) struct CompactRelay {
     pub(super) send: bool,
     received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
     sent: Option<(ServingBlock, Option<Instant>, OwnedSemaphorePermit)>,
-    /// Bound aggregate recovery payloads, including repeated or empty requests.
+    /// Bound aggregate recovery payloads, including repeated requests.
     recovery_bytes_left: usize,
+    /// Bound the number of recovery replies for each delivered announcement. The byte budget
+    /// bounds their size, not their number.
+    recovery_replies_left: usize,
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(Arc<Block>, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
@@ -131,6 +139,7 @@ impl CompactRelay {
         *until = Some(Instant::now() + RETENTION);
         self.recovery_bytes_left =
             usize::try_from(MAX_BLOCK_BYTES).expect("the block byte limit fits in memory");
+        self.recovery_replies_left = MAX_RECOVERY_REPLIES;
     }
 
     pub(super) fn expire(&mut self) {
@@ -505,14 +514,21 @@ where
         if serving.block.hash() != request.block_hash {
             return;
         }
-        if request
-            .indexes
-            .last()
-            .is_some_and(|index| *index >= serving.block.transactions.len())
+        // A request for no transactions gets no reply.
+        if request.indexes.is_empty()
+            || request
+                .indexes
+                .last()
+                .is_some_and(|index| *index >= serving.block.transactions.len())
             || request.indexes.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return;
         }
+        // A request that doesn't fit the byte budget still uses its reply.
+        let Some(replies_left) = self.compact.recovery_replies_left.checked_sub(1) else {
+            return;
+        };
+        self.compact.recovery_replies_left = replies_left;
         let overhead = request.block_hash.zcash_serialized_size()
             + CompactSizeMessage::try_from(request.indexes.len())
                 .expect("recovery indexes are bounded by the advertised block")
@@ -543,8 +559,9 @@ where
             block_hash: request.block_hash,
             transactions,
         };
-        // Repeated recovery shares a byte budget, and requests are only answered until the snapshot
-        // expires. The reply gets the usual send timeout, because an honest peer can ask late.
+        // Repeated recovery shares the reply limit and a byte budget, and requests are only answered
+        // until the snapshot expires. The reply gets the usual send timeout, because an honest peer
+        // can ask late.
         if let Err(error) = self
             .peer_tx
             .send(Message::BlockTransactions(response))

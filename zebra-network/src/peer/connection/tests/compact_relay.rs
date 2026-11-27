@@ -1,7 +1,8 @@
 //! Compact recovery uses the normal bounded downloader and falls back without scoring collisions.
 
 use super::{
-    super::compact_relay::smaller_announcement, new_test_connection, new_test_connection_with_sink,
+    super::compact_relay::{smaller_announcement, MAX_RECOVERY_REPLIES},
+    new_test_connection, new_test_connection_with_sink,
 };
 use crate::{
     compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
@@ -367,6 +368,7 @@ async fn sent_compact_snapshot_serves_bounded_recovery() {
 
         for (hash, indexes) in [
             (unknown, vec![0]),
+            (block.hash(), vec![]),
             (block.hash(), vec![block.transactions.len()]),
             (block.hash(), vec![0, block.transactions.len()]),
             (block.hash(), vec![1, 0]),
@@ -394,8 +396,11 @@ async fn sent_compact_snapshot_serves_bounded_recovery() {
         };
         let max_responses =
             usize::try_from(MAX_BLOCK_BYTES).unwrap() / expected.zcash_serialized_size();
-        assert!(max_responses > 1, "the fixture permits repeated recovery");
-        for _ in 0..max_responses {
+        assert!(
+            max_responses > MAX_RECOVERY_REPLIES,
+            "the byte budget permits more replies than the reply limit"
+        );
+        for _ in 0..MAX_RECOVERY_REPLIES {
             let (_, response) = tokio::join!(
                 connection.serve_compact_transactions(request.clone()),
                 outbound.next()
@@ -412,7 +417,116 @@ async fn sent_compact_snapshot_serves_bounded_recovery() {
         assert!(errors.try_get_error().is_none());
     })
     .await
-    .expect("sent snapshots permit repeated recovery within one shared byte budget");
+    .expect("sent snapshots permit repeated recovery within the reply limit");
+}
+
+/// Each delivered compact block announcement answers a few transaction recovery requests, within
+/// a byte budget, and a request for no transactions gets no reply.
+#[tokio::test]
+async fn recovery_replies_are_bounded_per_announcement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for (block_bytes, budget) in [
+            (
+                zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES.as_slice(),
+                false,
+            ),
+            // A block with more than half the byte budget in transactions.
+            (
+                zebra_test::vectors::BLOCK_TESTNET_141042_BYTES.as_slice(),
+                true,
+            ),
+        ] {
+            let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+            let (mut connection, _client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            connection.compact.send = true;
+            let (result, delivered) = tokio::sync::oneshot::channel();
+            let (_, message) = tokio::join!(
+                connection.send_block_advert(crate::peer_set::BlockAdvert {
+                    hash: block.hash(),
+                    result,
+                }),
+                async {
+                    inbound
+                        .expect_request(Request::BlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::Blocks(vec![InventoryResponse::Available((
+                            block.clone(),
+                            None,
+                        ))]));
+                    outbound.next().await.unwrap()
+                }
+            );
+            assert!(
+                matches!(message, Message::CompactBlock(_)),
+                "the block is announced in compact form"
+            );
+            delivered.await.unwrap().unwrap();
+
+            let request = |indexes: Vec<usize>| BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes,
+            };
+            let reply = |indexes: &[usize]| {
+                Message::BlockTransactions(BlockTransactions {
+                    block_hash: block.hash(),
+                    transactions: indexes
+                        .iter()
+                        .map(|index| block.transactions[*index].clone())
+                        .collect(),
+                })
+            };
+            // A reply waits for the receiver, so a refused request finishes without waiting.
+            assert!(
+                connection
+                    .serve_compact_transactions(request(vec![]))
+                    .now_or_never()
+                    .is_some(),
+                "a request for no transactions gets no reply, and doesn't use one"
+            );
+            assert!(outbound.try_recv().is_err());
+
+            let all: Vec<usize> = (0..block.transactions.len()).collect();
+            let indexes = if budget { all } else { vec![0] };
+            let (_, response) = tokio::join!(
+                connection.serve_compact_transactions(request(indexes.clone())),
+                outbound.next()
+            );
+            assert_eq!(response, Some(reply(&indexes)));
+            if budget {
+                assert!(
+                    connection
+                        .serve_compact_transactions(request(indexes))
+                        .now_or_never()
+                        .is_some(),
+                    "the second full request doesn't fit the byte budget"
+                );
+                assert!(outbound.try_recv().is_err());
+            } else {
+                for _ in 1..MAX_RECOVERY_REPLIES {
+                    let (_, response) = tokio::join!(
+                        connection.serve_compact_transactions(request(vec![1])),
+                        outbound.next()
+                    );
+                    assert_eq!(response, Some(reply(&[1])));
+                }
+                assert!(
+                    connection
+                        .serve_compact_transactions(request(vec![1]))
+                        .now_or_never()
+                        .is_some(),
+                    "the reply limit refuses the next request, however small"
+                );
+                assert!(outbound.try_recv().is_err());
+            }
+            assert!(connection.compact.has_cached());
+            assert!(errors.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("recovery replies are answered without waiting");
 }
 
 #[tokio::test]

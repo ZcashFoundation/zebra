@@ -121,8 +121,9 @@ The receiver rebuilds the block from its verified mempool, then asks once for
 any missing transactions with `getblocktxn`. A short ID collision, a commitment
 mismatch, an unknown parent, or a two-second recovery timeout makes it download
 the full block instead, without penalising the announcing peer. Announced
-blocks are kept for 15 seconds to answer recovery requests, within a block-sized
-byte budget, and the number of retained blocks is bounded across all peers.
+blocks are kept for 15 seconds to answer up to two recovery requests, within a
+block-sized byte budget, and the number of retained blocks is bounded across all
+peers.
 Every rebuilt block is verified like any other block. Coinbase-only blocks are
 announced as ordinary inventory, because the compact encoding would not save
 any bytes.
