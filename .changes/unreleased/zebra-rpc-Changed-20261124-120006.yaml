@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: 'The block template updater validates each template it publishes as a block proposal, one at a time. It drops a validation after 30 seconds, or when a template is published on another block. A template that isn''t validated is verified like any other block when a miner submits it.'
-time: 2026-11-24T12:00:06.000000000Z

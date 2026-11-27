@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: 'Added `From<&ContextuallyVerifiedBlock>` for `ChainTipBlock`, which builds a chain tip block without taking or copying the verified block.'
-time: 2026-11-13T12:00:00.000000000Z

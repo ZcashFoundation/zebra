@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: 'Zebra no longer stalls its initial sync on pruned Zakura peers (Zakura 1.8.8 and later) that advertise `NODE_NETWORK` with `NODE_PRUNED`. It doesn''t use them as new outbound peers while syncing, or as a source of historic blocks. Since mid-November, these peers made Mainnet syncs from genesis about 50% slower. Zebra also asks other peers up to two more times before dropping a chain tip that no peer answered, instead of restarting the sync.'
-time: 2026-11-18T14:00:00.000000000Z

@@ -7573,7 +7573,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "15.0.1"
+version = "15.1.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7687,7 +7687,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "8.0.0"
+version = "7.2.0"
 dependencies = [
  "abscissa_core",
  "bytes",

@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: 'Added the `compact` module: the compact block announcement, the request and response for the transactions a receiver is missing, and the reconstruction of a block from candidate transactions.'
-time: 2026-11-24T12:00:00.000000000Z

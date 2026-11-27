@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: Changed OpenTelemetry trace sampling to follow the OpenTelemetry specification. `OTEL_TRACES_SAMPLER_ARG` is now a ratio between 0.0 and 1.0, and applies only when `OTEL_TRACES_SAMPLER` is set, for example `OTEL_TRACES_SAMPLER=traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1` for 10% of traces. If you set `OTEL_TRACES_SAMPLER_ARG` to a percentage, set these two variables instead, or set `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT`, which still takes a percentage.
-time: 2026-11-18T19:03:46.269369Z

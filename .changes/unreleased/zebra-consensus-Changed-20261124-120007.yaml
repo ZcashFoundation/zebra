@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: 'The block verifier no longer asks the state whether a block with the header of a validated proposal is known: the state rejects a duplicate block when it commits it.'
-time: 2026-11-24T12:00:07.000000000Z

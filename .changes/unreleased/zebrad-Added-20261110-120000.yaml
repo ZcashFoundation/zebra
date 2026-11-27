@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: 'Added static user and password authentication for the JSON-RPC server: set `rpc.rpc_user` with `rpc.rpc_password` or `rpc.rpc_password_file` to require fixed HTTP Basic credentials instead of the cookie. ([#12403](https://github.com/ZcashFoundation/zebra/pull/12403))'
-time: 2026-11-10T12:00:00.000000+00:00

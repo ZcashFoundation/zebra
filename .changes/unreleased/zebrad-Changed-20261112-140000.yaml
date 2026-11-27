@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Rebuild the mining block template when the mempool verifies a new transaction, at most once a second, instead of only every 5 seconds.'
-time: 2026-11-12T14:00:00.000000000Z

@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: Decode large submitted blocks and block proposals in parallel, off the async executor.
-time: 2026-11-06T15:22:09.42027596+01:00

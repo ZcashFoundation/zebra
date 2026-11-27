@@ -1,4 +1,0 @@
-project: zebra-node-services
-kind: Added
-body: 'Added `mempool::Request::VerifiedTransactionsForBlock`, which asks the mempool for its verified transactions with a block''s mined hashes when the block''s parent is its last seen tip, and `mempool::Response::VerifiedTransactionsForBlock`, which returns them by mined hash. The block verifier in `zebra-consensus` reuses their verification, so a mempool service must answer only with the output of the mempool transaction verifier, unmodified apart from the `time` and `height` that the mempool sets, with the tip height that each transaction was verified at as `height`, or with no transactions.'
-time: 2026-11-26T01:12:09.410865103Z

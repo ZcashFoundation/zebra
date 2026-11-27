@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: 'Kept the `getstandardfee` recommendation at 1,000 zatoshis per logical action on test networks and from Mainnet height 3,590,000, instead of lowering it with `zip317::MARGINAL_FEE` to 400, so that transactions that pay it still relay through nodes that require 1,000.'
-time: 2026-11-25T18:00:01.000000000Z

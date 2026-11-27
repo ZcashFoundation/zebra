@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.1.0] - 2026-11-27
+
+### Added
+
+- Added `CachedFfiTransaction::context_digest()`, a commitment to the transaction, consensus branch and spent outputs that `is_valid()` reads, so callers can remember successful script verifications. `CachedFfiTransaction::new()` computes it by hashing the spent outputs once, except for transactions none of whose inputs can pass `is_valid()` ([#11939](https://github.com/ZcashFoundation/zebra/pull/11939)).
+
 ## [15.0.0] - 2026-11-16
 
 ### Changed

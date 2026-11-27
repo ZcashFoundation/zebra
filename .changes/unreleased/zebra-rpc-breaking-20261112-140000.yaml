@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: 'Added a mempool change subscriber parameter to `RpcImpl::spawn_block_template_updater`, so the block template updater can rebuild templates when the mempool verifies a transaction.'
-time: 2026-11-12T14:00:00.000000000Z

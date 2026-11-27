@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: 'Documented that `VerifiedUnminedTx::height` must be the tip height that the mempool verified a transaction at, because the block verifier in `zebra-consensus` reuses the mempool''s verification of a transaction based on it.'
-time: 2026-11-26T07:37:31.806124760Z
