@@ -34,6 +34,11 @@ static SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::ne
 const RETENTION: Duration = Duration::from_secs(15);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The number of transaction recovery requests answered for each delivered announcement.
+///
+/// A Zebra recipient asks once for each announcement, so the second reply allows one repeat.
+pub(super) const MAX_RECOVERY_REPLIES: usize = 2;
+
 struct ServingBlock {
     block: Arc<Block>,
     /// Keep the sent short-ID keys reproducible without retaining the compact transaction vectors.
@@ -84,8 +89,11 @@ pub(super) struct CompactRelay {
     pub(super) send: bool,
     received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
     sent: Option<(ServingBlock, Option<Instant>, OwnedSemaphorePermit)>,
-    /// Bound aggregate recovery payloads, including repeated or empty requests.
+    /// Bound aggregate recovery payloads, including repeated requests.
     recovery_bytes_left: usize,
+    /// Bound the number of recovery replies for each delivered announcement. The byte budget
+    /// bounds their size, not their number.
+    recovery_replies_left: usize,
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(ReconstructedBlock, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
@@ -106,15 +114,19 @@ impl CompactRelay {
             .is_some_and(|(serving, until, _)| until.is_none() && serving.is_authorized())
     }
 
+    /// Starts the delivered announcement's serving deadline.
+    ///
+    /// The snapshot keeps its authorization, so transaction recovery can check whether its
+    /// publication was withdrawn.
     pub(super) fn mark_sent(&mut self) {
-        let (serving, until, _) = self
+        let (_, until, _) = self
             .sent
             .as_mut()
             .expect("a delivered compact announcement retains its serving snapshot");
-        serving.authorization = None;
         *until = Some(Instant::now() + RETENTION);
         self.recovery_bytes_left =
             usize::try_from(MAX_BLOCK_BYTES).expect("the block byte limit fits in memory");
+        self.recovery_replies_left = MAX_RECOVERY_REPLIES;
     }
 
     pub(super) fn expire(&mut self) {
@@ -401,10 +413,15 @@ where
 
     pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {
         self.compact.expire();
-        if let Some((block, _, _)) = &self.compact.reconstructed {
-            if block.block().hash() == hash {
-                return Ok(self.compact_response(block.clone()));
-            }
+        let cached = self
+            .compact
+            .reconstructed
+            .as_ref()
+            .map(|(block, _, _)| block)
+            .filter(|block| block.block().hash() == hash)
+            .cloned();
+        if let Some(block) = cached {
+            return self.compact_response(block);
         }
         if self
             .compact
@@ -438,7 +455,7 @@ where
                             )
                             .await
                         {
-                            return Ok(self.compact_response(block));
+                            return self.compact_response(block);
                         }
                     } else {
                         self.send_download_request(Message::GetBlockTransactions(
@@ -497,11 +514,16 @@ where
         }
     }
 
-    fn compact_response(&self, block: ReconstructedBlock) -> Handler {
-        Handler::Finished(Ok(Response::ReconstructedBlock(
+    /// Returns a block rebuilt from the peer's compact announcement, if the peer is still eligible.
+    ///
+    /// Rebuilding can wait for the inbound service, so the peer can be banned, or fall below the
+    /// minimum version, while it waits.
+    fn compact_response(&mut self, block: ReconstructedBlock) -> Result<Handler, PeerError> {
+        self.live_authorization()?;
+        Ok(Handler::Finished(Ok(Response::ReconstructedBlock(
             block,
             self.connection_info.connected_addr.get_transient_addr(),
-        )))
+        ))))
     }
 
     async fn finish_compact(
@@ -551,9 +573,14 @@ where
             unreachable!("the matching reconstruction was checked")
         };
         if let Some(block) = self.finish_compact(reconstruction, response, permit).await {
-            let response = self.compact_response(block);
-            if let State::AwaitingResponse { handler, .. } = &mut self.state {
-                *handler = response;
+            match self.compact_response(block) {
+                Ok(response) => {
+                    if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                        *handler = response;
+                    }
+                }
+                // Failing the connection also fails the waiting request.
+                Err(error) => self.fail_with(error).await,
             }
         } else {
             self.fallback_compact(hash).await;
@@ -617,6 +644,25 @@ where
         }
     }
 
+    /// Returns the block with `hash` if a block request for it is still served, by asking the
+    /// ordinary block service before `until`. That service serves committed blocks, but never
+    /// bodies from the early-relay cache.
+    async fn servable_block(&mut self, hash: block::Hash, until: Instant) -> Option<Arc<Block>> {
+        let response = timeout_at(
+            until,
+            self.compact_query(Request::BlocksByHash(HashSet::from([hash]))),
+        )
+        .await
+        .ok()??;
+        let Response::Blocks(blocks) = response else {
+            return None;
+        };
+        blocks.into_iter().find_map(|item| match item {
+            InventoryResponse::Available((block, _)) if block.hash() == hash => Some(block),
+            _ => None,
+        })
+    }
+
     pub(super) async fn serve_compact_transactions(&mut self, request: BlockTransactionsRequest) {
         if !self.connection_info.early_block_relay {
             return;
@@ -628,15 +674,22 @@ where
         if serving.block.hash() != request.block_hash {
             return;
         }
-        if request
-            .indexes
-            .last()
-            .is_some_and(|index| *index >= serving.block.transactions.len())
+        // A request for no transactions gets no reply.
+        if request.indexes.is_empty()
+            || request
+                .indexes
+                .last()
+                .is_some_and(|index| *index >= serving.block.transactions.len())
             || request.indexes.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return;
         }
         let until = *until;
+        // A request that doesn't fit the byte budget still uses its reply.
+        let Some(replies_left) = self.compact.recovery_replies_left.checked_sub(1) else {
+            return;
+        };
+        self.compact.recovery_replies_left = replies_left;
         let overhead = request.block_hash.zcash_serialized_size()
             + CompactSizeMessage::try_from(request.indexes.len())
                 .expect("recovery indexes are bounded by the advertised block")
@@ -658,16 +711,39 @@ where
             return;
         };
         self.compact.recovery_bytes_left = remaining;
-        let transactions = request
-            .indexes
-            .into_iter()
-            .map(|index| serving.block.transactions[index].clone())
-            .collect();
+        let withdrawn = serving
+            .authorization
+            .as_ref()
+            .is_some_and(|authorization| !authorization.is_authorized(&serving.block));
+        let transactions = if withdrawn {
+            // Like a block request, serve the transactions of a block whose publication was
+            // withdrawn only if the ordinary block service still serves the block, for example
+            // because it was committed. Only the requested transactions are kept.
+            let servable = self.servable_block(request.block_hash, until).await;
+            let Some(transactions) = servable.and_then(|block| {
+                request
+                    .indexes
+                    .iter()
+                    .map(|index| block.transactions.get(*index).cloned())
+                    .collect()
+            }) else {
+                self.compact.clear_sent();
+                return;
+            };
+            transactions
+        } else {
+            request
+                .indexes
+                .into_iter()
+                .map(|index| serving.block.transactions[index].clone())
+                .collect()
+        };
         let response = BlockTransactions {
             block_hash: request.block_hash,
             transactions,
         };
-        // Repeated recovery shares a byte budget and the snapshot's original deadline.
+        // Repeated recovery shares the reply limit, the byte budget, and the snapshot's original
+        // deadline.
         let result = timeout_at(
             until,
             self.peer_tx.send(Message::BlockTransactions(response)),

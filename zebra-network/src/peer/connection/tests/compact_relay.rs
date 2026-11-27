@@ -244,6 +244,113 @@ async fn connection_find_blocks_inflight_compact_rechecks_authorization() {
     .expect("in-flight compact discovery rechecks bans and the live minimum version");
 }
 
+/// A block rebuilt from a compact announcement is only returned if the peer still isn't banned,
+/// and still meets the minimum version. Rebuilding can wait for the inbound service, so the peer
+/// is checked after that wait, and before a cached rebuilt block is returned again.
+#[tokio::test(start_paused = true)]
+async fn rebuilt_block_downloads_recheck_bans_and_the_minimum_version() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source: crate::PeerSocketAddr = BarrierConnection::SOURCE.parse().unwrap();
+        let candidates: Vec<zebra_chain::transaction::UnminedTx> = block.transactions[1..]
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect();
+        let is_check = |request: &Request| {
+            matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                if **checked == *block && evidence.evidence_for(checked).is_some())
+        };
+        for mode in ["cached", "rebuilt", "recovered"] {
+            for revocation in ["ban", "version"] {
+                // The connection keeps the screened compact block for reconstruction. Its discovery
+                // barrier doesn't change how blocks are downloaded.
+                let mut connection = BarrierConnection::start(&compact).await;
+                let revoke = |connection: &BarrierConnection| {
+                    if revocation == "ban" {
+                        connection.bans.send_modify(|bans| bans.ban(source.ip()));
+                    } else {
+                        connection.tip.send_best_tip_height(
+                            zebra_chain::parameters::NetworkUpgrade::Nu7
+                                .activation_height(&zebra_chain::parameters::Network::Mainnet),
+                        );
+                    }
+                };
+                let download = Request::BlockDownload {
+                    hash: block.hash(),
+                    advertiser: connection.advertiser.clone(),
+                };
+                let response = if mode == "cached" {
+                    let response = connection.request(download.clone()).await;
+                    connection
+                        .inbound
+                        .expect_request(Request::CompactBlockTransactions(compact.clone()))
+                        .await
+                        .respond(Response::CompactBlockTransactions(candidates.clone()));
+                    connection
+                        .inbound
+                        .expect_request_that(is_check)
+                        .await
+                        .respond(Response::Nil);
+                    assert_reconstructed(response.await.unwrap().unwrap(), &block, source);
+                    revoke(&connection);
+                    connection.request(download).await
+                } else {
+                    let response = connection.request(download).await;
+                    let candidates = if mode == "rebuilt" {
+                        candidates.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    connection
+                        .inbound
+                        .expect_request(Request::CompactBlockTransactions(compact.clone()))
+                        .await
+                        .respond(Response::CompactBlockTransactions(candidates));
+                    if mode == "recovered" {
+                        assert!(matches!(
+                            connection.outbound.next().await,
+                            Some(Message::GetBlockTransactions(_))
+                        ));
+                        connection
+                            .receive(Message::BlockTransactions(BlockTransactions {
+                                block_hash: block.hash(),
+                                transactions: block.transactions[1..].to_vec(),
+                            }))
+                            .await;
+                    }
+                    let check = connection.inbound.expect_request_that(is_check).await;
+                    revoke(&connection);
+                    check.respond(Response::Nil);
+                    response
+                };
+                assert_eq!(
+                    response.await.unwrap().unwrap_err().inner_debug(),
+                    "ConnectionDropped",
+                    "{mode} {revocation}"
+                );
+                connection.task.await.unwrap();
+                assert_eq!(
+                    connection.errors.try_get_error().unwrap().inner_debug(),
+                    "ConnectionDropped",
+                    "{mode} {revocation}"
+                );
+                assert!(
+                    connection.outbound.try_recv().is_err(),
+                    "{mode} {revocation}: nothing else is requested from the peer"
+                );
+            }
+        }
+    })
+    .await
+    .expect("rebuilt blocks are checked without timers");
+}
+
 #[tokio::test(start_paused = true)]
 async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
     let _init_guard = zebra_test::init();
@@ -1533,6 +1640,7 @@ async fn sent_compact_snapshot_survives_withdrawal_with_bounded_recovery() {
 
         for (hash, indexes) in [
             (unknown, vec![0]),
+            (block.hash(), vec![]),
             (block.hash(), vec![block.transactions.len()]),
             (block.hash(), vec![0, block.transactions.len()]),
             (block.hash(), vec![1, 0]),
@@ -1560,11 +1668,26 @@ async fn sent_compact_snapshot_survives_withdrawal_with_bounded_recovery() {
         };
         let max_responses =
             usize::try_from(MAX_BLOCK_BYTES).unwrap() / expected.zcash_serialized_size();
-        assert!(max_responses > 1, "the fixture permits repeated recovery");
-        for _ in 0..max_responses {
+        let max_replies = crate::peer::connection::compact_relay::MAX_RECOVERY_REPLIES;
+        assert!(
+            max_responses > max_replies,
+            "the byte budget permits more replies than the reply limit"
+        );
+        for _ in 0..max_replies {
+            // The publication was withdrawn, so each reply checks that a block request for it is
+            // still served.
             let (_, response) = tokio::join!(
                 connection.serve_compact_transactions(request.clone()),
-                outbound.next()
+                async {
+                    inbound
+                        .expect_request(Request::BlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::Blocks(vec![InventoryResponse::Available((
+                            block.clone(),
+                            None,
+                        ))]));
+                    outbound.next().await
+                }
             );
             assert_eq!(response, Some(Message::BlockTransactions(expected.clone())));
             assert_eq!(connection.compact.expiry(), until);
@@ -1578,7 +1701,195 @@ async fn sent_compact_snapshot_survives_withdrawal_with_bounded_recovery() {
         assert!(errors.try_get_error().is_none());
     })
     .await
-    .expect("sent snapshots permit repeated recovery within one shared byte budget");
+    .expect("sent snapshots permit repeated recovery within the reply limit");
+}
+
+/// After the publication of an announced block is withdrawn, its transactions are only served
+/// while a block request for it is still served, for example because the block was committed.
+#[tokio::test]
+async fn compact_snapshot_is_served_only_while_its_block_is_servable() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        for mode in ["live", "committed", "withdrawn"] {
+            let (mut connection, _client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            connection.compact.send = true;
+            let live = Arc::new(AtomicBool::new(true));
+            let authorized = live.clone();
+            let (result, delivered) = tokio::sync::oneshot::channel();
+            let (_, message) = tokio::join!(
+                connection.send_block_advert(crate::peer_set::BlockAdvert {
+                    hash: block.hash(),
+                    compact_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+                    result,
+                }),
+                async {
+                    inbound
+                        .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::AuthorizedBlocks {
+                            blocks: vec![InventoryResponse::Available((block.clone(), None))],
+                            authorization: crate::BlockAuthorization::new(move |_| {
+                                authorized.load(Ordering::SeqCst)
+                            }),
+                        });
+                    outbound.next().await.unwrap()
+                }
+            );
+            assert!(matches!(message, Message::CompactBlock(_)));
+            delivered.await.unwrap().unwrap();
+            if mode != "live" {
+                live.store(false, Ordering::SeqCst);
+            }
+
+            let request = BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes: vec![1],
+            };
+            let expected = Message::BlockTransactions(BlockTransactions {
+                block_hash: block.hash(),
+                transactions: vec![block.transactions[1].clone()],
+            });
+            let (_, response) = tokio::join!(
+                connection.serve_compact_transactions(request.clone()),
+                async {
+                    if mode != "live" {
+                        let committed = if mode == "committed" {
+                            InventoryResponse::Available((block.clone(), None))
+                        } else {
+                            InventoryResponse::Missing(block.hash())
+                        };
+                        inbound
+                            .expect_request(Request::BlocksByHash([block.hash()].into()))
+                            .await
+                            .respond(Response::Blocks(vec![committed]));
+                    }
+                    if mode == "withdrawn" {
+                        None
+                    } else {
+                        outbound.next().await
+                    }
+                }
+            );
+            if mode == "withdrawn" {
+                // The snapshot is released, so later requests get no reply.
+                assert!(outbound.try_recv().is_err());
+                assert!(!connection.compact.has_cached());
+                connection.serve_compact_transactions(request).await;
+                assert!(outbound.try_recv().is_err());
+            } else {
+                assert_eq!(response, Some(expected), "{mode}");
+                assert!(connection.compact.has_cached(), "{mode}");
+            }
+            inbound.expect_no_requests().await;
+            assert!(errors.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("recovery replies are written without timers");
+}
+
+/// Each delivered compact block announcement answers a few transaction recovery requests, within
+/// a byte budget, and a request for no transactions gets no reply.
+#[tokio::test]
+async fn recovery_replies_are_bounded_per_announcement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let max_replies = crate::peer::connection::compact_relay::MAX_RECOVERY_REPLIES;
+        for (block_bytes, budget) in [
+            (
+                zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES.as_slice(),
+                false,
+            ),
+            // A block with more than half the byte budget in transactions.
+            (
+                zebra_test::vectors::BLOCK_TESTNET_141042_BYTES.as_slice(),
+                true,
+            ),
+        ] {
+            let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+            let (mut connection, _client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            connection.compact.send = true;
+            let (result, delivered) = tokio::sync::oneshot::channel();
+            let (_, message) = tokio::join!(
+                connection.send_block_advert(crate::peer_set::BlockAdvert {
+                    hash: block.hash(),
+                    compact_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+                    result,
+                }),
+                async {
+                    inbound
+                        .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::AuthorizedBlocks {
+                            blocks: vec![InventoryResponse::Available((block.clone(), None))],
+                            authorization: crate::BlockAuthorization::new(|_| true),
+                        });
+                    outbound.next().await.unwrap()
+                }
+            );
+            assert!(matches!(message, Message::CompactBlock(_)));
+            delivered.await.unwrap().unwrap();
+
+            let request = |indexes: Vec<usize>| BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes,
+            };
+            let reply = |indexes: &[usize]| {
+                Message::BlockTransactions(BlockTransactions {
+                    block_hash: block.hash(),
+                    transactions: indexes
+                        .iter()
+                        .map(|index| block.transactions[*index].clone())
+                        .collect(),
+                })
+            };
+            // A request for no transactions gets no reply, and doesn't use one.
+            connection.serve_compact_transactions(request(vec![])).await;
+            assert!(outbound.try_recv().is_err());
+
+            let all: Vec<usize> = (0..block.transactions.len()).collect();
+            let indexes = if budget { all } else { vec![0] };
+            let (_, response) = tokio::join!(
+                connection.serve_compact_transactions(request(indexes.clone())),
+                outbound.next()
+            );
+            assert_eq!(response, Some(reply(&indexes)));
+            if budget {
+                // The second full request doesn't fit the byte budget.
+                connection
+                    .serve_compact_transactions(request(indexes))
+                    .await;
+                assert!(outbound.try_recv().is_err());
+            } else {
+                for _ in 1..max_replies {
+                    let (_, response) = tokio::join!(
+                        connection.serve_compact_transactions(request(vec![1])),
+                        outbound.next()
+                    );
+                    assert_eq!(response, Some(reply(&[1])));
+                }
+                // The reply limit refuses the next request, however small.
+                connection
+                    .serve_compact_transactions(request(vec![1]))
+                    .await;
+                assert!(outbound.try_recv().is_err());
+            }
+            assert!(connection.compact.has_cached());
+            assert!(errors.try_get_error().is_none());
+        }
+    })
+    .await
+    .expect("recovery replies are written without timers");
 }
 
 #[tokio::test]

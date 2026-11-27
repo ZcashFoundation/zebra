@@ -61,7 +61,11 @@ mod tests;
 // Keep reading recovery replies without letting unrelated service calls or writes hide
 // the deadline. Both limits include every deferred message, in peer order.
 const MAX_DEFERRED_MESSAGES: usize = 64;
-const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
+// Any one message that the codec accepts fits after a mebibyte of smaller messages. A connection
+// only defers messages while it recovers a compact block, and it handles them before it reads more
+// peer messages, so it never holds more than this.
+const MAX_DEFERRED_BYTES: usize =
+    1024 * 1024 + crate::protocol::external::codec::MAX_MESSAGE_WIRE_LEN;
 
 #[derive(Debug)]
 pub(super) enum Handler {
@@ -407,6 +411,18 @@ impl Handler {
 
                     Handler::Finished(Ok(Response::Blocks(available.chain(missing).collect())))
                 }
+            }
+
+            // The peer can send the full block while its compact block's missing transactions are
+            // recovered, for example when it answers an earlier block request. The full block is
+            // the response a fallback request would get.
+            (Handler::CompactBlock { reconstruction, .. }, Message::Block(block))
+                if block.hash() == reconstruction.block_hash() =>
+            {
+                Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
+                    block,
+                    transient_addr,
+                ))])))
             }
 
             // Inventory has no request identifier: a block announcement is indistinguishable
@@ -1108,6 +1124,20 @@ where
                             };
 
                             self.update_state_metrics(None);
+
+                            // A full block can finish compact recovery, so stop decoding
+                            // transactions for it.
+                            if recovering
+                                && !matches!(
+                                    self.state,
+                                    State::AwaitingResponse {
+                                        handler: Handler::CompactBlock { .. },
+                                        ..
+                                    }
+                                )
+                            {
+                                self.clear_compact_recovery();
+                            }
 
                             // Returned messages can be inbound requests, including block adverts
                             // that also completed a FindBlocks response.
