@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::{
-    sync::{broadcast, mpsc, watch},
+    sync::{broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
     time::Instant,
 };
@@ -32,16 +32,23 @@ use crate::{
     config::mining,
     methods::{
         tests::utils::fake_history_tree,
-        types::get_block_template::{
-            precompute::{TemplateCache, MEMPOOL_REBUILD_PAUSE},
-            BlockTemplateResponse,
+        types::{
+            get_block_template::{
+                constants::MEMPOOL_LONG_POLL_INTERVAL,
+                precompute::{TemplateCache, TemplateChanges, MEMPOOL_REBUILD_PAUSE},
+                BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateResponse,
+            },
+            long_poll::LongPollId,
         },
-        RpcImpl,
+        RpcImpl, RpcServer,
     },
 };
 
 /// How long the tests wait for the updater to do something it should do promptly.
 const PROMPT: Duration = Duration::from_secs(10);
+
+/// How long the tests wait to check that the updater doesn't publish a template.
+const QUIET: Duration = Duration::from_millis(500);
 
 /// A block template updater on mock services, and the handles that drive them.
 struct Updater {
@@ -54,8 +61,9 @@ struct Updater {
     tip: watch::Sender<(Height, Hash)>,
     mock_tip_sender: MockChainTipSender,
 
-    /// The early mining work that the mock state reports.
-    candidate: watch::Sender<Option<GetBlockTemplateChainInfo>>,
+    /// The early mining work that the mock state reports while its parent block is the best tip,
+    /// and the hash of that parent block.
+    candidate: watch::Sender<Option<(Hash, GetBlockTemplateChainInfo)>>,
 
     /// Publishes or withdraws early mining work on the updater's subscription.
     publish_candidate: Box<dyn Fn(Option<(Hash, GetBlockTemplateChainInfo)>) + Send + Sync>,
@@ -69,6 +77,21 @@ struct Updater {
     /// Lets the mock mempool answer one request, if it was started holding its answers.
     mempool_answers: mpsc::UnboundedSender<()>,
 
+    /// A message for each early mining work request that the mock state gets, sent before it
+    /// answers the request from the state it had when the request arrived.
+    candidate_reads: mpsc::UnboundedReceiver<()>,
+
+    /// Makes the mock state hold its answer to the next early mining work request until the
+    /// receiver it is sent gets a message, or its sender is dropped.
+    candidate_read_holds: mpsc::UnboundedSender<oneshot::Receiver<()>>,
+
+    /// A message for each chain info request that the mock state gets, which is the first step
+    /// of every template build that isn't on early mining work.
+    chain_info_reads: mpsc::UnboundedReceiver<()>,
+
+    /// Starts a `getblocktemplate` request that long polls on a template's long poll ID.
+    long_poll: LongPoll,
+
     /// The updater and the mock responders.
     tasks: Vec<JoinHandle<()>>,
 }
@@ -80,6 +103,13 @@ impl Drop for Updater {
         }
     }
 }
+
+/// Starts a `getblocktemplate` request that long polls on a long poll ID.
+type LongPoll = Box<
+    dyn Fn(LongPollId) -> JoinHandle<jsonrpsee::core::RpcResult<GetBlockTemplateResponse>>
+        + Send
+        + Sync,
+>;
 
 /// Returns the state's information for a block template on the tip `(tip_height, tip_hash)`.
 fn chain_info(net: &Network, tip_height: Height, tip_hash: Hash) -> GetBlockTemplateChainInfo {
@@ -166,8 +196,13 @@ impl Updater {
             None,
         );
 
-        let (candidate, candidate_receiver) = watch::channel(None);
+        let (candidate, candidate_receiver) =
+            watch::channel::<Option<(Hash, GetBlockTemplateChainInfo)>>(None);
         let (candidate_changes, publish_candidate) = MiningCandidateChanges::new_for_tests();
+        let (candidate_read_sender, candidate_reads) = mpsc::unbounded_channel();
+        let (candidate_read_holds, mut held_candidate_reads) =
+            mpsc::unbounded_channel::<oneshot::Receiver<()>>();
+        let (chain_info_read_sender, chain_info_reads) = mpsc::unbounded_channel();
         let read_state_responder = {
             let net = net.clone();
             let tip = tip_receiver.clone();
@@ -177,7 +212,30 @@ impl Updater {
             tokio::spawn(async move {
                 loop {
                     let request = read_state.expect_request_that(|_| true).await;
-                    let (tip_height, tip_hash) = *tip.borrow();
+
+                    // The request is answered from the state when it arrives, so a test that
+                    // changes the state after it sees the request's message doesn't change the
+                    // answer. A held request is answered from the state when it is released.
+                    let state = || (*tip.borrow(), candidate_receiver.borrow().clone());
+                    let mut answer_from = state();
+
+                    match request.request() {
+                        ReadRequest::MiningCandidate => {
+                            let hold = held_candidate_reads.try_recv().ok();
+                            let _ = candidate_read_sender.send(());
+
+                            if let Some(release) = hold {
+                                let _ = release.await;
+                                answer_from = state();
+                            }
+                        }
+                        ReadRequest::ChainInfo => {
+                            let _ = chain_info_read_sender.send(());
+                        }
+                        _ => {}
+                    }
+
+                    let ((tip_height, tip_hash), candidate) = answer_from;
 
                     request.respond_with(|request| -> Result<ReadResponse, BoxError> {
                         Ok(match request {
@@ -185,9 +243,13 @@ impl Updater {
                                 ReadResponse::ChainInfo(chain_info(&net, tip_height, tip_hash))
                             }
                             ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
-                            ReadRequest::MiningCandidate => {
-                                ReadResponse::MiningCandidate(candidate_receiver.borrow().clone())
-                            }
+                            // Like the state, only report early work on a child of the best tip.
+                            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(
+                                candidate
+                                    .clone()
+                                    .filter(|(parent_hash, _)| *parent_hash == tip_hash)
+                                    .map(|(_, candidate)| candidate),
+                            ),
                             ReadRequest::MiningCandidateChanges if failed_subscriptions > 0 => {
                                 failed_subscriptions -= 1;
                                 return Err("the state is unavailable".into());
@@ -236,6 +298,20 @@ impl Updater {
             .expect("the miner params were not overridden")
             .clone();
 
+        let long_poll: LongPoll = {
+            let rpc = rpc.clone();
+            Box::new(move |long_poll_id| {
+                let rpc = rpc.clone();
+                tokio::spawn(async move {
+                    rpc.get_block_template(Some(GetBlockTemplateParameters {
+                        long_poll_id: Some(long_poll_id),
+                        ..Default::default()
+                    }))
+                    .await
+                })
+            })
+        };
+
         let updater = Self {
             net,
             cache,
@@ -246,6 +322,10 @@ impl Updater {
             mempool_changes: mempool_changes.clone(),
             builds,
             mempool_answers,
+            candidate_reads,
+            candidate_read_holds,
+            chain_info_reads,
+            long_poll,
             tasks: vec![read_state_responder, mempool_responder],
         };
         updater.set_tip(tip_height, tip_hash);
@@ -276,14 +356,100 @@ impl Updater {
             .send_best_tip_block_time(chrono::Utc::now());
     }
 
+    /// Commits the block `block`, a child of the best tip, like the state does: it changes its best
+    /// tip, and then the chain tip changes once.
+    ///
+    /// Only the mock chain tip's hash changes, because each field the mock changes wakes the
+    /// updater, and the updater only needs the hash to see the commit.
+    fn commit(&self, block: (Height, Hash)) {
+        self.tip.send_replace(block);
+        self.mock_tip_sender.send_best_tip_hash(block.1);
+    }
+
     /// Publishes early mining work on the block `candidate`, a child of the best tip, or
     /// withdraws the work.
+    ///
+    /// The work is the chain info that the mock state reports once the block is committed.
     fn set_candidate(&self, candidate: Option<(Height, Hash)>) {
         let (_, parent_hash) = self.best_tip();
-        let candidate = candidate.map(|(height, hash)| chain_info(&self.net, height, hash));
+        let candidate =
+            candidate.map(|(height, hash)| (parent_hash, chain_info(&self.net, height, hash)));
 
         self.candidate.send_replace(candidate.clone());
-        (self.publish_candidate)(candidate.map(|candidate| (parent_hash, candidate)));
+        (self.publish_candidate)(candidate);
+    }
+
+    /// Wakes the updater with a chain tip change that keeps the best tip's hash.
+    fn wake_updater(&self) {
+        self.mock_tip_sender
+            .send_best_tip_block_time(chrono::Utc::now());
+    }
+
+    /// Waits for the next early mining work request that the mock state gets.
+    ///
+    /// The updater only reads the early work again after it has finished building the template
+    /// on the work it read before, so this is a point where that build is finished.
+    async fn candidate_read(&mut self) {
+        tokio::time::timeout(PROMPT, self.candidate_reads.recv())
+            .await
+            .expect("the updater reads the early mining work")
+            .expect("the read state responder is running");
+    }
+
+    /// Makes the mock state hold its answer to the next early mining work request, and returns
+    /// the sender that releases it. The mock state answers from its state when it is released.
+    fn hold_candidate_read(&self) -> oneshot::Sender<()> {
+        let (release, held) = oneshot::channel();
+        self.candidate_read_holds
+            .send(held)
+            .expect("the read state responder is running");
+
+        release
+    }
+
+    /// Returns the number of chain info requests the mock state has got since the last call.
+    fn chain_info_reads(&mut self) -> usize {
+        std::iter::from_fn(|| self.chain_info_reads.try_recv().ok()).count()
+    }
+
+    /// Forgets the requests the mock state has got so far.
+    fn forget_reads(&mut self) {
+        while self.candidate_reads.try_recv().is_ok() {}
+        self.chain_info_reads();
+    }
+
+    /// Starts a `getblocktemplate` request that long polls on `template`.
+    fn long_poll(
+        &self,
+        template: &BlockTemplateResponse,
+    ) -> JoinHandle<jsonrpsee::core::RpcResult<GetBlockTemplateResponse>> {
+        (self.long_poll)(template.long_poll_id)
+    }
+
+    /// Checks that `templates` doesn't see a template published within [`QUIET`], that the cache
+    /// still has `tip_template`, and that it has no template on the block `block_hash`.
+    async fn assert_nothing_published(
+        &self,
+        templates: &mut TemplateChanges,
+        tip_template: &Arc<BlockTemplateResponse>,
+        block_hash: Hash,
+    ) {
+        let (_, tip_hash) = self.best_tip();
+
+        assert!(
+            tokio::time::timeout(QUIET, templates.changed())
+                .await
+                .is_err(),
+            "no template is published, so long polls aren't woken"
+        );
+        assert!(
+            Arc::ptr_eq(&self.template(tip_hash), tip_template),
+            "the cache still has the chain tip's template"
+        );
+        assert!(
+            !self.has_template_on(block_hash),
+            "the cache has no template on the block"
+        );
     }
 
     /// Returns `true` if the cache has a template on the block `tip_hash`.
@@ -353,6 +519,28 @@ impl Updater {
     fn has_built(&mut self) -> bool {
         self.builds.try_recv().is_ok()
     }
+
+    /// Starts an updater whose mock mempool holds its answers, and waits until it has published
+    /// a template with mempool transactions on the chain tip. Returns the updater, which is then
+    /// waiting for a change, and that template.
+    async fn start_with_tip_template() -> (Self, Arc<BlockTemplateResponse>) {
+        let mut updater = Self::start_holding_mempool_answers().await;
+        let (_, tip_hash) = updater.best_tip();
+
+        // The updater publishes a coinbase-only template, and then builds one from the mempool,
+        // which replaces it.
+        updater.template_on(tip_hash).await;
+        updater.build().await;
+        let coinbase_only_template = updater.template(tip_hash);
+        updater.answer_mempool();
+        let tip_template = updater
+            .template_after(tip_hash, &coinbase_only_template)
+            .await;
+
+        updater.forget_reads();
+
+        (updater, tip_template)
+    }
 }
 
 /// The updater keeps trying to subscribe to early mining work, and precomputes templates once the
@@ -368,103 +556,421 @@ async fn updater_retries_its_subscription_to_early_mining_work() {
     updater.build().await;
 }
 
-/// The updater publishes coinbase-only work on a block that is still being verified. It goes
-/// back to work on the chain tip when that block is withdrawn, without a tip change, and it
-/// builds ordinary work on the block once the block is the chain tip.
+/// The updater builds a coinbase-only template on a block that is still being verified, but
+/// doesn't publish it, so neither the cache nor a long polling miner gets work on the block. Once
+/// the block is committed, the updater publishes that template without building one, and it is
+/// the template that a build on the committed block makes.
 #[tokio::test(flavor = "multi_thread")]
-async fn updater_follows_mining_candidates() {
+async fn updater_publishes_a_mining_candidates_template_once_its_block_is_committed() {
     let _init_guard = zebra_test::init();
 
-    let mut updater = Updater::start(0).await;
-    let (tip_height, tip_hash) = updater.best_tip();
-    updater.template_on(tip_hash).await;
-    updater.build().await;
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let mut templates = updater.cache.subscribe();
+    let long_poll = updater.long_poll(&tip_template);
 
-    // A block with a valid proof of work arrives. Work on it doesn't read the mempool.
+    // A block with a valid proof of work arrives.
     let candidate = (
         tip_height.next().expect("the height is valid"),
         Hash([0x22; 32]),
     );
     updater.set_candidate(Some(candidate));
-    updater.template_on(candidate.1).await;
-    assert!(!updater.has_template_on(tip_hash));
+    updater.candidate_read().await;
+
+    // A chain tip change that keeps the tip makes the updater check that the early work is still
+    // there, after it has built the template on the block, and then read the work again at the
+    // start of its loop. It then waits for the block.
+    updater.wake_updater();
+    updater.candidate_read().await;
+    updater.candidate_read().await;
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, candidate.1)
+        .await;
+    assert!(
+        !long_poll.is_finished(),
+        "a long polling miner isn't sent work on a block that isn't committed"
+    );
     assert!(
         !updater.has_built(),
         "work on a block that is still being verified is coinbase-only"
     );
 
-    // The block is rejected, so its work is withdrawn.
-    updater.set_candidate(None);
-    updater.template_on(tip_hash).await;
-    assert!(!updater.has_template_on(candidate.1));
-    updater.build().await;
-
-    // The block arrives again, and this time it is committed.
-    updater.set_candidate(Some(candidate));
-    updater.template_on(candidate.1).await;
-    assert!(!updater.has_built());
-
-    updater.set_tip(candidate.0, candidate.1);
-    updater.set_candidate(None);
-    updater.build().await;
+    // The block is committed: the state changes the chain tip, and then withdraws the work. The
+    // template is published before the withdrawal, without waiting for a refresh to be due.
+    let committed = Instant::now();
+    updater.commit(candidate);
     updater.template_on(candidate.1).await;
     assert!(
-        !updater.has_template_on(tip_hash),
-        "a committed block's work isn't replaced with work on its parent"
+        committed.elapsed() < Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+        "the template was published {:?} after the commit",
+        committed.elapsed()
+    );
+    updater.set_candidate(None);
+    let early_template = updater.template(candidate.1);
+
+    let long_poll = tokio::time::timeout(PROMPT, long_poll)
+        .await
+        .expect("the long polling miner gets work on the committed block")
+        .expect("the long poll task doesn't panic")
+        .expect("the long poll succeeds")
+        .try_into_template()
+        .expect("the long poll is in template mode");
+    assert_eq!(long_poll.previous_block_hash, candidate.1);
+
+    // Then the updater builds a template with mempool transactions on the block. Its state read
+    // is the only one since the commit, so the template on the block wasn't built after it.
+    updater.build().await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        1,
+        "the template on the block is published without being built again"
+    );
+
+    // The mempool is empty, so that build makes the same template.
+    updater.answer_mempool();
+    let full_template = updater.template_after(candidate.1, &early_template).await;
+    assert!(
+        *full_template == *early_template,
+        "the template on early work is the template on the committed block"
     );
 }
 
-/// When early mining work is withdrawn before its block is committed, the updater publishes the
-/// chain tip's template again straight away, without building one. If the block is committed
-/// after that, it publishes the block's template again.
+/// When the state withdraws its early work on a block, because the block is rejected or takes too
+/// long to verify, the updater publishes nothing, and miners keep the chain tip's template until
+/// it is due for a refresh.
 #[tokio::test(flavor = "multi_thread")]
-async fn updater_restores_the_templates_that_a_withdrawal_replaces() {
+async fn updater_publishes_nothing_for_a_withdrawn_mining_candidate() {
     let _init_guard = zebra_test::init();
 
-    let mut updater = Updater::start_holding_mempool_answers().await;
-    let (tip_height, tip_hash) = updater.best_tip();
-
-    // The updater publishes a coinbase-only template, and then builds one from the mempool,
-    // which replaces it. After that build it waits for a few seconds.
-    updater.template_on(tip_hash).await;
-    updater.build().await;
-    let coinbase_only_template = updater.template(tip_hash);
-    updater.answer_mempool();
-    let tip_template = updater
-        .template_after(tip_hash, &coinbase_only_template)
-        .await;
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let mut templates = updater.cache.subscribe();
 
     let candidate = (
         tip_height.next().expect("the height is valid"),
         Hash([0x22; 32]),
     );
     updater.set_candidate(Some(candidate));
-    updater.template_on(candidate.1).await;
-    let candidate_template = updater.template(candidate.1);
+    updater.candidate_read().await;
 
-    // The block takes too long to verify, so its work is withdrawn. The mempool holds its
-    // answers, so a template that the updater built would be the coinbase-only one.
+    // The updater reads the early work again when it is withdrawn.
+    let withdrawn = Instant::now();
     updater.set_candidate(None);
-    updater.template_on(tip_hash).await;
-    assert!(
-        Arc::ptr_eq(&updater.template(tip_hash), &tip_template),
-        "the chain tip's template is published again, not built again"
-    );
+    updater.candidate_read().await;
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, candidate.1)
+        .await;
 
-    // The block is committed after all.
-    updater.set_tip(candidate.0, candidate.1);
+    // The block is never committed, and the updater refreshes the tip's template when it is due,
+    // rather than straight away, so it isn't busy with that build if the block is committed
+    // late. The mock mempool holds the build.
+    let refresh = updater.build().await;
+    assert!(
+        refresh - withdrawn >= Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+        "the template was refreshed {:?} after the withdrawal",
+        refresh - withdrawn
+    );
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, candidate.1)
+        .await;
+}
+
+/// Early work on more blocks, which the state also withdraws, doesn't postpone the refresh of the
+/// chain tip's template past the time it was due after the first withdrawal.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_refreshes_when_due_however_many_mining_candidates_are_withdrawn() {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, _tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let height = tip_height.next().expect("the height is valid");
+
+    updater.set_candidate(Some((height, Hash([0x22; 32]))));
+    updater.candidate_read().await;
+    let first_withdrawn = Instant::now();
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+
+    // Each block gets early work well before the refresh is due, and the state withdraws it. If
+    // each withdrawal started a new wait, the last one would postpone the refresh by 3 seconds.
+    for (delay, hash) in [(1, Hash([0x33; 32])), (3, Hash([0x44; 32]))] {
+        tokio::time::sleep_until(first_withdrawn + Duration::from_secs(delay)).await;
+        updater.set_candidate(Some((height, hash)));
+        updater.candidate_read().await;
+        updater.set_candidate(None);
+        updater.candidate_read().await;
+    }
+
+    let refresh = updater.build().await - first_withdrawn;
+    assert!(
+        (Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)
+            ..Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL + 2))
+            .contains(&refresh),
+        "the template was refreshed {refresh:?} after the first withdrawal",
+    );
+}
+
+/// A block that takes too long to verify can still be committed after the state withdraws its
+/// early work. The updater keeps the block's template, and publishes it without building one when
+/// the block is committed.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_publishes_the_template_of_a_block_committed_after_its_work_is_withdrawn() {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let mut templates = updater.cache.subscribe();
+
+    let candidate = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x22; 32]),
+    );
+    updater.set_candidate(Some(candidate));
+    updater.candidate_read().await;
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, candidate.1)
+        .await;
+
+    // The mock mempool holds its answers, so the updater can only publish a template on the
+    // block if it isn't building the tip's template when the block is committed.
+    updater.commit(candidate);
     updater.template_on(candidate.1).await;
-    assert!(
-        Arc::ptr_eq(&updater.template(candidate.1), &candidate_template),
-        "the block's template is published again, not built again"
-    );
 
-    // Then the updater builds ordinary work on the block.
+    updater.build().await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        1,
+        "the template on the block is published without being built again"
+    );
+}
+
+/// Early work on another block replaces the kept template, and the updater publishes the template
+/// on the block that is committed without building one.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_replaces_a_kept_template_with_one_on_newer_early_work() {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let mut templates = updater.cache.subscribe();
+
+    let height = tip_height.next().expect("the height is valid");
+    let (first, second) = ((height, Hash([0x22; 32])), (height, Hash([0x33; 32])));
+
+    updater.set_candidate(Some(first));
+    updater.candidate_read().await;
+
+    // The updater reads the early work again when it changes, and then builds a template on the
+    // second block.
+    updater.set_candidate(Some(second));
+    updater.candidate_read().await;
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, first.1)
+        .await;
+    updater.candidate_read().await;
+
+    updater.commit(second);
+    updater.set_candidate(None);
+    updater.template_on(second.1).await;
+
+    updater.build().await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        1,
+        "the template on the second block is published without being built again"
+    );
+}
+
+/// The updater drops the kept template when another block becomes the chain tip, so a template on
+/// the block is built again if the block becomes the chain tip later.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_drops_a_kept_template_when_another_block_is_committed() {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let mut templates = updater.cache.subscribe();
+
+    let height = tip_height.next().expect("the height is valid");
+    let (candidate, other_block) = ((height, Hash([0x22; 32])), (height, Hash([0x44; 32])));
+
+    updater.set_candidate(Some(candidate));
+    updater.candidate_read().await;
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+    updater
+        .assert_nothing_published(&mut templates, &tip_template, candidate.1)
+        .await;
+
+    // Another block is committed. The mock mempool holds the build on it.
+    updater.set_tip(other_block.0, other_block.1);
+    updater.template_on(other_block.1).await;
+    updater.build().await;
+    updater.forget_reads();
+
+    // The chain reorganizes onto the block of the dropped template.
+    updater.set_tip(candidate.0, candidate.1);
+    updater.answer_mempool();
+    updater.template_on(candidate.1).await;
+
+    updater.build().await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        2,
+        "the template on the block is built again, and then with mempool transactions"
+    );
+}
+
+/// The updater keeps the template on a block whose early work was withdrawn, while the chain tip
+/// is still the block's parent, even after it has refreshed the chain tip's template. If the
+/// state commits the block while the updater reads the early work at the start of its loop, that
+/// read finds no work, and the updater publishes the kept template without building one.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_publishes_a_kept_template_when_its_block_is_committed_during_a_read_of_early_work()
+{
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, tip_hash) = updater.best_tip();
+
+    let candidate = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x22; 32]),
+    );
+    updater.set_candidate(Some(candidate));
+    updater.candidate_read().await;
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+
+    // A chain tip change that keeps the tip ends the wait after the withdrawal, and the updater
+    // refreshes the chain tip's template.
+    updater.wake_updater();
     updater.build().await;
     updater.answer_mempool();
+    updater.template_after(tip_hash, &tip_template).await;
+    updater.forget_reads();
+
+    // The updater wakes up again, and the block is committed while the mock state holds the
+    // updater's read of the early work.
+    let release = updater.hold_candidate_read();
+    updater.wake_updater();
+    updater.candidate_read().await;
+    updater.commit(candidate);
+    release
+        .send(())
+        .expect("the read state responder holds the read");
+
+    updater.template_on(candidate.1).await;
+    updater.build().await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        1,
+        "the template on the block is published without being built again"
+    );
+}
+
+/// If the state commits the block of the kept template while the updater reads the early work at
+/// the start of its loop, and has early work on a child of that block by the time it answers, the
+/// updater publishes the kept template without building one, and nothing on the child.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_publishes_a_kept_template_when_early_work_on_its_blocks_child_arrives_during_a_read(
+) {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, tip_hash) = updater.best_tip();
+
+    let candidate = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x22; 32]),
+    );
+    let child = (
+        candidate.0.next().expect("the height is valid"),
+        Hash([0x33; 32]),
+    );
+    updater.set_candidate(Some(candidate));
+    updater.candidate_read().await;
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+
+    // A chain tip change that keeps the tip ends the wait after the withdrawal, and the updater
+    // refreshes the chain tip's template.
+    updater.wake_updater();
+    updater.build().await;
+    updater.answer_mempool();
+    updater.template_after(tip_hash, &tip_template).await;
+    updater.forget_reads();
+
+    // The updater wakes up again. While the mock state holds the updater's read of the early work,
+    // the block is committed, and the state starts verifying a child of the block.
+    let release = updater.hold_candidate_read();
+    updater.wake_updater();
+    updater.candidate_read().await;
+    updater.commit(candidate);
+    updater.set_candidate(Some(child));
+    release
+        .send(())
+        .expect("the read state responder holds the read");
+
+    updater.template_on(candidate.1).await;
+    let kept_template = updater.template(candidate.1);
+
+    // The child isn't committed, so nothing else is published while the state verifies it.
+    let mut templates = updater.cache.subscribe();
     updater
-        .template_after(candidate.1, &candidate_template)
+        .assert_nothing_published(&mut templates, &kept_template, child.1)
         .await;
+    assert_eq!(
+        updater.chain_info_reads(),
+        0,
+        "the template on the block is published without being built again"
+    );
+}
+
+/// When the chain tip changes while the updater builds a template, and the state is already
+/// verifying a block on the new tip when the updater sees the change, the updater builds the
+/// template on that block first. If the state then withdraws its work on the block, the updater
+/// builds the new tip's template straight away, rather than when a refresh would be due, because
+/// miners have no template on that tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_builds_a_new_tips_template_straight_away_when_early_work_on_its_child_is_withdrawn(
+) {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, _tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+
+    // The updater refreshes the chain tip's template, and the mock mempool holds that build.
+    updater.wake_updater();
+    updater.build().await;
+    updater.forget_reads();
+
+    // A new block is committed, and the state starts verifying a block on top of it.
+    let new_tip = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x33; 32]),
+    );
+    let candidate = (
+        new_tip.0.next().expect("the height is valid"),
+        Hash([0x22; 32]),
+    );
+    updater.set_tip(new_tip.0, new_tip.1);
+    updater.set_candidate(Some(candidate));
+
+    // The refresh isn't on the new tip, so the updater discards it, and then reads the early work.
+    updater.answer_mempool();
+    updater.candidate_read().await;
+
+    let withdrawn = Instant::now();
+    updater.set_candidate(None);
+    updater.template_on(new_tip.1).await;
+    assert!(
+        withdrawn.elapsed() < Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+        "the template on the new tip was published {:?} after the withdrawal",
+        withdrawn.elapsed()
+    );
 }
 
 /// The updater rebuilds its template when the mempool verifies a transaction, before the

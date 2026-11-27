@@ -1,4 +1,5 @@
-//! Tests for giving miners early work on a block that is still being verified.
+//! Tests for the early mining work that the block verifier starts on a block that is still being
+//! verified.
 
 use std::{sync::Arc, time::Duration};
 

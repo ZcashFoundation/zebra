@@ -623,17 +623,17 @@ fn tip_checking_verifier(
     (verifier, accepted_rx)
 }
 
-/// A template on a block that is still being verified is validated once that block is the chain
-/// tip, because the state rejects a proposal that isn't on its tip. On an empty mempool, the first
-/// full template on the block can have the same long poll ID, so a long polling miner keeps
-/// working on the early template, and submits it when it solves it.
+/// A template on a block that `latest_chain_tip` doesn't report yet is validated once it does,
+/// because the state rejects a proposal that isn't on its tip. On an empty mempool, the next
+/// template on the block can have the same long poll ID, so a long polling miner keeps working on
+/// the first template, and submits it when it solves it.
 #[tokio::test(start_paused = true)]
-async fn template_on_a_block_being_verified_is_validated_once_the_block_is_the_tip() {
+async fn template_on_a_block_the_chain_tip_doesnt_report_yet_is_validated_once_it_does() {
     let _init_guard = zebra_test::init();
 
-    let early_template = template();
-    let mut full_template = early_template.clone();
-    full_template.cur_time = DateTime32::from(early_template.cur_time.timestamp() + 1);
+    let first_template = template();
+    let mut next_template = first_template.clone();
+    next_template.cur_time = DateTime32::from(first_template.cur_time.timestamp() + 1);
 
     // The chain tip is the parent of the block that the templates are on.
     let (chain_tip, chain_tip_sender) = chain_tip_at(block::Hash([0x01; 32]));
@@ -647,15 +647,15 @@ async fn template_on_a_block_being_verified_is_validated_once_the_block_is_the_t
         chain_tip,
     ));
 
-    cache.publish(early_template.clone());
+    cache.publish(first_template.clone());
 
     // The clock is paused, and only moves when every task is waiting. So the validator has taken
-    // the early template when this sleep ends.
+    // the first template when this sleep ends.
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // The block is committed, and then the updater publishes a full template on it.
-    chain_tip_sender.send_best_tip_hash(early_template.previous_block_hash);
-    cache.publish(full_template.clone());
+    // The chain tip reports the block, and then the updater publishes the next template on it.
+    chain_tip_sender.send_best_tip_hash(first_template.previous_block_hash);
+    cache.publish(next_template.clone());
 
     let mut validated_times = Vec::new();
     for _ in 0..2 {
@@ -669,20 +669,20 @@ async fn template_on_a_block_being_verified_is_validated_once_the_block_is_the_t
 
     assert_eq!(
         validated_times,
-        [early_template.cur_time, full_template.cur_time]
+        [first_template.cur_time, next_template.cur_time]
             .map(chrono::DateTime::<chrono::Utc>::from),
-        "the early template is validated first, and then the full template",
+        "the first template is validated first, and then the next one",
     );
 }
 
-/// A template on another block ends the wait for the chain tip, so a template on a block that is
-/// rejected while it is being verified doesn't hold up the chain tip's template.
+/// A template on another block ends the wait for the chain tip, so a template on a block that
+/// doesn't become the chain tip doesn't hold up the chain tip's template.
 #[tokio::test(start_paused = true)]
 async fn template_on_another_block_ends_the_wait_for_the_chain_tip() {
     let _init_guard = zebra_test::init();
 
-    let rejected_block_template = template();
-    let mut tip_template = rejected_block_template.clone();
+    let other_block_template = template();
+    let mut tip_template = other_block_template.clone();
     tip_template.previous_block_hash = block::Hash([0x01; 32]);
 
     let (chain_tip, _chain_tip_sender) = chain_tip_at(tip_template.previous_block_hash);
@@ -696,12 +696,12 @@ async fn template_on_another_block_ends_the_wait_for_the_chain_tip() {
         chain_tip,
     ));
 
-    cache.publish(rejected_block_template);
+    cache.publish(other_block_template);
 
     // The clock is paused, so the validator is waiting for the block when this sleep ends.
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // The block is rejected, so the updater publishes a template on the chain tip again.
+    // The block doesn't become the chain tip, and the updater publishes a template on the tip.
     cache.publish(tip_template.clone());
 
     // The block is never the chain tip, so the proposal on the tip only reaches the verifier if
@@ -715,5 +715,73 @@ async fn template_on_another_block_ends_the_wait_for_the_chain_tip() {
     assert_eq!(
         proposal.header.previous_block_hash,
         tip_template.previous_block_hash
+    );
+}
+
+/// A template on a block that the state was still verifying is kept while the chain tip is the
+/// block's parent, dropped when the chain tip is another block, and published once the chain tip
+/// is the block, unless the cache already has a template on the block.
+#[test]
+fn early_template_is_kept_dropped_or_published_by_the_chain_tip() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let template = template();
+    let block_hash = template.previous_block_hash;
+    let parent_hash = block::Hash([0x01; 32]);
+    let other_block_hash = block::Hash([0x02; 32]);
+    let early_template = || {
+        Some(EarlyTemplate {
+            parent_hash: Some(parent_hash),
+            template: template.clone(),
+        })
+    };
+    let cached_time = |cache: &TemplateCache| {
+        cache
+            .template_for_tip(block_hash, &network, template.max_time)
+            .map(|template| template.cur_time)
+    };
+
+    let cache = TemplateCache::default();
+    let mut kept = early_template();
+    publish_early_template(&mut kept, Some(parent_hash), &cache);
+    assert!(
+        kept.is_some(),
+        "the template is kept while its block can still be committed"
+    );
+    assert!(cache.is_empty(), "the template isn't published");
+
+    publish_early_template(&mut kept, Some(other_block_hash), &cache);
+    assert!(
+        kept.is_none(),
+        "the template is dropped when another block is the chain tip"
+    );
+    assert!(cache.is_empty(), "the template isn't published");
+
+    let mut kept = early_template();
+    publish_early_template(&mut kept, Some(block_hash), &cache);
+    assert!(kept.is_none(), "a published template isn't kept");
+    assert_eq!(
+        cached_time(&cache),
+        Some(template.cur_time),
+        "the template is published once its block is the chain tip",
+    );
+
+    // A template with mempool transactions on the block can be built before this task sees the
+    // block become the chain tip.
+    let mut full_template = template.clone();
+    full_template.cur_time = DateTime32::from(template.cur_time.timestamp() + 1);
+    cache.publish(full_template.clone());
+
+    let mut kept = early_template();
+    publish_early_template(&mut kept, Some(block_hash), &cache);
+    assert!(
+        kept.is_none(),
+        "the template isn't kept once its block is the chain tip"
+    );
+    assert_eq!(
+        cached_time(&cache),
+        Some(full_template.cur_time),
+        "the template doesn't replace a template the cache already has on the block",
     );
 }

@@ -9,7 +9,14 @@
 //! The precomputed template can be a few seconds behind the mempool, which costs the miner the fees
 //! of the transactions that arrived in the meantime, until the next refresh. But it is never behind
 //! the chain: the RPC ignores a template whose previous block hash isn't the current tip, and
-//! [`run()`] publishes a coinbase-only template for a new tip as soon as it sees one.
+//! [`run()`] publishes a coinbase-only template for a new tip as soon as it sees one. If the state
+//! is already verifying a block on top of that tip, the template on that block is built first.
+//!
+//! When a block from a peer has a valid proof of work, the state publishes early mining work on it
+//! while it verifies the block's transactions. [`run()`] builds the coinbase-only template on that
+//! block straight away, but only publishes it once the block is the chain tip. So miners never work
+//! on a block that Zebra hasn't committed, and they get work on a new block from a peer as soon as
+//! it is committed, without waiting for a template build.
 
 use std::{sync::Arc, time::Duration};
 
@@ -179,12 +186,7 @@ impl TemplateCache {
 
     /// Publishes `template` as the precomputed template.
     pub(crate) fn publish(&self, template: BlockTemplateResponse) {
-        self.replace(Arc::new(template));
-    }
-
-    /// Publishes `template` as the precomputed template, and returns the template it replaces.
-    fn replace(&self, template: Arc<BlockTemplateResponse>) -> Option<Arc<BlockTemplateResponse>> {
-        self.0.send_replace(Some(template))
+        self.0.send_replace(Some(Arc::new(template)));
     }
 
     /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
@@ -241,6 +243,12 @@ impl TemplateCache {
 /// [`MEMPOOL_LONG_POLL_INTERVAL`] seconds, so it picks up new mempool transactions and a recent
 /// `cur_time`.
 ///
+/// While the state verifies a block with a valid proof of work on top of the chain tip, builds the
+/// coinbase-only template on that block from the state's early mining work, and keeps it without
+/// publishing it. Publishes it once the block is the chain tip, so the new tip's first template
+/// doesn't wait for a build. Keeps one such template, and drops it when the chain tip changes to
+/// another block, or the state has early work on another block.
+///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
@@ -265,6 +273,14 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
+
+    // The coinbase-only template on a block that the state was still verifying, which is
+    // published once that block is the chain tip.
+    let mut early_template: Option<EarlyTemplate> = None;
+
+    // The chain tip, and when its template is due for a refresh, after the state withdrew early
+    // work on a block on that tip. Withdrawals of early work on more blocks don't postpone it.
+    let mut withdrawn_refresh: Option<(block::Hash, Instant)> = None;
 
     // Subscribing tells the state to compute early mining work on blocks it is still verifying.
     // Templates are only precomputed once this succeeds, so it is retried.
@@ -308,14 +324,38 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         latest_chain_tip.mark_best_tip_seen();
         candidate_changes.mark_seen();
 
-        // A block with a valid proof of work that is still being verified is the newest block
-        // miners can build on. Publish a coinbase-only template on top of it, then wait until it
-        // is committed, which makes it the chain tip, or its work is withdrawn.
-        if let Some(candidate) = mining_candidate(read_state.clone()).await {
-            // The template that the candidate's template replaces.
-            let mut replaced_template = None;
+        // A template on a block that was still being verified is published as soon as this task
+        // sees that block become the chain tip.
+        let tip_hash = latest_chain_tip.best_tip_hash();
+        publish_early_template(&mut early_template, tip_hash, &cache);
 
-            if !cache.holds_tip(candidate.tip_hash) {
+        // A block with a valid proof of work that is still being verified is the next block
+        // miners are likely to build on. Build a coinbase-only template on top of it, without
+        // publishing it, then wait until the block is committed, which makes it the chain tip, or
+        // its work is withdrawn.
+        if let Some(candidate) = mining_candidate(read_state.clone()).await {
+            let is_built = early_template
+                .as_ref()
+                .is_some_and(|early| early.template.previous_block_hash == candidate.tip_hash);
+
+            if !is_built {
+                // The state can commit the kept template's block during the read, and then have
+                // early work on a child of that block when it answers, so publish the template
+                // before replacing it.
+                publish_early_template(
+                    &mut early_template,
+                    latest_chain_tip.best_tip_hash(),
+                    &cache,
+                );
+
+                // The state has early work on one block at a time, so work on another block
+                // replaces the kept template.
+                early_template = None;
+
+                // The state updates the chain tip before it computes early work on a child of the
+                // tip, so the chain tip is now the block's parent, or a newer block.
+                let parent_hash = latest_chain_tip.best_tip_hash();
+
                 if let Ok(height) = candidate.tip_height.next() {
                     store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
                 }
@@ -330,7 +370,12 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 )
                 .await
                 {
-                    Ok(Some(template)) => replaced_template = cache.replace(Arc::new(template)),
+                    Ok(Some(template)) => {
+                        early_template = Some(EarlyTemplate {
+                            parent_hash,
+                            template,
+                        })
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         tracing::debug!(?error, "failed to build a template for a mining candidate")
@@ -349,26 +394,27 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
 
             // The state withdraws a candidate's work when the block is rejected, and when it
-            // takes too long to verify. A waiting `getblocktemplate` request is only woken by a
-            // template, and building one for the chain tip can take a shielded coinbase proof.
-            // So if the replaced template is the tip's, publish it again straight away. The
-            // state updates the chain tip before it withdraws the work of a committed block, so
-            // this only goes back to the tip when the candidate wasn't committed.
-            let extends_tip = |template: &Arc<BlockTemplateResponse>| {
-                latest_chain_tip.best_tip_hash() == Some(template.previous_block_hash)
-            };
-            if let Some(tip_template) = replaced_template.filter(extends_tip) {
-                // Work on another candidate is published at the start of the loop instead.
-                if mining_candidate(read_state.clone()).await.is_some() {
-                    continue;
-                }
+            // takes too long to verify. A block that took too long can still be committed, and
+            // its template is published straight away if this task is waiting then. So if miners
+            // have a template on the chain tip, it isn't refreshed until it is due: a refresh can
+            // take a shielded coinbase proof. If they have none, because the state was already
+            // verifying the block when this task saw the chain tip change, the tip's template is
+            // built straight away. The state updates the chain tip before it withdraws the work of
+            // a committed block.
+            let is_withdrawn = early_template.is_some()
+                && latest_chain_tip.best_tip_hash() == tip_hash
+                && tip_hash.is_some_and(|tip_hash| cache.holds_tip(tip_hash))
+                && mining_candidate(read_state.clone()).await.is_none();
+            if is_withdrawn {
+                // The refresh is due a fixed time after the first withdrawal on this chain tip, so
+                // early work on more blocks that the state withdraws can't keep postponing it. A
+                // later withdrawal waits for less time, or not at all.
+                let refresh_due = match withdrawn_refresh {
+                    Some((hash, due)) if Some(hash) == tip_hash => due,
+                    _ => Instant::now() + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+                };
+                withdrawn_refresh = tip_hash.map(|tip_hash| (tip_hash, refresh_due));
 
-                let candidate_template = cache.replace(tip_template);
-
-                // A block that took too long to verify can still be committed. Its template is
-                // kept until the tip's template is due for a refresh, so a late commit gets work
-                // straight away. Refreshing the tip's template sooner could keep this task busy
-                // with a coinbase proof when the block is committed.
                 tokio::select! {
                     biased;
                     tip_changed = tip_change.best_tip_changed() => {
@@ -377,11 +423,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                         }
                     }
                     _ = candidate_changes.published() => {}
-                    _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
-                }
-
-                if let Some(candidate_template) = candidate_template.filter(extends_tip) {
-                    cache.replace(candidate_template);
+                    _ = sleep_until(refresh_due) => {}
                 }
             }
 
@@ -392,6 +434,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         // miners extend the new tip instead of wasting work on a shorter chain while we select
         // mempool transactions for it.
         if let Some((tip_height, tip_hash)) = latest_chain_tip.best_tip_height_and_hash() {
+            // The state stops reporting early work on a block when it commits the block, so the
+            // block of the kept template can have become the chain tip since it was checked above.
+            publish_early_template(&mut early_template, Some(tip_hash), &cache);
+
             if !cache.holds_tip(tip_hash) {
                 if let Ok(height) = tip_height.next() {
                     store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
@@ -417,6 +463,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 }
             }
         }
+
+        // This build is the refresh that withdrawn early work waits for.
+        withdrawn_refresh = None;
 
         // Only wait for mempool changes that this build's mempool snapshot can't include.
         mempool_changes = mempool_changes.resubscribe();
@@ -482,8 +531,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         };
 
         if !is_built {
-            // Wait before retrying the build, but not before publishing work on a new chain tip
-            // or mining candidate.
+            // Wait before retrying the build, but not past a new chain tip, or early work on a
+            // block, whose template is built straight away.
             let mut tip_change = latest_chain_tip.clone();
             tokio::select! {
                 biased;
@@ -537,6 +586,39 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     }
 }
 
+/// A coinbase-only template on a block that the state was still verifying when it was built.
+struct EarlyTemplate {
+    /// The chain tip after the state's early work was read, which is the parent of the template's
+    /// block, unless the chain tip has already moved on.
+    parent_hash: Option<block::Hash>,
+
+    /// The template on the block.
+    template: BlockTemplateResponse,
+}
+
+/// Publishes `early_template` to `cache` if its block is the chain tip `tip_hash`, unless `cache`
+/// already has a template on that block. Keeps the template while `tip_hash` is still the block's
+/// parent, because the block can still be committed, and drops it otherwise.
+fn publish_early_template(
+    early_template: &mut Option<EarlyTemplate>,
+    tip_hash: Option<block::Hash>,
+    cache: &TemplateCache,
+) {
+    let Some(early) = early_template.take() else {
+        return;
+    };
+
+    if tip_hash == Some(early.template.previous_block_hash) {
+        // A template built from the state's early work on a block is the coinbase-only template
+        // that a build on the committed block would publish, apart from its current time.
+        if !cache.holds_tip(early.template.previous_block_hash) {
+            cache.publish(early.template);
+        }
+    } else if tip_hash == early.parent_hash {
+        *early_template = Some(early);
+    }
+}
+
 /// Waits until the mempool has verified a new transaction, and it is at least `not_before`.
 ///
 /// Never returns if the mempool has shut down, so it can be used in a `select!`.
@@ -566,10 +648,9 @@ async fn verified_transaction_added(
 /// its proof of work before committing it, without decoding its transactions. A template that is
 /// published during a validation waits for it, and then only the latest template is validated.
 ///
-/// The state only accepts a proposal on the chain tip, so a template on a block that is still
-/// being verified is validated once `latest_chain_tip` reports that block. Miners can keep working
-/// on that template after the block is committed: on an empty mempool, the first template on the
-/// committed block can have the same long poll ID, so a long polling miner isn't sent it.
+/// The state only accepts a proposal on its chain tip, and it commits a block before it updates
+/// `latest_chain_tip`. So a template is validated once `latest_chain_tip` reports the block the
+/// template is on, which it normally does by the time [`run()`] publishes the template.
 ///
 /// A validation, and its wait for the chain tip, is dropped when a template is published on
 /// another block, because miners no longer work on the template it validates, and after
@@ -624,8 +705,7 @@ pub(crate) async fn validate_templates<BlockVerifierRouter, Tip>(
             },
         };
 
-        // This is expected when the chain tip changes during the validation, or when the state
-        // withdraws the work on a block that is still being verified.
+        // This is expected when the chain tip changes during the validation.
         if let Err(error) = result {
             tracing::debug!(
                 ?error,
@@ -686,7 +766,7 @@ where
 
 /// Returns the state information for mining on top of a block with a valid proof of work that
 /// is still being verified, if there is one.
-pub(crate) async fn mining_candidate<ReadStateService>(
+async fn mining_candidate<ReadStateService>(
     read_state: ReadStateService,
 ) -> Option<GetBlockTemplateChainInfo>
 where

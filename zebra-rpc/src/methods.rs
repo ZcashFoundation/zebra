@@ -1248,8 +1248,7 @@ where
         }
     }
 
-    /// Returns the precomputed template, if it extends the tip the state has committed, or a
-    /// block with a valid proof of work that the state is still verifying on top of that tip.
+    /// Returns the precomputed template, if it extends the tip the state has committed.
     ///
     /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
     /// tip change, re-reading the tip every time it publishes.
@@ -1267,21 +1266,6 @@ where
 
         tokio::time::timeout(timeout, async move {
             loop {
-                // A block with a valid proof of work that is still being verified is newer than
-                // the tip, so work on it comes first. The state only returns it while its parent
-                // is the tip, so it is read before the tip: if it has just been committed, the
-                // tip read below sees it, and the same work is served as work on the tip.
-                if let Some(candidate) = precompute::mining_candidate(self.read_state.clone()).await
-                {
-                    if let Some(template) = cache.template_for_tip(
-                        candidate.tip_hash,
-                        &self.network,
-                        self.template_clock_now(),
-                    ) {
-                        return Some(template);
-                    }
-                }
-
                 // The state publishes committed blocks before updating `latest_chain_tip`.
                 // Read its tip on every cache publication, including after a wait, so neither
                 // a lagging tip channel nor a tip snapshot from before the wait admits stale work.
