@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: breaking
+body: '`mempool::Request` and `mempool::Response` are not `#[non_exhaustive]`, so exhaustive matches on them must handle the new `VerifiedTransactionsForBlock` variants.'
+time: 2026-10-23T09:18:47.751805834+02:00

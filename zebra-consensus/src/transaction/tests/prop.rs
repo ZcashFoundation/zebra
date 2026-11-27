@@ -260,16 +260,19 @@ proptest! {
         prop_assert_eq!(result.unwrap().tx_id, transaction_id);
     }
 
-    /// Test that any transaction accepted by the mempool verifier is also accepted by the
-    /// block verifier, given the same transaction, height and spent UTXOs.
+    /// Test that a transaction the mempool verifier accepts, for a height in the same verification
+    /// rules epoch as a later or equal block height, is accepted by the block transaction verifier
+    /// at that height, with the same unmined ID, miner fee and signature operation count, whenever
+    /// it passes the block context rules there. The block verifier reuses the mempool's
+    /// verification of a transaction like this in a block on the mempool's tip, and takes its fee
+    /// and signature operations from the mempool, so a transaction that breaks this would let the
+    /// block verifier accept blocks that nodes which verify the transaction in full reject.
     ///
-    /// # Correctness
-    ///
-    /// This is the invariant that keeps Zebra's block templates mineable. If the mempool
-    /// accepts a transaction that block verification would reject, that transaction is
-    /// selected into a block template, and every block mined from that template is refused
-    /// by the same node that produced it. An attacker who can craft such a transaction
-    /// stalls block production for every mining pool running Zebra.
+    /// The transactions are transparent transfers with standard P2SH inputs, some with signature
+    /// operations in their redeem scripts or outputs, against a mock state that has every spent
+    /// output and accepts every nullifier and anchor. `block::tests::mempool_reuse` covers mempool
+    /// verifications for later heights than the block's, and a shielded transaction with real
+    /// proofs.
     ///
     /// [`BlockTxVerifier`](transaction::BlockTxVerifier) and
     /// [`MempoolTxVerifier`](transaction::MempoolTxVerifier) are separate services, so
@@ -281,11 +284,12 @@ proptest! {
     /// mempool transaction can have.
     #[test]
     fn mempool_acceptance_implies_block_acceptance(
-        (network, block_height) in sapling_onwards_strategy(),
+        (network, block_height, mempool_height) in same_epoch_heights_strategy(),
         next_median_time_past in datetime_u32(),
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
         transaction_version in 4_u8..=5,
         lock_time in lock_time_strategy(),
+        sigops in mock_sigops_strategy(),
     ) {
         let _init_guard = zebra_test::init();
 
@@ -294,6 +298,7 @@ proptest! {
         prop_assume!(next_median_time_past < DateTime::<Utc>::MAX_UTC);
         let block_time = next_median_time_past + Duration::seconds(1);
 
+        // It expires at the block's height, so it hasn't expired at the mempool's height either.
         let (transaction, known_utxos) = mock_funded_transparent_transaction(
             &network,
             block_height,
@@ -301,39 +306,118 @@ proptest! {
             transaction_version,
             lock_time,
         );
+        let (transaction, known_utxos) = sigops.apply(transaction, known_utxos);
 
         let mempool_result = validate_mempool(
             transaction.clone(),
-            block_height,
+            mempool_height,
             next_median_time_past,
             known_utxos.clone(),
             network.clone(),
         );
 
         // Transactions the mempool rejects say nothing about block verification: the mempool
-        // applies policy rules (ZIP-317, input standardness) that blocks do not.
-        if let Ok(mempool_response) = mempool_result {
-            let block_result = validate_with_state(
-                transaction,
-                block_height,
-                block_time,
-                next_median_time_past,
-                known_utxos,
-                network,
-            );
+        // applies policy rules (ZIP-317, input standardness) that blocks do not. These cases are
+        // rejected, so a change that makes the mempool reject most transactions fails the test.
+        let Ok(mempool_response) = mempool_result else {
+            return Err(TestCaseError::reject("the mempool rejects the transaction"));
+        };
+        // The block verifier only reuses the mempool's verification of a transaction that passes
+        // the block context rules at the block.
+        let block = transaction::BlockContext {
+            height: block_height,
+            time: block_time,
+            network_upgrade: NetworkUpgrade::current(&network, block_height),
+        };
+        prop_assume!(
+            transaction::check_block_context_rules(&transaction, &block, &network).is_ok(),
+            "the block context rules reject the transaction at the block"
+        );
+        let verified = mempool_response.transaction;
 
-            prop_assert!(
-                block_result.is_ok(),
+        let block_result = validate_with_state(
+            transaction,
+            block_height,
+            block_time,
+            next_median_time_past,
+            known_utxos,
+            network,
+        );
+        let block_response = block_result.map_err(|error| {
+            TestCaseError::fail(format!(
                 "the mempool accepted a transaction that block verification rejected, \
-                 so it would make a block template unmineable: {}",
-                block_result.unwrap_err()
-            );
+                 so the block verifier would accept it from the mempool: {error}"
+            ))
+        })?;
 
-            prop_assert_eq!(
-                block_result.unwrap().tx_id.mined_id(),
-                mempool_response.transaction.transaction.id.mined_id()
+        prop_assert_eq!(block_response.tx_id, verified.transaction.id);
+        prop_assert_eq!(block_response.miner_fee, Some(verified.miner_fee));
+        prop_assert_eq!(block_response.sigops, verified.block_sigop_count());
+    }
+
+    /// Test that the block transaction verifier gives the same result for a transaction at the
+    /// first and last heights of a verification rules epoch, if the transaction passes the block
+    /// context rules at both.
+    ///
+    /// # Correctness
+    ///
+    /// The block verifier reuses the mempool's verification of a transaction in a block at any
+    /// height in the epoch that the mempool verified it in, and only checks
+    /// `check_block_context_rules` again at the block's height. So the rest of the transaction
+    /// verifier must give the same result at every height in an epoch. A rule that activates
+    /// inside an epoch activates after its first height and by its last height, so this fails if
+    /// such a rule is added outside `check_block_context_rules`, for the transactions this
+    /// generates. Such a rule belongs in `check_block_context_rules`, or its activation height
+    /// must start an epoch in `VerificationRulesEpoch`.
+    ///
+    /// The transactions are transparent transfers, so this can't see a rule that only changes how
+    /// shielded proofs or signatures are verified.
+    #[test]
+    fn block_verification_only_depends_on_the_height_through_the_block_context_rules(
+        (network, first, last) in epoch_heights_strategy(),
+        block_time in datetime_u32(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        sigops in mock_sigops_strategy(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        // It expires at the epoch's last height, so it hasn't expired at either height.
+        let (transaction, known_utxos) = mock_funded_transparent_transaction(
+            &network,
+            last,
+            relative_source_fund_heights,
+            transaction_version,
+            LockTime::unlocked(),
+        );
+        let (transaction, known_utxos) = sigops.apply(transaction, known_utxos);
+
+        let network_upgrade = NetworkUpgrade::current(&network, first);
+        for height in [first, last] {
+            let block = transaction::BlockContext {
+                height,
+                time: block_time,
+                network_upgrade,
+            };
+            prop_assert!(
+                transaction::check_block_context_rules(&transaction, &block, &network).is_ok(),
+                "the transaction passes the block context rules at {height:?}",
             );
         }
+
+        let verify_at = |height| {
+            validate_with_state(
+                transaction.clone(),
+                height,
+                block_time,
+                block_time,
+                known_utxos.clone(),
+                network.clone(),
+            )
+            .map(|response| (response.tx_id, response.miner_fee, response.sigops))
+            .map_err(|error| error.to_string())
+        };
+        prop_assert_eq!(verify_at(first), verify_at(last));
     }
 }
 
@@ -370,6 +454,138 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
         (start_height_value..=end_height_value)
             .prop_map(move |height_value| (network.clone(), block::Height(height_value)))
     })
+}
+
+/// Generates a network, a block height from the Sapling activation height onward, and a height at
+/// or below it in the same verification rules epoch, which the mempool verified the block's
+/// transaction for.
+///
+/// A quarter of the cases use the block's height. That is the usual case: the mempool verifies its
+/// transactions for the height after its tip, which is the height of a block on that tip.
+fn same_epoch_heights_strategy() -> impl Strategy<Value = (Network, block::Height, block::Height)> {
+    sapling_onwards_strategy().prop_flat_map(|(network, block_height)| {
+        let start = transaction::VerificationRulesEpoch::containing(&network, block_height).start();
+        prop_oneof![
+            1 => Just(block_height.0),
+            3 => start.0..=block_height.0,
+        ]
+        .prop_map(move |mempool_height| {
+            (network.clone(), block_height, block::Height(mempool_height))
+        })
+    })
+}
+
+/// Generates a network, and the first and last heights of one of its verification rules epochs
+/// from the Sapling activation height onward. The last epoch has no last height, so this uses a
+/// height far after its first height.
+fn epoch_heights_strategy() -> impl Strategy<Value = (Network, block::Height, block::Height)> {
+    any::<Network>()
+        .prop_flat_map(|network| {
+            let mut start = NetworkUpgrade::Sapling
+                .activation_height(&network)
+                .expect("Sapling has an activation height");
+            let mut starts = vec![start];
+            while let Some(last) =
+                transaction::VerificationRulesEpoch::containing(&network, start).last()
+            {
+                start = last
+                    .next()
+                    .expect("epochs end far below the maximum height");
+                starts.push(start);
+            }
+            (Just(network), proptest::sample::select(starts))
+        })
+        .prop_map(|(network, start)| {
+            let epoch = transaction::VerificationRulesEpoch::containing(&network, start);
+            let last = epoch.last().unwrap_or_else(|| {
+                block::Height(
+                    epoch
+                        .start()
+                        .0
+                        .saturating_add(1_000_000)
+                        .min(block::Height::MAX_EXPIRY_HEIGHT.0),
+                )
+            });
+            (network, epoch.start(), last)
+        })
+}
+
+/// Signature operations added to a mock transaction's transparent transfers.
+#[derive(Clone, Copy, Debug)]
+struct MockSigops {
+    /// The number of `OP_CHECKSIG`s after `OP_FALSE` in each output script.
+    output: u8,
+    /// Whether each input's redeem script is `OP_0 OP_IF OP_CHECKSIG OP_ENDIF OP_1`, which has one
+    /// signature operation that never runs, instead of `OP_TRUE`.
+    redeem: bool,
+}
+
+/// Generates the signature operations to add to a mock transaction.
+fn mock_sigops_strategy() -> impl Strategy<Value = MockSigops> {
+    (0_u8..=3, any::<bool>()).prop_map(|(output, redeem)| MockSigops { output, redeem })
+}
+
+impl MockSigops {
+    /// Returns `transaction`, a mock transaction with transparent transfers, and its spent
+    /// outputs `known_utxos`, with these signature operations.
+    ///
+    /// The output scripts of the mock transfers are `OP_FALSE`, and their inputs push the redeem
+    /// script `OP_TRUE` of the P2SH outputs they spend.
+    fn apply(
+        self,
+        transaction: Transaction,
+        mut known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> (
+        Transaction,
+        HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
+        let mut output_script = vec![0x00];
+        output_script.resize(1 + usize::from(self.output), 0xac);
+        let output_script = transparent::Script::new(&output_script);
+        let outputs = transaction
+            .outputs()
+            .into_iter()
+            .map(|mut output| {
+                output.lock_script = output_script.clone();
+                output
+            })
+            .collect();
+        let mut transaction = transaction.with_transparent_outputs(outputs);
+
+        if self.redeem {
+            // An unlock script that pushes the redeem script, and the P2SH output script with the
+            // redeem script's hash.
+            let unlock_script = transparent::Script::new(&[0x05, 0x00, 0x63, 0xac, 0x68, 0x51]);
+            let mut lock_script = vec![0xa9, 0x14];
+            lock_script.extend(
+                hex::decode("2c93496b19af9ee138c38a1ac362a8de4a91e356")
+                    .expect("the redeem script hash is valid hex"),
+            );
+            lock_script.push(0x87);
+            let lock_script = transparent::Script::new(&lock_script);
+
+            let inputs = transaction
+                .inputs()
+                .into_iter()
+                .map(|mut input| {
+                    if let transparent::Input::PrevOut {
+                        unlock_script: script,
+                        ..
+                    } = &mut input
+                    {
+                        *script = unlock_script.clone();
+                    }
+                    input
+                })
+                .collect();
+            transaction = transaction.with_transparent_inputs(inputs);
+            for spent in known_utxos.values_mut() {
+                spent.utxo.output.lock_script = lock_script.clone();
+            }
+        }
+
+        (transaction, known_utxos)
+    }
 }
 
 /// Create a mock transaction that only transfers transparent amounts.

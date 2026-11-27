@@ -231,7 +231,8 @@ async fn solved_proposal_is_committed_without_validating_it_again() {
     );
     transaction_verifier.expect_no_requests().await;
 
-    // The validation result was used, so the same block is verified in full the next time.
+    // The validation result was used, so the same block is verified like any other block the
+    // next time.
     let verify = tokio::spawn(
         verifier
             .ready()
@@ -304,9 +305,9 @@ async fn proposals_with_one_header_keep_one_validation_result() {
 }
 
 /// A block that differs from a validated proposal in more than its nonce and solution is
-/// verified in full.
+/// verified like any other block.
 #[tokio::test]
-async fn changed_proposal_is_verified_in_full() {
+async fn changed_proposal_is_verified_like_any_other_block() {
     let _init_guard = zebra_test::init();
 
     let network = network();
@@ -351,9 +352,10 @@ async fn changed_proposal_is_verified_in_full() {
 }
 
 /// A block with the header and transaction IDs of a validated proposal, but different
-/// authorizing data, is verified in full. It doesn't use up the proposal's validation result.
+/// authorizing data, is verified like any other block. It doesn't use up the proposal's
+/// validation result.
 #[tokio::test]
-async fn proposal_with_changed_authorizing_data_is_verified_in_full() {
+async fn proposal_with_changed_authorizing_data_is_verified_like_any_other_block() {
     let _init_guard = zebra_test::init();
 
     let network = network();
@@ -561,10 +563,10 @@ async fn duplicate_solved_proposal_keeps_its_error() {
 }
 
 /// A proposal's validation result is used once, also while its commit is still in progress.
-/// Another request for the same block is verified in full, starting with the check that the
-/// block is new.
+/// Another request for the same block is verified like any other block, starting with the check
+/// that the block is new.
 #[tokio::test]
-async fn solved_proposal_is_verified_in_full_while_it_is_committed() {
+async fn solved_proposal_is_verified_like_any_other_block_while_it_is_committed() {
     let _init_guard = zebra_test::init();
 
     let network = network();

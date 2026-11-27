@@ -43,8 +43,11 @@ use zebra_state as zs;
 use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
+mod epoch;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use epoch::VerificationRulesEpoch;
 
 /// A timeout applied to UTXO lookup requests.
 ///
@@ -282,19 +285,7 @@ where
         let state = self.state.clone();
 
         let tx = req.transaction.clone();
-        // Reuse the caller's precomputed hash instead of calling `Transaction::unmined_id()`,
-        // which would re-serialize and re-hash the whole transaction.
-        // `Transaction::auth_digest()` returns `None` for exactly the versions that
-        // `UnminedTxId::from(&Transaction)` maps to `Legacy` (v1-v4), and `Some` for those it
-        // maps to `Witnessed` (v5 onward), so deriving the variant from it stays correct if a
-        // later transaction version is added.
-        let tx_id = match tx.auth_digest() {
-            None => UnminedTxId::Legacy(req.transaction_hash),
-            Some(auth_digest) => UnminedTxId::Witnessed(transaction::WtxId {
-                id: req.transaction_hash,
-                auth_digest,
-            }),
-        };
+        let tx_id = unmined_id(&tx, req.transaction_hash);
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
@@ -304,13 +295,21 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            // Do quick checks first
-            check_common_consensus_rules(tx.as_ref(), height, &network)?;
+            // Do quick checks first. The block verifier runs only these checks on a transaction
+            // that it takes from the mempool, and skips the rest of this verifier for it, so a
+            // rule that depends on the block's height or time must be checked in
+            // `check_block_context_rules`.
+            check_block_context_rules(
+                tx.as_ref(),
+                &BlockContext {
+                    height,
+                    time,
+                    network_upgrade: nu,
+                },
+                &network,
+            )?;
 
             tracing::trace!(?tx_id, "passed quick checks");
-
-            // Block transactions are checked against the block's own time directly.
-            check::lock_time_has_passed(&tx, height, time)?;
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
@@ -497,7 +496,7 @@ where
             }
 
             // Do quick checks first
-            check_common_consensus_rules(tx.as_ref(), height, &network)?;
+            check_common_consensus_rules(tx.as_ref(), height, nu, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -580,11 +579,9 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
-            // spends both chain and mempool UTXOs (mempool outputs are appended last by
-            // `mempool_spent_utxos()`), causing policy checks to pair the wrong input with
-            // the wrong spent output.
-            // https://github.com/ZcashFoundation/zebra/issues/10346
+            // `mempool_spent_utxos()` fills the spent outputs in input order, including outputs
+            // from the mempool, so each input is paired with its own spent output. Block
+            // verification reuses this result, so that pairing is a consensus rule here.
             let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
 
             let transaction = VerifiedUnminedTx::new(
@@ -778,6 +775,72 @@ where
     }
 }
 
+/// Returns the unmined ID of `tx`, whose mined ID is `hash`.
+pub(crate) fn unmined_id(tx: &Transaction, hash: transaction::Hash) -> UnminedTxId {
+    // Reuse the caller's precomputed hash instead of calling `Transaction::unmined_id()`,
+    // which would re-serialize and re-hash the whole transaction.
+    // `Transaction::auth_digest()` returns `None` for exactly the versions that
+    // `UnminedTxId::from(&Transaction)` maps to `Legacy` (v1-v4), and `Some` for those it
+    // maps to `Witnessed` (v5 onward), so deriving the variant from it stays correct if a
+    // later transaction version is added.
+    match tx.auth_digest() {
+        None => UnminedTxId::Legacy(hash),
+        Some(auth_digest) => UnminedTxId::Witnessed(transaction::WtxId {
+            id: hash,
+            auth_digest,
+        }),
+    }
+}
+
+/// A block that a transaction is verified in.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BlockContext {
+    /// The block's height.
+    pub(crate) height: block::Height,
+    /// The time in the block's header.
+    pub(crate) time: DateTime<Utc>,
+    /// The network upgrade at `height`, which callers have already looked up.
+    pub(crate) network_upgrade: NetworkUpgrade,
+}
+
+/// Checks the rules for `tx` that depend on `block`, the block it is in, without its scripts,
+/// proofs or signatures.
+///
+/// The block transaction verifier starts with these checks. The block verifier runs only these
+/// checks on a transaction that it takes from the mempool, and skips the rest of the block
+/// transaction verifier for it, because the mempool has verified that transaction in the same
+/// [`VerificationRulesEpoch`].
+///
+/// # Correctness
+///
+/// A rule that depends on the block's height or time, other than through its verification rules
+/// epoch, must be checked here, or the block verifier won't check it for transactions it takes
+/// from the mempool. A rule that activates inside a network upgrade and changes how scripts,
+/// proofs or signatures are verified must instead start an epoch in [`VerificationRulesEpoch`],
+/// so that the block verifier doesn't reuse verifications from before it activated.
+/// `block_verification_only_depends_on_the_height_through_the_block_context_rules` in
+/// `tests::prop` checks the rest of the block transaction verifier for the transactions it
+/// generates.
+pub(crate) fn check_block_context_rules(
+    tx: &Transaction,
+    block: &BlockContext,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    check_common_consensus_rules(tx, block.height, block.network_upgrade, network)?;
+    // Block transactions are checked against the block's own time directly.
+    check::lock_time_has_passed(tx, block.height, block.time)?;
+    // `dispatch_version_verification()` repeats this check for the transactions it verifies,
+    // because the mempool transaction verifier, which doesn't call this function, relies on it.
+    // The block verifier needs the check here too, for the transactions it takes from the mempool
+    // without verifying them. Both checks use the network upgrade that the caller already has.
+    match tx.tx_version() {
+        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, block.network_upgrade),
+        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, block.network_upgrade),
+        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, block.network_upgrade),
+        _ => Err(TransactionError::WrongVersion),
+    }
+}
+
 /// Applies every consensus rule that a transaction must satisfy in both block and mempool
 /// context.
 ///
@@ -786,9 +849,11 @@ where
 /// [`BlockTxVerifier`] and [`MempoolTxVerifier`] are separate services with no shared code
 /// path, so a rule added to only one of them silently makes the two disagree. When the
 /// mempool accepts a transaction that block verification would reject, that transaction
-/// reaches block templates but makes the resulting block unmineable, stalling block
-/// production for every pool running Zebra. See
-/// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+/// reaches block templates. The block verifier takes the mempool's verification of a
+/// transaction in a block on the mempool's tip instead of running [`BlockTxVerifier`], so
+/// Zebra would accept that block, while nodes that verify the transaction in full reject it.
+/// The rules in this function still run for that transaction, in `check_block_context_rules`.
+/// See <https://github.com/ZcashFoundation/zebra/issues/9301>.
 ///
 /// Any new rule that applies to a transaction regardless of where it is being verified
 /// belongs here, so that both verifiers pick it up. Rules that only apply to one context
@@ -800,9 +865,10 @@ where
 fn check_common_consensus_rules(
     tx: &Transaction,
     height: block::Height,
+    network_upgrade: NetworkUpgrade,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    check_structure_and_network_rules(tx, height, network)?;
+    check_structure_and_network_rules(tx, height, network_upgrade, network)?;
 
     if tx.is_coinbase() {
         check::coinbase_tx_no_prevout_joinsplit_spend(tx)?;
@@ -828,12 +894,16 @@ fn check_common_consensus_rules(
 fn check_structure_and_network_rules(
     tx: &Transaction,
     height: block::Height,
+    network_upgrade: NetworkUpgrade,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    // The network upgrade active at this height is used by several of the checks below;
-    // `NetworkUpgrade::current` rebuilds the activation-height map on each call, so compute it
-    // once and share it rather than recomputing it per check.
-    let network_upgrade = NetworkUpgrade::current(network, height);
+    // Callers pass the network upgrade at `height`, which they already have, because
+    // `NetworkUpgrade::current` rebuilds the activation height map on each call.
+    debug_assert_eq!(
+        network_upgrade,
+        NetworkUpgrade::current(network, height),
+        "callers pass the network upgrade at the transaction's verification height"
+    );
 
     check::has_inputs_and_outputs(tx)?;
     check::has_enough_orchard_flags(tx)?;
@@ -950,6 +1020,10 @@ fn check_maturity_height(
 ///
 /// `nu` is the network upgrade active at the transaction's verification height,
 /// pre-computed by the caller using [`NetworkUpgrade::current`].
+///
+/// The version-specific functions check that `nu` supports the transaction's version. Block
+/// transactions have already passed the same check in `check_block_context_rules`, but mempool
+/// transactions haven't, so the check stays here for every caller.
 ///
 /// `tx_id` must be the unmined ID of `tx`: the shielded verifiers key their caches on it, so an
 /// ID that does not identify `tx` would let one transaction's bundle be answered from another's

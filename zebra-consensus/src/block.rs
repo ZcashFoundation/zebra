@@ -17,28 +17,31 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
-use tokio::sync::watch;
-use tower::{Service, ServiceExt};
+use tokio::sync::{oneshot, watch};
+use tower::{util::BoxCloneService, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
     transparent,
     work::equihash,
 };
+use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
+mod mempool_reuse;
 pub mod request;
+mod transactions;
 
 pub use request::Request;
+
+pub(crate) use mempool_reuse::Audits as ReuseAudits;
 
 #[cfg(test)]
 mod tests;
@@ -50,6 +53,12 @@ pub struct SemanticBlockVerifier<S, V> {
     network: Network,
     state_service: S,
     transaction_verifier: V,
+    mempool: Option<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    mempool_setup_rx:
+        Option<oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>>,
+    /// Verifies one transaction that each committed block took from the mempool again, in the
+    /// background. The default audits nothing.
+    reuse_audits: ReuseAudits,
     /// The block proposals that this verifier has validated, shared by all its requests.
     validated_proposals: Arc<watch::Sender<ValidatedProposals>>,
 }
@@ -58,8 +67,13 @@ pub struct SemanticBlockVerifier<S, V> {
 ///
 /// A miner that solves a validated proposal submits the same block with a nonce and an Equihash
 /// solution. That block only needs its proof of work checked: the rest of its validation is the
-/// proposal's.
-type ValidatedProposals = VecDeque<(Arc<block::Block>, Box<zs::ContextuallyVerifiedBlock>)>;
+/// proposal's. So each proposal also keeps the transaction that it took from the mempool, if it
+/// took any, to verify again in the background once a block that solves it is committed.
+type ValidatedProposals = VecDeque<(
+    Arc<block::Block>,
+    Box<zs::ContextuallyVerifiedBlock>,
+    Option<mempool_reuse::ReuseAudit>,
+)>;
 
 /// The number of validated proposals the verifier keeps.
 ///
@@ -80,22 +94,28 @@ fn header_solves_validated_proposal(
     validated_proposals
         .borrow()
         .iter()
-        .any(|(proposal, _)| is_solved_proposal_header(proposal, block))
+        .any(|(proposal, _, _)| is_solved_proposal_header(proposal, block))
 }
 
-/// Removes and returns the validation result of the proposal that `block` solves, if there is one.
+/// Removes and returns the validation result of the proposal that `block` solves, and the
+/// proposal's audit of a transaction that it took from the mempool, if there is one.
 fn take_solved_proposal(
     validated_proposals: &watch::Sender<ValidatedProposals>,
     block: &block::Block,
-) -> Option<Box<zs::ContextuallyVerifiedBlock>> {
+) -> Option<(
+    Box<zs::ContextuallyVerifiedBlock>,
+    Option<mempool_reuse::ReuseAudit>,
+)> {
     let mut solved = None;
 
     validated_proposals.send_if_modified(|proposals| {
         if let Some(index) = proposals
             .iter()
-            .position(|(proposal, _)| is_solved_proposal(proposal, block))
+            .position(|(proposal, _, _)| is_solved_proposal(proposal, block))
         {
-            solved = proposals.remove(index).map(|(_, contextual)| contextual);
+            solved = proposals
+                .remove(index)
+                .map(|(_, contextual, audit)| (contextual, audit));
         }
 
         // Nothing waits for changes to the proposals.
@@ -445,8 +465,43 @@ where
             network: network.clone(),
             state_service,
             transaction_verifier,
+            mempool: None,
+            mempool_setup_rx: None,
+            reuse_audits: ReuseAudits::default(),
             validated_proposals: Arc::new(watch::Sender::new(VecDeque::new())),
         }
+    }
+
+    /// Enables optional reuse once the mempool service finishes starting.
+    pub(crate) fn with_mempool(
+        mut self,
+        receiver: oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    ) -> Self {
+        self.mempool_setup_rx = Some(receiver);
+        self
+    }
+
+    /// Verifies one transaction that each committed block took from the mempool again, in the
+    /// background with `audits`, and counts whether the transaction verifier agrees with the
+    /// mempool's verification.
+    pub(crate) fn with_reuse_audits(mut self, audits: ReuseAudits) -> Self {
+        self.reuse_audits = audits;
+        self
+    }
+
+    /// Returns the mempool, if the mempool service has finished starting.
+    fn current_mempool(&mut self) -> Option<mempool_reuse::Mempool> {
+        if let Some(receiver) = self.mempool_setup_rx.as_mut() {
+            match receiver.try_recv() {
+                Ok(mempool) => {
+                    self.mempool = Some(mempool);
+                    self.mempool_setup_rx = None;
+                }
+                Err(oneshot::error::TryRecvError::Closed) => self.mempool_setup_rx = None,
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+        }
+        self.mempool.clone()
     }
 }
 
@@ -476,10 +531,12 @@ where
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
+        let mempool = self.current_mempool();
+        let reuse_audits = self.reuse_audits.clone();
         let validated_proposals = self.validated_proposals.clone();
 
         let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
         let block = request.block();
@@ -549,7 +606,7 @@ where
             } else {
                 take_solved_proposal(&validated_proposals, &block)
             };
-            if let Some(mut contextual) = solved_proposal {
+            if let Some((mut contextual, audit)) = solved_proposal {
                 check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
                     .map_err(VerifyBlockError::Time)?;
 
@@ -568,6 +625,9 @@ where
                     Ok(zs::Response::Committed(committed_hash)) => {
                         assert_eq!(committed_hash, hash, "state must commit correct hash");
                         record_phase("state_commit", &mut phase_start);
+                        // The block has the proposal's transactions, so it is audited like a
+                        // block that took them from the mempool itself.
+                        reuse_audits.send(audit.map(|audit| audit.for_solved_block(hash)));
                         Ok(hash)
                     }
 
@@ -579,8 +639,8 @@ where
 
             // This block has a validated proposal's header, but it didn't get the proposal's
             // validation result: its transactions aren't the proposal's, or a concurrent request
-            // for the same block took the result. So it is verified in full, like any other
-            // block, starting with the check that it skipped.
+            // for the same block took the result. So it is verified like any other block,
+            // starting with the check that it skipped.
             if header_solves_proposal {
                 check_block_is_new(&mut state_service, hash).await?;
             }
@@ -658,52 +718,28 @@ where
                 record_phase("block_checks", &mut phase_start);
             }
 
-            // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesUnordered::new();
+            let mut candidates =
+                mempool_reuse::lookup(mempool, &block, &transaction_hashes, hash).await;
+            let rules = mempool_reuse::ReuseRules::new(&network, height, block.header.time);
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
                 &transaction_hashes,
             ));
 
-            for (&transaction_hash, transaction) in
-                transaction_hashes.iter().zip(block.transactions.iter())
-            {
-                let rsp = transaction_verifier
-                    .ready()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::BlockRequest {
-                        transaction_hash,
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        height,
-                        time: block.header.time,
-                    });
-                async_checks.push(rsp);
+            let (sigops, block_miner_fees) = transactions::BlockTransactions {
+                transaction_verifier,
+                block: &block,
+                transaction_hashes: &transaction_hashes,
+                known_utxos: &known_utxos,
+                height,
+                candidates: &mut candidates,
+                rules: &rules,
             }
-            tracing::trace!(len = async_checks.len(), "built async tx checks");
-
-            // Get the transaction results back from the transaction verifier.
-
-            // Sum up some block totals from the transaction responses.
-            let mut sigops = 0;
-            let mut block_miner_fees = Ok(Amount::zero());
-
-            use futures::StreamExt;
-            while let Some(result) = async_checks.next().await {
-                tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
-                    .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
-
-                sigops += response.sigops;
-
-                // Coinbase transactions consume the miner fee,
-                // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee {
-                    block_miner_fees += miner_fee;
-                }
+            .verify()
+            .await?;
+            if record_phases {
+                candidates.record(block.transactions.len().saturating_sub(1));
             }
 
             // Check the summed block totals
@@ -740,6 +776,8 @@ where
                 record_phase("transaction_verification", &mut phase_start);
             }
 
+            let audit = candidates.audit(&block, &transaction_hashes, &rules);
+
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
@@ -774,10 +812,10 @@ where
                         // once a block has used it, so a later block with that header gets the
                         // known block check first.
                         validated_proposals.send_modify(|proposals| {
-                            proposals.retain(|(validated, _)| {
+                            proposals.retain(|(validated, _, _)| {
                                 !is_solved_proposal_header(validated, &proposal)
                             });
-                            proposals.push_front((proposal, contextual));
+                            proposals.push_front((proposal, contextual, audit));
                             proposals.truncate(MAX_VALIDATED_PROPOSALS);
                         });
 
@@ -797,6 +835,7 @@ where
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     record_phase("state_commit", &mut phase_start);
+                    reuse_audits.send(audit);
                     Ok(hash)
                 }
 

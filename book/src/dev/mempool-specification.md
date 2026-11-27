@@ -143,6 +143,8 @@ The mempool exposes a service interface with the following request types:
    - `FullTransactions`: Get all verified transactions with fee information
    - `RejectedTransactionIds`: Query rejected transaction IDs
    - `TransactionWithDepsByMinedId`: Get a transaction and its dependencies
+   - `VerifiedTransactionsForBlock`: Get the verified transactions with a block's mined hashes, if
+     the block's parent is the mempool's tip
 
 2. **Action Requests**:
    - `Queue`: Queue transactions or transaction IDs for download and verification
@@ -163,12 +165,32 @@ The mempool interacts with several other Zebra components:
 
 5. **RPC Services**: To provide transaction data for RPC methods.
 
+6. **Block Verifier**: To reuse the verification of a block's transactions that are in the
+   mempool, when the block's parent is the mempool's tip.
+
 ## Implementation Constraints
 
 1. **Correctness**:
    - All transactions in the mempool must be verified
-   - Transactions must be re-verified when the chain tip changes
+   - Transactions must be re-verified when the chain tip is reset: when the best chain switches to
+     another fork, when more than one block was added since the mempool last checked the tip, or
+     when the next block's height activates a network upgrade or the soft fork that temporarily
+     disables Orchard actions. A reset empties the mempool and its rejection lists, and queues the
+     transactions that were stored or being verified to be verified again. Any other new block
+     extends the tip without a reset: the mempool removes the transactions that the block mined,
+     the transactions that conflict with them, and expired transactions, and keeps its other
+     transactions without verifying them again. A transaction whose verification finishes after
+     the tip moved is verified again at the new tip before it is stored
    - Rejected transactions must be properly tracked to prevent DoS attacks
+   - The block verifier skips the transaction verifier for a block's transactions that are in the
+     mempool, when the block's parent is the mempool's tip. So the mempool must only store
+     transactions that the transaction verifier would accept in a block in the verification rules
+     epoch that the mempool verified them in, except for the rules that the block verifier checks
+     again for each block. The mempool keeps transactions that it verified at older tips only within
+     one network upgrade, because it resets when the next block would activate a network upgrade,
+     and the block verifier only reuses a transaction that the mempool verified in the block's
+     verification rules epoch: the network upgrade of the block's height, on the same side of the
+     activation of the soft fork that temporarily disables Orchard actions
 
 2. **Performance**:
    - Transaction processing should be asynchronous

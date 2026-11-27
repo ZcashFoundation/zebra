@@ -2,17 +2,21 @@
 //! succeeded.
 //!
 //! Zebra verifies a transaction's shielded proofs and signatures and its transparent input scripts
-//! when the transaction arrives over mempool gossip, and again when it arrives in a block. This
-//! service skips the second verification. The Halo2 Orchard and Ironwood verifiers
-//! ([`super::halo2`]) and the Sapling verifier ([`super::sapling`]) share it, and key their
-//! entries the same way. The transparent script verifier ([`crate::script`]) has its own cache and
-//! key.
+//! when the transaction arrives over mempool gossip. The block verifier reuses the mempool's
+//! verification of some of a block's transactions (see "Reuse of the mempool's verification"
+//! below), and sends the others to the transaction verifier. For those, this service skips the
+//! proofs, signatures and scripts that have already been verified for the same transaction, for
+//! example in the mempool. The Halo2 Orchard and Ironwood verifiers ([`super::halo2`]) and the
+//! Sapling verifier ([`super::sapling`]) share it, and key their entries the same way. The
+//! transparent script verifier ([`crate::script`]) has its own cache and key.
 //!
-//! # Why this is not the mempool bypass
+//! # Why this is not the removed mempool bypass
 //!
 //! Zebra once skipped whole-transaction verification for transactions already in the mempool, and
 //! removed it as a security fix (PR #10494). Transaction validity depends on height, block time
-//! and spent outputs, and that cache's key named none of them.
+//! and spent outputs, and that cache's key named none of them. The block verifier's reuse of the
+//! mempool's verification is narrower, and is described in "Reuse of the mempool's verification"
+//! below.
 //!
 //! This cache remembers successful bundle verification by transaction ID, sighash and shielded
 //! pool. A hit still runs the whole transaction verifier against the block's height, time and
@@ -25,6 +29,15 @@
 //! Only `Ok` results are cached. A batch error is not per-item evidence, because
 //! [`Fallback`](tower_fallback::Fallback) re-verifies failures singly, and it may not be a verdict
 //! at all — a shut-down batch worker reports the same way. Caching it would reject a valid block.
+//!
+//! # Reuse of the mempool's verification
+//!
+//! The block verifier skips the transaction verifier, and this cache, for a block transaction that
+//! the mempool has verified, but only when the mempool's tip is the block's parent, and the mempool
+//! verified the same authorizing data in the block's verification rules epoch. Unlike the removed
+//! bypass, it checks the rules that depend on the block's height and time again, and the state
+//! checks the transaction's spends. The block's other transactions go through the transaction
+//! verifier and this cache.
 
 use std::{
     collections::{HashSet, VecDeque},

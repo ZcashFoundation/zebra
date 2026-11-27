@@ -16,6 +16,8 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 ///   - `verifier`: `halo2_pre_nu6_2`, `halo2_nu6_2`, `halo2_nu6_3_onward`, or `groth16_sapling`.
 /// - `zebra.consensus.block.phase.duration_seconds`: `phase`, `block_checks`,
 ///   `transaction_verification`, or `state_commit`.
+/// - `zebra.consensus.block.mempool_reuse.audit`: `result`, `match`, `mismatch`, `inconclusive`,
+///   or `skipped`.
 pub const LABELS: &[(&str, &[&str])] = &[
     (
         "zebra.consensus.batch.duration_seconds",
@@ -27,6 +29,7 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("zebra.consensus.cache.evict", &["verifier"]),
     ("zebra.consensus.cache.size", &["verifier"]),
     ("zebra.consensus.block.phase.duration_seconds", &["phase"]),
+    ("zebra.consensus.block.mempool_reuse.audit", &["result"]),
 ];
 
 /// The counters of signatures and shielded bundles in batches that failed verification.
@@ -105,6 +108,54 @@ pub fn describe() {
          commit. The first two phases are recorded when they pass, even if a later phase rejects \
          the block. The state commit is recorded only for committed blocks, and includes any \
          wait for the parent block."
+    );
+
+    // Mempool reuse in the block verifier
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.hit",
+        Unit::Count,
+        "Transactions in fully verified blocks that the block verifier took from the mempool's \
+         verification, instead of verifying them. Recorded once the block's transactions pass \
+         verification, even if a later check or the commit rejects the block. Not recorded for \
+         block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.miss",
+        Unit::Count,
+        "Transactions other than coinbase transactions in fully verified blocks that the block \
+         verifier verified while it had a mempool: the mempool didn't have them or its tip wasn't \
+         the block's parent, it verified them for another verification rules epoch or with other \
+         authorizing data, or the lookup failed or timed out. Recorded once the block's \
+         transactions pass verification, even if a later check or the commit rejects the block. \
+         Not recorded for block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.timeout",
+        Unit::Count,
+        "Mempool lookups for fully verified blocks that the block verifier stopped waiting for, \
+         so it verified all the block's transactions. Recorded once the block's transactions pass \
+         verification, even if a later check or the commit rejects the block. Not recorded for \
+         block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.error",
+        Unit::Count,
+        "Mempool lookups for fully verified blocks that failed with a mempool service error, so \
+         the block verifier verified all the block's transactions. Recorded once the block's \
+         transactions pass verification, even if a later check or the commit rejects the block. \
+         Not recorded for block proposals."
+    );
+    describe_counter!(
+        "zebra.consensus.block.mempool_reuse.audit",
+        Unit::Count,
+        "Transactions in committed blocks that the block verifier took from the mempool's \
+         verification and then checked again in the background with the block transaction \
+         verifier, by result. A block that solves a validated block proposal is audited when it \
+         is committed, but block proposals aren't. The transaction verifier's caches can answer \
+         the proofs, signatures and scripts that the mempool already verified, so an audit mainly \
+         checks the spent outputs, the fee and signature operation count, and the rules that \
+         depend on the block. A mismatch is a bug: the mempool and block transaction verifiers \
+         disagree, so the node can accept a block that other nodes reject."
     );
 
     // Batch verifiers

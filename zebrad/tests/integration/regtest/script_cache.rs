@@ -107,7 +107,7 @@ async fn template(
 /// The node reuses the verdicts of successful proposal checks, including the checks of the
 /// templates it serves, for blocks that differ from them only in their nonce and solution.
 /// Templates use the current time or the parent's minimum time, so a time later than both makes
-/// the node verify this block's transactions. It stays well within the consensus time limits.
+/// the node verify this block. It stays well within the consensus time limits.
 fn retimed(block: &Block) -> Result<Block> {
     let mut block = block.clone();
     let later = block
@@ -121,6 +121,61 @@ fn retimed(block: &Block) -> Result<Block> {
     Ok(block)
 }
 
+/// The node's counts of the transactions in fully verified blocks that the block verifier took
+/// from the mempool's verification, or verified itself, of its mempool lookups that timed out or
+/// failed, and of its background audits of reused transactions that matched or didn't.
+#[cfg(feature = "prometheus")]
+#[derive(Debug)]
+struct MempoolReuseCounters {
+    hit: u64,
+    miss: u64,
+    timeout: u64,
+    error: u64,
+    audit_match: u64,
+    audit_mismatch: u64,
+}
+
+/// Sets `config`'s metrics endpoint to a free local port, and returns a listener that keeps the
+/// port reserved. Drop it just before starting the node, so the node can bind the port.
+#[cfg(feature = "prometheus")]
+fn reserve_metrics_endpoint(
+    config: &mut zebrad::config::ZebradConfig,
+) -> Result<std::net::TcpListener> {
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0")?;
+    config.metrics.endpoint_addr = Some(reservation.local_addr()?);
+    Ok(reservation)
+}
+
+/// Returns the node's mempool reuse counters, from its metrics endpoint at `endpoint`. A counter
+/// that the node hasn't recorded is zero.
+#[cfg(feature = "prometheus")]
+async fn mempool_reuse_counters(endpoint: std::net::SocketAddr) -> Result<MempoolReuseCounters> {
+    let body = reqwest::Client::builder()
+        .timeout(LAUNCH_DELAY)
+        .build()?
+        .get(format!("http://{endpoint}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    // The series names in the metric catalog, with their labels. Each series is a single line
+    // with the series name, its labels and the value.
+    let value = |series: &str| -> Result<u64> {
+        body.lines()
+            .find_map(|line| line.strip_prefix(series)?.strip_prefix(' '))
+            .map_or(Ok(0), |value| Ok(value.trim().parse()?))
+    };
+    Ok(MempoolReuseCounters {
+        hit: value("zebra_consensus_block_mempool_reuse_hit")?,
+        miss: value("zebra_consensus_block_mempool_reuse_miss")?,
+        timeout: value("zebra_consensus_block_mempool_reuse_timeout")?,
+        error: value("zebra_consensus_block_mempool_reuse_error")?,
+        audit_match: value(r#"zebra_consensus_block_mempool_reuse_audit{result="match"}"#)?,
+        audit_mismatch: value(r#"zebra_consensus_block_mempool_reuse_audit{result="mismatch"}"#)?,
+    })
+}
+
 /// Returns the hash of the best chain block at `height`.
 async fn best_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash> {
     Ok(client
@@ -132,14 +187,17 @@ async fn best_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash
 }
 
 /// Blocks containing transactions from the mempool are accepted and rejected exactly as they
-/// would be if the mempool had not already verified their transparent scripts.
+/// would be if the mempool had not already verified them.
 ///
 /// The transactions are admitted by the node's mempool, which remembers their successful script
-/// verifications, and the blocks are checked by its block verifier and state, never by reusing an
-/// earlier check of the same block. Covers:
+/// verifications, and whose verification the block verifier reuses for a block on its tip, which
+/// the node counts in its `zebra.consensus.block.mempool_reuse` metrics. The blocks are checked by
+/// the block verifier and state, never by reusing an earlier check of the same block. Covers:
 /// - authorizing data that differs from the admitted transaction, under the same transaction ID,
 /// - a block time before an admitted transaction's lock time,
-/// - acceptance of a block that mines the admitted transactions.
+/// - acceptance of a block that mines the admitted transactions,
+/// - the block verifier's reuse of the mempool's verification of the mined transactions, unless
+///   its mempool lookup times out or fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -154,8 +212,14 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
         let mut config = os_assigned_rpc_port_config(false, &network)?;
         config.mempool.debug_enable_at_height = Some(0);
         config.mining.miner_address = Some(op_true_address(&network).to_string().parse()?);
-        let mut child = testdir()?
-            .with_config(&mut config)?
+        #[cfg(feature = "prometheus")]
+        let metrics_reservation = reserve_metrics_endpoint(&mut config)?;
+        let dir = testdir()?.with_config(&mut config)?;
+        #[cfg(feature = "prometheus")]
+        let metrics_endpoint = metrics_reservation.local_addr()?;
+        #[cfg(feature = "prometheus")]
+        drop(metrics_reservation);
+        let mut child = dir
             .spawn_child(args!["start"])?
             .with_timeout(LAUNCH_DELAY)?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
@@ -213,10 +277,10 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
         mempool(&client, &admitted).await?;
         let block = template(&client, &network, tip_hash, &admitted).await?;
 
-        // The admitted transaction's ID still matches, but its authorizing data differs, so its
-        // script must be verified again rather than answered from the mempool's success, which
-        // would leave only the block commitment check to fail. Proposal checks never reuse earlier
-        // verdicts, so they can start from the template.
+        // The admitted transaction's ID still matches, but its authorizing data differs, so the
+        // transaction and its script must be verified again rather than answered from the
+        // mempool's success, which would leave only the block commitment check to fail. Proposal
+        // checks never reuse an earlier proposal check, so they can start from the template.
         let mut forged = block.clone();
         let position = forged
             .transactions
@@ -244,11 +308,45 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
 
         // A block on the same parent mines the admitted transactions. Proposal reuse ignores only
         // the nonce and solution, so a later time than the served template makes the node verify
-        // the block's transactions instead of reusing a template check.
+        // the block instead of reusing a template check.
         let mined = retimed(&block)?;
         assert!(mined.header.time > block.header.time);
         client.submit_block(mined.clone()).await?;
         assert_eq!(best_hash(&client, tip.0 + 1).await?, mined.hash());
+
+        // The block verifier counts both mined transactions. It only counts transactions in fully
+        // verified blocks with transactions other than the coinbase, and the generated blocks
+        // only have a coinbase, while the forged and early blocks are proposals. It takes both
+        // from the mempool, unless the mempool lookup timed out or failed, which it also counts.
+        // So a lookup that the node doesn't send, or that the mempool answers without the mined
+        // transactions, fails this test.
+        #[cfg(feature = "prometheus")]
+        {
+            let mut counters = mempool_reuse_counters(metrics_endpoint).await?;
+            assert_eq!(counters.hit + counters.miss, 2, "{counters:?}");
+            assert!(
+                counters.hit == 2 || counters.timeout + counters.error > 0,
+                "the block verifier verified mempool transactions that it could reuse: \
+                 {counters:?}"
+            );
+
+            // After the commit, the node verifies one of the reused transactions again in the
+            // background, and the transaction verifier agrees with the mempool's verification.
+            if counters.hit > 0 {
+                let deadline = std::time::Instant::now() + LAUNCH_DELAY;
+                while counters.audit_match + counters.audit_mismatch == 0
+                    && std::time::Instant::now() < deadline
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    counters = mempool_reuse_counters(metrics_endpoint).await?;
+                }
+                assert_eq!(
+                    (counters.audit_match, counters.audit_mismatch),
+                    (1, 0),
+                    "{counters:?}"
+                );
+            }
+        }
         mempool(&client, &[]).await?;
 
         child.kill(false)?;

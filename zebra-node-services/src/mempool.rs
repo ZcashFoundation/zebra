@@ -2,7 +2,11 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -47,6 +51,41 @@ pub enum Request {
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
+
+    /// Query verified candidates for a block by their mined hashes.
+    ///
+    /// Returns no candidates if the mempool is disabled, its last seen tip differs from
+    /// the parent, or the request exceeds the block transaction allocation limit.
+    /// Callers must check full [`UnminedTxId`]s, the verification rules epoch, and
+    /// block-specific consensus rules before reuse. Missing verification heights are not reusable.
+    ///
+    /// # Correctness
+    ///
+    /// The block verifier in `zebra-consensus` trusts the transactions in the response, apart from
+    /// the rules that it checks again for each block. It doesn't look up their spent outputs or
+    /// verify their scripts, proofs and signatures, and it adds their
+    /// [`miner_fee`](VerifiedUnminedTx::miner_fee) and signature operation counts to the block's
+    /// totals, which the block's miner fee and signature operation limit checks use.
+    ///
+    /// So a mempool service must only return transactions when its last seen tip is
+    /// `parent_hash`. For each transaction, it must return the [`VerifiedUnminedTx`] that the
+    /// mempool transaction verifier in `zebra-consensus` returned for it, with every field
+    /// unmodified, apart from [`VerifiedUnminedTx::time`] and [`VerifiedUnminedTx::height`], which
+    /// the mempool sets when it stores the transaction. The unmodified fields are the transaction,
+    /// its miner fee, its signature operation counts, its spent outputs, and the fields computed
+    /// from them. `height` must be the tip height that the transaction was verified at, one below
+    /// the height of the next block that the verifier checked it for. A response can leave out any
+    /// transaction, or be empty.
+    ///
+    /// A later change to a transaction's fee, such as a fee delta that prioritises it in block
+    /// templates, must be kept in a separate field, never in `miner_fee`, which must stay the fee
+    /// that the verifier computed.
+    VerifiedTransactionsForBlock {
+        /// Mined hashes of the candidate block's transactions.
+        transaction_hashes: Arc<[transaction::Hash]>,
+        /// Parent hash of the candidate block.
+        parent_hash: block::Hash,
+    },
 
     /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
     /// waiting until it becomes available if it is unknown.
@@ -144,6 +183,13 @@ pub enum Response {
     /// [`Request::TransactionsByMinedId`] requests, since the mempool does not allow
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
+
+    /// Verified candidates for [`Request::VerifiedTransactionsForBlock`], by mined hash.
+    ///
+    /// Contains only requested mined hashes. Each transaction is the mempool transaction verifier's
+    /// unmodified output, with the tip height that it was verified at. See the request's
+    /// correctness rules.
+    VerifiedTransactionsForBlock(HashMap<transaction::Hash, VerifiedUnminedTx>),
 
     /// Response to [`Request::AwaitOutput`] with the transparent output
     UnspentOutput(transparent::Output),

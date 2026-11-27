@@ -23,7 +23,11 @@ use std::{
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
@@ -36,7 +40,7 @@ use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
-    block::{Request, SemanticBlockVerifier, VerifyBlockError},
+    block::{Request, ReuseAudits, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
@@ -267,6 +271,8 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
+/// The `mempool` channel gives both verifiers the mempool service, which is created after them.
+/// The block verifier uses it to skip verifying transactions the mempool has already verified.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -277,6 +283,27 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
+///
+/// # Security
+///
+/// The block verifier trusts the `mempool` service's responses to
+/// [`mempool::Request::VerifiedTransactionsForBlock`]. For each transaction in a response that it
+/// reuses, it skips [`transaction::BlockTxVerifier`], which looks up the transaction's spent
+/// outputs and verifies its scripts, proofs and signatures. It adds the response's miner fee and
+/// signature operation counts for the transaction to the block's totals, which the block's miner
+/// fee and signature operation limit checks use.
+///
+/// So the service must only return transactions when the block's parent is its last seen tip, and
+/// only [`VerifiedUnminedTx`]s that the mempool transaction verifier from this function returned,
+/// with every field unmodified, apart from the time and [`height`] that the mempool sets when it
+/// stores a transaction. `height` must be the tip height that the transaction was verified at. A
+/// response can leave out any transaction, or be empty. A later change to a transaction's fee,
+/// such as a fee delta that prioritises it, must be kept in a separate field, because `miner_fee`
+/// must stay the fee that the verifier computed. See
+/// [`mempool::Request::VerifiedTransactionsForBlock`] for details.
+///
+/// [`VerifiedUnminedTx`]: zebra_chain::transaction::VerifiedUnminedTx
+/// [`height`]: zebra_chain::transaction::VerifiedUnminedTx::height
 #[instrument(skip(state_service, mempool))]
 pub async fn init<S, Mempool>(
     config: Config,
@@ -388,13 +415,39 @@ where
         .instrument(Span::current()),
     );
 
+    // Both the mempool transaction verifier and the block verifier use the mempool.
+    let (transaction_mempool_sender, transaction_mempool) = oneshot::channel();
+    let (block_mempool_sender, block_mempool) = oneshot::channel();
+    tokio::spawn(
+        async move {
+            // A caller without a mempool, such as `init_test`, drops the sender.
+            let Ok(mempool) = mempool.await else {
+                return;
+            };
+            if block_mempool_sender
+                .send(BoxCloneService::new(mempool.clone()))
+                .is_err()
+            {
+                tracing::warn!(
+                    "error setting up the block verifier with a handle to the mempool service"
+                );
+            }
+            if transaction_mempool_sender.send(mempool).is_err() {
+                tracing::warn!(
+                    "error setting up the transaction verifier with a handle to the mempool service"
+                );
+            }
+        }
+        .instrument(Span::current()),
+    );
+
     // transaction verification
 
     let block_transaction = transaction::BlockTxVerifier::new(network, state_service.clone());
     let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
 
     let mempool_transaction =
-        transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
+        transaction::MempoolTxVerifier::new(network, state_service.clone(), transaction_mempool);
     let mempool_transaction =
         Buffer::new(BoxService::new(mempool_transaction), VERIFIER_BUFFER_BOUND);
 
@@ -419,7 +472,9 @@ where
     );
 
     let block =
-        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone())
+            .with_mempool(block_mempool)
+            .with_reuse_audits(ReuseAudits::spawn(block_transaction.clone()));
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,

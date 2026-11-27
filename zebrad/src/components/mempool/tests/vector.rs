@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use tokio::{
@@ -19,7 +19,7 @@ use zebra_chain::{
         testnet::{ConfiguredActivationHeights, ParametersBuilder},
         Network, NetworkUpgrade,
     },
-    serialization::ZcashDeserializeInto,
+    serialization::{TrustedPreallocate, ZcashDeserializeInto},
     transaction::{Transaction, VerifiedUnminedTx},
     transparent::{self, OutPoint},
 };
@@ -397,6 +397,223 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
 
     Ok(())
+}
+
+/// An enabled Mainnet mempool, with the services from [`setup`] that it uses.
+struct EnabledMempool {
+    service: Mempool,
+    /// Kept so that the services the mempool uses live as long as it does.
+    _services: (
+        MockPeerSet,
+        StateService,
+        ChainTipChange,
+        MockTxVerifier,
+        RecentSyncLengths,
+        tokio::sync::broadcast::Receiver<MempoolChange>,
+    ),
+}
+
+impl EnabledMempool {
+    /// Returns an enabled Mainnet mempool, whose tip is the genesis block.
+    async fn new() -> Self {
+        let (
+            mut service,
+            peer_set,
+            state_service,
+            chain_tip_change,
+            tx_verifier,
+            mut recent_syncs,
+            mempool_transaction_receiver,
+        ) = setup(&Network::Mainnet, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        Self {
+            service,
+            _services: (
+                peer_set,
+                state_service,
+                chain_tip_change,
+                tx_verifier,
+                recent_syncs,
+                mempool_transaction_receiver,
+            ),
+        }
+    }
+
+    /// Stores the first transaction of Mainnet block 1, verified on the genesis tip, and returns
+    /// its mined ID.
+    fn insert_block_1_transaction(&mut self) -> zebra_chain::transaction::Hash {
+        let transaction = Network::Mainnet
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        self.service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        hash
+    }
+
+    /// Returns the best tip hash, which is the parent of the next block.
+    fn tip_hash(&self) -> block::Hash {
+        self.service.latest_chain_tip.best_tip_hash().unwrap()
+    }
+
+    /// Returns the mempool's answer to [`Request::VerifiedTransactionsForBlock`].
+    async fn verified_transactions_for_block(
+        &mut self,
+        transaction_hashes: Vec<zebra_chain::transaction::Hash>,
+        parent_hash: block::Hash,
+    ) -> HashMap<zebra_chain::transaction::Hash, VerifiedUnminedTx> {
+        let response = (&mut self.service)
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: transaction_hashes.into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        candidates
+    }
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_returns_requested_subset() {
+    timeout(Duration::from_secs(30), async {
+        let mut mempool = EnabledMempool::new().await;
+
+        let transactions: Vec<_> = Network::Mainnet
+            .unmined_transactions_in_blocks(1..=4)
+            .collect();
+        for (index, transaction) in transactions[..3].iter().enumerate() {
+            mempool
+                .service
+                .storage()
+                .insert(
+                    transaction.clone(),
+                    Vec::new(),
+                    (index == 0).then_some(Height(0)),
+                )
+                .unwrap();
+        }
+
+        let hashes: Vec<_> = transactions
+            .iter()
+            .map(|transaction| transaction.transaction.id.mined_id())
+            .collect();
+        // The answer has the entries that the test stored, unmodified apart from the time and
+        // height that the mempool sets when it stores a transaction.
+        let expected = [2, 0]
+            .into_iter()
+            .map(|index| {
+                let hash = hashes[index];
+                let stored = &mempool.service.storage().transactions()[&hash];
+                let inserted = VerifiedUnminedTx {
+                    time: stored.time,
+                    height: stored.height,
+                    ..transactions[index].clone()
+                };
+                (hash, inserted)
+            })
+            .collect();
+        let parent_hash = mempool.tip_hash();
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hashes[2], hashes[3], hashes[0]], parent_hash)
+            .await;
+
+        assert_eq!(candidates, expected);
+        assert_eq!(candidates[&hashes[2]].height, None);
+        assert_eq!(candidates[&hashes[0]].height, Some(Height(0)));
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_requires_last_seen_tip() {
+    timeout(Duration::from_secs(30), async {
+        let mut mempool = EnabledMempool::new().await;
+        let hash = mempool.insert_block_1_transaction();
+        let parent_hash = mempool.tip_hash();
+        let ActiveState::Enabled {
+            last_seen_tip_hash, ..
+        } = &mut mempool.service.active_state
+        else {
+            panic!("mempool was enabled");
+        };
+        *last_seen_tip_hash = block::Hash([0; 32]);
+        assert_ne!(*last_seen_tip_hash, parent_hash);
+
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash], parent_hash)
+            .await;
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_disabled_returns_empty() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            _recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        assert!(!service.is_enabled());
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+
+        let response = (&mut service)
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![transaction.transaction.id.mined_id()].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+        assert!(!service.is_enabled());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
+    timeout(Duration::from_secs(30), async {
+        let mut mempool = EnabledMempool::new().await;
+        let hash = mempool.insert_block_1_transaction();
+        let parent_hash = mempool.tip_hash();
+        let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
+
+        // The largest batch still gets an answer, with one entry, because its hashes are equal.
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash; max_transactions], parent_hash)
+            .await;
+        assert_eq!(candidates.len(), 1);
+
+        let candidates = mempool
+            .verified_transactions_for_block(vec![hash; max_transactions + 1], parent_hash)
+            .await;
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
 }
 
 #[tokio::test]
@@ -1506,6 +1723,57 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     Ok(())
 }
 
+/// Queues `tx` in `mempool` for download and verification, and checks that the mempool queued it.
+async fn queue_for_verification(mempool: &mut Mempool, tx: &Arc<Transaction>) {
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![tx.unmined_id().into()]))
+        .await
+        .unwrap();
+    let Response::Queued(queued_responses) = response else {
+        unreachable!("the mempool answers a queue request with its queue responses")
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+}
+
+/// Answers the mempool's download of `tx` from `peer_set`.
+async fn answer_download(peer_set: &mut MockPeerSet, tx: &Arc<Transaction>) {
+    peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available((tx.clone().into(), None)),
+            ]));
+        })
+        .await;
+}
+
+/// Answers the mempool's verification of a transaction from `tx_verifier`, with a dummy fee and
+/// the signature operation counts `legacy_sigops` and `p2sh_sigops`. Returns the height that the
+/// mempool verified the transaction for, and the verifier's answer.
+async fn answer_verification(
+    tx_verifier: &mut MockTxVerifier,
+    legacy_sigops: u32,
+    p2sh_sigops: u32,
+) -> (Height, VerifiedUnminedTx) {
+    let responder = tx_verifier.expect_request_that(|_| true).await;
+    let height = responder.request().height;
+    let transaction = responder.request().clone().transaction;
+    let verified = VerifiedUnminedTx::new(
+        transaction,
+        Amount::try_from(1_000_000).expect("the fee is a valid amount"),
+        legacy_sigops,
+        p2sh_sigops,
+        Arc::new(vec![]),
+    )
+    .expect("verification should pass");
+    responder.respond(transaction::MempoolResponse::from(verified.clone()));
+    (height, verified)
+}
+
 /// Check that transactions are re-verified if the tip changes
 /// during verification.
 #[tokio::test(flavor = "multi_thread")]
@@ -1543,51 +1811,13 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     // Blocks 1-3 are committed to the state below, so the transaction must come from a
     // later block, or it would be cancelled as a mined transaction instead of re-verified.
     let tx = block4.transactions[0].clone();
-    let txid = block4.transactions[0].unmined_id();
-    let response = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
-        .await
-        .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
+    queue_for_verification(&mut mempool, &tx).await;
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
     // Verify the transaction
 
-    peer_set
-        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
-        .map(|responder| {
-            responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available((tx.clone().into(), None)),
-            ]));
-        })
-        .await;
-
-    tx_verifier
-        .expect_request_that(|_| true)
-        .map(|responder| {
-            let transaction = responder.request().clone().transaction;
-
-            // Set a dummy fee and sigops.
-            responder.respond(transaction::MempoolResponse::from(
-                VerifiedUnminedTx::new(
-                    transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
-                    0,
-                    0,
-                    std::sync::Arc::new(vec![]),
-                )
-                .expect("verification should pass"),
-            ));
-        })
-        .await;
+    answer_download(&mut peer_set, &tx).await;
+    answer_verification(&mut tx_verifier, 0, 0).await;
 
     // Push blocks 1 and 2 to the state before the mempool polls its chain tip change
     // receiver again. The mempool then sees the tip jump from the genesis block to
@@ -1622,34 +1852,10 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
 
     // Verify the transaction again
 
-    peer_set
-        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
-        .map(|responder| {
-            responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available((tx.into(), None)),
-            ]));
-        })
-        .await;
+    answer_download(&mut peer_set, &tx).await;
 
     // Verify the transaction now that the mempool has already checked chain_tip_change
-    tx_verifier
-        .expect_request_that(|_| true)
-        .map(|responder| {
-            let transaction = responder.request().clone().transaction;
-
-            // Set a dummy fee and sigops.
-            responder.respond(transaction::MempoolResponse::from(
-                VerifiedUnminedTx::new(
-                    transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
-                    0,
-                    0,
-                    std::sync::Arc::new(vec![]),
-                )
-                .expect("verification should pass"),
-            ));
-        })
-        .await;
+    answer_verification(&mut tx_verifier, 0, 0).await;
 
     // Push block 3 to the state. This will increase the tip height past the expected
     // tip height that the tx was verified at.
@@ -1678,6 +1884,81 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     // no transactions were inserted in the mempool.
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
     assert_eq!(mempool.storage().transaction_count(), 0);
+
+    Ok(())
+}
+
+/// The mempool records the tip height it verified each transaction on, the height before the one
+/// it verified the transaction for. The block verifier relies on this when it reuses the
+/// mempool's verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_records_the_tip_height_each_transaction_was_verified_on() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
+
+    let (
+        mut mempool,
+        mut peer_set,
+        mut state_service,
+        mut chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    // Move the tip to block 1, so that the recorded height isn't the genesis block's.
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            block1.into(),
+        ))
+        .await
+        .unwrap();
+    chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .expect("unexpected chain tip update failure");
+    mempool.dummy_call().await;
+
+    // A transaction from a later block, so that the tip doesn't mine it.
+    let tx = block4.transactions[0].clone();
+    queue_for_verification(&mut mempool, &tx).await;
+    answer_download(&mut peer_set, &tx).await;
+    // Signature operation counts, which the stored entry must keep.
+    let (verification_height, verified) = answer_verification(&mut tx_verifier, 3, 2).await;
+
+    // The mempool stores the verified transaction when it next checks its downloads.
+    timeout(Duration::from_secs(10), async {
+        while mempool.storage().transaction_count() == 0 {
+            mempool.dummy_call().await;
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the mempool stores the verified transaction");
+
+    assert_eq!(verification_height, Height(2), "the next block's height");
+    let stored = &mempool.storage().transactions()[&tx.hash()];
+    assert_eq!(
+        stored.height,
+        Some(verification_height.previous()?),
+        "the tip height the transaction was verified on",
+    );
+    // The block verifier adds the stored fee and signature operation counts to a block's totals,
+    // so the mempool stores the verifier's output unmodified, apart from the time and height.
+    assert_eq!(
+        *stored,
+        VerifiedUnminedTx {
+            time: stored.time,
+            height: stored.height,
+            ..verified
+        },
+    );
 
     Ok(())
 }
