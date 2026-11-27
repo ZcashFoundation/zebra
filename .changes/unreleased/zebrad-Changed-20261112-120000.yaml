@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Gossip newly committed blocks to peers right away, instead of waiting 7 seconds before each one.'
+time: 2026-11-12T12:00:00.000000000Z

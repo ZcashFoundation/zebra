@@ -15,7 +15,7 @@ use zebra_network as zn;
 use zebra_state::ChainTipChange;
 
 use crate::{
-    components::sync::{SyncStatus, PEER_GOSSIP_DELAY, TIPS_RESPONSE_TIMEOUT},
+    components::sync::{SyncStatus, TIPS_RESPONSE_TIMEOUT},
     BoxError,
 };
 
@@ -73,12 +73,6 @@ where
             /// A brief duration to wait after a tip change for a new message in the mined block channel.
             // TODO: Add a test to check that Zebra does not advertise mined blocks to peers twice.
             const WAIT_FOR_BLOCK_SUBMISSION_DELAY: Duration = Duration::from_micros(100);
-
-            // wait for at least the network timeout between gossips
-            //
-            // in practice, we expect blocks to arrive approximately every 75 seconds,
-            // so waiting 6 seconds won't make much difference
-            tokio::time::sleep(PEER_GOSSIP_DELAY).await;
 
             // wait for at least one tip change, to make sure we have a new block hash to broadcast
             let tip_action = chain_tip.wait_for_tip_change().await.map_err(TipChange)?;

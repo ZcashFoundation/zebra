@@ -171,11 +171,11 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// when no peer answers a round.
 const EXTEND_TIP_ROUNDS: usize = 3;
 
-/// Controls how long we wait between gossiping successive blocks or transactions.
+/// Controls how long we wait between gossiping successive batches of transactions.
 ///
 /// ## Correctness
 ///
-/// If this timeout is set too high, blocks and transactions won't propagate through
+/// If this timeout is set too high, transactions won't propagate through
 /// the network efficiently.
 ///
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
