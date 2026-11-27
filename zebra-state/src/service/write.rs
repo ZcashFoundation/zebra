@@ -22,7 +22,7 @@ use crate::{
     service::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
-        non_finalized_state::NonFinalizedState,
+        non_finalized_state::{NonFinalizedState, ValidatedChain},
         precomputed_trees::PrecomputedTrees,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         read, ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
@@ -58,16 +58,28 @@ pub(crate) fn validate_and_commit_non_finalized(
     non_finalized_state: &mut NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
+    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared)?;
+    non_finalized_state.insert_validated(validated);
+
+    Ok(())
+}
+
+/// Runs contextual validation on the prepared block, without changing the non-finalized state.
+///
+/// Returns the chain with the block, for [`NonFinalizedState::insert_validated`].
+fn validate_non_finalized(
+    finalized_state: &ZebraDb,
+    non_finalized_state: &NonFinalizedState,
+    prepared: SemanticallyVerifiedBlock,
+) -> Result<ValidatedChain, ValidateContextError> {
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+        non_finalized_state.validate_new_chain(prepared, finalized_state)
     } else {
-        non_finalized_state.commit_block(prepared, finalized_state)?;
+        non_finalized_state.validate_block(prepared, finalized_state)
     }
-
-    Ok(())
 }
 
 /// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`].
