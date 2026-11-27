@@ -4,7 +4,7 @@ use tokio::sync::oneshot::error::RecvError;
 
 use crate::BoxError;
 
-mod cache;
+pub(crate) mod cache;
 pub mod ed25519;
 pub mod groth16;
 pub mod halo2;
