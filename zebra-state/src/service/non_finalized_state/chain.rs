@@ -390,9 +390,9 @@ impl Chain {
     }
 
     /// Pushes `block` like [`Self::push`], reusing the `precomputed` note commitment trees if
-    /// they were computed from the same block body and this chain's tip trees. It also reuses a
-    /// mining candidate's history tree if the trees are reused, and this chain's tip history tree
-    /// has the same root as the candidate's parent history tree.
+    /// they are for the same block body, and were computed from this chain's tip trees. It also
+    /// reuses a mining candidate's history tree if the trees are reused, and this chain's tip
+    /// history tree has the same root as the candidate's parent history tree.
     pub(crate) fn push_with_trees(
         mut self,
         block: ContextuallyVerifiedBlock,

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'A block proposal''s validation result keeps the proposal''s note commitment trees, so a commit of the solved proposal that can''t reuse the proposal''s chain doesn''t compute them again.'
+time: 2026-11-26T01:47:00.000000000-05:00

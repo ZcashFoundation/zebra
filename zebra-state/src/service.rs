@@ -74,7 +74,7 @@ pub mod check;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
-mod precomputed_trees;
+pub(crate) mod precomputed_trees;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -2279,23 +2279,42 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                // Lend the proposal's note commitment trees to its validation, which reuses them,
+                // so the result can keep them. The proposal's parent is the best tip. A compute
+                // error is left to the validation to report.
+                let parent_trees = match latest_non_finalized_state.best_chain() {
+                    Some(chain) => chain.note_commitment_trees_for_tip(),
+                    None => state.db.note_commitment_trees_for_tip(),
+                };
+                latest_non_finalized_state.precomputed_trees =
+                    precomputed_trees::PrecomputedTrees::compute(
+                        semantically_verified.block.clone(),
+                        parent_trees,
+                    )
+                    .ok();
+
                 let hash = semantically_verified.hash;
                 write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
                 )?;
+                let proposal_trees = latest_non_finalized_state.precomputed_trees.take();
 
                 // Keep the chain with the proposal on top, so a commit of the solved proposal
                 // can use it instead of applying the block to its parent chain again.
                 let chain = latest_non_finalized_state
                     .remove_chain_with_tip(hash)
                     .expect("successful proposal validation inserted its block");
-                let contextual = chain
+                let mut contextual = chain
                     .tip_block()
                     .expect("the chain has the proposal at its tip")
                     .clone();
                 latest_non_finalized_state.store_prepared_chain(chain);
+
+                // The proposal's trees, for a commit of the solved proposal that can't reuse the
+                // chain kept above. Only the returned result carries them, not the kept chain.
+                contextual.proposal_trees = proposal_trees.map(Box::new);
 
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }

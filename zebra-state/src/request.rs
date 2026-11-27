@@ -355,6 +355,10 @@ pub struct ContextuallyVerifiedBlock {
     /// through the block verifier, copied from the [`SemanticallyVerifiedBlock`] it was
     /// built from. See that type's `received_time` field for details.
     pub(crate) received_time: Option<Instant>,
+
+    /// The note commitment trees after a validated block proposal, for the commit of its solved
+    /// block. Only validation results carry them, never a chain's blocks.
+    pub(crate) proposal_trees: Option<Box<crate::service::precomputed_trees::PrecomputedTrees>>,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -518,7 +522,8 @@ impl ContextuallyVerifiedBlock {
     /// The caller must check `block`'s proof of work, and that `block` is the same as the
     /// proposal apart from its nonce and Equihash solution. That includes the authorizing data
     /// of its transactions, which transaction and block equality don't compare. The receipt
-    /// time is the solved block's, not the proposal's.
+    /// time is the solved block's, not the proposal's. This also moves the proposal's note
+    /// commitment trees to `block`.
     ///
     /// # Correctness
     ///
@@ -527,6 +532,9 @@ impl ContextuallyVerifiedBlock {
     /// proposal path; see [`Request::CommitContextuallyVerifiedBlock`].
     pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
         self.hash = block.hash();
+        if let Some(trees) = self.proposal_trees.as_mut() {
+            trees.rebind(block.clone());
+        }
         self.block = block;
         self.received_time = Some(received_time);
     }
@@ -606,6 +614,7 @@ impl ContextuallyVerifiedBlock {
                 transaction_hashes,
                 chain_value_pool_change,
                 received_time,
+                proposal_trees: None,
             },
             transaction_fees,
         ))
@@ -1205,6 +1214,9 @@ pub enum Request {
     /// to the solved block with [`ContextuallyVerifiedBlock::rebind`]. The caller must check the
     /// solved block's proof of work, and that it is the same as the proposal apart from its
     /// nonce and Equihash solution, including the authorizing data of its transactions.
+    ///
+    /// The result can carry the proposal's note commitment trees. The state uses them if it
+    /// applies the block to its parent chain.
     ///
     /// # Correctness
     ///

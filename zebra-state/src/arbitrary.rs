@@ -127,6 +127,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
             received_time,
+            proposal_trees: None,
         }
     }
 }

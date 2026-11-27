@@ -95,7 +95,8 @@ pub struct NonFinalizedState {
     /// Note commitment trees, and a mining candidate's chain history, computed before the commit
     /// of the block they belong to.
     ///
-    /// The block write task sets this for one validation. Clones never carry it.
+    /// The block write task sets this for one validation, and the read state service for one
+    /// proposal validation, on its own copy. Clones never carry it.
     pub(crate) precomputed_trees: Option<crate::service::precomputed_trees::PrecomputedTrees>,
 
     /// A private copy of the best chain with the latest validated block proposal on top.
@@ -818,16 +819,20 @@ impl NonFinalizedState {
     ///
     /// If the chain that the proposal's validation built, or the chain of a later proposal that
     /// only changed the time, is still available, this rebinds its tip to the solved block.
-    /// Otherwise, it applies the block to its parent chain.
+    /// Otherwise, it applies the block to its parent chain, with the proposal's note commitment
+    /// trees if `contextual` carries them.
     ///
     /// Returns the proposal block that the solved block replaced, if any, so the caller can drop
     /// it after answering the commit.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn commit_prevalidated_contextual(
         &mut self,
-        contextual: ContextuallyVerifiedBlock,
+        mut contextual: ContextuallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Option<Arc<ContextuallyVerifiedBlock>>, ValidateContextError> {
+        // A chain's blocks never carry a proposal's trees.
+        let proposal_trees = contextual.proposal_trees.take();
+
         // Blocks are invalidated by their solved hashes, which proposals don't have.
         if self
             .invalidated_blocks
@@ -853,7 +858,7 @@ impl NonFinalizedState {
                 finalized_state.history_tree(),
                 finalized_state.finalized_value_pool(),
             )
-            .push(contextual)?
+            .push_with_trees(contextual, proposal_trees.as_deref())?
         } else {
             let parent_chain = self.parent_chain(parent_hash)?;
 
@@ -862,7 +867,8 @@ impl NonFinalizedState {
                     replaced_proposal = Some(prepared_chain.rebind_tip(contextual)?);
                     prepared_chain
                 }
-                None => Arc::unwrap_or_clone(parent_chain).push(contextual)?,
+                None => Arc::unwrap_or_clone(parent_chain)
+                    .push_with_trees(contextual, proposal_trees.as_deref())?,
             }
         };
 
