@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Forwarded canonical JSON-RPC 2.0 requests and their responses through the HTTP compatibility middleware unchanged, and converted JSON-RPC 1.0 responses by splicing only their head and tail instead of re-parsing large results.
+time: 2026-11-26T13:12:05.206113373Z
