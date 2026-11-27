@@ -1,9 +1,7 @@
 # This workflow automates the building and pushing of Docker images based on user-defined inputs. It includes:
 # - Accepting various inputs like image name, Dockerfile path, target, and additional Rust-related parameters.
-# - Authenticates with Google Cloud and logs into Google Artifact Registry and DockerHub.
-# - Uses Docker Buildx for improved build performance and caching.
+# - Authenticates with Google Cloud and logs into Google Artifact Registry and, when needed, Docker Hub.
 # - Builds the Docker image and pushes it to both Google Artifact Registry and potentially DockerHub, depending on release type.
-# - Manages caching strategies to optimize build times across different branches.
 # - Uses Docker Scout to display vulnerabilities and recommendations for the latest built image.
 name: Build docker image
 
@@ -61,6 +59,11 @@ on:
       DOCKERHUB_USERNAME:
         required: false
       DOCKERHUB_TOKEN:
+        required: false
+      # Read-only Docker Hub credentials for Docker Scout on release PRs. Without them, Scout is skipped.
+      DOCKER_SCOUT_USERNAME:
+        required: false
+      DOCKER_SCOUT_TOKEN:
         required: false
 
     outputs:
@@ -149,8 +152,6 @@ jobs:
       pull-requests: write # for `docker-scout` to be able to write the comment
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
-      # Docker Build Cloud and Docker Hub credentials belong to ZcashFoundation/zebra, so copies build locally.
-      DOCKER_BUILDER: ${{ github.repository == 'ZcashFoundation/zebra' && vars.DOCKER_BUILDER || 'docker-container' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -197,24 +198,18 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      - name: Login to DockerHub
-        if: github.repository == 'ZcashFoundation/zebra'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
         with:
-          version: lab:latest
-          driver: ${{ env.DOCKER_BUILDER }}
-          endpoint: ${{ env.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
-          # Only local hosted builders disappear with the VM; remote drivers retain cleanup.
-          cleanup: >-
-            ${{ runner.environment != 'github-hosted' ||
-            env.DOCKER_BUILDER != 'docker-container' }}
+          version: v0.39.1
+          # A shared builder keeps cache mounts across branches, and `no-cache` does not empty them.
+          driver: docker-container
+          driver-opts: image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+          # Any default-branch workflow run can write the Actions cache.
+          cache-binary: false
+          # Hosted VMs discard the local builder after the job; persistent runners still clean up.
+          cleanup: ${{ runner.environment != 'github-hosted' }}
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
@@ -239,7 +234,7 @@ jobs:
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
           provenance: mode=max
-          sbom: true
+          sbom: generator=docker.io/docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
@@ -359,11 +354,8 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      # Login to DockerHub in ZcashFoundation/zebra, when:
-      # 1. Publishing images for a release or pre-release, OR
-      # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
-        if: github.repository == 'ZcashFoundation/zebra' && (inputs.publish_to_dockerhub || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v')))
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -403,7 +395,7 @@ jobs:
 
       - name: Install Cosign
         if: inputs.publish_to_dockerhub
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Sign images with Cosign
         if: inputs.publish_to_dockerhub
@@ -434,19 +426,35 @@ jobs:
           push-to-registry: true
 
       # Fail the release if the signature or attestations don't verify.
+      # Every caller of this reusable workflow signs with the same identity,
+      # so pin the release tag, repository, and commit.
       - name: Verify release signatures
         if: inputs.publish_to_dockerhub
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ZcashFoundation/zebra
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [[ -z "${RELEASE_TAG}" ]]; then
+            echo "::error::Docker Hub images are only published from release events"
+            exit 1
+          fi
+          signer_workflow="${REPOSITORY}/.github/workflows/zfnd-build-docker-image.yml"
           cosign verify "${HUB_IMAGE}@${DIGEST}" \
-            --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
-            --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
-          gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
-            --owner ZcashFoundation \
-            --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
+            --certificate-identity="https://github.com/${signer_workflow}@refs/tags/${RELEASE_TAG}" \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            --certificate-github-workflow-repository="${REPOSITORY}" \
+            --certificate-github-workflow-sha="${GITHUB_SHA}"
+          for predicate_type in https://slsa.dev/provenance/v1 https://spdx.dev/Document/v2.3; do
+            gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
+              --repo "${REPOSITORY}" \
+              --signer-workflow "${signer_workflow}" \
+              --source-ref "refs/tags/${RELEASE_TAG}" \
+              --source-digest "${GITHUB_SHA}" \
+              --predicate-type "${predicate_type}"
+          done
 
       # For the merged multi-arch manifest, display:
       # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)
@@ -457,14 +465,35 @@ jobs:
       # - `prod` for a release event
       # - `stage` for a push event to the main branch
       # - `dev` for a pull request event
+      #
+      # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
+      # and are commonly used for testing, and thus are ephemeral.
+      # Release PRs are release-plz branches with the `release` label, as in release.yml and pr-gate.yml.
+      # TODO: Run on more PRs once we have a better way to determine if just new vulnerabilities are present.
+      # See: https://github.com/docker/scout-action/issues/56
+      - name: Check Docker Scout credentials
+        id: scout-credentials
+        if: ${{ github.repository == 'ZcashFoundation/zebra' && inputs.dockerfile_target == 'runtime' && github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-plz-') && contains(github.event.pull_request.labels.*.name, 'release') }}
+        env:
+          HAS_CREDENTIALS: ${{ secrets.DOCKER_SCOUT_USERNAME != '' && secrets.DOCKER_SCOUT_TOKEN != '' }}
+        run: |
+          if [[ "${HAS_CREDENTIALS}" == "true" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Docker Scout skipped::DOCKER_SCOUT_USERNAME and DOCKER_SCOUT_TOKEN were not passed to this build."
+          fi
+
+      - name: Login to Docker Scout
+        if: steps.scout-credentials.outputs.available == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_SCOUT_USERNAME }}
+          password: ${{ secrets.DOCKER_SCOUT_TOKEN }}
+
       - name: Docker Scout
         id: docker-scout
         uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a #v1.21.0
-        # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
-        # and are commonly used for testing, and thus are ephemeral.
-        # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
-        # See: https://github.com/docker/scout-action/issues/56
-        if: ${{ github.repository == 'ZcashFoundation/zebra' && inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        if: steps.scout-credentials.outputs.available == 'true'
         with:
           command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}

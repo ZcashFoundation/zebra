@@ -44,7 +44,7 @@ jobs:
       short_sha: auto
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
-      # Build releases without the shared (poisonable) Docker Build Cloud cache.
+      # Don't reuse cached layers, as ADR 0007 requires for release builds.
       no_cache: true
       # Enable Docker Hub publishing for every release and pre-release (this is the single source of truth for Docker Hub images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)

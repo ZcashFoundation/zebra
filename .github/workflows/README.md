@@ -116,11 +116,16 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
   - Environment configuration
   - Resource cleanup
 
-#### [Docker Build Cloud](https://www.docker.com/products/build-cloud/)
+#### Image Builds
 
-- Optimized build times (~10 min for non-cached, ~30 sec for cached)
-- More efficient than GitHub Runners
-- Addresses [Rust caching limitations](https://github.com/ZcashFoundation/zebra/issues/6169#issuecomment-1712776391)
+- Images build with Buildx on a fresh local builder for each job, on GitHub-hosted runners
+- Docker Scout runs on release PRs, which are `release-plz-` branches with the `release` label, with
+  the `DOCKER_SCOUT_USERNAME` and `DOCKER_SCOUT_TOKEN` secrets. Use a Docker Hub access token without image push permission, because pull request
+  runs receive it. Without these secrets, Scout is skipped with a notice
+- Only release runs receive `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, the token that publishes
+  release images to Docker Hub
+- Don't move image builds to a shared builder. It keeps BuildKit cache mounts across builds from
+  any branch, and `no-cache` does not empty them
 
 #### Container Registries
 
@@ -249,7 +254,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 
 ### Supporting/Reusable Workflows
 
-- **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+- **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build and tagging on a fresh local builder
   Hosted VMs discard local builders; self-hosted runners and remote drivers retain cleanup.
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
