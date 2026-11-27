@@ -44,6 +44,12 @@ mod tests;
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// The number of messages in a row that one [`Decoder::decode`] call ignores.
+///
+/// The messages behind them in the buffer are decoded when the peer sends more bytes. Peers
+/// don't send this many ignored messages in a row in normal operation.
+pub(super) const MAX_IGNORED_MESSAGES_PER_DECODE: usize = 1024;
+
 /// The maximum body length allowed before the handshake completes.
 ///
 /// Version messages are ~344 bytes max (including a 256-byte user agent);
@@ -426,12 +432,46 @@ impl fmt::Debug for DecodeState {
     }
 }
 
+/// The result of decoding the next message in a buffer.
+enum Decoded {
+    /// A message.
+    Message(Message),
+
+    /// A message that Zebra ignores, which has been consumed from the buffer.
+    Ignored,
+
+    /// The buffer doesn't hold the whole message yet.
+    Incomplete,
+}
+
 impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[allow(clippy::unwrap_in_result)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // The reader only calls this again once the peer has sent more bytes, so after an ignored
+        // message, decode the messages behind it that are already in the buffer. Each message
+        // consumes at least a header, so this ends when the buffer runs out.
+        //
+        // An ignored message can be as small as its header, so a full buffer can hold tens of
+        // thousands of them. This stops after `MAX_IGNORED_MESSAGES_PER_DECODE` of them, so the
+        // connection's task goes back to the reader, where it can yield to other tasks.
+        for _ in 0..MAX_IGNORED_MESSAGES_PER_DECODE {
+            match self.decode_message(src)? {
+                Decoded::Message(message) => return Ok(Some(message)),
+                Decoded::Ignored => {}
+                Decoded::Incomplete => return Ok(None),
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+impl Codec {
+    /// Decodes the next message in `src`, if `src` holds all of it.
+    #[allow(clippy::unwrap_in_result)]
+    fn decode_message(&mut self, src: &mut BytesMut) -> Result<Decoded, Error> {
         use Error::Parse;
         match self.state {
             DecodeState::Head => {
@@ -439,7 +479,7 @@ impl Decoder for Codec {
                 if src.len() < HEADER_LEN {
                     trace!(?self.state, "src buffer does not have an entire header, waiting");
                     // Signal that decoding requires more data.
-                    return Ok(None);
+                    return Ok(Decoded::Incomplete);
                 }
 
                 // Now that we know that src contains a header, split off the header section.
@@ -486,7 +526,7 @@ impl Decoder for Codec {
                 };
 
                 // Now that the state is updated, recurse to attempt body decoding.
-                self.decode(src)
+                self.decode_message(src)
             }
             DecodeState::Body {
                 body_len,
@@ -496,7 +536,7 @@ impl Decoder for Codec {
                 if src.len() < body_len {
                     // Need to wait for the full body
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
-                    return Ok(None);
+                    return Ok(Decoded::Incomplete);
                 }
 
                 // Now that we know we have the full body, split off the body,
@@ -524,7 +564,7 @@ impl Decoder for Codec {
                     _ => true,
                 };
                 if !negotiated {
-                    return Ok(None);
+                    return Ok(Decoded::Ignored);
                 }
 
                 if checksum != sha256d::Checksum::from(&body[..]) {
@@ -594,10 +634,9 @@ impl Decoder for Codec {
                         // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                         // because closing the connection could cause a denial of service or eclipse attack.
                         debug!(?command, %command_string, "unknown message command from peer");
-                        return Ok(None);
+                        return Ok(Decoded::Ignored);
                     }
                 }
-                // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
                 .map(|msg| {
                     // bitcoin allows extra data at the end of most messages,
@@ -611,7 +650,7 @@ impl Decoder for Codec {
                         // upgrade message formats
                         debug!(?extra_bytes, %msg, "extra data after decoding message");
                     }
-                    Some(msg)
+                    Decoded::Message(msg)
                 })
             }
         }

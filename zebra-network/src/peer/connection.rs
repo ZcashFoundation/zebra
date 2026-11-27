@@ -49,6 +49,7 @@ use crate::{
     BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
+use compact_relay::Diverted;
 use InventoryResponse::*;
 
 mod compact_relay;
@@ -56,6 +57,11 @@ mod peer_tx;
 
 #[cfg(test)]
 mod tests;
+
+// Keep reading recovery replies without letting unrelated service calls or writes hide
+// the deadline. Both limits include every deferred message, in peer order.
+const MAX_DEFERRED_MESSAGES: usize = 64;
+const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub(super) enum Handler {
@@ -69,6 +75,12 @@ pub(super) enum Handler {
     Peers,
     FindBlocks {
         extends: Option<block::Hash>,
+    },
+    /// A block locator request that waits for the compact discovery barrier's pong before it is
+    /// sent, because the block inventories before that pong reply to an earlier request.
+    HeldFindBlocks {
+        known_blocks: Vec<block::Hash>,
+        stop: Option<block::Hash>,
     },
     FindHeaders,
     BlocksByHash {
@@ -99,6 +111,7 @@ impl fmt::Display for Handler {
             Handler::Peers => "Peers".to_string(),
 
             Handler::FindBlocks { .. } => "FindBlocks".to_string(),
+            Handler::HeldFindBlocks { .. } => "FindBlocks(held)".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
             Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
@@ -135,7 +148,8 @@ impl Handler {
             Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks { .. } => "FindBlocks".into(),
+            // Waiting requests use the same metric labels.
+            Handler::FindBlocks { .. } | Handler::HeldFindBlocks { .. } => "FindBlocks".into(),
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
@@ -775,10 +789,6 @@ where
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
 
-        // Keep reading recovery replies without letting unrelated service calls or writes hide
-        // the deadline. Both limits include every deferred message, in peer order.
-        const MAX_DEFERRED_MESSAGES: usize = 64;
-        const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
         let sizing_codec = Codec::builder()
             .for_version(self.connection_info.negotiated_version)
             .finish();
@@ -895,7 +905,12 @@ where
                         }
                         Either::Left(Some(Err(e))) => self.fail_with(e).await,
                         Either::Left(Some(Ok(msg))) => {
-                            self.compact.divert_retired_discovery(&msg);
+                            let (Diverted::Pass(msg) | Diverted::Announcement(msg)) =
+                                self.compact.divert_retired_discovery(msg)
+                            else {
+                                // The discovery barrier consumed the message.
+                                continue;
+                            };
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
                             if let Some(unhandled_msg) = unhandled_msg {
@@ -1071,10 +1086,8 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = if self.compact.divert_retired_discovery(&peer_msg) {
-                                Some(peer_msg)
-                            } else {
-                                match self.state {
+                            let request_msg = match self.compact.divert_retired_discovery(peer_msg) {
+                                Diverted::Pass(peer_msg) => match self.state {
                                     State::AwaitingResponse {
                                         ref mut handler, ..
                                     } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
@@ -1083,6 +1096,14 @@ where
                                                       peer_msg,
                                                       self.client_rx,
                                     ),
+                                },
+                                // It isn't a response, but it can be an inbound block announcement.
+                                Diverted::Announcement(peer_msg) => Some(peer_msg),
+                                // The discovery barrier consumed the message.
+                                Diverted::Consumed => None,
+                                Diverted::Retired => {
+                                    self.release_held_find_blocks().await;
+                                    None
                                 }
                             };
 
@@ -1459,6 +1480,10 @@ where
                     .and_then(|tip| self.compact.take_discovery(tip))
                 {
                     authorized().map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+                } else if self.compact.has_discovery_barrier() {
+                    // Until the barrier's pong arrives, the peer's block inventories reply to an
+                    // earlier request, so this request is sent after that pong.
+                    authorized().map(|()| Handler::HeldFindBlocks { known_blocks, stop })
                 } else {
                     let extends = known_blocks.first().copied().filter(|_| stop.is_none());
                     self

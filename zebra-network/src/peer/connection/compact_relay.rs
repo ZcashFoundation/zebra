@@ -62,6 +62,23 @@ struct DiscoveryBarrier {
     deadline: Instant,
 }
 
+/// What the discovery barrier did with a peer message.
+pub(super) enum Diverted {
+    /// The barrier is down, or the message isn't the barrier's pong or a block inventory, so the
+    /// message is handled as usual.
+    Pass(Message),
+
+    /// A single-block inventory for another block. It doesn't reply to a locator request while
+    /// the barrier is up, but it can still announce a block.
+    Announcement(Message),
+
+    /// A reply to the locator request that the barrier retired. It needs no other handling.
+    Consumed,
+
+    /// The barrier's pong, which took the barrier down. It needs no other handling.
+    Retired,
+}
+
 #[derive(Default)]
 pub(super) struct CompactRelay {
     pub(super) send: bool,
@@ -147,29 +164,41 @@ impl CompactRelay {
             .is_some_and(|barrier| barrier.nonce == nonce)
     }
 
+    pub(super) fn has_discovery_barrier(&self) -> bool {
+        self.discovery_barrier.is_some()
+    }
+
     pub(super) fn barrier_timed_out(&self) -> bool {
         self.discovery_barrier
             .as_ref()
             .is_some_and(|barrier| barrier.deadline <= Instant::now())
     }
 
-    /// Quarantine all block inventories until the owned pong, including unsolicited gossip.
+    /// Keep all block inventories from the locator response handler until the owned pong.
     /// This relies on honest Zebra connections awaiting locator service calls and writes before
     /// handling later pings, including deferred recovery traffic. It is not a service-bit guarantee.
     /// Stock zcashd cannot enter this compact path; a missing owned pong closes it on timeout.
-    pub(super) fn divert_retired_discovery(&mut self, message: &Message) -> bool {
+    ///
+    /// The pong and the replies to the retired request are consumed. Other single-block
+    /// inventories are still block announcements.
+    pub(super) fn divert_retired_discovery(&mut self, message: Message) -> Diverted {
         let Some(barrier) = &self.discovery_barrier else {
-            return false;
+            return Diverted::Pass(message);
         };
         match message {
-            Message::Pong(nonce) if *nonce == barrier.nonce => {
+            Message::Pong(nonce) if nonce == barrier.nonce => {
                 self.discovery_barrier = None;
-                true
+                Diverted::Retired
             }
-            Message::Inv(items) if is_block_inventory(items) => {
+            Message::Inv(ref items) if is_block_inventory(items) => {
+                let starts_with_compact = items[0].block_hash() == Some(barrier.hash);
+                if items.len() == 1 && !starts_with_compact {
+                    // A singleton for another block may be unrelated gossip.
+                    return Diverted::Announcement(message);
+                }
                 // Only an extension of the screened compact's old locator is reusable. A singleton
-                // may be unrelated gossip; it neither consumes the barrier nor repopulates a cache.
-                if items.len() > 1 && items[0].block_hash() == Some(barrier.hash) {
+                // naming the compact's block repeats what this connection already announced.
+                if items.len() > 1 && starts_with_compact {
                     self.discovery = Some(Discovery {
                         parent: barrier.parent,
                         hashes: block_hashes(items)
@@ -178,9 +207,9 @@ impl CompactRelay {
                         until: Instant::now() + RETENTION,
                     });
                 }
-                true
+                Diverted::Consumed
             }
-            _ => false,
+            message => Diverted::Pass(message),
         }
     }
 
@@ -454,6 +483,20 @@ where
             .await
     }
 
+    /// Recheck peer eligibility immediately before returning a response that needs no write.
+    fn live_authorization(&mut self) -> Result<(), PeerError> {
+        let banned = self
+            .connection_info
+            .connected_addr
+            .get_transient_addr()
+            .is_some_and(|addr| self.bans_receiver.borrow().is_banned(addr.ip()));
+        if banned || self.connection_info.remote.version < self.minimum_peer_version.current() {
+            Err(PeerError::ConnectionDropped)
+        } else {
+            Ok(())
+        }
+    }
+
     fn compact_response(&self, block: ReconstructedBlock) -> Handler {
         Handler::Finished(Ok(Response::ReconstructedBlock(
             block,
@@ -532,6 +575,45 @@ where
                 blocks: Vec::with_capacity(1),
             };
             self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+        }
+    }
+
+    /// Sends a block locator request that waited for the discovery barrier's pong, or answers it
+    /// with an extension of the retired request that arrived before that pong.
+    ///
+    /// The request keeps its original response deadline.
+    pub(super) async fn release_held_find_blocks(&mut self) {
+        let State::AwaitingResponse { handler, .. } = &mut self.state else {
+            return;
+        };
+        if !matches!(handler, Handler::HeldFindBlocks { .. }) {
+            return;
+        }
+        let Handler::HeldFindBlocks { known_blocks, stop } =
+            std::mem::replace(handler, Handler::Finished(Ok(Response::Nil)))
+        else {
+            unreachable!("the waiting request was checked")
+        };
+        let extends = known_blocks.first().copied().filter(|_| stop.is_none());
+        let handler =
+            if let Some(hashes) = extends.and_then(|tip| self.compact.take_discovery(&tip)) {
+                self.live_authorization()
+                    .map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+            } else {
+                self.send_download_request(Message::GetBlocks { known_blocks, stop })
+                    .await
+                    .map(|()| Handler::FindBlocks { extends })
+            };
+        match handler {
+            Ok(handler) => {
+                if let State::AwaitingResponse {
+                    handler: waiting, ..
+                } = &mut self.state
+                {
+                    *waiting = handler;
+                }
+            }
+            Err(error) => self.fail_with(error).await,
         }
     }
 
