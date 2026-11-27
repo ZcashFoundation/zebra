@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Updated `sinsemilla` to 0.2.1 and enabled its `merkle-table` feature, which hashes Orchard Merkle nodes with precomputed lookup tables and batch evaluation. The tables are built on first use and take about 1 MiB on most targets; set `SINSEMILLA_TABLE_LIMIT` at build time to change that.
+time: 2026-11-27T21:27:30.207923112Z

@@ -153,7 +153,7 @@ serde_json = "1.0.140"
 serde_with = "3.12"
 sha2 = "0.10"
 siphasher = "1.0"
-sinsemilla = "0.2"
+sinsemilla = "0.2.1"
 schemars = "1"
 spandoc = "0.2"
 anyhow = "1.0"
@@ -400,7 +400,3 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
-
-[patch.crates-io]
-# Await the checked batch API and startup precomputation from zcash/sinsemilla#17 and #19.
-sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "d17214e2a336d71071adfef4a7c453b57877ac27" }
