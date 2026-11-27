@@ -286,3 +286,38 @@ pub async fn populated_state_with_debug(
 
     (state, read_state, latest_chain_tip, chain_tip_change)
 }
+
+/// Counts of the early mining work that the block write task computed and reused, for tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EarlyMiningWorkCounts {
+    /// Mining candidates that got early work.
+    pub candidates: usize,
+
+    /// Block validations that reused a mining candidate's note commitment trees.
+    pub reused_trees: usize,
+
+    /// Block validations that reused a mining candidate's history tree.
+    pub reused_history_trees: usize,
+
+    /// Block validations that skipped a header commitment check a mining candidate had done.
+    pub skipped_commitment_checks: usize,
+}
+
+/// Returns the counts of early mining work since the process started. Every state in the
+/// process adds to the same counts, so tests compare counts from before and after what they
+/// check, in a process of their own.
+pub fn early_mining_work_counts() -> EarlyMiningWorkCounts {
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::precomputed_trees::{
+        MINING_CANDIDATES, REUSED_HISTORY_TREES, REUSED_TREES, SKIPPED_COMMITMENT_CHECKS,
+    };
+
+    EarlyMiningWorkCounts {
+        candidates: MINING_CANDIDATES.load(SeqCst),
+        reused_trees: REUSED_TREES.load(SeqCst),
+        reused_history_trees: REUSED_HISTORY_TREES.load(SeqCst),
+        skipped_commitment_checks: SKIPPED_COMMITMENT_CHECKS.load(SeqCst),
+    }
+}

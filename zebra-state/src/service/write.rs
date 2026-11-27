@@ -265,9 +265,9 @@ pub enum NonFinalizedWriteMessage {
     /// A block whose proof of work is valid, but which is still being verified.
     ///
     /// The block write task computes the chain info for mining on top of it, and keeps the
-    /// block's note commitment trees for its commit. Computing them here, in order with the
-    /// commits, means the work is always based on the latest committed tip, and the commit of
-    /// the same block never computes its trees at the same time.
+    /// block's note commitment trees and chain history for its commit. Computing them here, in
+    /// order with the commits, means the work is always based on the latest committed tip, and
+    /// the commit of the same block never computes its trees at the same time.
     MiningCandidate {
         block: Arc<block::Block>,
         rsp_tx: oneshot::Sender<Option<GetBlockTemplateChainInfo>>,
@@ -488,7 +488,8 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
-        // The note commitment trees of the latest mining candidate, for its commit to reuse.
+        // The note commitment trees and chain history of the latest mining candidate, for its
+        // commit to reuse.
         let mut candidate_trees: Option<PrecomputedTrees> = None;
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
@@ -503,6 +504,10 @@ impl WriteBlockWorkerTask {
 
                     let chain_info = match candidate {
                         Ok((chain_info, trees)) => {
+                            #[cfg(any(test, feature = "proptest-impl"))]
+                            crate::service::precomputed_trees::MINING_CANDIDATES
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
                             candidate_trees = Some(trees);
                             Some(chain_info)
                         }

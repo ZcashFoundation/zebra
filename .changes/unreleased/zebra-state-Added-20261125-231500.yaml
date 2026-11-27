@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added `early_mining_work_counts()` and `EarlyMiningWorkCounts`, with the `proptest-impl` feature, which count the early mining work the state computed and the block validations that reused it.'
+time: 2026-11-25T23:15:00.000000000-05:00

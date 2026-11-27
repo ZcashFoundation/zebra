@@ -390,7 +390,9 @@ impl Chain {
     }
 
     /// Pushes `block` like [`Self::push`], reusing the `precomputed` note commitment trees if
-    /// they were computed from the same block body and this chain's tip trees.
+    /// they were computed from the same block body and this chain's tip trees. It also reuses a
+    /// mining candidate's history tree if the trees are reused, and this chain's tip history tree
+    /// has the same root as the candidate's parent history tree.
     pub(crate) fn push_with_trees(
         mut self,
         block: ContextuallyVerifiedBlock,
@@ -2102,6 +2104,13 @@ impl Chain {
         // Prepare data for parallel execution
         let mut nct = self.note_commitment_trees_for_tip();
 
+        // A mining candidate's history tree is reused only if its trees were, and its parent
+        // history tree has the same root.
+        let parent_history = self.history_block_commitment_tree();
+        let reused_history = precomputed.and_then(|precomputed| {
+            precomputed.reuse_history(&contextually_valid.block, &nct, &parent_history)
+        });
+
         let mut tree_result = None;
         let mut partial_result = None;
 
@@ -2115,7 +2124,7 @@ impl Chain {
                     .and_then(|precomputed| precomputed.reuse(&contextually_valid.block, &nct))
                 {
                     Some(trees) => {
-                        #[cfg(test)]
+                        #[cfg(any(test, feature = "proptest-impl"))]
                         crate::service::precomputed_trees::REUSED_TREES
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
@@ -2159,19 +2168,32 @@ impl Chain {
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let mut history_tree = self.history_block_commitment_tree();
-        let history_tree_mut = Arc::make_mut(&mut history_tree);
-        history_tree_mut
-            .push(
-                &self.network,
-                contextually_valid.block.clone(),
-                BlockCommitmentTreeRoots {
-                    sapling: &sapling_root,
-                    orchard: &orchard_root,
-                    ironwood: &ironwood_root,
-                },
-            )
-            .map_err(Arc::new)?;
+        let history_tree = match reused_history {
+            Some(history_tree) => {
+                #[cfg(any(test, feature = "proptest-impl"))]
+                crate::service::precomputed_trees::REUSED_HISTORY_TREES
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                history_tree
+            }
+            None => {
+                let mut history_tree = parent_history;
+                let history_tree_mut = Arc::make_mut(&mut history_tree);
+                history_tree_mut
+                    .push(
+                        &self.network,
+                        contextually_valid.block.clone(),
+                        BlockCommitmentTreeRoots {
+                            sapling: &sapling_root,
+                            orchard: &orchard_root,
+                            ironwood: &ironwood_root,
+                        },
+                    )
+                    .map_err(Arc::new)?;
+
+                history_tree
+            }
+        };
 
         self.add_history_tree(height, history_tree);
 

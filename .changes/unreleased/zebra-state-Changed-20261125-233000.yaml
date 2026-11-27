@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Reused the chain history update and the header commitment check from a block''s early mining work in the block''s commit.'
+time: 2026-11-25T23:30:00.000000000-05:00

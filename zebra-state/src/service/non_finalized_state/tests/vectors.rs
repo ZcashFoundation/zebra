@@ -1063,10 +1063,14 @@ fn history_tree_is_updated_for_network_upgrade(
 /// committed, apart from the value pools, which are only known after the block's transactions
 /// are verified. That holds for the block that starts the history tree, and for its child, whose
 /// early work has a chain history root.
+///
+/// The commit of the block reuses its early work, and gives the same state as a commit without
+/// it.
 #[test]
 fn mining_candidate_chain_info_is_the_chain_info_after_the_commit() {
-    use crate::service::read::difficulty::{
-        get_block_template_chain_info, mining_candidate_chain_info,
+    use crate::service::{
+        arbitrary::{early_mining_work_counts, EarlyMiningWorkCounts},
+        read::difficulty::{get_block_template_chain_info, mining_candidate_chain_info},
     };
 
     let _init_guard = zebra_test::init();
@@ -1104,12 +1108,62 @@ fn mining_candidate_chain_info_is_the_chain_info_after_the_commit() {
         header.difficulty_threshold = context.expected_difficulty;
         let candidate = Arc::new(candidate);
 
-        let (early, _trees) = mining_candidate_chain_info(&state, &finalized_state.db, &candidate)
+        let (early, trees) = mining_candidate_chain_info(&state, &finalized_state.db, &candidate)
             .expect("the candidate extends the best tip");
 
+        // The candidate's work doesn't skip the header commitment check of another block, even
+        // one that only has another commitment.
+        let (_, other_work) = mining_candidate_chain_info(&state, &finalized_state.db, &candidate)
+            .expect("the candidate extends the best tip");
+        let wrong_commitment = candidate.clone().set_block_commitment([0xff; 32]);
+        let mut probe = state.clone();
+        probe.precomputed_trees = Some(other_work);
+        let before = early_mining_work_counts();
+        assert!(
+            matches!(
+                probe.commit_block(wrong_commitment.prepare(), &finalized_state),
+                Err(crate::ValidateContextError::InvalidBlockCommitment(_))
+            ),
+            "the commit checks the header commitment of a block the work wasn't computed for",
+        );
+        assert_eq!(
+            early_mining_work_counts(),
+            before,
+            "the commit of another block reuses none of the candidate's work",
+        );
+
+        let mut without_work = state.clone();
+        let prepared = candidate.clone().prepare();
+
+        state.precomputed_trees = Some(trees);
+        let before = early_mining_work_counts();
         state
-            .commit_block(candidate.clone().prepare(), &finalized_state)
+            .commit_block(prepared.clone(), &finalized_state)
             .expect("the block is valid");
+        let after = early_mining_work_counts();
+        state.precomputed_trees = None;
+
+        without_work
+            .commit_block(prepared, &finalized_state)
+            .expect("the block is valid");
+
+        // In the first iteration, the block is the Heartwood activation block, so its parent's
+        // history tree is empty, and has no root.
+        assert_eq!(
+            after,
+            EarlyMiningWorkCounts {
+                reused_trees: before.reused_trees + 1,
+                reused_history_trees: before.reused_history_trees + 1,
+                skipped_commitment_checks: before.skipped_commitment_checks + 1,
+                ..before
+            },
+            "the commit reuses all the early work on the block",
+        );
+        assert!(
+            state.eq_internal_state(&without_work),
+            "a commit that reuses early work gives the same state as a commit without it",
+        );
+
         let committed = get_block_template_chain_info(&state, &finalized_state.db, &network)
             .expect("the state has a context for the next block");
 

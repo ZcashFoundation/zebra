@@ -84,9 +84,10 @@ pub struct NonFinalizedState {
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
-    /// Note commitment trees that were computed before the commit of the block they belong to.
+    /// Note commitment trees, and a mining candidate's chain history, computed before the commit
+    /// of the block they belong to.
     ///
-    /// The block write task sets this for one commit. Clones never carry it.
+    /// The block write task sets this for one validation. Clones never carry it.
     pub(crate) precomputed_trees: Option<crate::service::precomputed_trees::PrecomputedTrees>,
 
     /// A private copy of the best chain with the latest validated block proposal on top.
@@ -1052,6 +1053,8 @@ impl NonFinalizedState {
         let block = contextual.block.clone();
         let network = new_chain.network();
         let history_tree = new_chain.history_block_commitment_tree();
+        let commitment_is_checked = precomputed_trees
+            .is_some_and(|trees| trees.commitment_is_checked(&block, &history_tree));
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
@@ -1059,11 +1062,21 @@ impl NonFinalizedState {
 
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
-                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
-                    block,
-                    &network,
-                    &history_tree,
-                ));
+                block_commitment_result = Some(if commitment_is_checked {
+                    // A mining candidate checked this block's header commitment against a parent
+                    // history tree with the same root.
+                    #[cfg(any(test, feature = "proptest-impl"))]
+                    crate::service::precomputed_trees::SKIPPED_COMMITMENT_CHECKS
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                    Ok(())
+                } else {
+                    check::block_commitment_is_valid_for_chain_history(
+                        block,
+                        &network,
+                        &history_tree,
+                    )
+                });
             });
 
             scope.spawn_fifo(|_scope| {

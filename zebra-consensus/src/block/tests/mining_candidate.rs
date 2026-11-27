@@ -17,7 +17,8 @@ use crate::{
 use super::proposals::{block, network, MockState, MockTransactionVerifier};
 
 /// The verifier asks the state for early mining work before the block's transactions are
-/// verified, and keeps the work until the block is committed.
+/// verified, and keeps the work until the block is committed. It sends the same block object
+/// with both requests, so the commit can reuse the work.
 #[tokio::test]
 async fn mining_candidate_is_published_before_transaction_verification() {
     let _init_guard = zebra_test::init();
@@ -39,10 +40,14 @@ async fn mining_candidate_is_published_before_transaction_verification() {
 
     // The state gets the request before any transaction is sent for verification.
     let (guard, mut verification) = zs::MiningCandidateGuard::new_for_tests();
-    state
+    let candidate = state
         .expect_request(zs::Request::MiningCandidate(block.clone()))
-        .await
-        .respond(zs::Response::MiningCandidate(Some(guard)));
+        .await;
+    let zs::Request::MiningCandidate(candidate_block) = candidate.request() else {
+        unreachable!("the request was matched above");
+    };
+    let candidate_block = candidate_block.clone();
+    candidate.respond(zs::Response::MiningCandidate(Some(guard)));
 
     let transaction_request = transaction_verifier.expect_request_that(|_| true).await;
     assert!(
@@ -64,6 +69,14 @@ async fn mining_candidate_is_published_before_transaction_verification() {
     assert!(
         verification.has_changed().is_ok(),
         "early work is kept until the block is committed"
+    );
+    let zs::Request::CommitSemanticallyVerifiedBlock(committed) = commit.request() else {
+        unreachable!("the request was matched above");
+    };
+    // The state only reuses early work for the block object it was computed for.
+    assert!(
+        Arc::ptr_eq(&candidate_block, &committed.block),
+        "the commit has the same block object as the mining candidate"
     );
     commit.respond(zs::Response::Committed(hash));
 
