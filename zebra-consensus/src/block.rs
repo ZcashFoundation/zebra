@@ -605,7 +605,7 @@ where
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
-                    zs::Response::ValidBlockProposal => Ok(hash),
+                    zs::Response::ValidBlockProposal(_) => Ok(hash),
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
                 };
             }

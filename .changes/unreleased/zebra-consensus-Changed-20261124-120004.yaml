@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'The block verifier accepts the validation result that `zebra_state::Response::ValidBlockProposal` now carries.'
+time: 2026-11-24T12:00:04.000000000Z

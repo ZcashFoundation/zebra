@@ -1024,6 +1024,123 @@ fn mining_candidate_chain_info_is_the_chain_info_after_the_commit() {
     }
 }
 
+/// Rebinding the chain of a validated proposal to the solved block gives the same chain as
+/// committing the solved block, for a tip with a history tree, which depends on the block hash.
+/// That also holds when the proposal's chain still has a root block that the state has finalized.
+#[test]
+fn rebound_chain_is_the_chain_of_the_committed_block() {
+    let _init_guard = zebra_test::init();
+
+    for finalize_root in [false, true] {
+        let network = Network::Mainnet;
+        let height = NetworkUpgrade::Heartwood
+            .activation_height(&network)
+            .expect("Heartwood has an activation height")
+            .0;
+        let prev_block: Arc<Block> = network
+            .block_map()
+            .get(&(height - 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into()
+            .expect("block is structurally valid");
+
+        let mut state = NonFinalizedState::new(&network);
+        let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+            .expect("opening an ephemeral database should succeed");
+
+        // The Heartwood activation block has an all-zero commitment.
+        let activation_block = prev_block.make_fake_child().set_block_commitment([0u8; 32]);
+        state
+            .commit_new_chain(prev_block.prepare(), &finalized_state)
+            .expect("the block is valid");
+        state
+            .commit_block(activation_block.clone().prepare(), &finalized_state)
+            .expect("the block is valid");
+
+        let chain = state.best_chain().expect("the state has a chain");
+        let history_tree = NonEmptyHistoryTree::from_block(
+            &network,
+            activation_block.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
+                orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
+                ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+            },
+        )
+        .expect("the activation block starts a history tree");
+        let proposal = activation_block
+            .make_fake_child()
+            .set_block_commitment(history_tree.hash().into());
+
+        // Validate the proposal on a copy of the state, like the read state service does.
+        let mut proposal_state = state.clone();
+        proposal_state
+            .commit_block(proposal.clone().prepare(), &finalized_state)
+            .expect("the proposal is valid");
+        let prepared_chain = proposal_state
+            .remove_chain_with_tip(proposal.hash())
+            .expect("validation adds the proposal to a chain");
+        let contextual = prepared_chain
+            .tip_block()
+            .expect("the proposal is the chain's tip")
+            .clone();
+        state.store_prepared_chain(prepared_chain);
+
+        if finalize_root {
+            state.finalize();
+        }
+
+        // A solved proposal only differs in its nonce and solution.
+        let mut solved = (*proposal).clone();
+        Arc::make_mut(&mut solved.header).nonce = [0xff; 32].into();
+        let solved = Arc::new(solved);
+        assert_ne!(solved.hash(), proposal.hash());
+
+        let received_time = std::time::Instant::now();
+        let mut expected = state.clone();
+        let mut pushed = solved.clone().prepare();
+        pushed.received_time = Some(received_time);
+        expected
+            .commit_block(pushed, &finalized_state)
+            .expect("the solved block is valid");
+
+        let mut rebound = contextual;
+        rebound.rebind(solved.clone(), received_time);
+        state
+            .commit_prevalidated_contextual(rebound, &finalized_state)
+            .expect("the solved block is valid");
+        assert!(
+            !state.has_prepared_chain(),
+            "the commit rebinds the proposal's chain instead of pushing the block",
+        );
+
+        let (rebound_chain, expected_chain) = (
+            state.best_chain().expect("the state has a chain"),
+            expected.best_chain().expect("the state has a chain"),
+        );
+        assert_eq!(rebound_chain.non_finalized_tip_hash(), solved.hash());
+        assert!(
+            rebound_chain
+                .history_block_commitment_tree()
+                .as_ref()
+                .is_some(),
+            "the tip has a history tree",
+        );
+        assert!(
+            rebound_chain.eq_internal_state(expected_chain),
+            "rebinding gives the same chain as committing the solved block \
+             (finalize_root: {finalize_root})",
+        );
+        // A root block that the prepared chain removes on its own is no longer shared with the
+        // chain set, so the chain counts that block's index entries as its own.
+        assert_eq!(
+            rebound_chain.detached_index_entry_count() > 0,
+            finalize_root,
+            "only a separately removed root block detaches index entries",
+        );
+    }
+}
+
 #[test]
 fn commitment_is_validated() {
     for network in Network::iter() {

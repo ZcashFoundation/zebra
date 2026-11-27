@@ -633,7 +633,7 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone(), None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -728,7 +728,7 @@ proptest! {
             // reset: they all grow.
             let expected_action = TipAction::grow_with(expected_block.clone().into());
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block, None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -1108,7 +1108,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
 
     // A child of the committed tip is rejected before it's queued.
     let rejected = state
-        .queue_and_commit_to_non_finalized_state(forged_child(5))
+        .queue_and_commit_to_non_finalized_state(forged_child(5), None)
         .try_recv()
         .expect("forged child is answered before it's queued")
         .expect_err("forged child is rejected");
@@ -1116,7 +1116,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
     assert!(state.block_write_sender.finalized.is_some());
 
     // A child of a checkpoint block that hasn't arrived yet is rejected when its parent is sent.
-    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7));
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7), None);
     assert!(state.block_write_sender.finalized.is_some());
     commit_checkpoint(&mut state, 6);
     commit_checkpoint(&mut state, 7);
@@ -1130,7 +1130,8 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
     // The honest switch still happens at the final checkpoint.
     commit_checkpoint(&mut state, 8);
     assert!(state.checkpoint_handoff_is_ready());
-    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None);
     assert!(state.block_write_sender.finalized.is_none());
 
     Ok(())
@@ -1185,7 +1186,8 @@ fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
 
     let mut forged = Arc::unwrap_or_clone(blocks[9].clone());
     Arc::make_mut(&mut forged.header).previous_block_hash = blocks[6].hash();
-    let mut forged_rx = state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare());
+    let mut forged_rx =
+        state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare(), None);
     assert!(matches!(
         forged_rx.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1203,7 +1205,8 @@ fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
         .expect("block 6 commits");
     commit_checkpoint(&mut state, 7);
     commit_checkpoint(&mut state, 8);
-    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let _honest_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None);
     assert!(state.block_write_sender.finalized.is_none());
 
     let rejected = forged_rx
@@ -1248,7 +1251,8 @@ fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
     }
 
     // The first block above the final checkpoint arrives before the final checkpoint.
-    let mut child_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    let mut child_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare(), None);
     assert!(matches!(
         child_rx.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1265,7 +1269,8 @@ fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
     ));
 
     // The next block triggers the switch, and both commit.
-    let grandchild_rx = state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare());
+    let grandchild_rx =
+        state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare(), None);
     assert!(state.block_write_sender.finalized.is_none());
     assert_eq!(
         child_rx.blocking_recv().expect("child is answered")?,
@@ -1372,8 +1377,8 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                     forged.received_time = Some(forged_received);
                     let mut honest = honest;
                     honest.received_time = Some(forged_received + Duration::from_secs(1));
-                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged);
-                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged, None);
+                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone(), None);
                     assert!(state.non_finalized_state_queued_blocks.has(honest.hash));
 
                     let replaced = forged_rx
@@ -1389,7 +1394,7 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
                     );
 
                     state
-                        .queue_and_commit_to_non_finalized_state(parent)
+                        .queue_and_commit_to_non_finalized_state(parent, None)
                         .await
                         .expect("write task responds")
                         .expect("valid parent commits");
@@ -1507,15 +1512,15 @@ fn queued_forged_replacement_fails_and_scores_only_forger() -> Result<()> {
                     assert_ne!(forged.auth_data_root(), honest.block.auth_data_root());
 
                     // The honest body is queued first, the forged one replaces it.
-                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone());
-                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged.prepare());
+                    let honest_rx = state.queue_and_commit_to_non_finalized_state(honest.clone(), None);
+                    let forged_rx = state.queue_and_commit_to_non_finalized_state(forged.prepare(), None);
 
                     let replaced = honest_rx.await.expect("state responds").expect_err("replaced");
                     assert!(replaced.inner().is_duplicate_request());
                     assert_eq!(replaced.inner().misbehavior_score(), 0);
 
                     state
-                        .queue_and_commit_to_non_finalized_state(parent)
+                        .queue_and_commit_to_non_finalized_state(parent, None)
                         .await
                         .expect("write task responds")
                         .expect("valid parent commits");
@@ -1553,11 +1558,11 @@ async fn write_channel_duplicate_keeps_its_own_channel() {
         .collect();
 
     // Block 3 is queued behind block 2, which has been sent to the write task.
-    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(blocks[1].clone());
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(blocks[1].clone(), None);
     state.non_finalized_block_write_sent_hashes.add(&blocks[0]);
 
     let duplicate = state
-        .queue_and_commit_to_non_finalized_state(blocks[0].clone())
+        .queue_and_commit_to_non_finalized_state(blocks[0].clone(), None)
         .await
         .expect("state responds")
         .expect_err("the hash was already sent to the write task");
@@ -1607,8 +1612,13 @@ async fn queued_identical_replacement_keeps_earliest_receipt_time() {
         let mut second_copy = block.clone().prepare();
         second_copy.received_time = second;
 
-        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy);
-        let mut second_rx = state.queue_and_commit_to_non_finalized_state(second_copy);
+        // The second copy solves a validated proposal. It waits for its parent, so the queue
+        // doesn't keep the proposal's validation result.
+        let contextual =
+            crate::ContextuallyVerifiedBlock::test_with_zero_spent_utxos(second_copy.clone());
+        let first_rx = state.queue_and_commit_to_non_finalized_state(first_copy, None);
+        let mut second_rx =
+            state.queue_and_commit_to_non_finalized_state(second_copy, Some(Box::new(contextual)));
 
         assert!(first_rx
             .await
@@ -1624,10 +1634,14 @@ async fn queued_identical_replacement_keeps_earliest_receipt_time() {
             "the newer caller keeps waiting on its own channel"
         );
 
-        let (queued, _rsp_tx) = state
+        let (queued, _rsp_tx, contextual) = state
             .non_finalized_state_queued_blocks
             .remove_queued(&block.hash())
             .expect("the second copy is queued");
         assert_eq!(queued.received_time, expected);
+        assert!(
+            contextual.is_none(),
+            "a block that waits for its parent is validated as usual"
+        );
     }
 }
