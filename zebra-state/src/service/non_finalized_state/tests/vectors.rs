@@ -3306,6 +3306,98 @@ fn transparent_balance_change_skips_blocks_below_min_height() -> Result<()> {
     Ok(())
 }
 
+/// A balance change that no valid block makes is rejected, rather than stopping the node. Only a
+/// block whose transactions aren't verified can make one.
+#[test]
+fn address_balance_change_above_the_money_supply_is_rejected() -> Result<()> {
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::{DeferredPoolBalanceChange, MAX_MONEY},
+        parameters::NetworkKind,
+        transaction::{self, LockTime, Transaction},
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let finalized_height = Height(600_000);
+    let height = Height(600_001);
+    let value: Amount<NonNegative> = (MAX_MONEY / 2 + 1).try_into()?;
+    let pools = ValueBalance::from_transparent_amount(value);
+    let receiver = transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x41; 20]);
+    let spender = transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x42; 20]);
+    let chain = Chain::new(
+        &network,
+        finalized_height,
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        pools,
+    );
+
+    // The spent output belongs to another address, so the receiver's balance only grows.
+    let outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0x11; 32]),
+        index: 0,
+    };
+    let utxo = transparent::OrderedUtxo::new(
+        transparent::Output::new(value, spender.script()),
+        finalized_height,
+        1,
+    );
+
+    // The coinbase claims more than any block subsidy, and the transfer moves an existing output.
+    // Each transaction's value is in range, and so is the block's, but the receiver gets both.
+    let transactions = vec![
+        Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(value, receiver.script())],
+            LockTime::unlocked(),
+            Height(0),
+        )),
+        Arc::new(Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(value, receiver.script())],
+            LockTime::unlocked(),
+            Height(0),
+        )),
+    ];
+    let mut header: block::Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    header.previous_block_hash = block::Hash([0x22; 32]);
+    header.merkle_root = transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    let block = Arc::new(Block {
+        header: Arc::new(header),
+        transactions,
+    })
+    .set_work(10);
+    let contextual = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        block.prepare(),
+        HashMap::from([(outpoint, utxo)]),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        pools,
+    )?;
+
+    // The chain's value pool limit would also reject this block, but the address index is
+    // updated first.
+    assert!(matches!(
+        chain.push(contextual),
+        Err(crate::ValidateContextError::ChangeAddressBalance { height: error_height, .. })
+            if error_height == height
+    ));
+
+    Ok(())
+}
+
 /// Combining the transparent balance changes of several addresses doesn't overflow, in any
 /// address order, even if their changes in the whole chain and in the blocks it shares with the
 /// finalized state are each larger than half the money supply.

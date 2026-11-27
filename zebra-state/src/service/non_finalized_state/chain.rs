@@ -2280,7 +2280,12 @@ impl Chain {
         }
 
         // Index the block's address changes once, for every chain that will contain the block.
-        let transfers = BlockTransparentTransfers::new(contextually_valid, &self.network);
+        let transfers = BlockTransparentTransfers::new(contextually_valid, &self.network).map_err(
+            |amount_error| ValidateContextError::ChangeAddressBalance {
+                amount_error,
+                height,
+            },
+        )?;
         self.transparent_transfers_by_height
             .insert(height, Arc::new(transfers));
 
