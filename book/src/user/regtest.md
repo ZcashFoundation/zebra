@@ -94,6 +94,46 @@ nonzero genesis transparent outputs must still be rebuilt, including experimenta
 v29 state created with the old accounting. Rebuild custom state if consensus
 parameters change for blocks already in the cache.
 
+### Testing compact block relay
+
+Compact block relay is experimental and off by default. To try it between two
+Zebra nodes, set this option on both of them:
+
+```toml
+[network]
+experimental_early_block_relay = true
+```
+
+Nodes with the option advertise a temporary experimental service bit, and use
+compact relay only on connections where both peers advertise it. Other peers
+keep ordinary inventory announcements and full blocks.
+
+On those connections, each peer asks for compact announcements with
+`sendcmpct`, and a newly committed block is announced as a `cmpctblock`: the
+complete header, a nonce, six-byte SipHash-2-4 short IDs, and the coinbase
+transaction. Short IDs cover the transaction ID and authorizing data digest of
+v5 and later transactions, and the transaction ID of earlier versions. Blocks
+before NU5 are announced in the same way, but the receiver always downloads
+them in full.
+
+The receiver rebuilds the block from its verified mempool, then asks once for
+any missing transactions with `getblocktxn`. A short ID collision, a commitment
+mismatch, an unknown parent, or a two-second recovery timeout makes it download
+the full block instead, without penalising the announcing peer. Announced
+blocks are kept for 15 seconds to answer recovery requests, within a block-sized
+byte budget, and the number of retained blocks is bounded across all peers.
+Every rebuilt block is fully verified. Coinbase-only blocks are announced as
+ordinary inventory, because the compact encoding would not save any bytes.
+
+Only the connection that received an announcement can rebuild its block. So
+when a peer that negotiated compact block relay announces a block, that peer is
+asked for the block first, if it is ready. If it is busy, or the download is a
+retry, another peer is asked for the full block. Announcements from other peers
+are routed as they are without compact block relay. The
+`zebra.net.compact_block.admitted` metric counts the announcements that a node
+kept, and `zebra.net.compact_block.rebuilt` counts the blocks that it rebuilt
+from them.
+
 ### Using Zebra's Internal Miner
 
 Zebra can mine blocks on the Regtest network when compiled with the experimental `internal-miner` compilation feature and configured to enable to internal miner.

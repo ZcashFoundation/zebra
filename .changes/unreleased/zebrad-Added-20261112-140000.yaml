@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added the experimental `network.experimental_early_block_relay` option, off by default. Zebra nodes that both set it announce new blocks to each other as a header and short transaction IDs, and rebuild each block from their mempools instead of downloading its transactions again. Every rebuilt block is still fully verified. The `zebra.net.compact_block.admitted` and `zebra.net.compact_block.rebuilt` metrics count the announcements a node kept and the blocks it rebuilt from them.'
+time: 2026-11-12T14:00:00.000000000Z

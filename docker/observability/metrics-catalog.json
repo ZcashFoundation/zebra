@@ -2889,6 +2889,32 @@
       }
     },
     {
+      "name": "zebra.net.compact_block.admitted",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Compact block announcements that this node kept, to rebuild the block when it is downloaded.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_compact_block_admitted"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.compact_block.rebuilt",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks that this node rebuilt from a compact announcement and its mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_compact_block_rebuilt"
+        ]
+      }
+    },
+    {
       "name": "zebra.net.connection.state",
       "kind": "gauge",
       "unit": "count",

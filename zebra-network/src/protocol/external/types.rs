@@ -185,6 +185,16 @@ bitflags! {
         /// Zakura pruned nodes advertise it alongside `NODE_NETWORK` (experimental bit 25).
         /// They don't answer `getblocks` for heights below what they keep.
         const NODE_PRUNED = 1 << 25;
+
+        /// Opt in to experimental compact block relay.
+        ///
+        /// Both ends must advertise this bit. This is a temporary experiment, not a production
+        /// allocation: bits 24–31 are [reserved for temporary experiments][experimental-bits].
+        /// Bit 26 avoids bits 24 and 25, which other experiments already use for different
+        /// capabilities. A production allocation is pending.
+        ///
+        /// [experimental-bits]: https://github.com/zcash/zcash/blob/16ac743/src/protocol.h#L77-L83
+        const NODE_EARLY_BLOCK_RELAY = 1 << 26;
     }
 }
 
