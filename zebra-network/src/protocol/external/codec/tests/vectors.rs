@@ -1036,3 +1036,81 @@ async fn messages_after_ignored_messages_are_decoded() {
 
     drop(writer);
 }
+
+/// Messages that Zebra ignores don't grow the reader's buffer, however many of them a peer sends.
+/// One decode call ignores a limited number of them, so a read can leave more of them in the
+/// buffer, but the codec reserves room for each header it reads, so the reader never has to grow
+/// a buffer that they filled.
+#[tokio::test]
+async fn ignored_messages_do_not_grow_the_read_buffer() {
+    use std::time::Duration;
+
+    use tokio::io::AsyncWriteExt;
+    use tokio_util::codec::FramedRead;
+
+    let _init_guard = zebra_test::init();
+
+    // An empty message with a command that Zebra doesn't know.
+    let mut ignored = Vec::new();
+    ignored.extend_from_slice(&Network::Mainnet.magic().0);
+    ignored.extend_from_slice(b"notacommand\0");
+    ignored.extend_from_slice(&0u32.to_le_bytes());
+    ignored.extend_from_slice(&sha256d::Checksum::from(&[][..]).0);
+
+    // The buffer holds more ignored messages than one decode call ignores, so reads leave some
+    // of them behind that limit.
+    const READ_CAPACITY: usize = 64 * 1024;
+    let chunk = ignored.repeat(READ_CAPACITY / HEADER_LEN);
+    assert!(chunk.len() / HEADER_LEN > MAX_IGNORED_MESSAGES_PER_DECODE);
+
+    let (mut writer, reader) = tokio::io::duplex(chunk.len());
+    let mut messages = FramedRead::with_capacity(reader, Codec::builder().finish(), READ_CAPACITY);
+
+    // A few mebibytes of ignored messages, read one chunk at a time. Each read is polled
+    // without the task budget, so it reads everything that was written.
+    for _ in 0..64 {
+        tokio::time::timeout(Duration::from_secs(5), writer.write_all(&chunk))
+            .await
+            .expect("the reader read the previous chunk, so the pipe has room")
+            .expect("the pipe is open");
+        assert!(
+            tokio::task::unconstrained(messages.next())
+                .now_or_never()
+                .is_none(),
+            "ignored messages aren't returned",
+        );
+        assert!(
+            messages.read_buffer().capacity() <= READ_CAPACITY,
+            "ignored messages grew the read buffer from {READ_CAPACITY} to {} bytes",
+            messages.read_buffer().capacity(),
+        );
+    }
+
+    // A message that Zebra decodes is still delivered after them. The ignored messages left in
+    // the buffer are decoded as the peer sends more bytes.
+    let ping = Message::Ping(Nonce(7));
+    let mut ping_bytes = BytesMut::new();
+    Codec::builder()
+        .finish()
+        .encode(ping.clone(), &mut ping_bytes)
+        .expect("encoding a ping succeeds");
+    let mut sent = ping_bytes.to_vec();
+
+    let mut message = None;
+    for _ in 0..=READ_CAPACITY / HEADER_LEN / MAX_IGNORED_MESSAGES_PER_DECODE {
+        tokio::time::timeout(Duration::from_secs(5), writer.write_all(&sent))
+            .await
+            .expect("the reader read the previous bytes, so the pipe has room")
+            .expect("the pipe is open");
+        if let Some(decoded) = tokio::task::unconstrained(messages.next()).now_or_never() {
+            message = decoded;
+            break;
+        }
+        sent.clone_from(&ignored);
+    }
+    let message = message
+        .expect("the ping is decoded once the ignored messages before it are")
+        .expect("the bytes are valid");
+    assert_eq!(message, ping);
+    assert!(messages.read_buffer().capacity() <= READ_CAPACITY);
+}
