@@ -123,7 +123,7 @@ jobs:
               breaking and breaking-plus-Added rules to real zebrad library-consumer breaks.
               Do not add a dummy operator fragment for a technical-only change.
             - Breaking for a crate (`kind: breaking`): a removal, a signature, field,
-              or type change, reduced visibility, an MSRV bump, new feature-gating, or an
+              or type change, reduced visibility, new feature-gating, or an
               addition that breaks downstream builds, meaning a new variant on an enum that is
               NOT marked `#[non_exhaustive]`, a new field on a struct callers build by literal,
               or a new required method on a public trait that downstream code implements.
@@ -132,6 +132,7 @@ jobs:
               a changed or removed RPC response or endpoint, a database-format bump, or a changed
               default behavior. New optional config, new RPC endpoints or fields, performance, and
               metrics are not breaking.
+            - An MSRV raise is `Changed`, not breaking, for crates and for operators.
             - Fixed only when the fix is invisible (the bug is gone, output is unchanged); if
               operators see different behavior, logs, or errors, use Changed.
             - Match the wording of the entries already in that project's changelog.

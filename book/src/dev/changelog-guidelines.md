@@ -253,12 +253,12 @@ fail after upgrading. Explain the affected setup and the replacement.
 | RPC | Removed methods; incompatible parameters, responses, or semantics |
 | State | A database-format change that prevents downgrade |
 | Behavior | New defaults or policy that invalidate existing integrations |
-| Build requirements | An increased minimum supported Rust version for source builds |
 
 An optional configuration field with a compatible default, a new RPC method or
-response field, new metrics, and a behavior-preserving optimization are not
-inherently breaking. Describe actual compatibility constraints; do not assert
-that every client tolerates an added response field.
+response field, new metrics, a behavior-preserving optimization, and a higher
+minimum Rust version for source builds are not inherently breaking. Describe
+actual compatibility constraints; do not assert that every client tolerates an
+added response field.
 
 Rust API changes belong in library changelogs unless they also affect operators;
 use `zebrad-api` for `zebrad`'s Rust APIs and technical behavior.
@@ -316,18 +316,20 @@ operator major version or change the existing operator version policy.
 
 Apply [Cargo's SemVer guidance][cargo-semver]. Breaking changes include removed
 or renamed public items, incompatible signatures or return types, new trait
-bounds, changed error types, reduced visibility, removed features, newly required
-feature gates, and increased minimum supported Rust versions. Additions can also
-break callers: exhaustive enum variants, public struct fields used in literals,
-and required methods on traits implemented downstream.
+bounds, changed error types, reduced visibility, removed features, and newly
+required feature gates. Additions can also break callers: exhaustive enum
+variants, public struct fields used in literals, and required methods on traits
+implemented downstream.
 
 Record observable semantics, including validation, ordering, privacy, security,
 and resource use.
 
-New independent public types or functions and behavior-preserving optimizations
-are not inherently breaking. Check trait implementations and method additions
-for coherence or name-resolution conflicts. Adding an `Option<T>` parameter
-still changes the signature; Rust has no default arguments.
+New independent public types or functions, behavior-preserving optimizations,
+and increased minimum supported Rust versions are not inherently breaking.
+Cargo's guidance treats an MSRV raise as a minor change, so record it under
+`Changed`. Check trait implementations and method additions for coherence or
+name-resolution conflicts. Adding an `Option<T>` parameter still changes the
+signature; Rust has no default arguments.
 
 ### Dependency updates
 

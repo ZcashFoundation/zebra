@@ -81,8 +81,8 @@ fn build_table() -> Vec<jubjub::AffineNielsPoint> {
 fn node_limbs(node: &sapling_crypto::Node) -> [u64; 4] {
     let bytes = jubjub::Base::from(*node).to_repr();
     let mut limbs = [0u64; 4];
-    for (limb, chunk) in limbs.iter_mut().zip(bytes.chunks_exact(8)) {
-        *limb = u64::from_le_bytes(chunk.try_into().expect("8-byte chunks"));
+    for (limb, chunk) in limbs.iter_mut().zip(bytes.as_chunks::<8>().0) {
+        *limb = u64::from_le_bytes(*chunk);
     }
     limbs[3] &= u64::MAX >> 1;
     limbs
@@ -135,9 +135,10 @@ const LEVEL_TASK_NODES: usize = 64;
 
 /// Hashes each adjacent pair of `nodes`, which has an even length, with one field inversion.
 fn combine_level(level: Level, nodes: &[sapling_crypto::Node]) -> Vec<sapling_crypto::Node> {
-    let points: Vec<_> = nodes
-        .chunks_exact(2)
-        .map(|pair| hash_point(level, &pair[0], &pair[1]))
+    let (pairs, _) = nodes.as_chunks::<2>();
+    let points: Vec<_> = pairs
+        .iter()
+        .map(|[lhs, rhs]| hash_point(level, lhs, rhs))
         .collect();
     let mut affine = vec![jubjub::AffinePoint::identity(); points.len()];
     jubjub::ExtendedPoint::batch_normalize(&points, &mut affine);

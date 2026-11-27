@@ -9,6 +9,9 @@ rust-version.workspace = true
 [package.metadata]
 cargo-fuzz = true
 
+# Harnesses keep the default lints, not the workspace's.
+[lints]
+
 # The dependency set is the union of the crates imported by the fuzz targets.
 # Inherit shared dependencies so API changes cannot leave the harnesses pinned
 # to a different version from the node crates.

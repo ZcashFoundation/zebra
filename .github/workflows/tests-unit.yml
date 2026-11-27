@@ -57,7 +57,7 @@ jobs:
           filters: .github/path-filters.yml
 
   run-unit-tests:
-    name: stable 1.97.0
+    name: stable 1.100.0
     needs: changes
     # Adding a label that is not `release`, or editing the pull request, cannot change the
     # result of a test run on a head commit that did not move, and this is the longest
@@ -94,8 +94,8 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.97.0
-          cache-key: unit-tests-1.97.0-default-release-binaries
+          toolchain: 1.100.0
+          cache-key: unit-tests-1.100.0-default-release-binaries
           cache-on-failure: true
           # Restore on every ref, but only write from main. This is the longest
           # job in CI, so it is the one that suffers most when PR-scoped caches
@@ -167,7 +167,7 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.97.0
+          toolchain: 1.100.0
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:

@@ -46,7 +46,9 @@ fn combine_matches_sapling_crypto() {
             pairs.extend([*lhs, *rhs]);
         }
         let expected: Vec<_> = pairs
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| sapling_crypto::Node::combine(level, &pair[0], &pair[1]))
             .collect();
         assert_eq!(combine_level(level, &pairs), expected);
@@ -63,7 +65,9 @@ fn level_subtree_root_matches_pairwise_hashing() {
         let mut level = 0u8;
         while expected.len() > 1 {
             expected = expected
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| sapling_crypto::Node::combine(level.into(), &pair[0], &pair[1]))
                 .collect();
             level += 1;

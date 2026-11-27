@@ -79,7 +79,7 @@ to the latest release.
 
 ### Runners and build caches
 
-Linux unit tests use Rust 1.97.0, `cargo nextest` with the `ci` profile,
+Linux unit tests use Rust 1.100.0, `cargo nextest` with the `ci` profile,
 release mode without link-time optimization, and `default-release-binaries`.
 Pull requests use `ubuntu-26.04`; merge groups and pushes to the main repository
 use `ubuntu-latest-xl`.

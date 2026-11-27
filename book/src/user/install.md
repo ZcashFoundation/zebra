@@ -100,13 +100,13 @@ installed binary by its full path. Continue with [running Zebra](run.md).
 
 ## Building from source
 
-The `zebrad` binary requires Rust 1.91 or newer; Zebra 7.1.0 pins Rust 1.91.0
-in `rust-toolchain.toml`. Install [rustup](https://www.rust-lang.org/tools/install),
+The `zebrad` binary requires Rust 1.91 or newer; Zebra pins Rust 1.100.0 in
+`rust-toolchain.toml`. Install [rustup](https://www.rust-lang.org/tools/install),
 then select the release toolchain:
 
 ```sh
-rustup toolchain install 1.91.0
-rustup default 1.91.0
+rustup toolchain install 1.100.0
+rustup default 1.100.0
 ```
 
 The bundled RocksDB and Zcash script library require a C compiler, a C++17

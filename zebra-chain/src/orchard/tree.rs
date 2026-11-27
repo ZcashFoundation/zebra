@@ -99,9 +99,10 @@ fn merkle_crh_orchard_batch(
     out: &mut [Node],
 ) {
     assert_eq!(nodes.len(), out.len() * 2, "one output per node pair");
-    let words: Vec<_> = nodes
-        .chunks_exact(2)
-        .map(|pair| merkle_crh_words(level, pair[0].0, pair[1].0))
+    let (pairs, _) = nodes.as_chunks::<2>();
+    let words: Vec<_> = pairs
+        .iter()
+        .map(|[lhs, rhs]| merkle_crh_words(level, lhs.0, rhs.0))
         .collect();
     for (out, hash) in out.iter_mut().zip(domain.hash_many_vartime(&words)) {
         *out = Node(hash.unwrap_or(pallas::Base::zero()));
@@ -237,8 +238,8 @@ impl Node {
     /// Combines independent public node pairs at the same level.
     fn combine_batch(level: u8, nodes: &[Self], out: &mut [Self]) {
         if out.len() <= 1 {
-            for (pair, out) in nodes.chunks_exact(2).zip(out) {
-                *out = Self::combine(level.into(), &pair[0], &pair[1]);
+            for ([lhs, rhs], out) in nodes.as_chunks::<2>().0.iter().zip(out) {
+                *out = Self::combine(level.into(), lhs, rhs);
             }
         } else {
             merkle_crh_orchard_batch(&MERKLE_CRH_DOMAIN, level, nodes, out);

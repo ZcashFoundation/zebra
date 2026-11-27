@@ -206,6 +206,8 @@ impl ConnectionTracker {
 
     /// Claims one of the `limit` slots shared by connections to peers that can't serve historic
     /// blocks, and returns `false` if they are all taken. Dropping the tracker frees the slot.
+    // `fetch_update` is deprecated, but its replacement, `try_update`, needs Rust 1.95.
+    #[allow(deprecated)]
     pub fn try_mark_non_serving(&mut self, limit: usize) -> bool {
         if !self.is_non_serving {
             self.is_non_serving = self
