@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Restructured internal state service code, with no change in behavior.
+time: 2026-11-25T20:00:01.000000000Z

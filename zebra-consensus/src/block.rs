@@ -125,6 +125,30 @@ fn take_solved_proposal(
     solved
 }
 
+/// Keeps `proposal` and `contextual`, its validation result, as the newest validated proposal,
+/// with `audit`, the proposal's audit of a transaction that it took from the mempool, if it took
+/// any.
+///
+/// It replaces any proposal that only differs from `proposal` in its nonce and solution, and
+/// drops the oldest proposals beyond [`MAX_VALIDATED_PROPOSALS`].
+fn keep_validated_proposal(
+    validated_proposals: &watch::Sender<ValidatedProposals>,
+    proposal: Arc<block::Block>,
+    contextual: Box<zs::ContextuallyVerifiedBlock>,
+    audit: Option<mempool_reuse::ReuseAudit>,
+) {
+    // A valid proposal's header commits to its transactions, so proposals
+    // that only differ in their nonce and solution are the same proposal.
+    // Keeping one result for them means that no result is left for a header
+    // once a block has used it, so a later block with that header gets the
+    // known block check first.
+    validated_proposals.send_modify(|proposals| {
+        proposals.retain(|(validated, _, _)| !is_solved_proposal_header(validated, &proposal));
+        proposals.push_front((proposal, contextual, audit));
+        proposals.truncate(MAX_VALIDATED_PROPOSALS);
+    });
+}
+
 /// Returns `true` if `block` is `proposal` with a different nonce and Equihash solution.
 ///
 /// `block`'s transactions haven't been checked against its header, so an equal header doesn't
@@ -805,19 +829,7 @@ where
                 {
                     zs::Response::ValidBlockProposal(contextual) => {
                         // Keep the result, so the solved proposal isn't validated again.
-                        //
-                        // A valid proposal's header commits to its transactions, so proposals
-                        // that only differ in their nonce and solution are the same proposal.
-                        // Keeping one result for them means that no result is left for a header
-                        // once a block has used it, so a later block with that header gets the
-                        // known block check first.
-                        validated_proposals.send_modify(|proposals| {
-                            proposals.retain(|(validated, _, _)| {
-                                !is_solved_proposal_header(validated, &proposal)
-                            });
-                            proposals.push_front((proposal, contextual, audit));
-                            proposals.truncate(MAX_VALIDATED_PROPOSALS);
-                        });
+                        keep_validated_proposal(&validated_proposals, proposal, contextual, audit);
 
                         Ok(hash)
                     }

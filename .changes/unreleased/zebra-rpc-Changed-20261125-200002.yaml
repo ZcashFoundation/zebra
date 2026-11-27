@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Restructured internal block template updater code, with no change in behavior.
+time: 2026-11-25T20:00:02.000000000Z

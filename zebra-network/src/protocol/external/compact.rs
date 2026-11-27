@@ -6,7 +6,7 @@
 //! reconstruction are synchronous and must run on a blocking worker.
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt,
     hash::Hasher,
     io::{self, Read, Write},
@@ -196,22 +196,19 @@ impl CompactBlock {
         }
         let mut matches = HashMap::with_capacity(self.short_ids.len());
         for id in &self.short_ids {
-            match matches.entry(*id) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Match::Missing);
-                }
-                Entry::Occupied(mut entry) => {
-                    entry.insert(Match::Ambiguous);
-                }
-            }
+            matches
+                .entry(*id)
+                .and_modify(|matched| *matched = Match::Ambiguous)
+                .or_insert(Match::Missing);
         }
         for (short, id) in ids {
-            if let Some(matched) = matches.get_mut(&short) {
-                match matched {
-                    Match::Missing => *matched = Match::Unique(id),
-                    Match::Unique(previous) if *previous != id => *matched = Match::Ambiguous,
-                    _ => {}
-                }
+            let Some(matched) = matches.get_mut(&short) else {
+                continue;
+            };
+            match matched {
+                Match::Missing => *matched = Match::Unique(id),
+                Match::Unique(previous) if *previous != id => *matched = Match::Ambiguous,
+                _ => {}
             }
         }
         matches
@@ -329,33 +326,7 @@ impl Reconstruction {
             .try_fold(bytes, |bytes, tx| {
                 add_bytes(bytes, tx.zcash_serialized_size())
             })?;
-        let keys = self.compact.keys();
-        let mut recovered = response.transactions.into_iter();
-        let mut prefilled = self.compact.prefilled.iter().peekable();
-        let mut short_ids = self.compact.short_ids.iter();
-        for (index, slot) in self.transactions.iter_mut().enumerate() {
-            if prefilled
-                .peek()
-                .is_some_and(|(position, _)| *position == index)
-            {
-                prefilled.next();
-                continue;
-            }
-            let expected = short_ids
-                .next()
-                .expect("each non-prefilled slot has a short ID");
-            if slot.is_none() {
-                let tx = recovered
-                    .next()
-                    .expect("response count equals missing slot count");
-                if short_id(keys, tx.as_ref().into()) != *expected {
-                    return Err(SerializationError::Parse(
-                        "compact recovery identity or order mismatch",
-                    ));
-                }
-                *slot = Some(tx);
-            }
-        }
+        self.fill_missing(response)?;
         let block = Arc::new(Block {
             header: self.compact.header.clone(),
             transactions: self
@@ -374,6 +345,42 @@ impl Reconstruction {
             ));
         }
         Ok(block)
+    }
+
+    /// Places the transactions of `response` in the missing slots, in block order, checking each
+    /// against its slot's short ID. `finish` has already checked that `response` has one
+    /// transaction for each missing slot.
+    #[allow(clippy::unwrap_in_result)]
+    fn fill_missing(&mut self, response: BlockTransactions) -> Result<(), SerializationError> {
+        let keys = self.compact.keys();
+        let mut recovered = response.transactions.into_iter();
+        let mut prefilled = self.compact.prefilled.iter().peekable();
+        let mut short_ids = self.compact.short_ids.iter();
+        for (index, slot) in self.transactions.iter_mut().enumerate() {
+            if prefilled
+                .peek()
+                .is_some_and(|(position, _)| *position == index)
+            {
+                prefilled.next();
+                continue;
+            }
+            let expected = short_ids
+                .next()
+                .expect("each non-prefilled slot has a short ID");
+            if slot.is_some() {
+                continue;
+            }
+            let tx = recovered
+                .next()
+                .expect("response count equals missing slot count");
+            if short_id(keys, tx.as_ref().into()) != *expected {
+                return Err(SerializationError::Parse(
+                    "compact recovery identity or order mismatch",
+                ));
+            }
+            *slot = Some(tx);
+        }
+        Ok(())
     }
 }
 
