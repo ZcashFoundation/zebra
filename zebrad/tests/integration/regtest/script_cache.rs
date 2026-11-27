@@ -122,8 +122,8 @@ fn retimed(block: &Block) -> Result<Block> {
 }
 
 /// The node's counts of the transactions in fully verified blocks that the block verifier took
-/// from the mempool's verification, or verified itself, of its mempool lookups that timed out or
-/// failed, and of its background audits of reused transactions that matched or didn't.
+/// from the mempool's verification, or verified itself, and of its mempool lookups that timed out
+/// or failed.
 #[cfg(feature = "prometheus")]
 #[derive(Debug)]
 struct MempoolReuseCounters {
@@ -131,8 +131,6 @@ struct MempoolReuseCounters {
     miss: u64,
     timeout: u64,
     error: u64,
-    audit_match: u64,
-    audit_mismatch: u64,
 }
 
 /// Sets `config`'s metrics endpoint to a free local port, and returns a listener that keeps the
@@ -159,8 +157,8 @@ async fn mempool_reuse_counters(endpoint: std::net::SocketAddr) -> Result<Mempoo
         .error_for_status()?
         .text()
         .await?;
-    // The series names in the metric catalog, with their labels. Each series is a single line
-    // with the series name, its labels and the value.
+    // The series names in the metric catalog. These counters have no labels, so each one is a
+    // single line with the series name and the value.
     let value = |series: &str| -> Result<u64> {
         body.lines()
             .find_map(|line| line.strip_prefix(series)?.strip_prefix(' '))
@@ -171,8 +169,6 @@ async fn mempool_reuse_counters(endpoint: std::net::SocketAddr) -> Result<Mempoo
         miss: value("zebra_consensus_block_mempool_reuse_miss")?,
         timeout: value("zebra_consensus_block_mempool_reuse_timeout")?,
         error: value("zebra_consensus_block_mempool_reuse_error")?,
-        audit_match: value(r#"zebra_consensus_block_mempool_reuse_audit{result="match"}"#)?,
-        audit_mismatch: value(r#"zebra_consensus_block_mempool_reuse_audit{result="mismatch"}"#)?,
     })
 }
 
@@ -322,30 +318,13 @@ async fn mempool_verified_scripts_do_not_skip_block_checks() -> Result<()> {
         // transactions, fails this test.
         #[cfg(feature = "prometheus")]
         {
-            let mut counters = mempool_reuse_counters(metrics_endpoint).await?;
+            let counters = mempool_reuse_counters(metrics_endpoint).await?;
             assert_eq!(counters.hit + counters.miss, 2, "{counters:?}");
             assert!(
                 counters.hit == 2 || counters.timeout + counters.error > 0,
                 "the block verifier verified mempool transactions that it could reuse: \
                  {counters:?}"
             );
-
-            // After the commit, the node verifies one of the reused transactions again in the
-            // background, and the transaction verifier agrees with the mempool's verification.
-            if counters.hit > 0 {
-                let deadline = std::time::Instant::now() + LAUNCH_DELAY;
-                while counters.audit_match + counters.audit_mismatch == 0
-                    && std::time::Instant::now() < deadline
-                {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    counters = mempool_reuse_counters(metrics_endpoint).await?;
-                }
-                assert_eq!(
-                    (counters.audit_match, counters.audit_mismatch),
-                    (1, 0),
-                    "{counters:?}"
-                );
-            }
         }
         mempool(&client, &[]).await?;
 

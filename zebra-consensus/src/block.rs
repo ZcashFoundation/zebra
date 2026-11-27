@@ -41,8 +41,6 @@ mod transactions;
 
 pub use request::Request;
 
-pub(crate) use mempool_reuse::Audits as ReuseAudits;
-
 #[cfg(test)]
 mod tests;
 
@@ -56,9 +54,6 @@ pub struct SemanticBlockVerifier<S, V> {
     mempool: Option<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     mempool_setup_rx:
         Option<oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>>,
-    /// Verifies one transaction that each committed block took from the mempool again, in the
-    /// background. The default audits nothing.
-    reuse_audits: ReuseAudits,
     /// The block proposals that this verifier has validated, shared by all its requests.
     validated_proposals: Arc<watch::Sender<ValidatedProposals>>,
 }
@@ -67,13 +62,8 @@ pub struct SemanticBlockVerifier<S, V> {
 ///
 /// A miner that solves a validated proposal submits the same block with a nonce and an Equihash
 /// solution. That block only needs its proof of work checked: the rest of its validation is the
-/// proposal's. So each proposal also keeps the transaction that it took from the mempool, if it
-/// took any, to verify again in the background once a block that solves it is committed.
-type ValidatedProposals = VecDeque<(
-    Arc<block::Block>,
-    Box<zs::ContextuallyVerifiedBlock>,
-    Option<mempool_reuse::ReuseAudit>,
-)>;
+/// proposal's.
+type ValidatedProposals = VecDeque<(Arc<block::Block>, Box<zs::ContextuallyVerifiedBlock>)>;
 
 /// The number of validated proposals the verifier keeps.
 ///
@@ -94,28 +84,22 @@ fn header_solves_validated_proposal(
     validated_proposals
         .borrow()
         .iter()
-        .any(|(proposal, _, _)| is_solved_proposal_header(proposal, block))
+        .any(|(proposal, _)| is_solved_proposal_header(proposal, block))
 }
 
-/// Removes and returns the validation result of the proposal that `block` solves, and the
-/// proposal's audit of a transaction that it took from the mempool, if there is one.
+/// Removes and returns the validation result of the proposal that `block` solves, if there is one.
 fn take_solved_proposal(
     validated_proposals: &watch::Sender<ValidatedProposals>,
     block: &block::Block,
-) -> Option<(
-    Box<zs::ContextuallyVerifiedBlock>,
-    Option<mempool_reuse::ReuseAudit>,
-)> {
+) -> Option<Box<zs::ContextuallyVerifiedBlock>> {
     let mut solved = None;
 
     validated_proposals.send_if_modified(|proposals| {
         if let Some(index) = proposals
             .iter()
-            .position(|(proposal, _, _)| is_solved_proposal(proposal, block))
+            .position(|(proposal, _)| is_solved_proposal(proposal, block))
         {
-            solved = proposals
-                .remove(index)
-                .map(|(_, contextual, audit)| (contextual, audit));
+            solved = proposals.remove(index).map(|(_, contextual)| contextual);
         }
 
         // Nothing waits for changes to the proposals.
@@ -467,7 +451,6 @@ where
             transaction_verifier,
             mempool: None,
             mempool_setup_rx: None,
-            reuse_audits: ReuseAudits::default(),
             validated_proposals: Arc::new(watch::Sender::new(VecDeque::new())),
         }
     }
@@ -478,14 +461,6 @@ where
         receiver: oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     ) -> Self {
         self.mempool_setup_rx = Some(receiver);
-        self
-    }
-
-    /// Verifies one transaction that each committed block took from the mempool again, in the
-    /// background with `audits`, and counts whether the transaction verifier agrees with the
-    /// mempool's verification.
-    pub(crate) fn with_reuse_audits(mut self, audits: ReuseAudits) -> Self {
-        self.reuse_audits = audits;
         self
     }
 
@@ -532,7 +507,6 @@ where
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
         let mempool = self.current_mempool();
-        let reuse_audits = self.reuse_audits.clone();
         let validated_proposals = self.validated_proposals.clone();
 
         let mut state_service = self.state_service.clone();
@@ -606,7 +580,7 @@ where
             } else {
                 take_solved_proposal(&validated_proposals, &block)
             };
-            if let Some((mut contextual, audit)) = solved_proposal {
+            if let Some(mut contextual) = solved_proposal {
                 check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
                     .map_err(VerifyBlockError::Time)?;
 
@@ -625,9 +599,6 @@ where
                     Ok(zs::Response::Committed(committed_hash)) => {
                         assert_eq!(committed_hash, hash, "state must commit correct hash");
                         record_phase("state_commit", &mut phase_start);
-                        // The block has the proposal's transactions, so it is audited like a
-                        // block that took them from the mempool itself.
-                        reuse_audits.send(audit.map(|audit| audit.for_solved_block(hash)));
                         Ok(hash)
                     }
 
@@ -776,8 +747,6 @@ where
                 record_phase("transaction_verification", &mut phase_start);
             }
 
-            let audit = candidates.audit(&block, &transaction_hashes, &rules);
-
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
@@ -812,10 +781,10 @@ where
                         // once a block has used it, so a later block with that header gets the
                         // known block check first.
                         validated_proposals.send_modify(|proposals| {
-                            proposals.retain(|(validated, _, _)| {
+                            proposals.retain(|(validated, _)| {
                                 !is_solved_proposal_header(validated, &proposal)
                             });
-                            proposals.push_front((proposal, contextual, audit));
+                            proposals.push_front((proposal, contextual));
                             proposals.truncate(MAX_VALIDATED_PROPOSALS);
                         });
 
@@ -835,7 +804,6 @@ where
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     record_phase("state_commit", &mut phase_start);
-                    reuse_audits.send(audit);
                     Ok(hash)
                 }
 
