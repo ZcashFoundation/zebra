@@ -107,9 +107,11 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Run unit tests
+        id: tests
         # Many of the slowest tests wait on timers or peers rather than the CPU, so run twice as many
         # tests as the runner has CPUs.
         run: |
+          rm -f "$JUNIT_REPORT"
           profile_args=()
           if [[ "$GITHUB_EVENT_NAME" == pull_request &&
                 "$GITHUB_REPOSITORY" == ZcashFoundation/zebra ]]; then
@@ -151,6 +153,22 @@ jobs:
           else:
               print("No flaky or failed tests.")
           PY
+
+      - name: Prepare test timing report
+        id: timings
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' && hashFiles(env.JUNIT_REPORT) != '' }}
+        continue-on-error: true
+        run: python3 .github/workflows/scripts/test-timings.py "$JUNIT_REPORT" "$RUNNER_TEMP/test-timings.xml"
+
+      - name: Retain nextest results
+        if: ${{ !cancelled() && steps.timings.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: nextest-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/test-timings.xml
+          if-no-files-found: warn
+          retention-days: 30
 
   check-no-git-dependencies:
     name: Check no git dependencies

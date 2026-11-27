@@ -45,7 +45,7 @@ proptest-impl = [
     "nonempty",
 ]
 
-bench = ["zebra-test"]
+bench = ["proptest-impl"]
 
 [dependencies]
 
