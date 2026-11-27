@@ -96,17 +96,18 @@ parameters change for blocks already in the cache.
 
 ### Testing compact block relay
 
-Compact block relay is experimental and off by default. To try it between two
-Zebra nodes, set this option on both of them:
+Compact block relay is off by default. To try it between two Zebra nodes, set
+this option on both of them:
 
 ```toml
 [network]
-experimental_early_block_relay = true
+compact_block_relay = true
 ```
 
-Nodes with the option advertise a temporary experimental service bit, and use
-compact relay only on connections where both peers advertise it. Other peers
-keep ordinary inventory announcements and full blocks.
+Nodes with the option advertise the service bit that the [draft Compact Block
+Relay ZIP](https://github.com/zcash/zips/pull/1429) assigns, and use compact
+relay only on connections where both peers advertise it. Other peers keep
+ordinary inventory announcements and full blocks.
 
 On those connections, each peer asks for compact announcements with
 `sendcmpct`, and a newly committed block is announced as a `cmpctblock`: the
@@ -124,6 +125,37 @@ blocks are kept for 15 seconds to answer recovery requests, within a block-sized
 byte budget, and the number of retained blocks is bounded across all peers.
 Every rebuilt block is fully verified. Coinbase-only blocks are announced as
 ordinary inventory, because the compact encoding would not save any bytes.
+
+The ZIP lets a peer that advertises the service bit relay a block before it has
+validated it, once the block passes the ZIP's early relay checks. Zebra only
+announces blocks that it has committed, but it accepts these blocks from its
+peers, rebuilt or in full. When a block from a peer that negotiated compact
+block relay passes the early relay checks as a child of Zebra's best tip, and
+then fails later validation, such as a transaction, signature operation, miner
+fee or contextual check, Zebra rejects the block without penalising the peer,
+as the ZIP's peer misbehaviour rules require. Zebra checks the block while it
+verifies it, if the block's parent is the best tip. If the block fails before
+its parent is the best tip, Zebra waits up to 30 seconds for the parent. Zebra
+then ignores the rejected block's hash, whether a peer announces it or Zebra
+finds it while syncing, instead of downloading and verifying the block again.
+
+A peer gets at most one unpenalised later failure per parent block for the
+blocks that it announces, and one for the blocks that Zebra downloads from it
+while syncing. Any other later failure from that peer on the same parent is
+penalised as it would be without compact block relay. Peers are grouped as they
+are for bans, so an IPv4 address, or an IPv6 `/64`, counts as one peer. On
+networks with a minimum difficulty rule, like Testnet, the early relay checks
+can cost very little proof of work, so this limits the invalid blocks that a
+peer can make Zebra verify without being penalised. Valid blocks don't fail
+later validation, so they never use the allowance.
+
+Zebra still penalises the peer for a block that fails the early relay checks,
+or whose parent doesn't become Zebra's best tip in that time, because Zebra
+only checks these blocks against its best tip. The ZIP says that a node must
+not penalise the peer when it doesn't have the parent's chain history. But
+without it, a node can't check the block's difficulty, so a peer could send
+blocks that pass the other checks with much less proof of work. Blocks from
+peers that didn't negotiate compact block relay are penalised as before.
 
 Only the connection that received an announcement can rebuild its block. So
 when a peer that negotiated compact block relay announces a block, that peer is

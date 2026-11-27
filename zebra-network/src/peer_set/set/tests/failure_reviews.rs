@@ -159,7 +159,7 @@ async fn compact_relay_sends_the_first_download_to_the_advertiser() {
 
     for _ in 0..20 {
         assert_eq!(
-            first_download_peer(PeerServices::NODE_EARLY_BLOCK_RELAY).await,
+            first_download_peer(PeerServices::NODE_COMPACT_BLOCKS).await,
             2,
         );
     }
@@ -182,7 +182,7 @@ async fn compact_relay_does_not_prefer_a_failed_advertiser() {
 
     let services = [
         PeerServices::NODE_NETWORK,
-        PeerServices::NODE_EARLY_BLOCK_RELAY,
+        PeerServices::NODE_COMPACT_BLOCKS,
     ];
     let (discovered_peers, addrs, mut handles) = mock_peers_with_services(&services);
     let (minimum_peer_version, _best_tip) =
@@ -1001,6 +1001,50 @@ async fn served_block_without_advertisement_keeps_advertiser_preference() {
         .call(request.clone());
     assert_eq!(received_request(&mut handles[0]), None);
     finish_download(&mut handles[1], request, response, download).await;
+}
+
+/// A block from a connection that negotiated compact block relay is recorded like any other block
+/// that an advertiser returned, so the next request for it asks another peer first.
+#[tokio::test(start_paused = true)]
+async fn served_early_block_from_advertiser_is_recorded() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (_, inventory, response) = block_download();
+    let Response::Blocks(blocks) = response else {
+        unreachable!("the helper constructs a block response");
+    };
+    let response = Response::EarlyBlocks(blocks);
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+
+    // Only the non-serving peer advertises the block, so it gets the request.
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[1]),
+    );
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    assert_eq!(received_request(&mut handles[0]), None);
+    finish_download(&mut handles[1], request, response, download).await;
+    peer_set.ready().await.expect("the peers are ready");
+
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .served_peers(inventory)
+            .collect::<Vec<_>>(),
+        vec![&addrs[1]],
+        "a block from a connection that negotiated compact block relay must be recorded",
+    );
 }
 
 /// Regression test for GHSA-g9rc-89v4-hhvf: repeat requests that are in flight at the same time

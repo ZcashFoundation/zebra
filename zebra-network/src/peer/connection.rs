@@ -884,6 +884,17 @@ where
                             debug!(error = ?response, "error in peer response to Zebra request");
                         }
 
+                        // A peer that negotiated compact block relay can send a block before it
+                        // has validated it. The downloaders score these blocks' failures
+                        // differently, so their downloads are marked.
+                        let response = match response {
+                            Ok(Response::Blocks(blocks))
+                                if self.connection_info.early_block_relay =>
+                            {
+                                Ok(Response::EarlyBlocks(blocks))
+                            }
+                            response => response,
+                        };
                         let _ = tx.send(response.map_err(Into::into));
                     } else {
                         unreachable!("already checked for AwaitingResponse");
@@ -1703,7 +1714,7 @@ where
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
-            Response::CompactBlockTransactions(_) => {
+            Response::CompactBlockTransactions(_) | Response::EarlyBlocks(_) => {
                 error!("inbound service returned a local-only compact relay response");
                 return;
             }

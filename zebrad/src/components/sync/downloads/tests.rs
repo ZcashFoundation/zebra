@@ -16,7 +16,10 @@ use tracing::Span;
 
 use zebra_chain::{
     block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block, Height},
-    chain_tip::{mock::MockChainTip, ChainTip},
+    chain_tip::{
+        mock::{MockChainTip, MockChainTipSender},
+        ChainTip,
+    },
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, ParametersBuilder},
         NetworkUpgrade,
@@ -406,6 +409,26 @@ fn mock_downloads(
     MockVerifier,
     MockState,
 ) {
+    let (downloads, network, verifier, state, _chain_tip_sender) =
+        mock_downloads_with_chain_tip(tip_height);
+
+    // Dropping the sender is fine: `watch::Receiver::borrow` keeps returning the height that was
+    // sent, and these tests don't change the tip mid-run.
+    (downloads, network, verifier, state)
+}
+
+/// Like [`mock_downloads`], and also returns the sender for the downloader's chain tip, so a test
+/// can change the best tip while a block is downloaded and verified.
+#[allow(clippy::type_complexity)]
+fn mock_downloads_with_chain_tip(
+    tip_height: Height,
+) -> (
+    Downloads<MockNetwork, MockVerifier, MockState, MockChainTip>,
+    MockNetwork,
+    MockVerifier,
+    MockState,
+    MockChainTipSender,
+) {
     let network: MockNetwork = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
@@ -420,8 +443,6 @@ fn mock_downloads(
 
     let (latest_chain_tip, chain_tip_sender) = MockChainTip::new();
     chain_tip_sender.send_best_tip_height(tip_height);
-    // Dropping the sender is fine: `watch::Receiver::borrow` keeps returning the height we just
-    // sent, and no test changes the tip mid-run.
 
     let (past_lookahead_limit_sender, _past_lookahead_limit_receiver) = watch::channel(false);
 
@@ -437,7 +458,7 @@ fn mock_downloads(
         Height(1_000_000),
     );
 
-    (downloads, network, verifier, state)
+    (downloads, network, verifier, state, chain_tip_sender)
 }
 
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
@@ -1249,5 +1270,352 @@ async fn download_deadline_includes_readiness_and_response() {
             assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
         }
         assert_eq!(Instant::now() - started, budget);
+    }
+}
+
+/// A peer that negotiated compact block relay can answer a sync download with a block it relays
+/// before validating it. When that block passes the checks that authenticate it for early relay,
+/// and then fails later validation, the draft Compact Block Relay ZIP says the node must not
+/// penalize the peer, so the failure isn't attributed to it.
+///
+/// The failure is still attributed if the block came from a connection that didn't negotiate
+/// compact block relay, if the state can't authenticate the block, or if the verifier rejected the
+/// block in its part of the early relay checks. The state is only asked to check a block from a
+/// negotiated connection that failed later validation. The block's parent never becomes the best
+/// tip, so a block that the state can't authenticate is attributed when the downloader stops
+/// waiting for its parent.
+#[tokio::test(start_paused = true)]
+async fn later_failure_of_authenticated_early_block_is_not_attributed() {
+    use zebra_consensus::{
+        error::TransactionError, router::RouterError, BlockError, VerifyBlockError,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let block = block_1();
+    let hash = block.hash();
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    let later_failure: fn() -> RouterError =
+        || VerifyBlockError::Transaction(TransactionError::BadBalance).into();
+    let early_relay_check_failure: fn() -> RouterError = || {
+        VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::CoinbasePosition),
+        }
+        .into()
+    };
+
+    // Whether the block came from a negotiated connection, the verifier's error, whether the state
+    // is asked to check the block, whether the check passes, and whether the failure is attributed.
+    let cases: [(bool, fn() -> RouterError, bool, bool, bool); 4] = [
+        (true, later_failure, true, true, false),
+        (true, later_failure, true, false, true),
+        (false, later_failure, false, false, true),
+        (true, early_relay_check_failure, false, false, true),
+    ];
+
+    for (early, error, checked, authenticated, attributed) in cases {
+        assert_ne!(error().misbehavior_score(), 0);
+
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+
+        downloads
+            .download_and_verify(hash)
+            .await
+            .expect("download is queued");
+
+        let blocks = vec![Available((block.clone(), Some(advertiser)))];
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await
+            .respond(if early {
+                zn::Response::EarlyBlocks(blocks)
+            } else {
+                zn::Response::Blocks(blocks)
+            });
+
+        verifier
+            .expect_request(zebra_consensus::Request::Commit(block.clone()))
+            .await
+            .respond_error(zn::BoxError::from(error()));
+
+        if checked {
+            let check = state
+                .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(block.clone()))
+                .await;
+            if authenticated {
+                check.respond(zs::ReadResponse::ValidBestTipBlockCommitments);
+            } else {
+                check.respond_error(zn::BoxError::from(
+                    "header does not extend the committed best tip",
+                ));
+            }
+        }
+
+        let result = downloads
+            .next()
+            .await
+            .expect("downloads is non-empty")
+            .expect_err("the block fails verification");
+        let expected = attributed.then_some(advertiser);
+        assert!(
+            matches!(
+                result,
+                BlockDownloadVerifyError::Invalid { advertiser_addr, .. } if advertiser_addr == expected
+            ),
+            "early: {early}, checked: {checked}, authenticated: {authenticated}, \
+             expected attribution: {expected:?}, error: {result:?}",
+        );
+
+        state.expect_no_requests().await;
+    }
+}
+
+/// A peer that negotiated compact block relay can relay a block once its parent is the peer's
+/// best tip, so the block can fail later validation before its parent is committed here. Then the
+/// downloader waits for the parent to become the best tip, without asking the state again, and
+/// checks the block once it is. The failure isn't attributed if that check passes.
+#[tokio::test(start_paused = true)]
+async fn later_failure_before_the_parent_is_the_best_tip_is_not_attributed() {
+    use zebra_consensus::{error::TransactionError, router::RouterError, VerifyBlockError};
+
+    let _init_guard = zebra_test::init();
+
+    let block = block_1();
+    let hash = block.hash();
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    let (mut downloads, mut network, mut verifier, mut state, chain_tip_sender) =
+        mock_downloads_with_chain_tip(Height(0));
+    // Another block is the best tip.
+    chain_tip_sender.send_best_tip_hash(block::Hash([0; 32]));
+
+    downloads
+        .download_and_verify(hash)
+        .await
+        .expect("download is queued");
+
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::EarlyBlocks(vec![Available((
+            block.clone(),
+            Some(advertiser),
+        ))]));
+
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .respond_error(zn::BoxError::from(RouterError::from(
+            VerifyBlockError::Transaction(TransactionError::BadBalance),
+        )));
+
+    // The block doesn't extend the best tip yet.
+    state
+        .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(block.clone()))
+        .await
+        .respond_error(zn::BoxError::from(
+            "header does not extend the committed best tip",
+        ));
+
+    // The downloader waits for the block's parent, without checking the block again.
+    state.expect_no_requests().await;
+
+    chain_tip_sender.send_best_tip_hash(block.header.previous_block_hash);
+    state
+        .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(block.clone()))
+        .await
+        .respond(zs::ReadResponse::ValidBestTipBlockCommitments);
+
+    let result = downloads
+        .next()
+        .await
+        .expect("downloads is non-empty")
+        .expect_err("the block fails verification");
+    assert!(
+        matches!(
+            result,
+            BlockDownloadVerifyError::Invalid {
+                advertiser_addr: None,
+                ..
+            }
+        ),
+        "the failure of an authenticated block must not be attributed, got: {result:?}",
+    );
+
+    state.expect_no_requests().await;
+}
+
+/// A peer gets at most one unpenalized later failure per parent block. So a second block on the
+/// same parent from the same peer, which passes the checks that authenticate it for early relay and
+/// then fails later validation, is attributed to the peer, even after a sync restart. A failure on
+/// another parent, and a failure from another peer on the same parent, aren't attributed.
+///
+/// The downloader refuses to download these blocks again. Once it has forgotten a block, the same
+/// block again from the same peer is attributed.
+#[tokio::test(start_paused = true)]
+async fn second_later_failure_on_the_same_parent_is_attributed() {
+    use crate::components::inbound::downloads::MAX_REJECTED_EARLY_BLOCKS;
+
+    let _init_guard = zebra_test::init();
+
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+    let other_peer: PeerSocketAddr = "127.0.0.2:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+
+    // Blocks with different hashes, on the same parent or on another one.
+    let with_header = |change: &dyn Fn(&mut block::Header)| {
+        let mut block = (*block_1()).clone();
+        change(Arc::make_mut(&mut block.header));
+        Arc::new(block)
+    };
+    let block = block_1();
+    let sibling = with_header(&|header| header.nonce.0[0] ^= 1);
+    let other_sibling = with_header(&|header| header.nonce.0[0] ^= 2);
+    let other_parent = with_header(&|header| header.previous_block_hash = block::Hash([1; 32]));
+    assert_eq!(
+        sibling.header.previous_block_hash,
+        block.header.previous_block_hash
+    );
+    assert_ne!(sibling.hash(), block.hash());
+    assert_ne!(other_sibling.hash(), sibling.hash());
+
+    // A description, the block, the peer that sends it, and whether the failure is attributed.
+    let cases = [
+        ("first failure", &block, advertiser, false),
+        ("same peer and parent", &sibling, advertiser, true),
+        ("another peer", &other_sibling, other_peer, false),
+        ("another parent", &other_parent, advertiser, false),
+    ];
+
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    for (case, block, peer, attributed) in cases {
+        assert_eq!(
+            serve_failing_early_block(
+                &mut downloads,
+                &mut network,
+                &mut verifier,
+                &mut state,
+                block,
+                peer,
+            )
+            .await,
+            attributed.then_some(peer),
+            "{case}",
+        );
+
+        // A sync restart keeps the allowances that peers have used, and the rejected blocks.
+        downloads.cancel_all();
+    }
+
+    // The downloader refuses the rejected blocks, without downloading or verifying them again.
+    for (_case, block, _peer, _attributed) in cases {
+        let hash = block.hash();
+        assert!(
+            matches!(
+                downloads.download_and_verify(hash).await,
+                Err(BlockDownloadVerifyError::AlreadyRejected { hash: rejected }) if rejected == hash
+            ),
+            "a rejected block must not be downloaded again",
+        );
+    }
+    assert!(downloads.is_empty());
+    network.expect_no_requests().await;
+    verifier.expect_no_requests().await;
+
+    // More blocks from the same peer on the same parent fill the downloader's rejected blocks, so
+    // it forgets the first block. These failures don't use an allowance, because they are scored.
+    for n in 0..MAX_REJECTED_EARLY_BLOCKS {
+        let n = u16::try_from(n + 1).expect("the number of rejected blocks is small");
+        let filler = with_header(&|header| {
+            header.nonce.0[0] ^= 4;
+            header.nonce.0[1] ^= n.to_le_bytes()[0];
+            header.nonce.0[2] ^= n.to_le_bytes()[1];
+        });
+        assert_eq!(
+            serve_failing_early_block(
+                &mut downloads,
+                &mut network,
+                &mut verifier,
+                &mut state,
+                &filler,
+                advertiser,
+            )
+            .await,
+            Some(advertiser),
+            "another block on the same parent",
+        );
+    }
+    assert_eq!(
+        serve_failing_early_block(
+            &mut downloads,
+            &mut network,
+            &mut verifier,
+            &mut state,
+            &block,
+            advertiser,
+        )
+        .await,
+        Some(advertiser),
+        "the same block again on the same parent, once it is forgotten",
+    );
+
+    state.expect_no_requests().await;
+}
+
+/// Downloads `block` from `peer` on a connection that negotiated compact block relay, fails it
+/// with a later validation failure after it passes the checks that authenticate it for early relay,
+/// and returns the peer that the failure is attributed to.
+async fn serve_failing_early_block(
+    downloads: &mut Downloads<MockNetwork, MockVerifier, MockState, MockChainTip>,
+    network: &mut MockNetwork,
+    verifier: &mut MockVerifier,
+    state: &mut MockState,
+    block: &Arc<Block>,
+    peer: PeerSocketAddr,
+) -> Option<PeerSocketAddr> {
+    use zebra_consensus::{error::TransactionError, router::RouterError, VerifyBlockError};
+
+    let hash = block.hash();
+    downloads
+        .download_and_verify(hash)
+        .await
+        .expect("download is queued");
+
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::EarlyBlocks(vec![Available((
+            block.clone(),
+            Some(peer),
+        ))]));
+
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .respond_error(zn::BoxError::from(RouterError::from(
+            VerifyBlockError::Transaction(TransactionError::BadBalance),
+        )));
+
+    state
+        .expect_request(zs::ReadRequest::CheckBestTipBlockCommitments(block.clone()))
+        .await
+        .respond(zs::ReadResponse::ValidBestTipBlockCommitments);
+
+    match downloads.next().await.expect("downloads is non-empty") {
+        Err(BlockDownloadVerifyError::Invalid {
+            advertiser_addr, ..
+        }) => advertiser_addr,
+        result => panic!("the block must fail verification, got: {result:?}"),
     }
 }

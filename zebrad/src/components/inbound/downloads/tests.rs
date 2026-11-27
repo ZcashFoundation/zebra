@@ -887,3 +887,260 @@ async fn verified_block_records_download_and_verify_durations() {
     assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
     assert_eq!(recorder.verify_commit.get(), (1, VERIFY.as_secs_f64()));
 }
+
+/// Only failures that score the peer, and that the block verifier returns after its part of the
+/// checks that authenticate a block for early relay, can be exempt from scoring for a peer that
+/// negotiated compact block relay.
+///
+/// Failures of those checks keep their score, including subsidy failures with the same shape as
+/// the miner fee failures. So do bodies that don't match their authorizing data commitment, and
+/// all the checkpoint verifier's failures.
+#[test]
+fn only_scored_failures_after_the_early_relay_checks_are_later_validation_failures() {
+    use zebra_chain::{
+        block::{merkle, CommitmentError},
+        parameters::subsidy::SubsidyError,
+    };
+    use zebra_consensus::{
+        error::TransactionError, router::RouterError, BlockError, VerifyBlockError,
+        VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    };
+
+    use super::is_later_validation_failure;
+
+    let _init_guard = zebra_test::init();
+
+    let hash = block_1().hash();
+    let height = Height(1);
+    let subsidy = |error| VerifyBlockError::Block {
+        source: BlockError::Transaction(TransactionError::Subsidy(error)),
+    };
+
+    let later_failures = [
+        VerifyBlockError::Transaction(TransactionError::BadBalance),
+        VerifyBlockError::Block {
+            source: BlockError::TooManyTransparentSignatureOperations {
+                height,
+                hash,
+                sigops: MAX_BLOCK_SIGOPS + 1,
+            },
+        },
+        subsidy(SubsidyError::InvalidMinerFees),
+        subsidy(SubsidyError::Overflow),
+    ];
+    for error in later_failures {
+        assert_ne!(error.misbehavior_score(), 0, "{error:?}");
+        assert!(is_later_validation_failure(&error), "{error:?}");
+        let error = RouterError::from(error);
+        assert!(is_later_validation_failure(&error), "{error:?}");
+    }
+
+    let auth_commitment_mismatch =
+        VerifyBlockError::Commit(zs::CommitBlockError::ValidateContextError(Box::new(
+            zs::ValidateContextError::InvalidBlockCommitment(
+                CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                    expected: [1; 32],
+                    actual: [2; 32],
+                },
+            ),
+        )));
+    let early_relay_check_failures = [
+        VerifyBlockError::Block {
+            source: BlockError::BadMerkleRoot {
+                actual: merkle::Root([1; 32]),
+                expected: merkle::Root([2; 32]),
+            },
+        },
+        VerifyBlockError::Block {
+            source: BlockError::InvalidDifficulty(height, hash),
+        },
+        VerifyBlockError::Block {
+            source: BlockError::Transaction(TransactionError::CoinbasePosition),
+        },
+        subsidy(SubsidyError::FundingStreamNotFound),
+        VerifyBlockError::Subsidy(SubsidyError::NoCoinbase),
+        auth_commitment_mismatch,
+    ];
+    for error in early_relay_check_failures {
+        assert_ne!(error.misbehavior_score(), 0, "{error:?}");
+        assert!(!is_later_validation_failure(&error), "{error:?}");
+        let error = RouterError::from(error);
+        assert!(!is_later_validation_failure(&error), "{error:?}");
+    }
+
+    let checkpoint = RouterError::from(VerifyCheckpointError::CoinbaseHeight { hash });
+    assert_ne!(checkpoint.misbehavior_score(), 0);
+    assert!(!is_later_validation_failure(&checkpoint));
+
+    // A failure that doesn't score the peer has nothing to exempt.
+    let duplicate = VerifyBlockError::Commit(zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::BestChain,
+    });
+    assert_eq!(duplicate.misbehavior_score(), 0);
+    assert!(!is_later_validation_failure(&duplicate));
+
+    // Other errors, like verification timeouts, aren't block verifier failures.
+    let local_error = zn::BoxError::from("block verification timed out");
+    assert!(!is_later_validation_failure(&*local_error));
+}
+
+/// A peer gets at most one unpenalized later failure per parent block, for a block that passed the
+/// checks that authenticate it for early relay. Every other later failure on that parent is scored.
+/// Peers are grouped like bans, so another port, or another address in the same IPv6 `/64`, doesn't
+/// get another allowance for the same parent.
+#[test]
+fn early_relay_allowance_is_one_failure_per_peer_group_and_parent() {
+    use zebra_chain::block;
+
+    use super::EarlyRelayAllowances;
+
+    let _init_guard = zebra_test::init();
+
+    let peer: PeerSocketAddr = "192.0.2.1:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let parent = block::Hash([1; 32]);
+    let other_parent = block::Hash([2; 32]);
+
+    let mut allowances = EarlyRelayAllowances::default();
+    assert!(
+        allowances.try_use(peer, parent),
+        "the first failure is allowed",
+    );
+    assert!(
+        !allowances.try_use(peer, parent),
+        "another failure on the same parent is scored",
+    );
+    assert!(
+        !allowances.try_use(peer, parent),
+        "every later failure on the same parent is scored",
+    );
+
+    assert!(
+        allowances.try_use(peer, other_parent),
+        "a failure on another parent is allowed",
+    );
+
+    let other_peer: PeerSocketAddr = "192.0.2.2:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    assert!(
+        allowances.try_use(other_peer, parent),
+        "another peer's failure on the same parent is allowed",
+    );
+
+    let same_ip = "192.0.2.1:18233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let ipv4_mapped = "[::ffff:192.0.2.1]:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let ipv6_peer = "[2001:db8::1]:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let same_ipv6_group = "[2001:db8::ffff:2]:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let other_ipv6_group = "[2001:db8:0:1::1]:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    assert!(
+        !allowances.try_use(same_ip, parent),
+        "another port of the same IP is the same peer group",
+    );
+    assert!(
+        !allowances.try_use(ipv4_mapped, parent),
+        "an IPv4-mapped IPv6 address is the same peer group",
+    );
+    assert!(allowances.try_use(ipv6_peer, parent));
+    assert!(
+        !allowances.try_use(same_ipv6_group, parent),
+        "another address in the same IPv6 /64 is the same peer group",
+    );
+    assert!(
+        allowances.try_use(other_ipv6_group, parent),
+        "an address in another IPv6 /64 is another peer group",
+    );
+}
+
+/// Returns a distinct block hash for each `n`.
+fn numbered_hash(n: usize) -> zebra_chain::block::Hash {
+    let mut hash = [0; 32];
+    let n = u64::try_from(n).expect("test numbers are small");
+    hash[..8].copy_from_slice(&n.to_le_bytes());
+    zebra_chain::block::Hash(hash)
+}
+
+/// The allowances that have been used are bounded, and the oldest ones are forgotten first.
+#[test]
+fn early_relay_allowances_forget_the_oldest_first() {
+    use super::{EarlyRelayAllowances, MAX_EARLY_RELAY_ALLOWANCES};
+
+    let _init_guard = zebra_test::init();
+
+    let peer: PeerSocketAddr = "192.0.2.1:8233"
+        .parse()
+        .expect("hard-coded address is valid");
+    let parent = numbered_hash;
+
+    let mut allowances = EarlyRelayAllowances::default();
+    for n in 0..MAX_EARLY_RELAY_ALLOWANCES {
+        assert!(allowances.try_use(peer, parent(n)));
+    }
+    assert!(
+        !allowances.try_use(peer, parent(0)),
+        "the oldest allowance is still used while the set is full",
+    );
+
+    // One more allowance forgets the oldest one, and only that one.
+    assert!(allowances.try_use(peer, parent(MAX_EARLY_RELAY_ALLOWANCES)));
+    assert!(
+        !allowances.try_use(peer, parent(1)),
+        "the second oldest allowance is still used",
+    );
+    assert!(
+        !allowances.try_use(peer, parent(MAX_EARLY_RELAY_ALLOWANCES)),
+        "the newest allowance is still used",
+    );
+    assert!(
+        allowances.try_use(peer, parent(0)),
+        "the oldest allowance is forgotten",
+    );
+}
+
+/// The rejected early relay blocks that a downloader remembers are bounded, and the oldest ones are
+/// forgotten first.
+#[test]
+fn rejected_early_blocks_forget_the_oldest_first() {
+    use indexmap::IndexSet;
+
+    use super::{remember_rejected_early_block, MAX_REJECTED_EARLY_BLOCKS};
+
+    let _init_guard = zebra_test::init();
+
+    let mut rejected = IndexSet::new();
+    for n in 0..MAX_REJECTED_EARLY_BLOCKS {
+        remember_rejected_early_block(&mut rejected, numbered_hash(n));
+    }
+    remember_rejected_early_block(&mut rejected, numbered_hash(0));
+    assert!(
+        rejected.contains(&numbered_hash(0)),
+        "a block that is already remembered doesn't forget the oldest one",
+    );
+
+    remember_rejected_early_block(&mut rejected, numbered_hash(MAX_REJECTED_EARLY_BLOCKS));
+    assert_eq!(rejected.len(), MAX_REJECTED_EARLY_BLOCKS);
+    assert!(
+        !rejected.contains(&numbered_hash(0)),
+        "the oldest block is forgotten",
+    );
+    assert!(
+        rejected.contains(&numbered_hash(1)),
+        "the second oldest block is still remembered",
+    );
+    assert!(
+        rejected.contains(&numbered_hash(MAX_REJECTED_EARLY_BLOCKS)),
+        "the newest block is remembered",
+    );
+}

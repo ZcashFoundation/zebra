@@ -914,7 +914,8 @@ where
 
         while let Some(hash) = self.reobtain_hashes.first().copied() {
             // Keep the hash queued across the await: the progress deadline can cancel dispatch.
-            // A duplicate means the block is already being handled.
+            // A duplicate means the block is already being handled, and a rejected early relay
+            // block can't be valid.
             if let Err(error) = self.queue_block(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
                 // Any other error means the network failed or wasn't ready before the download
@@ -923,6 +924,7 @@ where
                 if !matches!(
                     error,
                     BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+                        | BlockDownloadVerifyError::AlreadyRejected { .. }
                 ) {
                     break;
                 }
@@ -1378,11 +1380,15 @@ where
         // DuplicateBlockQueuedForDownload is caught and skipped instead of
         // propagating — this prevents dropping unprocessed hashes from the
         // batch, which would create frontier gaps and stalls (#5709).
+        // AlreadyRejected is skipped the same way.
         for hash in hashes.into_iter() {
             match self.queue_block(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");
+                }
+                Err(BlockDownloadVerifyError::AlreadyRejected { .. }) => {
+                    debug!("block already failed validation after early relay, continuing");
                 }
                 Err(error) => return Err(error),
             }
@@ -1698,6 +1704,7 @@ where
             InvalidHeight { .. } => "invalid_height",
             BodyHeaderMismatch { .. } => "body_header_mismatch",
             DuplicateBlockQueuedForDownload { .. } => "duplicate_queued",
+            AlreadyRejected { .. } => "already_rejected",
             CancelledDuringDownload { .. }
             | CancelledAwaitingVerifierReadiness { .. }
             | CancelledDuringVerification { .. } => "cancelled",
@@ -1712,14 +1719,17 @@ where
     ///
     /// Publishes the downloads before that wait. A block that is already queued isn't counted as
     /// an error, because the syncer ignores that error: it happens when a timed-out genesis
-    /// attempt or an earlier round left the block queued.
+    /// attempt or an earlier round left the block queued. Neither is a rejected early relay block,
+    /// because its failure was already counted.
     async fn queue_block(&mut self, hash: block::Hash) -> Result<(), BlockDownloadVerifyError> {
         self.update_metrics();
 
         let result = self.downloads.download_and_verify(hash).await;
 
         match &result {
-            Ok(()) | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {}
+            Ok(())
+            | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. })
+            | Err(BlockDownloadVerifyError::AlreadyRejected { .. }) => {}
             Err(error) => self.count_block_error(error),
         }
 
@@ -2049,6 +2059,14 @@ where
                     error = ?e,
                     "queued duplicate block hash for download, \
                      assuming the syncer will eventually resolve duplicates, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::AlreadyRejected { .. } => {
+                debug!(
+                    error = ?e,
+                    "block already failed validation after early relay, \
+                     not downloading it again, continuing"
                 );
                 false
             }

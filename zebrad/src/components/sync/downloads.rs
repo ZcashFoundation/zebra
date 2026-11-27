@@ -14,6 +14,7 @@ use futures::{
     ready,
     stream::{FuturesUnordered, Stream},
 };
+use indexmap::IndexSet;
 use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{
@@ -31,9 +32,15 @@ use zebra_chain::{
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
-use crate::components::sync::{
-    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+use crate::components::{
+    inbound::downloads::{
+        early_block_is_authenticated, is_later_validation_failure, remember_rejected_early_block,
+        start_early_relay_check, EarlyRelayAllowances,
+    },
+    sync::{
+        diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
+        FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    },
 };
 
 #[cfg(test)]
@@ -107,6 +114,17 @@ pub enum BlockDownloadVerifyError {
 
     #[error("duplicate block hash queued for download: {hash:?}")]
     DuplicateBlockQueuedForDownload { hash: block::Hash },
+
+    /// The block came from a peer that negotiated compact block relay, passed the checks that
+    /// authenticate it for early relay, and then failed later validation, so it isn't downloaded
+    /// again.
+    ///
+    /// The block's hash commits to its transactions and their authorizing data, so the block
+    /// can't be valid.
+    #[error(
+        "block already failed validation after it was authenticated for early relay: {hash:?}"
+    )]
+    AlreadyRejected { hash: block::Hash },
 
     #[error("error downloading block: {error:?} {hash:?}")]
     DownloadFailed {
@@ -277,9 +295,18 @@ where
     // Internal downloads state
     //
     /// A list of pending block download and verify tasks.
+    ///
+    /// A failed task returns its error, the hash of its block, and the block's parent if the block
+    /// came from a peer that negotiated compact block relay, passed the checks that authenticate it
+    /// for early relay, and then failed later validation.
     #[pin]
     pending: FuturesUnordered<
-        JoinHandle<Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>>,
+        JoinHandle<
+            Result<
+                (Height, block::Hash),
+                (BlockDownloadVerifyError, block::Hash, Option<block::Hash>),
+            >,
+        >,
     >,
 
     /// A list of channels that can be used to cancel pending block download and
@@ -294,6 +321,21 @@ where
     /// It stays set when an enclosing timeout cancels that wait, so the syncer can count the
     /// timeout as the block's error.
     awaiting_network_capacity: bool,
+
+    /// The hashes of blocks from peers that negotiated compact block relay, which passed the
+    /// checks that authenticate them for early relay and then failed later validation, oldest
+    /// first.
+    ///
+    /// Each of these hashes commits to its block's transactions and their authorizing data, so
+    /// [`Self::download_and_verify`] refuses them instead of verifying the same invalid blocks
+    /// again. [`Self::cancel_all()`] keeps them. See [`remember_rejected_early_block()`].
+    rejected_early_blocks: IndexSet<block::Hash>,
+
+    /// The peer groups that have used their allowance for a block on a parent, which passed the
+    /// checks that authenticate it for early relay and then failed later validation.
+    ///
+    /// [`Self::cancel_all()`] keeps them, so a sync restart doesn't give a peer another allowance.
+    early_relay_allowances: EarlyRelayAllowances,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -325,13 +367,64 @@ where
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             let result = join_result.expect("block download and verify tasks must not panic");
             let hash = match &result {
-                Ok((_, hash)) | Err((_, hash)) => *hash,
+                Ok((_, hash)) | Err((_, hash, _)) => *hash,
             };
             if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
                 this.in_flight_blocks.remove(queued_at, hash);
             }
 
-            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
+            let rejected_early_blocks = this.rejected_early_blocks;
+            let early_relay_allowances = this.early_relay_allowances;
+            Poll::Ready(Some(result.map_err(
+                |(e, _hash, authenticated_parent)| match (e, authenticated_parent) {
+                    // # Security
+                    //
+                    // A peer gets at most one unpenalized later failure per parent block, so a
+                    // peer that sends another block on the same parent that fails later
+                    // validation is scored. See `EarlyRelayAllowances` for details.
+                    (
+                        BlockDownloadVerifyError::Invalid {
+                            error,
+                            height,
+                            hash,
+                            advertiser_addr: Some(peer),
+                        },
+                        Some(parent),
+                    ) => {
+                        // The block's hash commits to its transactions and their authorizing
+                        // data, so a later download of the hash is the same invalid block.
+                        remember_rejected_early_block(rejected_early_blocks, hash);
+
+                        let advertiser_addr = if early_relay_allowances.try_use(peer, parent) {
+                            debug!(
+                                ?hash,
+                                ?peer,
+                                ?error,
+                                "authenticated early relay block failed later validation: \
+                                 rejected it without scoring the peer",
+                            );
+                            None
+                        } else {
+                            debug!(
+                                ?hash,
+                                ?peer,
+                                ?error,
+                                "peer already sent a block on the same parent that failed later \
+                                 validation: scoring the peer",
+                            );
+                            Some(peer)
+                        };
+
+                        BlockDownloadVerifyError::Invalid {
+                            error,
+                            height,
+                            hash,
+                            advertiser_addr,
+                        }
+                    }
+                    (e, _) => e,
+                },
+            )))
         } else {
             Poll::Ready(None)
         }
@@ -391,6 +484,8 @@ where
             cancel_handles: HashMap::new(),
             in_flight_blocks: InFlightBlocks::default(),
             awaiting_network_capacity: false,
+            rejected_early_blocks: IndexSet::new(),
+            early_relay_allowances: EarlyRelayAllowances::default(),
         }
     }
 
@@ -398,11 +493,23 @@ where
     ///
     /// This method waits for the network to become ready, returning an error if readiness fails
     /// or the download deadline expires. It returns immediately after queuing the request.
+    ///
+    /// Returns [`BlockDownloadVerifyError::AlreadyRejected`] without downloading the block, if it
+    /// is one of the downloader's rejected early relay blocks.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
+        if self.rejected_early_blocks.contains(&hash) {
+            debug!(
+                ?hash,
+                "block hash failed later validation after early relay: ignored block",
+            );
+            metrics::counter!("sync.already.rejected.dropped.block.hash.count").increment(1);
+            return Err(BlockDownloadVerifyError::AlreadyRejected { hash });
+        }
+
         if self.is_queued(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
@@ -458,7 +565,12 @@ where
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
+                // A peer that negotiated compact block relay can send a block before it has
+                // validated it.
+                let early_relay = matches!(rsp, zn::Response::EarlyBlocks(_));
+                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+                | zn::Response::EarlyBlocks(blocks) = rsp
+                {
                     assert_eq!(
                         blocks.len(),
                         1,
@@ -679,6 +791,19 @@ where
                         .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error: error.into() })?,
                 };
 
+                // Keep the block for the state to check, if it fails later validation.
+                let early_block = early_relay.then(|| block.clone());
+                // Check the block while it is verified, if its parent is the best tip, in case
+                // another block becomes the best tip before the verifier rejects this one. The
+                // checkpoint verifier's failures always keep their score, so its blocks aren't
+                // checked.
+                let early_check = match &early_block {
+                    Some(block) if block_height > max_checkpoint_height => {
+                        start_early_relay_check(&read_state, &latest_chain_tip, block)
+                    }
+                    _ => None,
+                };
+
                 // Verify the block.
                 let verify_start = std::time::Instant::now();
                 let mut rsp = verifier
@@ -716,19 +841,55 @@ where
                     metrics::counter!("sync.verified.block.count").increment(1);
                 }
 
-                verification
+                let result = verification
                     .map(|hash| (block_height, hash))
                     .map_err(|err| {
                         match err.downcast::<zebra_consensus::router::RouterError>() {
                             Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash, advertiser_addr },
                             Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
                         }
-                    })
+                    });
+
+                // # Security
+                //
+                // A peer that negotiated compact block relay can answer a sync download with a
+                // block it relays before validating it. Like the gossiped block downloader, this
+                // doesn't score that peer when the block passes the draft Compact Block Relay ZIP's
+                // early relay checks, and then fails later validation, unless `poll_next()` finds
+                // that the peer has already used its allowance for the block's parent.
+                match (result, early_block) {
+                    (
+                        Err(BlockDownloadVerifyError::Invalid { error, height, hash, advertiser_addr: Some(advertiser_addr) }),
+                        Some(block),
+                    ) if is_later_validation_failure(&error) => {
+                        let parent = block.header.previous_block_hash;
+                        // Prefer the cancel handle if both are ready.
+                        let authenticated = tokio::select! {
+                            biased;
+                            _ = &mut cancel_rx => {
+                                trace!("task cancelled while checking a block that failed verification");
+                                metrics::counter!("sync.cancelled.verify.count").increment(1);
+                                return Err(BlockDownloadVerifyError::CancelledDuringVerification { height, hash })
+                            }
+                            authenticated = early_block_is_authenticated(read_state, latest_chain_tip, block, height, early_check) => authenticated,
+                        };
+
+                        let error = BlockDownloadVerifyError::Invalid { error, height, hash, advertiser_addr: Some(advertiser_addr) };
+                        Ok(Err((error, authenticated.then_some(parent))))
+                    }
+                    (result, _) => Ok(result.map_err(|error| (error, None))),
+                }
             }
             .in_current_span()
             // Tack the hash onto the error so we can remove the cancel handle
-            // on failure as well as on success.
-            .map_err(move |e| (e, hash)),
+            // on failure as well as on success. The task's `Ok` is the verification result, with
+            // the parent of an authenticated early relay block that failed later validation, and
+            // its `Err` is a failure before verification.
+            .map(move |result| match result {
+                Ok(Ok(verified)) => Ok(verified),
+                Ok(Err((e, authenticated_parent))) => Err((e, hash, authenticated_parent)),
+                Err(e) => Err((e, hash, None)),
+            }),
         );
 
         // Try to start the spawned task before queueing the next block request
@@ -749,6 +910,8 @@ where
     }
 
     /// Cancel all running tasks and reset the downloader state.
+    ///
+    /// Keeps the rejected early relay blocks, and the allowances that peers have used for them.
     pub fn cancel_all(&mut self) {
         // Replace the pending task list with an empty one and drop it.
         let _ = std::mem::take(&mut self.pending);

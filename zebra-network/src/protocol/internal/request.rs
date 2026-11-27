@@ -69,7 +69,9 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks).
+    /// Returns [`Response::Blocks`](super::Response::Blocks), or
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) from a connection that negotiated
+    /// compact block relay.
     BlocksByHash(HashSet<block::Hash>),
 
     /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
@@ -120,7 +122,8 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Blocks`](super::Response::Blocks) containing the requested block,
-    /// or an error if the download fails.
+    /// or [`Response::EarlyBlocks`](super::Response::EarlyBlocks) from a connection that
+    /// negotiated compact block relay, or an error if the download fails.
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
