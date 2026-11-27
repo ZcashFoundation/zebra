@@ -675,6 +675,41 @@ async fn updater_publishes_nothing_for_a_withdrawn_mining_candidate() {
         .await;
 }
 
+/// Early work on more blocks, which the state also withdraws, doesn't postpone the refresh of the
+/// chain tip's template past the time it was due after the first withdrawal.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_refreshes_when_due_however_many_mining_candidates_are_withdrawn() {
+    let _init_guard = zebra_test::init();
+
+    let (mut updater, _tip_template) = Updater::start_with_tip_template().await;
+    let (tip_height, _) = updater.best_tip();
+    let height = tip_height.next().expect("the height is valid");
+
+    updater.set_candidate(Some((height, Hash([0x22; 32]))));
+    updater.candidate_read().await;
+    let first_withdrawn = Instant::now();
+    updater.set_candidate(None);
+    updater.candidate_read().await;
+
+    // Each block gets early work well before the refresh is due, and the state withdraws it. If
+    // each withdrawal started a new wait, the last one would postpone the refresh by 3 seconds.
+    for (delay, hash) in [(1, Hash([0x33; 32])), (3, Hash([0x44; 32]))] {
+        tokio::time::sleep_until(first_withdrawn + Duration::from_secs(delay)).await;
+        updater.set_candidate(Some((height, hash)));
+        updater.candidate_read().await;
+        updater.set_candidate(None);
+        updater.candidate_read().await;
+    }
+
+    let refresh = updater.build().await - first_withdrawn;
+    assert!(
+        (Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)
+            ..Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL + 2))
+            .contains(&refresh),
+        "the template was refreshed {refresh:?} after the first withdrawal",
+    );
+}
+
 /// A block that takes too long to verify can still be committed after the state withdraws its
 /// early work. The updater keeps the block's template, and publishes it without building one when
 /// the block is committed.

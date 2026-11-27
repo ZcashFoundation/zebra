@@ -278,6 +278,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     // published once that block is the chain tip.
     let mut early_template: Option<EarlyTemplate> = None;
 
+    // The chain tip, and when its template is due for a refresh, after the state withdrew early
+    // work on a block on that tip. Withdrawals of early work on more blocks don't postpone it.
+    let mut withdrawn_refresh: Option<(block::Hash, Instant)> = None;
+
     // Subscribing tells the state to compute early mining work on blocks it is still verifying.
     // Templates are only precomputed once this succeeds, so it is retried.
     let mut is_first_attempt = true;
@@ -393,6 +397,15 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 && tip_hash.is_some_and(|tip_hash| cache.holds_tip(tip_hash))
                 && mining_candidate(read_state.clone()).await.is_none();
             if is_withdrawn {
+                // The refresh is due a fixed time after the first withdrawal on this chain tip, so
+                // early work on more blocks that the state withdraws can't keep postponing it. A
+                // later withdrawal waits for less time, or not at all.
+                let refresh_due = match withdrawn_refresh {
+                    Some((hash, due)) if Some(hash) == tip_hash => due,
+                    _ => Instant::now() + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+                };
+                withdrawn_refresh = tip_hash.map(|tip_hash| (tip_hash, refresh_due));
+
                 tokio::select! {
                     biased;
                     tip_changed = tip_change.best_tip_changed() => {
@@ -401,7 +414,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                         }
                     }
                     _ = candidate_changes.published() => {}
-                    _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
+                    _ = sleep_until(refresh_due) => {}
                 }
             }
 
@@ -441,6 +454,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 }
             }
         }
+
+        // This build is the refresh that withdrawn early work waits for.
+        withdrawn_refresh = None;
 
         // Only wait for mempool changes that this build's mempool snapshot can't include.
         mempool_changes = mempool_changes.resubscribe();
