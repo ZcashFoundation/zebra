@@ -72,8 +72,7 @@ use zebra_chain::{
         ConsensusBranchId, Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::{
-        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashSerialize,
     },
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -3067,8 +3066,14 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        let block: Block = match block_bytes.zcash_deserialize_into() {
-            Ok(block_bytes) => block_bytes,
+        // Large blocks decode their transactions on Rayon, so keep that off the async executor.
+        let block = tokio::task::spawn_blocking(move || {
+            Block::zcash_deserialize_parallel(&mut block_bytes.as_slice())
+        })
+        .await
+        .map_misc_error()?;
+        let block: Block = match block {
+            Ok(block) => block,
             Err(error) => {
                 tracing::info!(
                     ?error,
