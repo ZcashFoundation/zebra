@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: 'The `Codec` decodes the messages that are already buffered behind a message it ignores, such as one with an unknown command, instead of waiting for more bytes. After 1,024 ignored messages in a row, it waits for more bytes.'
+time: 2026-11-18T12:00:01.000000000Z
