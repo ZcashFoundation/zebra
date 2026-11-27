@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Commit a block that was already validated as a block proposal, like a solved `getblocktemplate` template, without validating it again. Only its proof of work and time are checked.'
+time: 2026-11-12T15:00:00.000000000Z
