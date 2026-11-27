@@ -201,6 +201,12 @@ Do not retry immutable contradictions: a crate archive from another source commi
 
 If the automated workflow remains unavailable and a maintainer authorizes a break-glass manual release, follow the [manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
 
+### If Binary Attachment Fails
+
+The `Attach release binaries` job verifies the bundle's signature, checksums, and provenance against the release tag and commit before it uploads, and it never replaces a release asset. If verification fails, stop and ask a maintainer to investigate.
+
+If the job's upload step failed partway, delete the assets it uploaded with `gh release delete-asset v<version> <asset> --repo ZcashFoundation/zebra --yes`, then choose **Re-run failed jobs** on the same workflow run. If the release has assets that the run's upload step did not put there, stop and investigate. Do not re-run all jobs, because that also rebuilds and republishes the Docker image.
+
 ### Withdraw a Bad Release
 
 Withdraw a release when it has a defect that operators must not install or keep running, such as a consensus failure, data corruption, a security vulnerability, or a sync regression that stalls nodes. Fix any other defect in a regular release. A maintainer makes the call, then works through these steps for each affected version. Steps 1 to 4 can run in any order; start with the step that limits harm fastest. Start step 5 as soon as a fix is ready; step 6 waits for the release it publishes.
