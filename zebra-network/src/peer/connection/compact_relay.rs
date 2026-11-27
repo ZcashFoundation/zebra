@@ -238,6 +238,21 @@ where
             .map_err(|_| PeerError::ConnectionSendTimeout)?
     }
 
+    /// Returns an error if the peer is now banned, or below the minimum version.
+    ///
+    /// Requests are checked like this right before they are written, so a response that needs no
+    /// write is checked before it is returned.
+    fn live_authorization(&mut self) -> Result<(), PeerError> {
+        let address = self.connection_info.connected_addr.get_transient_addr();
+        if self.connection_info.remote.version < self.minimum_peer_version.current()
+            || address.is_some_and(|addr| self.bans_receiver.borrow().is_banned(addr.ip()))
+        {
+            Err(PeerError::ConnectionDropped)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Fetch the committed block before constructing an announcement.
     async fn compact_serving_block(&mut self, hash: block::Hash) -> Option<ServingBlock> {
         let Response::Blocks(blocks) = self
@@ -348,10 +363,15 @@ where
         let deadline = Instant::now() + constants::REQUEST_TIMEOUT;
         self.compact.download_deadline = Some(deadline);
         self.compact.expire();
-        if let Some((block, _, _)) = &self.compact.reconstructed {
-            if block.hash() == hash {
-                return Ok(self.compact_response(block.clone()));
-            }
+        let cached = self
+            .compact
+            .reconstructed
+            .as_ref()
+            .map(|(block, _, _)| block)
+            .filter(|block| block.hash() == hash)
+            .cloned();
+        if let Some(block) = cached {
+            return self.compact_response(block);
         }
         if self
             .compact
@@ -386,7 +406,7 @@ where
                             )
                             .await
                         {
-                            return Ok(self.compact_response(block));
+                            return self.compact_response(block);
                         }
                     } else if indexes.len() < reconstruction.transaction_count().div_ceil(2) {
                         // Recovering most of a block costs about as much as downloading it, and
@@ -418,11 +438,18 @@ where
         })
     }
 
-    fn compact_response(&self, block: Arc<Block>) -> Handler {
-        Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
-            block,
-            self.connection_info.connected_addr.get_transient_addr(),
-        ))])))
+    /// Returns a block rebuilt from the peer's compact announcement, if the peer is still eligible.
+    ///
+    /// Rebuilding waits for the inbound service, so the peer can be banned, or fall below the
+    /// minimum version, before the block is ready.
+    fn compact_response(&mut self, block: Arc<Block>) -> Result<Handler, PeerError> {
+        self.live_authorization()?;
+        Ok(Handler::Finished(Ok(Response::Blocks(vec![
+            InventoryResponse::Available((
+                block,
+                self.connection_info.connected_addr.get_transient_addr(),
+            )),
+        ]))))
     }
 
     async fn finish_compact(
@@ -475,9 +502,14 @@ where
             .finish_compact(reconstruction, response, permit, deadline)
             .await
         {
-            let response = self.compact_response(block);
-            if let State::AwaitingResponse { handler, .. } = &mut self.state {
-                *handler = response;
+            match self.compact_response(block) {
+                Ok(response) => {
+                    if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                        *handler = response;
+                    }
+                }
+                // Failing the connection also fails the waiting request.
+                Err(error) => self.fail_with(error).await,
             }
         } else {
             self.fallback_compact(hash, deadline).await;
