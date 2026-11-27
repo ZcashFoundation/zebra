@@ -184,6 +184,95 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
     .expect("bounded recovery completes with either reconstructed or full bytes");
 }
 
+/// A full block for the block whose missing transactions a compact download is recovering finishes
+/// the download, without waiting for the recovery timeout or requesting the block again.
+#[tokio::test]
+async fn full_block_for_the_recovering_block_finishes_its_download() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let source = "127.0.0.1:8233".parse().unwrap();
+        let (mut connection, mut client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        let (recovery, mut active_recovery) = tokio::sync::watch::channel(None);
+        connection.compact_recovery = Some(recovery);
+        let info = Arc::make_mut(&mut connection.connection_info);
+        info.early_block_relay = true;
+        info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+        let (mut peer, peer_rx) = mpsc::channel(1);
+        let task = tokio::spawn(connection.run(peer_rx));
+        assert!(matches!(
+            outbound.next().await,
+            Some(Message::SendCompact { .. })
+        ));
+
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        peer.send(Ok(Message::CompactBlock(compact.clone())))
+            .await
+            .unwrap();
+        inbound
+            .expect_request(Request::CheckCompactHeader(compact.clone()))
+            .await
+            .respond(Response::Nil);
+        inbound
+            .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+            .await
+            .respond(Response::Nil);
+        let (tx, rx) = oneshot::channel();
+        client
+            .send(ClientRequest {
+                request: Request::BlockDownload {
+                    hash: block.hash(),
+                    advertiser: Some(source),
+                },
+                tx,
+                span: tracing::Span::none(),
+            })
+            .await
+            .unwrap();
+        inbound
+            .expect_request(Request::CompactBlockTransactions(compact))
+            .await
+            .respond(Response::CompactBlockTransactions(all_but_one(&block)));
+        assert!(matches!(
+            outbound.next().await,
+            Some(Message::GetBlockTransactions(_))
+        ));
+        active_recovery.changed().await.unwrap();
+        assert!(active_recovery.borrow_and_update().is_some());
+
+        // The peer sends the full block instead of the missing transactions.
+        peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
+        // This is well within the two-second recovery timeout.
+        let response = tokio::time::timeout(Duration::from_secs(1), rx)
+            .await
+            .expect("the full block finishes the download before the recovery timeout");
+        assert_eq!(
+            response.unwrap().unwrap(),
+            Response::EarlyBlocks(vec![InventoryResponse::Available((
+                block.clone(),
+                Some(source)
+            ))])
+        );
+        assert!(
+            active_recovery.borrow().is_none(),
+            "transaction recovery responses are no longer decoded"
+        );
+        assert!(
+            outbound.try_recv().is_err(),
+            "the block isn't requested again"
+        );
+        assert!(errors.try_get_error().is_none());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    })
+    .await
+    .expect("the full block finishes the download");
+}
+
 /// A block rebuilt from a compact announcement is only returned if the peer still isn't banned,
 /// and still meets the minimum version. Rebuilding waits for the inbound service, so the peer is
 /// checked after that wait, and before a cached rebuilt block is returned again.
