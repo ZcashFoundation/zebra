@@ -110,7 +110,7 @@ async fn verify(
     let state = service_fn(|request| async move {
         Ok::<_, BoxError>(match request {
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
-            zebra_state::Request::MiningCandidate(_) => {
+            zebra_state::Request::MiningCandidate { .. } => {
                 zebra_state::Response::MiningCandidate(None)
             }
             zebra_state::Request::AwaitUtxo(requested) => {

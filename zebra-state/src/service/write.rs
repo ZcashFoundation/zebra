@@ -1,9 +1,13 @@
 //! Writing blocks to the finalized and non-finalized states.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indexmap::IndexMap;
 use tokio::sync::{
@@ -13,8 +17,9 @@ use tokio::sync::{
 
 use tracing::Span;
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Block, Height},
     parallel::tree::NoteCommitmentTrees,
+    transaction, transparent,
 };
 
 use crate::{
@@ -80,6 +85,142 @@ fn validate_non_finalized(
     } else {
         non_finalized_state.validate_block(prepared, finalized_state)
     }
+}
+
+/// The number of prepares the block write task ran after answering a mining candidate, for
+/// tests.
+#[cfg(test)]
+pub(crate) static PREPARES_RUN: AtomicUsize = AtomicUsize::new(0);
+
+/// The number of prepares that kept a validated chain, for tests.
+#[cfg(test)]
+pub(crate) static PREPARES_STORED: AtomicUsize = AtomicUsize::new(0);
+
+/// The number of commits that added a prepared chain instead of validating the block, for tests.
+#[cfg(test)]
+pub(crate) static PREPARED_COMMITS: AtomicUsize = AtomicUsize::new(0);
+
+/// The number of prepared chains that were for a commit's block, but not for the chain set it
+/// found, for tests.
+#[cfg(test)]
+pub(crate) static STALE_PREPARED_COMMITS: AtomicUsize = AtomicUsize::new(0);
+
+/// A block whose chain context the block write task validated after answering its mining
+/// candidate, for the commit of the same block.
+struct PreparedCommit {
+    /// Only a commit of this block object can use `validated`: a block hash doesn't identify
+    /// the block's authorizing data.
+    block: Arc<Block>,
+
+    /// Only a commit with this hash list object can use `validated`, so the chain's indexes
+    /// are the ones that commit builds.
+    transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// The chain with the block.
+    validated: ValidatedChain,
+
+    /// The root and tip hash of each chain that the block was validated with.
+    chain_ends: Vec<(block::Hash, block::Hash)>,
+}
+
+impl PreparedCommit {
+    /// Returns `true` if `queued` has the block and hash list that this was prepared from.
+    fn is_for(&self, queued: &SemanticallyVerifiedBlock) -> bool {
+        Arc::ptr_eq(&self.block, &queued.block)
+            && Arc::ptr_eq(&self.transaction_hashes, &queued.transaction_hashes)
+    }
+
+    /// Returns the chain, if the chain set is still the one it was validated with.
+    fn into_current_chain(self, non_finalized_state: &NonFinalizedState) -> Option<ValidatedChain> {
+        let is_current = self.chain_ends == non_finalized_state.chain_ends();
+
+        // Every message takes the prepared commit, and only messages change the chain set.
+        debug_assert!(
+            is_current,
+            "a prepared commit is only kept until the next message"
+        );
+        if !is_current {
+            tracing::warn!(
+                hash = ?self.block.hash(),
+                "a prepared commit was kept past a change to the chain set, so the block is \
+                 validated again",
+            );
+            #[cfg(test)]
+            STALE_PREPARED_COMMITS.fetch_add(1, Ordering::SeqCst);
+
+            return None;
+        }
+
+        Some(self.validated)
+    }
+}
+
+/// Contextually validates `block` on the current chain set, without changing the state, for a
+/// commit of the same block object with the same `transaction_hashes` object.
+///
+/// `transaction_hashes` are the hashes of the block's transactions, in order. The block's
+/// transactions aren't verified yet, so this first checks what the validation relies on.
+///
+/// Returns `None` if the block can't be validated, or if it is invalid. Its commit validates it
+/// again, and returns the error.
+fn prepare_commit(
+    finalized_state: &ZebraDb,
+    non_finalized_state: &NonFinalizedState,
+    block: Arc<Block>,
+    transaction_hashes: Arc<[transaction::Hash]>,
+) -> Option<PreparedCommit> {
+    // A mining candidate has a coinbase height, but a block without one must not stop the block
+    // write task.
+    let height = block.coinbase_height()?;
+
+    // The chain indexes need one unique hash per transaction.
+    if transaction_hashes.len() != block.transactions.len() {
+        return None;
+    }
+    let mut unique_hashes = HashSet::with_capacity(transaction_hashes.len());
+    if !transaction_hashes
+        .iter()
+        .all(|hash| unique_hashes.insert(hash))
+    {
+        return None;
+    }
+
+    // A chain asserts that it doesn't have a transaction already. The block verifier rejects a
+    // block that repeats one, but only after this runs.
+    let parent_hash = block.header.previous_block_hash;
+    let repeats_a_parent_chain_transaction = non_finalized_state.chain_iter().find_map(|chain| {
+        let parent_height = *chain.height_by_hash.get(&parent_hash)?;
+
+        Some(transaction_hashes.iter().any(|hash| {
+            chain
+                .tx_loc_by_hash
+                .get(hash)
+                .is_some_and(|location| location.height <= parent_height)
+        }))
+    }) == Some(true);
+    if repeats_a_parent_chain_transaction {
+        return None;
+    }
+
+    let prepared = SemanticallyVerifiedBlock {
+        block: block.clone(),
+        hash: block.hash(),
+        height,
+        new_outputs: transparent::new_ordered_outputs(&block, &transaction_hashes),
+        transaction_hashes: transaction_hashes.clone(),
+        received_time: None,
+    };
+    let chain_ends = non_finalized_state.chain_ends();
+    let validated = validate_non_finalized(finalized_state, non_finalized_state, prepared)
+        .inspect_err(|error| tracing::debug!(?error, "could not prepare a block's commit"))
+        .ok()?;
+
+    Some(PreparedCommit {
+        block,
+        transaction_hashes,
+        validated,
+        chain_ends,
+    })
 }
 
 /// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`].
@@ -270,8 +411,19 @@ pub enum NonFinalizedWriteMessage {
     /// means the work starts from the best tip committed when the candidate arrives, and the
     /// commit of the same block never computes its trees at the same time. That commit only
     /// reuses the work if its parent trees and history root are the ones the work started from.
+    ///
+    /// After answering, the block write task validates the block's chain context with that work,
+    /// unless another message is waiting or `verification` is closed. It keeps the result until
+    /// its next message, for a [`Self::Commit`] of the same block and hash list objects.
     MiningCandidate {
         block: Arc<block::Block>,
+
+        /// The hashes of the block's transactions, in order.
+        transaction_hashes: Arc<[transaction::Hash]>,
+
+        /// Closes once the block verifier is done with the block.
+        verification: watch::Receiver<()>,
+
         rsp_tx: oneshot::Sender<Option<GetBlockTemplateChainInfo>>,
     },
 }
@@ -493,10 +645,21 @@ impl WriteBlockWorkerTask {
         // The latest mining candidate's work, kept for its own block's commit.
         let mut candidate_trees: Option<PrecomputedTrees> = None;
 
+        // A block validated after its mining candidate was answered. Its validation used the
+        // state as it was then, so every message takes it.
+        let mut prepared_commit: Option<PreparedCommit> = None;
+
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+            let mut prepared = prepared_commit.take();
+
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
-                NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx } => {
+                NonFinalizedWriteMessage::MiningCandidate {
+                    block,
+                    transaction_hashes,
+                    verification,
+                    rsp_tx,
+                } => {
                     let candidate = read::difficulty::mining_candidate_chain_info(
                         non_finalized_state,
                         &finalized_state.db,
@@ -516,10 +679,41 @@ impl WriteBlockWorkerTask {
                             (None, None)
                         }
                     };
+                    let has_work = chain_info.is_some();
 
+                    // The first template on this block waits for this answer, and for nothing
+                    // below.
                     let _ = rsp_tx.send(chain_info);
-                    // Freeing the replaced work takes time, so it waits for the answer.
-                    drop(replaced_trees);
+                    // Freeing the replaced work and the discarded prepared commit takes time.
+                    drop((replaced_trees, prepared));
+
+                    // Skip the prepare if a message is already waiting. If it is the block's own
+                    // commit, that commit validates the block with the same work anyway, and any
+                    // other message would discard the prepared commit, so it shouldn't wait for
+                    // it. A closed guard means the block verifier is done with the block without
+                    // committing it.
+                    if has_work
+                        && non_finalized_block_write_receiver.is_empty()
+                        && verification.has_changed().is_ok()
+                    {
+                        non_finalized_state.precomputed_trees = candidate_trees.take();
+                        prepared_commit = prepare_commit(
+                            &finalized_state.db,
+                            non_finalized_state,
+                            block,
+                            transaction_hashes,
+                        );
+                        candidate_trees = non_finalized_state.precomputed_trees.take();
+
+                        #[cfg(test)]
+                        {
+                            PREPARES_RUN.fetch_add(1, Ordering::SeqCst);
+                            if prepared_commit.is_some() {
+                                PREPARES_STORED.fetch_add(1, Ordering::SeqCst);
+                            }
+                        }
+                    }
+
                     continue;
                 }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
@@ -577,6 +771,20 @@ impl WriteBlockWorkerTask {
                 non_finalized_state
                     .commit_prevalidated_contextual(*contextual, &finalized_state.db)
                     .map(|replaced| replaced_proposal = replaced)
+            } else if let Some(mut validated) = prepared
+                .take_if(|prepared| prepared.is_for(&queued_child))
+                .and_then(|prepared| prepared.into_current_chain(non_finalized_state))
+            {
+                tracing::debug!(?child_hash, "committing a prepared block");
+                #[cfg(test)]
+                PREPARED_COMMITS.fetch_add(1, Ordering::SeqCst);
+
+                validated.set_received_time(queued_child.received_time);
+                non_finalized_state.insert_validated(validated);
+                spent_candidate_trees =
+                    candidate_trees.take_if(|trees| trees.is_for(&queued_child.block));
+
+                Ok(())
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 // A candidate's work is only for its own block object, so only that block's
@@ -659,6 +867,7 @@ impl WriteBlockWorkerTask {
                 replaced_chain,
                 replaced_proposal,
                 spent_candidate_trees,
+                prepared,
             ));
 
             // A prepared chain that the best chain has passed can't be used any more.

@@ -231,7 +231,9 @@ at most once a second.
 When a block arrives from a peer, Zebra serves a coinbase-only template on top of it as soon as its
 proof of work, difficulty and header commitments are checked, while its transactions are still
 being verified. If the block turns out to be invalid, Zebra goes back to a template on the
-previous tip. Miners that long poll `getblocktemplate` see both changes.
+previous tip. While the block's transactions are verified, Zebra can also validate the block
+against its chain, so a valid block is committed sooner. Miners that long poll `getblocktemplate`
+see both template changes.
 
 Zebra validates each template as a block proposal in the background. When a miner submits that
 template with only a nonce and an Equihash solution added, Zebra checks the proof of work and

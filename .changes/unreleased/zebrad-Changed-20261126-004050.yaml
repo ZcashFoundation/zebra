@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Start validating a new block''s chain context on mining nodes while its transactions are verified, so a valid block can be committed sooner.'
+time: 2026-11-26T00:40:50.000000000-05:00

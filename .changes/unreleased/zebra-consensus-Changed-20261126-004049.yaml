@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'The semantic block verifier sends the block''s transaction hashes with `zebra_state::Request::MiningCandidate`, and the same hash list with the block''s commit.'
+time: 2026-11-26T00:40:49.000000000-05:00

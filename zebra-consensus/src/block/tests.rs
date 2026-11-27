@@ -1120,7 +1120,10 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .await
             .respond(zs::Response::KnownBlock(None));
         state
-            .expect_request(zs::Request::MiningCandidate(block.clone()))
+            .expect_request(zs::Request::MiningCandidate {
+                block: block.clone(),
+                transaction_hashes: block.transactions.iter().map(|tx| tx.hash()).collect(),
+            })
             .await
             .respond(zs::Response::MiningCandidate(None));
 

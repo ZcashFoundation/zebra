@@ -701,7 +701,12 @@ where
                 // Early work is optional, so a state error here doesn't fail verification.
                 match state_service
                     .clone()
-                    .oneshot(zs::Request::MiningCandidate(block.clone()))
+                    .oneshot(zs::Request::MiningCandidate {
+                        block: block.clone(),
+                        // The state can keep its validation of this block for the commit
+                        // below, which carries the same hashes.
+                        transaction_hashes: transaction_hashes.clone(),
+                    })
                     .await
                 {
                     Ok(zs::Response::MiningCandidate(guard)) => guard,

@@ -210,6 +210,95 @@ async fn mining_candidate_is_published_while_its_block_is_verified() {
     drop(guard);
 }
 
+/// The state service sends a mining candidate's block, transaction hashes and guard to the block
+/// write task, so the block's commit through the queue adds the chain that the task prepared.
+#[tokio::test]
+async fn state_service_commits_a_prepared_block() {
+    use std::sync::atomic::Ordering;
+
+    use super::write::{PREPARED_COMMITS, PREPARES_RUN};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+    // The state only computes early mining work while something is subscribed to it.
+    let _mining_candidates = state.read_service.mining_candidate.subscribe();
+
+    let [genesis, block1, mut block2]: [Block; 3] = [
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+    ]
+    .map(|bytes| bytes.zcash_deserialize_into().expect("block is valid"));
+
+    // The state service's queue methods skip the request handler's checkpoint height check.
+    state
+        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(Arc::new(genesis)))
+        .await
+        .expect("the write task responds")
+        .expect("the genesis block is valid");
+    // The first non-finalized block moves the block write task on to non-finalized blocks.
+    state
+        .queue_and_commit_to_non_finalized_state(Arc::new(block1).prepare(), None)
+        .await
+        .expect("the write task responds")
+        .expect("block 1 is valid");
+
+    // Give block 2 the time and difficulty threshold of a block template on block 1. The state
+    // doesn't check proof of work, so the header can be changed.
+    let context = super::read::difficulty::get_block_template_chain_info(
+        &state.read_service.latest_non_finalized_state(),
+        &state.read_service.db,
+        &network,
+    )
+    .expect("a state with block 1 has a context for the next block");
+    let header = Arc::make_mut(&mut block2.header);
+    header.time = context.min_time.into();
+    header.difficulty_threshold = context.expected_difficulty;
+    let block2 = Arc::new(block2).prepare();
+
+    let prepares_before = PREPARES_RUN.load(Ordering::SeqCst);
+    let prepared_commits_before = PREPARED_COMMITS.load(Ordering::SeqCst);
+    let response = state
+        .ready()
+        .await
+        .expect("the state is ready")
+        .call(Request::MiningCandidate {
+            block: block2.block.clone(),
+            transaction_hashes: block2.transaction_hashes.clone(),
+        })
+        .await
+        .expect("the state answers mining candidates");
+    let Response::MiningCandidate(Some(_guard)) = response else {
+        panic!("the state takes the mining candidate: {response:?}");
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while PREPARES_RUN.load(Ordering::SeqCst) <= prepares_before {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the block write task prepares the block's commit");
+
+    let block2_hash = block2.hash;
+    assert_eq!(
+        state
+            .queue_and_commit_to_non_finalized_state(block2, None)
+            .await
+            .expect("the write task responds")
+            .expect("block 2 is valid"),
+        block2_hash,
+    );
+    assert_eq!(
+        PREPARED_COMMITS.load(Ordering::SeqCst),
+        prepared_commits_before + 1,
+        "the commit adds the prepared chain",
+    );
+}
+
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
 ) -> Result<()> {

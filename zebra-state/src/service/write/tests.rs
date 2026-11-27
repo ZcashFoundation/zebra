@@ -413,7 +413,7 @@ fn finalizing_does_not_report_ancestors_of_retained_forks() {
 }
 
 /// The block write task computes early mining work on a block that extends the best tip, and
-/// then commits that block.
+/// prepares that block's commit with it. Then the block's commit adds the prepared chain.
 #[tokio::test]
 async fn write_worker_computes_work_for_a_mining_candidate() {
     let _init_guard = zebra_test::init();
@@ -441,51 +441,68 @@ async fn write_worker_computes_work_for_a_mining_candidate() {
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
-    let mining_candidate = |block: Arc<Block>| async {
-        let (rsp_tx, rsp_rx) = oneshot::channel();
-        tx.send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
-            .unwrap();
-
-        tokio::time::timeout(Duration::from_secs(10), rsp_rx)
-            .await
-            .expect("the write task answers")
-            .expect("the write task is running")
-    };
+    // The block verifier keeps this guard until it is done with the block.
+    let (_guard, verification) = watch::channel(());
+    let reused_trees = || REUSED_TREES.load(Ordering::SeqCst);
+    let prepared_commits = || PREPARED_COMMITS.load(Ordering::SeqCst);
+    let (reused_trees_before, prepared_commits_before) = (reused_trees(), prepared_commits());
+    let prepares_before = PREPARES_RUN.load(Ordering::SeqCst);
 
     // A block that doesn't extend the best tip doesn't get any work.
-    assert_eq!(mining_candidate(block2).await, None);
+    assert_eq!(
+        send_mining_candidate(tx, &block2.prepare(), verification.clone()).await,
+        None
+    );
 
-    let chain_info = mining_candidate(block1.clone())
+    let commit = block1.clone().prepare();
+    let chain_info = send_mining_candidate(tx, &commit, verification)
         .await
         .expect("a block that extends the best tip gets work");
     assert_eq!(chain_info.tip_hash, block1.hash());
     assert_eq!(chain_info.tip_height, Height(1));
+    wait_for_prepares(tx, prepares_before + 1).await;
 
-    // The commit of the same block reuses the candidate's note commitment trees. It only does
-    // that for the block allocation the candidate was computed from, so this fails if the two
-    // messages stop sharing it.
-    let reused_trees = || REUSED_TREES.load(Ordering::SeqCst);
-    let reused_trees_before = reused_trees();
-
+    // The prepare and the commit only use the candidate's work for the block and hash list
+    // objects the candidate was sent with, so this fails if the messages stop sharing either.
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::Commit((
-        block1.clone().prepare(),
-        rsp_tx,
-        None,
-    )))
-    .unwrap();
+    tx.send(NonFinalizedWriteMessage::Commit((commit, rsp_tx, None)))
+        .unwrap();
     let committed = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
         .expect("the write task answers")
         .expect("the write task is running");
     assert_eq!(committed.ok(), Some(block1.hash()));
     assert_eq!(latest.best_tip_hash(), Some(block1.hash()));
-    assert!(
-        reused_trees() > reused_trees_before,
-        "the commit reuses the trees that were computed for the candidate"
+    assert_eq!(
+        reused_trees(),
+        reused_trees_before + 1,
+        "the prepare reuses the trees that were computed for the candidate"
+    );
+    assert_eq!(
+        prepared_commits(),
+        prepared_commits_before + 1,
+        "the commit adds the prepared chain"
+    );
+    assert_eq!(
+        PREPARES_RUN.load(Ordering::SeqCst),
+        prepares_before + 1,
+        "only a candidate with work prepares its block's commit",
     );
 
     join_write_worker(sender, worker).await;
+}
+
+/// Waits until the block write task that `tx` sends to has run `prepares` prepares since the
+/// process started. Panics if the task stops first.
+async fn wait_for_prepares(tx: &UnboundedSender<NonFinalizedWriteMessage>, prepares: usize) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while PREPARES_RUN.load(Ordering::SeqCst) < prepares {
+            assert!(!tx.is_closed(), "the block write task stopped");
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the block write task prepares the commit");
 }
 
 /// Returns Mainnet block 1, with a header that is contextually valid on the genesis block in
@@ -515,14 +532,24 @@ fn nonce_variant(block: &Block, nonce: [u8; 32]) -> Arc<Block> {
     Arc::new(variant)
 }
 
-/// Sends `block` to the block write task as a mining candidate, and returns the answer.
+/// Sends `block`'s block and transaction hashes to the block write task as a mining candidate,
+/// and returns the answer.
+///
+/// `verification` is the receiver for the block verifier's guard. The block write task only
+/// prepares the block's commit while the guard is open.
 async fn send_mining_candidate(
     tx: &UnboundedSender<NonFinalizedWriteMessage>,
-    block: Arc<Block>,
+    block: &SemanticallyVerifiedBlock,
+    verification: watch::Receiver<()>,
 ) -> Option<GetBlockTemplateChainInfo> {
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
-        .unwrap();
+    tx.send(NonFinalizedWriteMessage::MiningCandidate {
+        block: block.block.clone(),
+        transaction_hashes: block.transaction_hashes.clone(),
+        verification,
+        rsp_tx,
+    })
+    .unwrap();
 
     tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
@@ -550,7 +577,8 @@ async fn send_commit(
 }
 
 /// A mining candidate's work is kept when another block is committed first, so the commit of the
-/// candidate's own block still reuses it.
+/// candidate's own block still reuses it. That other block's commit discards the candidate's
+/// prepared commit, which was validated without it.
 #[tokio::test]
 async fn candidate_trees_survive_another_blocks_commit() {
     let _init_guard = zebra_test::init();
@@ -565,16 +593,43 @@ async fn candidate_trees_survive_another_blocks_commit() {
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
+    let prepared_commits = || {
+        (
+            PREPARED_COMMITS.load(Ordering::SeqCst),
+            STALE_PREPARED_COMMITS.load(Ordering::SeqCst),
+        )
+    };
+    let prepared_commits_before = prepared_commits();
+    let (prepares_run_before, prepares_stored_before) = (
+        PREPARES_RUN.load(Ordering::SeqCst),
+        PREPARES_STORED.load(Ordering::SeqCst),
+    );
+
+    let (_guard, verification) = watch::channel(());
+    let commit = block.clone().prepare();
     assert!(
-        send_mining_candidate(tx, block.clone()).await.is_some(),
+        send_mining_candidate(tx, &commit, verification)
+            .await
+            .is_some(),
         "a block that extends the best tip gets work",
+    );
+    wait_for_prepares(tx, prepares_run_before + 1).await;
+    assert_eq!(
+        PREPARES_STORED.load(Ordering::SeqCst),
+        prepares_stored_before + 1,
+        "the block write task prepares the block's commit",
     );
     let committed = send_commit(tx, sibling.clone().prepare(), None).await;
     assert_eq!(committed.expect("the sibling is valid"), sibling.hash());
 
     let before = early_mining_work_counts();
-    let committed = send_commit(tx, block.clone().prepare(), None).await;
+    let committed = send_commit(tx, commit, None).await;
     assert_eq!(committed.expect("the block is valid"), block.hash());
+    assert_eq!(
+        prepared_commits(),
+        prepared_commits_before,
+        "the sibling's commit discards the candidate's prepared commit",
+    );
     assert_eq!(
         early_mining_work_counts(),
         EarlyMiningWorkCounts {
@@ -612,8 +667,11 @@ async fn candidate_trees_survive_a_solved_proposal_commit() {
         BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
+    let (_guard, verification) = watch::channel(());
     assert!(
-        send_mining_candidate(tx, block.clone()).await.is_some(),
+        send_mining_candidate(tx, &block.clone().prepare(), verification)
+            .await
+            .is_some(),
         "a block that extends the best tip gets work",
     );
 
@@ -690,8 +748,12 @@ async fn candidate_trees_survive_a_sibling_commit_on_a_non_finalized_parent() {
     let block = Arc::new(block);
     let sibling = nonce_variant(&block, [0xff; 32]);
 
+    let (_guard, verification) = watch::channel(());
+    let commit = block.clone().prepare();
     assert!(
-        send_mining_candidate(tx, block.clone()).await.is_some(),
+        send_mining_candidate(tx, &commit, verification)
+            .await
+            .is_some(),
         "a block that extends the best tip gets work",
     );
     // The sibling extends block 1's chain, so the block's commit forks that chain at block 1.
@@ -699,7 +761,7 @@ async fn candidate_trees_survive_a_sibling_commit_on_a_non_finalized_parent() {
     assert_eq!(committed.expect("the sibling is valid"), sibling.hash());
 
     let before = early_mining_work_counts();
-    let committed = send_commit(tx, block.clone().prepare(), None).await;
+    let committed = send_commit(tx, commit, None).await;
     assert_eq!(committed.expect("the block is valid"), block.hash());
     assert_eq!(
         early_mining_work_counts(),
@@ -928,3 +990,5 @@ async fn write_worker_drops_a_prepared_chain_that_the_best_chain_passed() {
 
     join_write_worker(sender, worker).await;
 }
+
+mod prepared;

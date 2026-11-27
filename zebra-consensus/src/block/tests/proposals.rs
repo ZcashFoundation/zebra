@@ -157,7 +157,10 @@ async fn verify_block(
         .await
         .respond(zs::Response::KnownBlock(None));
     state
-        .expect_request(zs::Request::MiningCandidate(block.clone()))
+        .expect_request(zs::Request::MiningCandidate {
+            block: block.clone(),
+            transaction_hashes: block.transactions.iter().map(|tx| tx.hash()).collect(),
+        })
         .await
         .respond(zs::Response::MiningCandidate(None));
     verify_coinbase(transaction_verifier, block).await;
@@ -618,7 +621,10 @@ async fn solved_proposal_is_verified_like_any_other_block_while_it_is_committed(
         .await
         .respond(zs::Response::KnownBlock(None));
     state
-        .expect_request(zs::Request::MiningCandidate(solved.clone()))
+        .expect_request(zs::Request::MiningCandidate {
+            block: solved.clone(),
+            transaction_hashes: solved.transactions.iter().map(|tx| tx.hash()).collect(),
+        })
         .await
         .respond(zs::Response::MiningCandidate(None));
     verify_coinbase(&mut transaction_verifier, &solved).await;

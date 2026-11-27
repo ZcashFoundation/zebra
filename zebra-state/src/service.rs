@@ -37,6 +37,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
+    transaction,
 };
 
 use crate::{
@@ -1167,12 +1168,18 @@ impl StateService {
 
     /// Starts computing early mining work on `block`, which has a valid proof of work but is
     /// still being verified. Returns a guard that keeps the work available.
+    /// `transaction_hashes` are the hashes of the block's transactions, in order. The block
+    /// write task also validates the block's chain context once it has answered.
     ///
     /// Returns `None` if nothing is subscribed to early mining work, if the state is already
     /// handling another mining candidate, or if the block write task isn't taking non-finalized
     /// blocks yet. That task only starts taking them when the first non-finalized block after a
     /// restart is committed, so that block doesn't get early work.
-    fn start_mining_candidate(&mut self, block: Arc<block::Block>) -> Option<MiningCandidateGuard> {
+    fn start_mining_candidate(
+        &mut self,
+        block: Arc<block::Block>,
+        transaction_hashes: Arc<[transaction::Hash]>,
+    ) -> Option<MiningCandidateGuard> {
         let candidates = self.read_service.mining_candidate.clone();
 
         // Nodes that aren't mining don't need this work.
@@ -1195,14 +1202,18 @@ impl StateService {
         }
 
         let parent_hash = block.header.previous_block_hash;
+        let (guard, verification) = watch::channel(());
         let (rsp_tx, rsp_rx) = oneshot::channel();
         self.block_write_sender
             .non_finalized
             .as_ref()?
-            .send(NonFinalizedWriteMessage::MiningCandidate { block, rsp_tx })
+            .send(NonFinalizedWriteMessage::MiningCandidate {
+                block,
+                transaction_hashes,
+                verification: verification.clone(),
+                rsp_tx,
+            })
             .ok()?;
-
-        let (guard, verification) = watch::channel(());
 
         // This task runs until the block write task has answered, so only one candidate is ever
         // queued, and then until the work is withdrawn.
@@ -1682,8 +1693,11 @@ impl Service<Request> for StateService {
                 unreachable!("converted to a semantically verified commit above")
             }
 
-            Request::MiningCandidate(block) => {
-                let guard = self.start_mining_candidate(block);
+            Request::MiningCandidate {
+                block,
+                transaction_hashes,
+            } => {
+                let guard = self.start_mining_candidate(block, transaction_hashes);
 
                 async move { Ok(Response::MiningCandidate(guard)) }.boxed()
             }
