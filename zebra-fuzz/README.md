@@ -76,8 +76,8 @@ semver guarantee.
 | `block_parallel_decode` | The parallel block decoder against the serial one: the same block or error, and the same consumed bytes |
 | `block_deep_fuzz` | Block consensus checks swept across mainnet network-upgrade activation heights |
 | `equihash_fuzz` | `Solution::check()` and the `equihash_solution_is_valid` consensus wrapper — the PoW verifier every inbound header passes through |
-| `script_verify_fuzz` | `CachedFfiTransaction::is_valid`, where transparent scripts cross the Rust → C++ FFI boundary |
-| `script_flag_matrix_fuzz` | BIP-66 / BIP-65 / BIP-62 script verification flag combinations |
+| `script_verify_fuzz` | `CachedFfiTransaction::is_valid` and sigop counting, where transparent scripts reach the Rust script interpreter |
+| `script_flag_matrix_fuzz` | BIP-66 / BIP-65 / BIP-62 script verification flag combinations, and the Rust interpreter's verdicts and Zebra's sigop counts compared with zcashd's C++ interpreter |
 | `address_fuzz` | Transparent and shielded address decoding, cross-checked between three parsers |
 | `note_commitment_tree_fuzz` | Append/root/read op sequences against the Sprout, Sapling and Orchard note-commitment trees in parallel |
 | `rpc_handler_fuzz` | `RpcImpl` trait dispatch with always-fail Tower mocks, exercising each method's pre-service input parsing |

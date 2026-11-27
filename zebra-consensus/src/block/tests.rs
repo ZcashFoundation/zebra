@@ -844,7 +844,7 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_single_transaction_block_many_inputs();
     let mut legacy_sigop_count = 0;
     for tx in block.transactions {
-        let tx_sigop_count = tx.sigops().expect("unexpected invalid sigop count");
+        let tx_sigop_count = tx.sigops();
         assert_eq!(tx_sigop_count, 0);
         legacy_sigop_count += tx_sigop_count;
     }
@@ -854,7 +854,7 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_multi_transaction_block();
     let mut sigops = 0;
     for tx in block.transactions {
-        let tx_sigop_count = tx.sigops().expect("unexpected invalid sigop count");
+        let tx_sigop_count = tx.sigops();
         assert_eq!(tx_sigop_count, 1);
         sigops += tx_sigop_count;
     }
@@ -875,7 +875,7 @@ fn legacy_sigops_count_for_historic_blocks() {
             .zcash_deserialize_into()
             .expect("block test vector is valid");
         for tx in block.transactions {
-            sigops += tx.sigops().expect("unexpected invalid sigop count");
+            sigops += tx.sigops();
         }
 
         // Test that historic blocks pass the sigops check.

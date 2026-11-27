@@ -42,7 +42,8 @@ pub struct Verifier;
 /// A script verification request.
 #[derive(Debug)]
 pub struct Request {
-    /// A cached transaction, in the format required by the script verifier FFI interface.
+    /// A cached transaction, with the previous outputs and sighash context the script verifier
+    /// needs.
     pub cached_ffi_transaction: Arc<CachedFfiTransaction>,
     /// The index of an input in `cached_ffi_transaction`, used for verifying this request
     ///
