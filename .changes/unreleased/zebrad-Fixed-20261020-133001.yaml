@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed `zebrad` panicking after startup when a peer in the list for the configured network has a missing or invalid port, or a malformed host. The config now fails to load with an error that names the entry.
+time: 2026-10-20T13:30:01.469200047Z
