@@ -1,0 +1,21 @@
+# Dependency train configuration, read by .github/scripts/dependency-train.py.
+# See book/src/dev/dependency-trains.md for the conductor playbook.
+
+# Consensus-sensitive crates: only Train B moves these; Train A leaves them exactly where they are.
+consensus = [
+    "zcash_*",
+    "orchard",
+    "halo2*",
+    "incrementalmerkletree",
+    "bridgetree",
+    "equihash",
+    "sapling-crypto",
+    "rocksdb",
+    "librocksdb-sys",
+    "secp256k1",
+    "zcash_script",
+]
+
+# Crates pinned back because their newest compatible release breaks us. crate = "exact version".
+# Remove the line when fixed upstream.
+[pinned]
