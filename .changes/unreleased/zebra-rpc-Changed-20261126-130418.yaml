@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Capped incoming indexer gRPC request decoding at 16 KiB, raised the per-connection concurrent HTTP/2 stream limit from 20 to 200, and capped active server-wide streaming subscriptions at 20.
+time: 2026-11-26T13:04:18.683227164Z
