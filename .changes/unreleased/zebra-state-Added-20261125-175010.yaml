@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ChainTipSender::clear_best_non_finalized_tip` to the public API. It selects the given finalized tip when the non-finalized state is empty, or clears the tip when both states are empty.
+time: 2026-11-25T17:50:10.007589+05:00

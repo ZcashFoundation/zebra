@@ -146,7 +146,7 @@ impl From<CheckpointVerifiedBlock> for ChainTipBlock {
 pub struct ChainTipSender {
     /// Whether the selected best tip is from the non-finalized state.
     ///
-    /// Cleared when the write task falls back to the finalized tip.
+    /// Cleared when the write task or `TrustedChainSync` falls back to the finalized tip.
     has_non_finalized_tip: bool,
 
     /// The sender channel for chain tip data.
@@ -218,8 +218,9 @@ impl ChainTipSender {
         let new_tip = new_tip.into();
         self.record_fields(&new_tip);
 
-        // An absent update does not change the selected tip. The write task uses
-        // `clear_best_non_finalized_tip` to explicitly fall back to the finalized state.
+        // An absent update does not change the selected tip. The write task and
+        // `TrustedChainSync` use `clear_best_non_finalized_tip` to explicitly fall back to the
+        // finalized state.
         if new_tip.is_some() {
             self.has_non_finalized_tip = true;
             self.update(new_tip)
@@ -230,7 +231,9 @@ impl ChainTipSender {
     ///
     /// The caller supplies the current database tip, which may have advanced since
     /// the last checkpointed block. If both states are empty, clear any old tip.
-    pub(crate) fn clear_best_non_finalized_tip(&mut self, finalized_tip: Option<ChainTipBlock>) {
+    ///
+    /// Also used by `TrustedChainSync` in `zebra-rpc`.
+    pub fn clear_best_non_finalized_tip(&mut self, finalized_tip: Option<ChainTipBlock>) {
         self.has_non_finalized_tip = false;
         if finalized_tip.is_some() {
             self.update(finalized_tip);
