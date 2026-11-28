@@ -565,6 +565,68 @@
         "type": "prometheus",
         "uid": "zebra-prometheus"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "state_finalized_value_pool_deferred / 100000000",
+          "legendFormat": "Deferred ZEC",
+          "refId": "A"
+        }
+      ],
+      "title": "Deferred Pool",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "description": "Pool Health Check: All pools should be non-negative (enforced internally by Zebra)",
       "fieldConfig": {
         "defaults": {
@@ -614,8 +676,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 12,
-        "x": 0,
+        "w": 8,
+        "x": 8,
         "y": 22
       },
       "id": 7,
@@ -638,7 +700,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "(state_finalized_value_pool_transparent < 0) + (state_finalized_value_pool_sprout < 0) + (state_finalized_value_pool_sapling < 0) + (state_finalized_value_pool_orchard < 0)",
+          "expr": "(state_finalized_value_pool_transparent < bool 0) + (state_finalized_value_pool_sprout < bool 0) + (state_finalized_value_pool_sapling < bool 0) + (state_finalized_value_pool_orchard < bool 0) + (state_finalized_value_pool_deferred < bool 0)",
           "legendFormat": "Pool Health Status",
           "refId": "A"
         }
@@ -672,8 +734,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 22
       },
       "id": 8,
