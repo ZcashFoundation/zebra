@@ -99,6 +99,7 @@ on:
       - .dockerignore
       - .github/workflows/zfnd-ci-integration-tests-gcp.yml
       - .github/workflows/zfnd-deploy-integration-tests-gcp.yml
+      - .github/workflows/scripts/gcp-container-cloud-init.sh
       - .github/workflows/zfnd-find-cached-disks.yml
       - .github/workflows/zfnd-build-docker-image.yml
 
