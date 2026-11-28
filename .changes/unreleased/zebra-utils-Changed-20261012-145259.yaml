@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Changed
+body: '`zebra-checkpoints` now exits successfully, instead of panicking, when there are no new checkpoints ([#11474](https://github.com/ZcashFoundation/zebra/pull/11474)).'
+time: 2026-10-12T14:52:59.233472594Z
