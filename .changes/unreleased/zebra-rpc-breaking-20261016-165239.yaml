@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`RpcServer::z_get_subtrees_by_index` takes an additional `max_height: Option<u32>` argument. Callers must pass `None` to keep the previous behaviour; JSON-RPC clients are unaffected ([#11599](https://github.com/ZcashFoundation/zebra/issues/11599)).'
+time: 2026-10-16T16:52:39.632768+05:00

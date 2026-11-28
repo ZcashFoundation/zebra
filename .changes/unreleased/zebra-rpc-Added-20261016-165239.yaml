@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: '`z_getsubtreesbyindex` accepts an optional `max_height` parameter, and only returns subtrees whose `end_height` is at or below it ([#11599](https://github.com/ZcashFoundation/zebra/issues/11599)).'
+time: 2026-10-16T16:52:39.624944+05:00
