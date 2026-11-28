@@ -1522,6 +1522,20 @@ pub enum ReadRequest {
         known_blocks: Vec<block::Hash>,
     },
 
+    /// Looks up the tip of the best chain and the tip of every side chain.
+    ///
+    /// Zebra only keeps side chains in the non-finalized state, so a fork deeper than the reorg
+    /// limit ([`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)) doesn't
+    /// appear, and the [fork limits](crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS) can drop
+    /// low-work side chains sooner.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::ChainTips(Vec<ChainTipInfo>)`](ReadResponse::ChainTips), with the best
+    /// chain tip first. If the non-finalized state is empty, the finalized tip, if any, is the
+    /// only tip.
+    ChainTips,
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1816,6 +1830,7 @@ impl ReadRequest {
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
+            ReadRequest::ChainTips => "chain_tips",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::AnyChainSaplingTree { .. } => "any_chain_sapling_tree",

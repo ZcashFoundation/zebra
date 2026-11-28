@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ReadRequest::ChainTips` and `ReadResponse::ChainTips`, which list the best chain tip and every side chain tip in the non-finalized state, with the height, hash, branch length and status of each tip (`ChainTipInfo`, `ChainTipStatus`).
+time: 2026-11-26T16:41:02.872422782Z

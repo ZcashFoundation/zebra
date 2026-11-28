@@ -68,6 +68,7 @@ pub use service::{
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,
+    read::{ChainTipInfo, ChainTipStatus},
     spawn_init_read_only,
     watch_receiver::WatchReceiver,
     OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
