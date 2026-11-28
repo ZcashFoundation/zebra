@@ -15,12 +15,13 @@
 #   DISK_DEVICE_NAME   device name of the data disk, formatted if blank (required)
 #   MOUNT_PATHS        space-separated container paths the data disk is mounted at (required)
 #   RESTART_POLICY     systemd Restart= value (default: no)
+#   CONTAINER_TTY      true or false, run the container with a TTY (default: true)
 #
 # konlet behaviours the document reproduces explicitly:
 #   - it formatted an unformatted data disk (`blkid || mkfs.ext4` below)
 #   - it named the container `klt-<instance>` (now CONTAINER_NAME)
 #   - --container-restart-policy (now RESTART_POLICY)
-#   - --container-tty (now `--tty`)
+#   - --container-tty (now CONTAINER_TTY)
 #
 # The host mount point deliberately contains no hyphen. A path such as
 # /mnt/disks/zebra-cache needs a \x2d escape in the systemd unit name, and that
@@ -33,6 +34,16 @@ set -euo pipefail
 : "${CONTAINER_IMAGE:?}" "${CONTAINER_NAME:?}" "${CONTAINER_ENV:?}"
 : "${DISK_DEVICE_NAME:?}" "${MOUNT_PATHS:?}"
 RESTART_POLICY="${RESTART_POLICY:-no}"
+CONTAINER_TTY="${CONTAINER_TTY:-true}"
+
+case "${CONTAINER_TTY}" in
+  true) TTY_ARG=" --tty" ;;
+  false) TTY_ARG="" ;;
+  *)
+    echo "CONTAINER_TTY must be true or false, not ${CONTAINER_TTY}" >&2
+    exit 1
+    ;;
+esac
 
 HOST_CACHE_DIR=/mnt/disks/zebracache
 DISK="/dev/disk/by-id/google-${DISK_DEVICE_NAME}"
@@ -43,7 +54,13 @@ for path in ${MOUNT_PATHS}; do
   DOCKER_MOUNTS+="${DOCKER_MOUNTS:+ }-v ${HOST_CACHE_DIR}:${path}"
 done
 
-# docker reads the env file as one KEY=VALUE per line.
+# docker reads the env file as one KEY=VALUE per line, so a carriage return or
+# newline inside a value would start another variable. konlet kept it in the
+# value, so reject it rather than let a value inject variables.
+if [[ "${CONTAINER_ENV}" == *[$'\r\n']* ]]; then
+  echo "CONTAINER_ENV must not contain a carriage return or newline" >&2
+  exit 1
+fi
 ENV_FILE_BODY=$(echo "${CONTAINER_ENV}" | tr ',' '\n' | sed 's/^/      /')
 
 cat <<CLOUDINIT
@@ -114,6 +131,11 @@ ${ENV_FILE_BODY}
     [Service]
     Type=exec
     Restart=${RESTART_POLICY}
+    # systemd stops restarting a unit that starts more than 5 times in 10s, and
+    # waits only 100ms between restarts by default, so a container that exits at
+    # once would stay down for good. Waiting 10s keeps a crash loop retrying, as
+    # docker's restart policy did under konlet.
+    RestartSec=10
     # konlet inherited docker's 10s SIGKILL, which can truncate zebrad's
     # RocksDB flush. A unit can wait for it.
     TimeoutStopSec=180
@@ -121,12 +143,13 @@ ${ENV_FILE_BODY}
     # Deliberately no --rm: callers read the container's logs after it exits,
     # and a restart replaces it through the ExecStartPre above.
     #
-    # --tty is not cosmetic: a TTY merges stderr into stdout, and log-parsing
-    # steps read 'docker logs' stdout only, while zebrad logs to stderr. No
-    # --interactive: nothing reads stdin, and it fails under systemd without a
-    # terminal.
-    ExecStart=/usr/bin/docker run --name ${CONTAINER_NAME} \\
-      --tty \\
+    # The TTY is not cosmetic. It merges stderr into stdout, which the integration
+    # tests need: their log-parsing steps read 'docker logs' stdout only, while
+    # zebrad logs to stderr. Nodes turn it off, because a TTY also ends each line
+    # with a carriage return, so their JSON log lines would not reach Cloud
+    # Logging unchanged. No --interactive: nothing reads stdin, and it fails
+    # under systemd without a terminal.
+    ExecStart=/usr/bin/docker run --name ${CONTAINER_NAME}${TTY_ARG} \\
       --network host \\
       --env-file /etc/${CONTAINER_NAME}.env \\
       ${DOCKER_MOUNTS} \\
