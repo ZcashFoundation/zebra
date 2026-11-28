@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: 'The JSON-RPC response types implement `schemars::JsonSchema`, describing them as they are serialized.'
+time: 2026-11-03T22:50:34.000000000Z

@@ -23,7 +23,19 @@ pub mod json_conversion;
 ///
 /// There are multiple formats for serializing a height, so we don't implement
 /// `ZcashSerialize` or `ZcashDeserialize` for `Height`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct Height(pub u32);
 

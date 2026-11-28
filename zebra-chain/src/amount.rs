@@ -30,10 +30,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 // TODO:
 // - remove the default NegativeAllowed bound, to make consensus rule reviews easier
 // - put a Constraint bound on the type generic, not just some implementations
-#[derive(Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(try_from = "i64")]
 #[serde(into = "i64")]
 #[serde(bound = "C: Constraint + Clone")]
+#[schemars(bound = "C: Constraint + Clone")]
 pub struct Amount<C = NegativeAllowed>(
     /// The inner amount value.
     i64,

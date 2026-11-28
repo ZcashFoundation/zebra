@@ -183,8 +183,7 @@ pub trait Rpc {
     /// Returns software information from the RPC server, as a [`GetInfo`] JSON struct.
     ///
     /// zcashd reference: [`getinfo`](https://zcash.github.io/rpc/getinfo.html)
-    /// method: post
-    /// tags: control
+    /// tags: Control
     ///
     /// # Notes
     ///
@@ -201,8 +200,7 @@ pub trait Rpc {
     /// [`GetDeprecationInfoResponse`] JSON struct.
     ///
     /// zcashd reference: [`getdeprecationinfo`](https://zcash.github.io/rpc/getdeprecationinfo.html)
-    /// method: post
-    /// tags: network
+    /// tags: Network
     ///
     /// # Notes
     ///
@@ -222,8 +220,7 @@ pub trait Rpc {
     /// Returns blockchain state information, as a [`GetBlockchainInfoResponse`] JSON struct.
     ///
     /// zcashd reference: [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Notes
     ///
@@ -235,8 +232,7 @@ pub trait Rpc {
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
     /// zcashd reference: [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html)
-    /// method: post
-    /// tags: address
+    /// tags: Addressindex
     ///
     /// # Parameters
     ///
@@ -264,8 +260,7 @@ pub trait Rpc {
     /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
     ///
     /// zcashd reference: [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html)
-    /// method: post
-    /// tags: transaction
+    /// tags: Rawtransactions
     ///
     /// # Parameters
     ///
@@ -289,8 +284,7 @@ pub trait Rpc {
     /// passed or -5 if a hash was passed.
     ///
     /// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -321,8 +315,7 @@ pub trait Rpc {
     /// if a height was passed or -5 if a hash was passed.
     ///
     /// zcashd reference: [`getblockheader`](https://zcash.github.io/rpc/getblockheader.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -342,22 +335,21 @@ pub trait Rpc {
     /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     #[method(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> Result<GetBlockHashResponse>;
 
     /// Returns the height and hash of the current best blockchain tip block, as a [`GetBlockHeightAndHashResponse`] JSON struct.
     ///
     /// zcashd reference: none
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     #[method(name = "getbestblockheightandhash")]
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse>;
 
     /// Returns details on the active state of the TX memory pool.
     ///
     /// zcash reference: [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)
+    /// tags: Blockchain
     #[method(name = "getmempoolinfo")]
     async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse>;
 
@@ -368,16 +360,14 @@ pub trait Rpc {
     /// - `verbose`: (boolean, optional, default=false) true for a json object, false for array of transaction ids.
     ///
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     #[method(name = "getrawmempool")]
     async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempoolResponse>;
 
     /// Returns information about the given block's Sapling & Orchard tree state.
     ///
     /// zcashd reference: [`z_gettreestate`](https://zcash.github.io/rpc/z_gettreestate.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -395,8 +385,7 @@ pub trait Rpc {
     /// Returns information about a range of Sapling or Orchard subtrees.
     ///
     /// zcashd reference: [`z_getsubtreesbyindex`](https://zcash.github.io/rpc/z_getsubtreesbyindex.html) - TODO: fix link
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -421,8 +410,7 @@ pub trait Rpc {
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
     /// zcashd reference: [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html)
-    /// method: post
-    /// tags: transaction
+    /// tags: Rawtransactions
     ///
     /// # Parameters
     ///
@@ -440,8 +428,7 @@ pub trait Rpc {
     /// Returns the transaction ids made by the provided transparent addresses.
     ///
     /// zcashd reference: [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)
-    /// method: post
-    /// tags: address
+    /// tags: Addressindex
     ///
     /// # Parameters
     ///
@@ -474,8 +461,7 @@ pub trait Rpc {
     /// Returns all unspent outputs for a list of addresses.
     ///
     /// zcashd reference: [`getaddressutxos`](https://zcash.github.io/rpc/getaddressutxos.html)
-    /// method: post
-    /// tags: address
+    /// tags: Addressindex
     ///
     /// # Parameters
     ///
@@ -513,8 +499,7 @@ pub trait Rpc {
     /// - Works only if the network of the running zebrad process is `Regtest`.
     ///
     /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
-    /// method: post
-    /// tags: control
+    /// tags: Control
     #[method(name = "stop")]
     fn stop(&self) -> Result<String>;
 
@@ -522,8 +507,7 @@ pub trait Rpc {
     /// the number of blocks in this chain excluding the genesis block).
     ///
     /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     #[method(name = "getblockcount")]
     fn get_block_count(&self) -> Result<u32>;
 
@@ -531,8 +515,7 @@ pub trait Rpc {
     /// to a block in the best chain.
     ///
     /// zcashd reference: [`getblockhash`](https://zcash-rpc.github.io/getblockhash.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -552,8 +535,7 @@ pub trait Rpc {
     /// - `jsonrequestobject`: (string, optional) A JSON object containing arguments.
     ///
     /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     ///
     /// # Notes
     ///
@@ -576,8 +558,7 @@ pub trait Rpc {
     /// Returns the [`SubmitBlockResponse`] for the operation, as a JSON string.
     ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     ///
     /// # Parameters
     ///
@@ -600,8 +581,7 @@ pub trait Rpc {
     /// Returns mining-related information.
     ///
     /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     #[method(name = "getmininginfo")]
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse>;
 
@@ -613,8 +593,7 @@ pub trait Rpc {
     /// If `height` is not supplied or is -1, uses the tip height.
     ///
     /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     #[method(name = "getnetworksolps")]
     async fn get_network_sol_ps(&self, num_blocks: Option<i32>, height: Option<i32>)
         -> Result<u64>;
@@ -626,8 +605,7 @@ pub trait Rpc {
     /// See that method for details.
     ///
     /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     #[method(name = "getnetworkhashps")]
     async fn get_network_hash_ps(
         &self,
@@ -640,16 +618,14 @@ pub trait Rpc {
     /// Returns an object containing various state info regarding P2P networking.
     ///
     /// zcashd reference: [`getnetworkinfo`](https://zcash.github.io/rpc/getnetworkinfo.html)
-    /// method: post
-    /// tags: network
+    /// tags: Network
     #[method(name = "getnetworkinfo")]
     async fn get_network_info(&self) -> Result<GetNetworkInfoResponse>;
 
     /// Returns data about each connected network node.
     ///
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
-    /// method: post
-    /// tags: network
+    /// tags: Network
     #[method(name = "getpeerinfo")]
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
 
@@ -659,8 +635,7 @@ pub trait Rpc {
     /// Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.
     ///
     /// zcashd reference: [`ping`](https://zcash.github.io/rpc/ping.html)
-    /// method: post
-    /// tags: network
+    /// tags: Network
     #[method(name = "ping")]
     async fn ping(&self) -> Result<()>;
 
@@ -668,8 +643,7 @@ pub trait Rpc {
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
-    /// method: post
-    /// tags: util
+    /// tags: Util
     ///
     /// # Parameters
     ///
@@ -681,8 +655,7 @@ pub trait Rpc {
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)
-    /// method: post
-    /// tags: util
+    /// tags: Util
     ///
     /// # Parameters
     ///
@@ -697,8 +670,7 @@ pub trait Rpc {
     /// Converts a transparent P2PKH address to a ZIP 320 TEX address.
     ///
     /// zcashd reference: [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)
-    /// method: post
-    /// tags: util
+    /// tags: Wallet
     ///
     /// # Parameters
     ///
@@ -721,8 +693,7 @@ pub trait Rpc {
     /// and on test networks. This will be replaced by a dynamic estimate without changing
     /// the parameters or result shape.
     ///
-    /// method: post
-    /// tags: wallet
+    /// tags: Util
     #[method(name = "getstandardfee")]
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse>;
 
@@ -731,8 +702,7 @@ pub trait Rpc {
     /// Once NSM reissuance starts, the preceding block must exist: future reserves cannot be forecast.
     ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
-    /// method: post
-    /// tags: mining
+    /// tags: Mining
     ///
     /// # Parameters
     ///
@@ -748,16 +718,14 @@ pub trait Rpc {
     /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
     ///
     /// zcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)
-    /// method: post
-    /// tags: blockchain
+    /// tags: Blockchain
     #[method(name = "getdifficulty")]
     async fn get_difficulty(&self) -> Result<f64>;
 
     /// Returns the list of individual payment addresses given a unified address.
     ///
     /// zcashd reference: [`z_listunifiedreceivers`](https://zcash.github.io/rpc/z_listunifiedreceivers.html)
-    /// method: post
-    /// tags: wallet
+    /// tags: Wallet
     ///
     /// # Parameters
     ///
@@ -778,6 +746,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
+    /// tags: Blockchain
     // TODO: Invalidate block hashes even if they're not present in the non-finalized state (#9553).
     #[method(name = "invalidateblock")]
     async fn invalidate_block(&self, block_hash: String) -> Result<()>;
@@ -787,6 +756,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
+    /// tags: Blockchain
     #[method(name = "reconsiderblock")]
     async fn reconsider_block(&self, block_hash: String) -> Result<Vec<block::Hash>>;
 
@@ -802,8 +772,7 @@ pub trait Rpc {
     /// Only works if the network of the running zebrad process is `Regtest`.
     ///
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
-    /// method: post
-    /// tags: generating
+    /// tags: Generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>>;
 
     #[method(name = "generatetoaddress")]
@@ -824,8 +793,7 @@ pub trait Rpc {
     /// several wallets from one node.
     ///
     /// zcashd reference: [`generatetoaddress`](https://zcash.github.io/rpc/generatetoaddress.html)
-    /// method: post
-    /// tags: generating
+    /// tags: Generating
     async fn generate_to_address(
         &self,
         num_blocks: u32,
@@ -852,18 +820,17 @@ pub trait Rpc {
     /// Only the "add" command is currently supported.
     ///
     /// zcashd reference: [`addnode`](https://zcash.github.io/rpc/addnode.html)
-    /// method: post
-    /// tags: network
+    /// tags: Network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
 
     /// Returns an OpenRPC schema as a description of this service.
+    /// tags: Control
     #[method(name = "rpc.discover")]
     fn openrpc(&self) -> openrpsee::openrpc::Response;
     /// Returns details about an unspent transaction output.
     ///
     /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
-    /// method: post
-    /// tags: transaction
+    /// tags: Blockchain
     ///
     /// # Parameters
     ///
@@ -3929,7 +3896,16 @@ where
 ///
 /// See the notes for the [`Rpc::get_info` method].
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetInfoResponse {
     /// The node version
     #[getter(rename = "raw_version")]
@@ -4102,7 +4078,16 @@ const END_OF_SERVICE_ESTIMATE_SAFETY_MARGIN: i64 = 24 * 60 * 60;
 /// Response to a `getdeprecationinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_deprecation_info` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetDeprecationInfoResponse {
     /// End of service information for this node release. Only present on Mainnet, where end of
     /// support is enforced.
@@ -4111,7 +4096,16 @@ pub struct GetDeprecationInfoResponse {
 }
 
 /// The `end_of_service` object in a [`GetDeprecationInfoResponse`].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct EndOfService {
     /// The estimated last height this server version supports, matching zcashd's threshold
     /// semantics. The node halts when the chain tip goes past this height.
@@ -4133,7 +4127,9 @@ pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 6];
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, schemars::JsonSchema,
+)]
 pub struct GetBlockchainInfoResponse {
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
@@ -4169,6 +4165,7 @@ pub struct GetBlockchainInfoResponse {
 
     /// The hash of the currently best block, in big-endian order, hex-encoded
     #[serde(rename = "bestblockhash", with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     best_block_hash: block::Hash,
 
@@ -4406,6 +4403,7 @@ impl GetAddressBalanceRequest {
     serde::Deserialize,
     Getters,
     new,
+    schemars::JsonSchema,
 )]
 pub struct GetAddressBalanceResponse {
     /// The total transparent balance.
@@ -4511,8 +4509,22 @@ impl ValidateAddresses for GetAddressUtxosRequest {
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+pub struct ConsensusBranchIdHex(
+    #[serde(with = "hex")]
+    #[schemars(with = "String")]
+    ConsensusBranchId,
+);
 
 impl ConsensusBranchIdHex {
     /// Returns a new instance of ['ConsensusBranchIdHex'].
@@ -4527,7 +4539,9 @@ impl ConsensusBranchIdHex {
 }
 
 /// Information about [`NetworkUpgrade`] activation.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct NetworkUpgradeInfo {
     /// Name of upgrade, string.
     ///
@@ -4563,7 +4577,9 @@ impl NetworkUpgradeInfo {
 }
 
 /// The activation status of a [`NetworkUpgrade`].
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum NetworkUpgradeStatus {
     /// The network upgrade is currently active.
     ///
@@ -4584,7 +4600,9 @@ pub enum NetworkUpgradeStatus {
 /// The [`ConsensusBranchId`]s for the tip and the next block.
 ///
 /// These branch IDs are different when the next block is a network upgrade activation block.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TipConsensusBranch {
     /// Branch ID used to validate the current chain tip, big-endian, hex-encoded.
     #[serde(rename = "chaintip")]
@@ -4615,8 +4633,14 @@ impl TipConsensusBranch {
 /// Contains the hex-encoded hash of the sent transaction.
 ///
 /// See the notes for the [`Rpc::send_raw_transaction` method].
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct SendRawTransactionResponse(#[serde(with = "hex")] transaction::Hash);
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct SendRawTransactionResponse(
+    #[serde(with = "hex")]
+    #[schemars(with = "String")]
+    transaction::Hash,
+);
 
 #[deprecated(note = "Use `SendRawTransactionResponse` instead")]
 pub use self::SendRawTransactionResponse as SentTransactionHash;
@@ -4648,11 +4672,15 @@ impl SendRawTransactionResponse {
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block`] method.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum GetBlockResponse {
     /// The request block, hex-encoded.
-    Raw(#[serde(with = "hex")] SerializedBlock),
+    Raw(
+        #[serde(with = "hex")]
+        #[schemars(with = "String")]
+        SerializedBlock,
+    ),
     /// The block object.
     Object(Box<BlockObject>),
 }
@@ -4691,11 +4719,21 @@ impl Default for GetBlockResponse {
 
 /// A Block object returned by the `getblock` RPC request.
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct BlockObject {
     /// The hash of the requested block.
     #[getter(copy)]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     hash: block::Hash,
 
     /// The number of confirmations of this block in the best chain,
@@ -4719,6 +4757,7 @@ pub struct BlockObject {
 
     /// The merkle root of the requested block.
     #[serde(with = "opthex", rename = "merkleroot")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     merkle_root: Option<block::merkle::Root>,
@@ -4726,6 +4765,7 @@ pub struct BlockObject {
     /// The blockcommitments field of the requested block. Its interpretation changes
     /// depending on the network and height.
     #[serde(with = "opthex", rename = "blockcommitments")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     block_commitments: Option<[u8; 32]>,
@@ -4734,12 +4774,14 @@ pub struct BlockObject {
     //
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "opthex", rename = "finalsaplingroot")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     final_sapling_root: Option<[u8; 32]>,
 
     /// The root of the Orchard commitment tree after applying this block.
     #[serde(with = "opthex", rename = "finalorchardroot")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     final_orchard_root: Option<[u8; 32]>,
@@ -4761,6 +4803,7 @@ pub struct BlockObject {
 
     /// The nonce of the requested block header.
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     nonce: Option<[u8; 32]>,
@@ -4768,12 +4811,14 @@ pub struct BlockObject {
     /// The Equihash solution in the requested block header.
     /// Note: presence of this field in getblock is not documented in zcashd.
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     solution: Option<Solution>,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     bits: Option<CompactDifficulty>,
@@ -4819,23 +4864,29 @@ pub struct BlockObject {
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     previous_block_hash: Option<block::Hash>,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     #[getter(copy)]
     next_block_hash: Option<block::Hash>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 /// The transaction list in a `getblock` call. Can be a list of transaction
 /// IDs or the full transaction details depending on verbosity.
 pub enum GetBlockTransaction {
     /// The transaction hash, hex-encoded.
-    Hash(#[serde(with = "hex")] transaction::Hash),
+    Hash(
+        #[serde(with = "hex")]
+        #[schemars(with = "String")]
+        transaction::Hash,
+    ),
     /// The block object.
     Object(Box<TransactionObject>),
 }
@@ -4843,7 +4894,7 @@ pub enum GetBlockTransaction {
 /// Response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block_header`] method.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum GetBlockHeaderResponse {
     /// The request block header, hex-encoded.
@@ -4857,13 +4908,23 @@ pub enum GetBlockHeaderResponse {
 pub use self::GetBlockHeaderResponse as GetBlockHeader;
 
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 /// Verbose response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block_header`] method.
 pub struct BlockHeaderObject {
     /// The hash of the requested block.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     hash: block::Hash,
 
@@ -4880,17 +4941,20 @@ pub struct BlockHeaderObject {
 
     /// The merkle root of the requesteed block.
     #[serde(with = "hex", rename = "merkleroot")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     merkle_root: block::merkle::Root,
 
     /// The blockcommitments field of the requested block. Its interpretation changes
     /// depending on the network and height.
     #[serde(with = "hex", rename = "blockcommitments")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     block_commitments: [u8; 32],
 
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     final_sapling_root: [u8; 32],
 
@@ -4904,16 +4968,19 @@ pub struct BlockHeaderObject {
 
     /// The nonce of the requested block header.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     nonce: [u8; 32],
 
     /// The Equihash solution in the requested block header.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     solution: Solution,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     bits: CompactDifficulty,
 
@@ -4924,6 +4991,7 @@ pub struct BlockHeaderObject {
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     previous_block_hash: block::Hash,
 
@@ -4931,6 +4999,7 @@ pub struct BlockHeaderObject {
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     #[serde(with = "opthex")]
+    #[schemars(with = "Option<String>")]
     next_block_hash: Option<block::Hash>,
 }
 
@@ -4972,9 +5041,15 @@ impl Default for BlockHeaderObject {
 /// Contains the hex-encoded hash of the requested block.
 ///
 /// Also see the notes for the [`RpcServer::get_best_block_hash`] and `get_block_hash` methods.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
-pub struct GetBlockHashResponse(#[serde(with = "hex")] pub(crate) block::Hash);
+pub struct GetBlockHashResponse(
+    #[serde(with = "hex")]
+    #[schemars(with = "String")]
+    pub(crate) block::Hash,
+);
 
 impl GetBlockHashResponse {
     /// Constructs a new [`GetBlockHashResponse`] from a block hash.
@@ -4995,7 +5070,18 @@ pub use self::GetBlockHashResponse as GetBlockHash;
 pub type Hash = GetBlockHashResponse;
 
 /// Response to a `getbestblockheightandhash` RPC request.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Deserialize,
+    serde::Serialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetBlockHeightAndHashResponse {
     /// The best chain tip block height
     #[getter(copy)]
@@ -5026,11 +5112,15 @@ impl Default for GetBlockHashResponse {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum GetRawTransactionResponse {
     /// The raw transaction, encoded as hex bytes.
-    Raw(#[serde(with = "hex")] SerializedTransaction),
+    Raw(
+        #[serde(with = "hex")]
+        #[schemars(with = "String")]
+        SerializedTransaction,
+    ),
     /// The transaction object.
     Object(Box<TransactionObject>),
 }
@@ -5045,7 +5135,9 @@ impl Default for GetRawTransactionResponse {
 }
 
 /// Response to a `getaddressutxos` RPC request.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum GetAddressUtxosResponse {
     /// Response when `chainInfo` is false or not provided.
@@ -5055,10 +5147,21 @@ pub enum GetAddressUtxosResponse {
 }
 
 /// Response to a `getaddressutxos` RPC request, when `chainInfo` is true.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetAddressUtxosResponseObject {
     utxos: Vec<Utxo>,
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     hash: block::Hash,
     #[getter(copy)]
@@ -5068,13 +5171,24 @@ pub struct GetAddressUtxosResponseObject {
 /// A UTXO returned by the `getaddressutxos` RPC request.
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct Utxo {
     /// The transparent address, base58check encoded
     address: transparent::Address,
 
     /// The output txid, in big-endian order, hex-encoded
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     txid: transaction::Hash,
 
@@ -5085,6 +5199,7 @@ pub struct Utxo {
 
     /// The transparent output script, hex encoded
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     script: transparent::Script,
 
     /// The amount of zatoshis in the transparent output
@@ -5242,7 +5357,9 @@ impl ValidateAddresses for GetAddressTxIdsRequest {
 }
 
 /// Information about the sapling and orchard note commitment trees if any.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct GetBlockTrees {
     #[serde(skip_serializing_if = "SaplingTrees::is_empty")]
     sapling: SaplingTrees,
@@ -5291,7 +5408,9 @@ impl GetBlockTrees {
 }
 
 /// Sapling note commitment tree information.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct SaplingTrees {
     size: u64,
 }
@@ -5303,7 +5422,9 @@ impl SaplingTrees {
 }
 
 /// Orchard note commitment tree information.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct OrchardTrees {
     size: u64,
 }
@@ -5315,7 +5436,17 @@ impl OrchardTrees {
 }
 
 /// Ironwood note commitment tree information. Ironwood reuses the Orchard tree type.
-#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy,
+    Clone,
+    Default,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 pub struct IronwoodTrees {
     size: u64,
 }
@@ -5657,6 +5788,6 @@ pub enum AddNodeCommand {
 /// Response to a `gettxout` RPC request.
 ///
 /// See the notes for the [`Rpc::get_tx_out` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct GetTxOutResponse(Option<types::transaction::OutputObject>);

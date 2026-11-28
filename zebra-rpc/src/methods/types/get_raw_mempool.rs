@@ -18,7 +18,9 @@ use super::zec::Zec;
 /// Response to a `getrawmempool` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_mempool` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum GetRawMempoolResponse {
     /// The transaction IDs, as hex strings (verbose=0)
@@ -31,7 +33,17 @@ pub enum GetRawMempoolResponse {
 /// A mempool transaction details object as returned by `getrawmempool` in
 /// verbose mode.
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct MempoolObject {
     /// Transaction size in bytes.
     pub(crate) size: u64,

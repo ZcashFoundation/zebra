@@ -40,10 +40,11 @@ pub const MAX_ZEC_FORMAT_PRECISION: usize = 8;
 /// Unlike `zcashd`, Zebra doesn't have control over its JSON number precision,
 /// because it uses `serde_json`'s formatter. But `zcashd` uses a fixed-point calculation:
 /// <https://github.com/zcash/zcash/blob/f6a4f68115ea4c58d55c8538579d0877ba9c8f79/src/rpc/server.cpp#L134>
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize, Default, schemars::JsonSchema)]
 #[serde(try_from = "f64")]
 #[serde(into = "f64")]
 #[serde(bound = "C: Constraint + Clone")]
+#[schemars(bound = "C: Constraint + Clone")]
 pub struct Zec<C: Constraint>(Amount<C>);
 
 impl<C: Constraint> Zec<C> {

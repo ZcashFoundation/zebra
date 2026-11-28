@@ -51,7 +51,9 @@ pub struct SubmitBlockParameters {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum SubmitBlockErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
@@ -68,7 +70,9 @@ pub enum SubmitBlockErrorResponse {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum SubmitBlockResponse {
     /// Block was not successfully submitted, return error
