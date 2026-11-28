@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblock` verbosity 0, `getrawtransaction` verbosity 0, and indexer gRPC `GetBlock` now serve finalized blocks and transactions from stored bytes without deserializing and re-serializing them; responses are unchanged. In `state.requests` metrics these requests are now labelled `raw_block` and `any_chain_raw_transaction` instead of `block` and `any_chain_transaction`.'
+time: 2026-11-26T10:31:59.840554436Z

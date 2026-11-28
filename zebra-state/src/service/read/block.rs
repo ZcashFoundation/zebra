@@ -17,10 +17,10 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     block_info::BlockInfo,
     serialization::ZcashSerialize as _,
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent::{self, Utxo},
 };
 
@@ -29,9 +29,9 @@ use crate::{
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::tip,
+        read::{find, tip},
     },
-    BlockReadError, HashOrHeight,
+    BlockReadError, BoxError, HashOrHeight, ReadResponse,
 };
 
 #[cfg(feature = "indexer")]
@@ -102,6 +102,27 @@ where
         )
 }
 
+/// Returns the serialized [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn raw_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<Option<SerializedBlock>, BlockReadError>
+where
+    C: AsRef<Chain>,
+{
+    // Non-finalized blocks have no stored bytes, so they are serialized from memory.
+    if let Some(contextual) = chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block(hash_or_height))
+    {
+        return Ok(Some(SerializedBlock::from(contextual.block.as_ref())));
+    }
+
+    db.serialized_block(hash_or_height)
+}
+
 /// Returns the [`block::Header`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_header<C>(
@@ -122,6 +143,42 @@ where
         .and_then(|chain| chain.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.header.clone())
         .or_else(|| db.block_header(hash_or_height))
+}
+
+/// Returns the [`ReadResponse::BlockHeader`] for `hash_or_height` from `best_chain` or `db`.
+pub(crate) fn block_header_response<C>(
+    best_chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<ReadResponse, BoxError>
+where
+    C: AsRef<Chain> + Clone,
+{
+    let height = hash_or_height
+        .height_or_else(|hash| find::height_by_hash(best_chain.clone(), db, hash))
+        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+    let hash = hash_or_height
+        .hash_or_else(|height| find::hash_by_height(best_chain.clone(), db, height))
+        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+    let next_height = height.next()?;
+    let next_block_hash = find::hash_by_height(best_chain.clone(), db, next_height);
+
+    let header = block_header(best_chain, db, height.into()).ok_or_else(|| {
+        if db.is_read_only() {
+            BoxError::from("block hash or height not found")
+        } else {
+            BoxError::from(BlockReadError::CorruptBlock { height })
+        }
+    })?;
+
+    Ok(ReadResponse::BlockHeader {
+        header,
+        hash,
+        height,
+        next_block_hash,
+    })
 }
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the
@@ -308,6 +365,20 @@ pub fn any_transaction<'a>(
     } else {
         let block_hash = containing_chain?.block(height.into())?.hash;
         Some(AnyTx::Side((tx, block_hash)))
+    }
+}
+
+/// Returns the serialized [`Transaction`] with [`transaction::Hash`], if it exists in any
+/// chain in `chains` or the finalized `db`.
+pub fn any_raw_transaction<'a>(
+    mut chains: impl Iterator<Item = &'a Arc<Chain>>,
+    db: &ZebraDb,
+    hash: transaction::Hash,
+) -> Result<Option<SerializedTransaction>, BlockReadError> {
+    // Non-finalized transactions have no stored bytes, so they are serialized from memory.
+    match chains.find_map(|chain| chain.transaction(hash)) {
+        Some((tx, _height, _time)) => Ok(Some(SerializedTransaction::from(tx.as_ref()))),
+        None => db.serialized_transaction(hash),
     }
 }
 

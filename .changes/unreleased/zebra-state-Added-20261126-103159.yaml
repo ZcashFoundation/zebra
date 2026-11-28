@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ReadRequest::RawBlock`, `ReadRequest::AnyChainRawTransaction`, `ReadResponse::RawBlock`, `ReadResponse::RawTransaction`, `ZebraDb::serialized_block`, `ZebraDb::serialized_transaction`, and `RawBytes::into_raw_bytes` to serve finalized blocks and transactions directly from stored bytes without deserializing them.
+time: 2026-11-26T10:31:59.836219579Z

@@ -1957,3 +1957,13 @@ fn sighash_of_every_input_is_linear_in_the_number_of_inputs() {
         );
     }
 }
+
+#[test]
+fn serialized_transaction_into_bytes_matches_as_ref() {
+    let _init_guard = zebra_test::init();
+
+    let expected = zebra_test::vectors::DUMMY_TX1.to_vec();
+    let serialized = SerializedTransaction::from(expected.clone());
+    assert_eq!(serialized.as_ref(), expected.as_slice());
+    assert_eq!(serialized.into_bytes(), expected);
+}

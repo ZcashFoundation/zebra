@@ -77,6 +77,7 @@ async fn state_propagates_incomplete_block_body_errors() {
                 ReadRequest::Block(query),
                 ReadRequest::AnyChainBlock(query),
                 ReadRequest::BlockAndSize(query),
+                ReadRequest::RawBlock(query),
                 ReadRequest::SpentOutputs(query),
                 ReadRequest::TipBlockSize,
             ] {
@@ -91,6 +92,15 @@ async fn state_propagates_incomplete_block_body_errors() {
             assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
         }
 
+        for tx in &block.transactions {
+            let error = read_state
+                .clone()
+                .oneshot(ReadRequest::AnyChainRawTransaction(tx.hash()))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+
         let ancestors = super::block_iter::any_ancestor_blocks(
             &read_state.latest_non_finalized_state(),
             db,
@@ -99,6 +109,23 @@ async fn state_propagates_incomplete_block_body_errors() {
         let error =
             super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
         assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+
+        // On a primary database, deleting `block_header_by_height` for a known `(height, hash)`
+        // reports `BlockReadError::CorruptBlock` from `ReadRequest::BlockHeader`.
+        let mut header_batch = DiskWriteBatch::new();
+        header_batch.zs_delete(&db.cf_handle("block_header_by_height").unwrap(), height);
+        db.write_batch(header_batch).unwrap();
+        for query in [height.into(), block.hash().into()] {
+            let error = read_state
+                .clone()
+                .oneshot(ReadRequest::BlockHeader(query))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<BlockReadError>(),
+                Some(&BlockReadError::CorruptBlock { height })
+            );
+        }
     })
     .await
     .unwrap();

@@ -786,6 +786,13 @@ pub struct SerializedTransaction {
     bytes: Vec<u8>,
 }
 
+impl SerializedTransaction {
+    /// Consumes the serialized transaction, returning the underlying bytes without copying.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
 impl fmt::Display for SerializedTransaction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&hex::encode(&self.bytes))

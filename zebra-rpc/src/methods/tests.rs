@@ -4,6 +4,7 @@
 
 mod first_template;
 mod prop;
+mod raw_rpc;
 mod snapshot;
 mod template_updater;
 pub mod utils;
